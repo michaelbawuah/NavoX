@@ -15,6 +15,15 @@ interface Account {
   };
 }
 
+interface GoogleConnection {
+  id: string;
+  provider: "google";
+  status: string;
+  granted_scopes: string[];
+  last_checked_at: string | null;
+  last_error: string | null;
+}
+
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
@@ -32,9 +41,35 @@ export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [connections, setConnections] = useState<GoogleConnection[]>([]);
+  const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
+  const [checkingConnectionId, setCheckingConnectionId] = useState<
+    string | null
+  >(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    const connectionOutcome = new URLSearchParams(window.location.search).get(
+      "google_connection",
+    );
+    if (connectionOutcome !== null) {
+      const outcomes: Record<string, string> = {
+        cancelled: "Google connection was cancelled.",
+        connected:
+          "Google account linked. No Gmail, Calendar, or Drive data was requested.",
+        failed: "Google could not complete the connection. Please try again.",
+        refresh_token_required:
+          "Google did not return a refresh credential. Please try connecting again.",
+        scope_mismatch:
+          "Google returned an unrequested permission. NavoX did not link the account.",
+        unverified: "Google did not confirm a verified email address.",
+      };
+      setMessage(
+        outcomes[connectionOutcome] ?? "Google connection did not complete.",
+      );
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
     async function restoreSession() {
       try {
         const response = await fetch(`${apiBaseUrl}/auth/me`, {
@@ -42,6 +77,15 @@ export default function Home() {
         });
         if (response.ok) {
           setAccount((await response.json()) as Account);
+          const connectionResponse = await fetch(
+            `${apiBaseUrl}/connections/google`,
+            { credentials: "include" },
+          );
+          if (connectionResponse.ok) {
+            setConnections(
+              (await connectionResponse.json()) as GoogleConnection[],
+            );
+          }
         }
       } finally {
         setIsLoading(false);
@@ -81,6 +125,50 @@ export default function Home() {
     setIsLoading(false);
   }
 
+  async function connectGoogle() {
+    setMessage("");
+    setIsConnectingGoogle(true);
+    const response = await fetch(`${apiBaseUrl}/connections/google/start`, {
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      setMessage(await readApiError(response));
+      setIsConnectingGoogle(false);
+      return;
+    }
+
+    const body = (await response.json()) as { authorization_url: string };
+    window.location.assign(body.authorization_url);
+  }
+
+  async function checkGoogleConnection(connectionId: string) {
+    setMessage("");
+    setCheckingConnectionId(connectionId);
+    const response = await fetch(
+      `${apiBaseUrl}/connections/google/${connectionId}/health`,
+      { method: "POST", credentials: "include" },
+    );
+    if (!response.ok) {
+      setMessage(await readApiError(response));
+      setCheckingConnectionId(null);
+      return;
+    }
+
+    const updated = (await response.json()) as GoogleConnection;
+    setConnections((current) =>
+      current.map((connection) =>
+        connection.id === updated.id ? updated : connection,
+      ),
+    );
+    setMessage(
+      updated.status === "active"
+        ? "Google connection is healthy."
+        : "Google needs to be reauthorized.",
+    );
+    setCheckingConnectionId(null);
+  }
+
   async function signOut() {
     setIsLoading(true);
     await fetch(`${apiBaseUrl}/auth/logout`, {
@@ -88,6 +176,7 @@ export default function Home() {
       credentials: "include",
     });
     setAccount(null);
+    setConnections([]);
     setMessage("");
     setIsLoading(false);
   }
@@ -113,9 +202,9 @@ export default function Home() {
             Welcome, {account.display_name ?? account.email}.
           </h1>
           <p className="summary">
-            <strong>{account.workspace.name}</strong> is ready. Google
-            connections, imported data, AI, and external actions remain off
-            until their dedicated Milestone 1 steps are implemented.
+            <strong>{account.workspace.name}</strong> is ready. You can link a
+            Google identity with no Gmail, Calendar, or Drive data access. AI
+            and external actions remain off.
           </p>
           <dl className="workspace-facts">
             <div>
@@ -127,13 +216,62 @@ export default function Home() {
               <dd>{account.email}</dd>
             </div>
           </dl>
-          <button
-            className="secondary-button"
-            type="button"
-            onClick={() => void signOut()}
+          <section
+            aria-labelledby="google-heading"
+            className="connection-panel"
           >
-            Sign out
-          </button>
+            <div>
+              <h2 id="google-heading">Google connection</h2>
+              <p>
+                This link verifies your Google identity only. It does not read
+                Gmail, Calendar, or Drive data.
+              </p>
+            </div>
+            {connections.length === 0 ? (
+              <button
+                className="primary-button"
+                disabled={isConnectingGoogle}
+                onClick={() => void connectGoogle()}
+                type="button"
+              >
+                {isConnectingGoogle ? "Opening Google…" : "Connect Google"}
+              </button>
+            ) : (
+              <ul className="connection-list">
+                {connections.map((connection) => (
+                  <li key={connection.id}>
+                    <span>
+                      Google · {connection.status.replaceAll("_", " ")}
+                    </span>
+                    <button
+                      className="secondary-button"
+                      disabled={checkingConnectionId === connection.id}
+                      onClick={() => void checkGoogleConnection(connection.id)}
+                      type="button"
+                    >
+                      {checkingConnectionId === connection.id
+                        ? "Checking…"
+                        : "Check health"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          {message && (
+            <p className="form-message" role="status">
+              {message}
+            </p>
+          )}
+          <div className="account-actions">
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => void signOut()}
+            >
+              Sign out
+            </button>
+          </div>
         </section>
       </main>
     );

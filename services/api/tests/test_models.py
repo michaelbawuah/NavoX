@@ -8,6 +8,9 @@ def test_tenant_foundation_tables_are_registered() -> None:
         "workspaces",
         "workspace_memberships",
         "user_sessions",
+        "connection_credentials",
+        "connections",
+        "oauth_authorization_attempts",
     } <= set(Base.metadata.tables)
 
 
@@ -23,3 +26,10 @@ def test_session_has_a_user_foreign_key() -> None:
     foreign_keys = {foreign_key.target_fullname for foreign_key in session.foreign_keys}
 
     assert foreign_keys == {"users.id"}
+
+
+def test_connection_is_scoped_to_a_user_and_workspace() -> None:
+    connection = Base.metadata.tables["connections"]
+    foreign_keys = {foreign_key.target_fullname for foreign_key in connection.foreign_keys}
+
+    assert {"users.id", "workspaces.id", "connection_credentials.id"} == foreign_keys

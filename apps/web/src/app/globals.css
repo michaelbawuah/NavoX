@@ -220,6 +220,46 @@ small {
   margin: 0;
 }
 
+.connection-panel {
+  display: grid;
+  gap: 1rem;
+  border-top: 1px solid #284562;
+  padding-top: 1.4rem;
+}
+
+.connection-panel h2 {
+  font-size: 1.1rem;
+}
+
+.connection-panel p {
+  margin-bottom: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.connection-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connection-list li,
+.account-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.connection-list li {
+  border: 1px solid #385b7a;
+  border-radius: 0.6rem;
+  padding: 0.75rem;
+  text-transform: capitalize;
+}
+
 @media (max-width: 700px) {
   .shell {
     grid-template-columns: 1fr;

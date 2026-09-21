@@ -18,3 +18,12 @@ export interface AuthenticatedAccount {
   display_name: string | null;
   workspace: WorkspaceSummary;
 }
+
+export interface GoogleConnection {
+  id: string;
+  provider: "google";
+  status: "active" | "needs_reauthorization" | string;
+  granted_scopes: string[];
+  last_checked_at: string | null;
+  last_error: string | null;
+}

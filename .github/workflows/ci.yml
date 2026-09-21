@@ -104,6 +104,9 @@ jobs:
             --cookie /tmp/navox-session.cookie \
             http://localhost:8000/api/v1/auth/me > /tmp/navox-me.json
           grep -F '"email":"owner@example.com"' /tmp/navox-me.json
+          test "$(curl --silent --output /dev/null --write-out "%{http_code}" \
+            --cookie /tmp/navox-session.cookie \
+            http://localhost:8000/api/v1/connections/google/start)" = "503"
           curl --fail --silent --show-error \
             --cookie /tmp/navox-session.cookie \
             --request POST \

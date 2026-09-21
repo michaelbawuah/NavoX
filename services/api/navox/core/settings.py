@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     web_origin: str = "http://localhost:3000"
     session_cookie_name: str = "navox_session"
     session_ttl_hours: int = Field(default=168, ge=1, le=720)
+    google_oauth_client_id: str = ""
+    google_oauth_client_secret: SecretStr | None = None
+    google_oauth_redirect_uri: str = "http://localhost:8000/api/v1/connections/google/callback"
+    google_token_encryption_key: SecretStr | None = None
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
