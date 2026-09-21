@@ -3,7 +3,15 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
+SERVICE_ROOT = Path(__file__).resolve().parents[2]
+ENV_FILE = next(
+    (
+        candidate / ".env"
+        for candidate in (SERVICE_ROOT, *SERVICE_ROOT.parents)
+        if (candidate / ".env").is_file()
+    ),
+    SERVICE_ROOT / ".env",
+)
 
 
 class Settings(BaseSettings):
@@ -14,7 +22,7 @@ class Settings(BaseSettings):
     temporal_task_queue: str = "navox-foundation"
 
     model_config = SettingsConfigDict(
-        env_file=PROJECT_ROOT / ".env",
+        env_file=ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
     )
