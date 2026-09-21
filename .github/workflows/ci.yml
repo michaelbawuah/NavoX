@@ -73,7 +73,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cp .env.example .env
-      - run: docker compose up --build -d
+      - name: Start Docker Compose
+        run: |
+          docker compose up --build -d || {
+            docker compose ps
+            docker compose logs
+            exit 1
+          }
       - name: Wait for NavoX readiness
         run: |
           for attempt in $(seq 1 60); do
