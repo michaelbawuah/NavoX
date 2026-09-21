@@ -1,0 +1,1 @@
+"""NavoX API application package."""

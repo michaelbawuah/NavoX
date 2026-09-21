@@ -1,0 +1,22 @@
+{
+  "name": "navox",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NavoX AI Operations Platform monorepo",
+  "packageManager": "npm@11.9.0",
+  "engines": {
+    "node": ">=20.9.0",
+    "npm": ">=11.0.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=@navox/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  }
+}
+
