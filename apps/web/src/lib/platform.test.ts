@@ -6,4 +6,3 @@ describe("platform identity", () => {
     expect(platform).toEqual({ name: "NavoX", version: "0.1.0" });
   });
 });
-

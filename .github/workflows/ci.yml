@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: Web quality
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test
+      - run: npm run build
+
+  api:
+    name: API quality
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.15"
+      - run: uv sync --locked --all-groups
+        working-directory: services/api
+      - run: uv run ruff check .
+        working-directory: services/api
+      - run: uv run ruff format --check .
+        working-directory: services/api
+      - run: uv run mypy navox
+        working-directory: services/api
+      - run: uv run pytest
+        working-directory: services/api
+      - run: uv run alembic upgrade head --sql > /tmp/navox-schema.sql
+        working-directory: services/api
+      - run: rg "CREATE TABLE (users|workspaces|workspace_memberships)" /tmp/navox-schema.sql
+
+  dependency-security:
+    name: Dependency security
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.15"
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: uv sync --locked --all-groups
+        working-directory: services/api
+      - run: uv run pip-audit --strict
+        working-directory: services/api
