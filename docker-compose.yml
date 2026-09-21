@@ -4,13 +4,14 @@ services:
   postgres:
     image: postgres:17.5-alpine
     environment:
-      POSTGRES_DB: navox
-      POSTGRES_USER: navox
-      POSTGRES_PASSWORD: navox
+      POSTGRES_DB: temporal
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
     ports:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/10-create-navox.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U navox -d navox"]
       interval: 5s
@@ -27,8 +28,8 @@ services:
       DB: postgresql12
       DB_PORT: 5432
       POSTGRES_SEEDS: postgres
-      POSTGRES_USER: navox
-      POSTGRES_PWD: navox
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
     ports:
       - "7233:7233"
 
@@ -46,6 +47,9 @@ services:
     build:
       context: ./services/api
     env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://navox:navox@postgres:5432/navox
+      TEMPORAL_TARGET: temporal:7233
     depends_on:
       postgres:
         condition: service_healthy
@@ -68,4 +72,3 @@ services:
 
 volumes:
   postgres-data:
-

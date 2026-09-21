@@ -1,0 +1,2 @@
+CREATE ROLE navox WITH LOGIN PASSWORD 'navox';
+CREATE DATABASE navox OWNER navox;
