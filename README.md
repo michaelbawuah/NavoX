@@ -2,7 +2,7 @@
 
 NavoX is an AI Operations Platform that helps people understand, prioritize, and safely handle work across their connected tools.
 
-The current implementation is **Milestone 0: Engineering Foundation**. It establishes a Next.js web shell, FastAPI API shell, PostgreSQL tenancy migration, Temporal worker boundary, local Docker services, reproducible dependency locks, health checks, and CI. It intentionally contains no user authentication, Google OAuth, raw-content ingestion, AI provider, or external-action implementation. Those begin only in later milestones described in [SPEC-001](docs/architecture/SPEC-001-navox.md).
+The current implementation includes the **Engineering Foundation** plus the first bounded Milestone 1 slice: email/password authentication, opaque server-side sessions, and automatic creation of one personal workspace. Google OAuth, raw-content ingestion, AI providers, and external actions are still deliberately absent until their dedicated milestones described in [SPEC-001](docs/architecture/SPEC-001-navox.md).
 
 ## Repository layout
 
@@ -69,7 +69,14 @@ npm run lint && npm run typecheck && npm run test && npm run build
 
 ## Environment and secrets
 
-Copy `.env.example` to `.env`; it contains local-only defaults and empty placeholders. Never commit `.env` or real credentials. Phase 1 OAuth refresh tokens will be referenced through protected secret storage rather than stored as plaintext application columns.
+Copy `.env.example` to `.env`; it contains local-only defaults and empty placeholders. Never commit `.env` or real credentials. Passwords are Argon2-hashed; browser sessions use HttpOnly, SameSite cookies backed by hashed server-side tokens. Google OAuth refresh tokens will later be referenced through protected secret storage rather than stored as plaintext application columns.
+
+## Authentication endpoints
+
+- `POST /api/v1/auth/register` creates an account, one personal workspace, owner membership, and session.
+- `POST /api/v1/auth/login` creates a new server-side session.
+- `GET /api/v1/auth/me` returns the authenticated account and accessible personal workspace.
+- `POST /api/v1/auth/logout` revokes the current server-side session.
 
 ## Local containers
 
