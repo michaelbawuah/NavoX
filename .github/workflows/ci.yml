@@ -45,7 +45,7 @@ jobs:
         working-directory: services/api
       - run: uv run alembic upgrade head --sql > /tmp/navox-schema.sql
         working-directory: services/api
-      - run: rg "CREATE TABLE (users|workspaces|workspace_memberships)" /tmp/navox-schema.sql
+      - run: grep -E "CREATE TABLE (users|workspaces|workspace_memberships)" /tmp/navox-schema.sql
 
   dependency-security:
     name: Dependency security
