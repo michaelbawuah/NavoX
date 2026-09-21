@@ -278,105 +278,215 @@ export default function Home() {
   }
 
   return (
-    <main className="shell">
-      <section aria-labelledby="navox-heading" className="intro">
-        <p className="eyebrow">NavoX · Private by design</p>
-        <h1 id="navox-heading">Operational awareness, built to earn trust.</h1>
-        <p className="summary">
-          Start with your own protected workspace. NavoX will never connect a
-          tool or take an external action without your explicit approval.
-        </p>
-        <ul className="trust-list">
-          <li>One personal workspace, created just for you</li>
-          <li>Passwords protected with modern hashing</li>
-          <li>No Google data or AI processing in this step</li>
-        </ul>
-      </section>
+    <main className="landing-shell">
+      <div className="ambient-orb ambient-orb-one" />
+      <div className="ambient-orb ambient-orb-two" />
 
-      <section aria-labelledby="auth-heading" className="auth-card">
-        <div aria-label="Account access" className="auth-tabs" role="tablist">
-          <button
-            aria-selected={mode === "register"}
-            className={mode === "register" ? "active" : ""}
-            onClick={() => {
-              setMode("register");
-              setMessage("");
-            }}
-            role="tab"
-            type="button"
-          >
-            Create account
-          </button>
-          <button
-            aria-selected={mode === "login"}
-            className={mode === "login" ? "active" : ""}
-            onClick={() => {
-              setMode("login");
-              setMessage("");
-            }}
-            role="tab"
-            type="button"
-          >
-            Sign in
-          </button>
+      <nav aria-label="NavoX" className="landing-nav">
+        <a className="brand" href="#navox-heading">
+          <span aria-hidden="true" className="brand-mark">
+            <i />
+            <i />
+            <i />
+          </span>
+          <span>NavoX</span>
+        </a>
+        <div className="nav-context">
+          <span className="nav-context-dot" />
+          Private operations
         </div>
-        <h2 id="auth-heading">
-          {mode === "register"
-            ? "Create your private workspace"
-            : "Welcome back"}
-        </h2>
-        <form className="auth-form" onSubmit={submit}>
-          {mode === "register" && (
+      </nav>
+
+      <div className="landing-layout">
+        <section
+          aria-labelledby="navox-heading"
+          className="intro landing-intro"
+        >
+          <p className="eyebrow landing-eyebrow">
+            <span /> Human-approved by default
+          </p>
+          <h1 id="navox-heading">
+            Know what matters.
+            <span>Decide with confidence.</span>
+          </h1>
+          <p className="summary landing-summary">
+            NavoX gives you a private command layer for the systems that shape
+            your work—designed to keep you informed and in control.
+          </p>
+          <div className="hero-actions">
+            <a className="primary-button hero-button" href="#access-panel">
+              Enter your workspace
+              <span aria-hidden="true" className="hero-button-arrow">
+                ↗
+              </span>
+            </a>
+            <p>Personal workspace · no credit card</p>
+          </div>
+
+          <section aria-labelledby="principles-heading" className="trust-grid">
+            <h2 className="visually-hidden" id="principles-heading">
+              NavoX principles
+            </h2>
+            <article>
+              <span className="principle-number">01</span>
+              <h2>Private by design</h2>
+              <p>Your workspace starts with only the access you approve.</p>
+            </article>
+            <article>
+              <span className="principle-number">02</span>
+              <h2>Intent before action</h2>
+              <p>No external action happens without your explicit approval.</p>
+            </article>
+            <article>
+              <span className="principle-number">03</span>
+              <h2>Built for clarity</h2>
+              <p>Useful signals, understandable decisions, lasting control.</p>
+            </article>
+          </section>
+
+          <section aria-label="Platform preview" className="system-preview">
+            <div className="system-preview-head">
+              <span className="preview-pulse" />
+              <p>Live system posture</p>
+              <span>01 / 01</span>
+            </div>
+            <div className="system-preview-body">
+              <div>
+                <span className="system-kicker">NavoX protocol</span>
+                <strong>Every connection begins with consent.</strong>
+              </div>
+              <ul>
+                <li>
+                  <span>Workspace access</span>
+                  <b>Protected</b>
+                </li>
+                <li>
+                  <span>External actions</span>
+                  <b>Approval required</b>
+                </li>
+              </ul>
+            </div>
+          </section>
+        </section>
+
+        <section
+          aria-labelledby="auth-heading"
+          className="auth-card access-card"
+          id="access-panel"
+        >
+          <div className="access-card-topline">
+            <span>Secure access</span>
+            <span>✦</span>
+          </div>
+          <div aria-label="Account access" className="auth-tabs" role="tablist">
+            <button
+              aria-selected={mode === "register"}
+              className={mode === "register" ? "active" : ""}
+              onClick={() => {
+                setMode("register");
+                setMessage("");
+              }}
+              role="tab"
+              type="button"
+            >
+              Create account
+            </button>
+            <button
+              aria-selected={mode === "login"}
+              className={mode === "login" ? "active" : ""}
+              onClick={() => {
+                setMode("login");
+                setMessage("");
+              }}
+              role="tab"
+              type="button"
+            >
+              Sign in
+            </button>
+          </div>
+          <div className="access-card-heading">
+            <p className="access-step">Step 01 · Identity</p>
+            <h2 id="auth-heading">
+              {mode === "register"
+                ? "Create your private workspace"
+                : "Welcome back"}
+            </h2>
+            <p>
+              {mode === "register"
+                ? "Your workspace is yours from the first sign-in."
+                : "Sign in to return to your private command layer."}
+            </p>
+          </div>
+          <form className="auth-form" onSubmit={submit}>
+            {mode === "register" && (
+              <label>
+                Your name
+                <input
+                  autoComplete="name"
+                  maxLength={256}
+                  minLength={1}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  required
+                  value={displayName}
+                />
+              </label>
+            )}
             <label>
-              Your name
+              Email address
               <input
-                autoComplete="name"
-                maxLength={256}
-                minLength={1}
-                onChange={(event) => setDisplayName(event.target.value)}
+                autoComplete="email"
+                onChange={(event) => setEmail(event.target.value)}
                 required
-                value={displayName}
+                type="email"
+                value={email}
               />
             </label>
-          )}
-          <label>
-            Email address
-            <input
-              autoComplete="email"
-              onChange={(event) => setEmail(event.target.value)}
-              required
-              type="email"
-              value={email}
-            />
-          </label>
-          <label>
-            Password
-            <input
-              autoComplete={
-                mode === "register" ? "new-password" : "current-password"
-              }
-              minLength={mode === "register" ? 12 : 1}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              type="password"
-              value={password}
-            />
-            {mode === "register" && <small>Use at least 12 characters.</small>}
-          </label>
-          {message && (
-            <p className="form-message" role="alert">
-              {message}
-            </p>
-          )}
-          <button className="primary-button" disabled={isLoading} type="submit">
-            {isLoading
-              ? "Working…"
-              : mode === "register"
-                ? "Create workspace"
-                : "Sign in"}
-          </button>
-        </form>
-      </section>
+            <label>
+              Password
+              <input
+                autoComplete={
+                  mode === "register" ? "new-password" : "current-password"
+                }
+                minLength={mode === "register" ? 12 : 1}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                type="password"
+                value={password}
+              />
+              {mode === "register" && (
+                <small>Use at least 12 characters.</small>
+              )}
+            </label>
+            {message && (
+              <p className="form-message" role="alert">
+                {message}
+              </p>
+            )}
+            <button
+              className="primary-button"
+              disabled={isLoading}
+              type="submit"
+            >
+              {isLoading
+                ? "Working…"
+                : mode === "register"
+                  ? "Create my workspace"
+                  : "Sign in"}
+            </button>
+          </form>
+          <p className="access-footnote">
+            <span aria-hidden="true" className="access-footnote-symbol">
+              ⌁
+            </span>
+            Passwords are protected with modern hashing.
+          </p>
+        </section>
+      </div>
+
+      <footer className="landing-footer">
+        <p>© 2026 NavoX</p>
+        <p>Private operations, on your terms.</p>
+      </footer>
     </main>
   );
 }
