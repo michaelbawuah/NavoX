@@ -1,6 +1,11 @@
 "use client";
 
 import { type FormEvent, useEffect, useState } from "react";
+import {
+  AccessStage,
+  LandingAtmosphere,
+  MotionControl,
+} from "../components/landing-art";
 
 type AuthMode = "register" | "login";
 
@@ -47,6 +52,7 @@ export default function Home() {
     string | null
   >(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [effectsPaused, setEffectsPaused] = useState(false);
 
   useEffect(() => {
     const connectionOutcome = new URLSearchParams(window.location.search).get(
@@ -278,9 +284,10 @@ export default function Home() {
   }
 
   return (
-    <main className="landing-shell">
+    <main className="landing-shell" data-effects-paused={effectsPaused}>
       <div className="ambient-orb ambient-orb-one" />
       <div className="ambient-orb ambient-orb-two" />
+      <LandingAtmosphere />
 
       <nav aria-label="NavoX" className="landing-nav">
         <a className="brand" href="#navox-heading">
@@ -369,122 +376,132 @@ export default function Home() {
           </section>
         </section>
 
-        <section
-          aria-labelledby="auth-heading"
-          className="auth-card access-card"
-          id="access-panel"
-        >
-          <div className="access-card-topline">
-            <span>Secure access</span>
-            <span>✦</span>
-          </div>
-          <div aria-label="Account access" className="auth-tabs" role="tablist">
-            <button
-              aria-selected={mode === "register"}
-              className={mode === "register" ? "active" : ""}
-              onClick={() => {
-                setMode("register");
-                setMessage("");
-              }}
-              role="tab"
-              type="button"
+        <AccessStage>
+          <section
+            aria-labelledby="auth-heading"
+            className="auth-card access-card"
+            id="access-panel"
+          >
+            <div className="access-card-topline">
+              <span>Secure access</span>
+              <span>✦</span>
+            </div>
+            <div
+              aria-label="Account access"
+              className="auth-tabs"
+              role="tablist"
             >
-              Create account
-            </button>
-            <button
-              aria-selected={mode === "login"}
-              className={mode === "login" ? "active" : ""}
-              onClick={() => {
-                setMode("login");
-                setMessage("");
-              }}
-              role="tab"
-              type="button"
-            >
-              Sign in
-            </button>
-          </div>
-          <div className="access-card-heading">
-            <p className="access-step">Step 01 · Identity</p>
-            <h2 id="auth-heading">
-              {mode === "register"
-                ? "Create your private workspace"
-                : "Welcome back"}
-            </h2>
-            <p>
-              {mode === "register"
-                ? "Your workspace is yours from the first sign-in."
-                : "Sign in to return to your private command layer."}
-            </p>
-          </div>
-          <form className="auth-form" onSubmit={submit}>
-            {mode === "register" && (
+              <button
+                aria-selected={mode === "register"}
+                className={mode === "register" ? "active" : ""}
+                onClick={() => {
+                  setMode("register");
+                  setMessage("");
+                }}
+                role="tab"
+                type="button"
+              >
+                Create account
+              </button>
+              <button
+                aria-selected={mode === "login"}
+                className={mode === "login" ? "active" : ""}
+                onClick={() => {
+                  setMode("login");
+                  setMessage("");
+                }}
+                role="tab"
+                type="button"
+              >
+                Sign in
+              </button>
+            </div>
+            <div className="access-card-heading">
+              <p className="access-step">Step 01 · Identity</p>
+              <h2 id="auth-heading">
+                {mode === "register"
+                  ? "Create your private workspace"
+                  : "Welcome back"}
+              </h2>
+              <p>
+                {mode === "register"
+                  ? "Your workspace is yours from the first sign-in."
+                  : "Sign in to return to your private command layer."}
+              </p>
+            </div>
+            <form className="auth-form" onSubmit={submit}>
+              {mode === "register" && (
+                <label>
+                  Your name
+                  <input
+                    autoComplete="name"
+                    maxLength={256}
+                    minLength={1}
+                    onChange={(event) => setDisplayName(event.target.value)}
+                    required
+                    value={displayName}
+                  />
+                </label>
+              )}
               <label>
-                Your name
+                Email address
                 <input
-                  autoComplete="name"
-                  maxLength={256}
-                  minLength={1}
-                  onChange={(event) => setDisplayName(event.target.value)}
+                  autoComplete="email"
+                  onChange={(event) => setEmail(event.target.value)}
                   required
-                  value={displayName}
+                  type="email"
+                  value={email}
                 />
               </label>
-            )}
-            <label>
-              Email address
-              <input
-                autoComplete="email"
-                onChange={(event) => setEmail(event.target.value)}
-                required
-                type="email"
-                value={email}
-              />
-            </label>
-            <label>
-              Password
-              <input
-                autoComplete={
-                  mode === "register" ? "new-password" : "current-password"
-                }
-                minLength={mode === "register" ? 12 : 1}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-                type="password"
-                value={password}
-              />
-              {mode === "register" && (
-                <small>Use at least 12 characters.</small>
+              <label>
+                Password
+                <input
+                  autoComplete={
+                    mode === "register" ? "new-password" : "current-password"
+                  }
+                  minLength={mode === "register" ? 12 : 1}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                  type="password"
+                  value={password}
+                />
+                {mode === "register" && (
+                  <small>Use at least 12 characters.</small>
+                )}
+              </label>
+              {message && (
+                <p className="form-message" role="alert">
+                  {message}
+                </p>
               )}
-            </label>
-            {message && (
-              <p className="form-message" role="alert">
-                {message}
-              </p>
-            )}
-            <button
-              className="primary-button"
-              disabled={isLoading}
-              type="submit"
-            >
-              {isLoading
-                ? "Working…"
-                : mode === "register"
-                  ? "Create my workspace"
-                  : "Sign in"}
-            </button>
-          </form>
-          <p className="access-footnote">
-            <span aria-hidden="true" className="access-footnote-symbol">
-              ⌁
-            </span>
-            Passwords are protected with modern hashing.
-          </p>
-        </section>
+              <button
+                className="primary-button"
+                disabled={isLoading}
+                type="submit"
+              >
+                {isLoading
+                  ? "Working…"
+                  : mode === "register"
+                    ? "Create my workspace"
+                    : "Sign in"}
+              </button>
+            </form>
+            <p className="access-footnote">
+              <span aria-hidden="true" className="access-footnote-symbol">
+                ⌁
+              </span>
+              Passwords are protected with modern hashing.
+            </p>
+          </section>
+        </AccessStage>
       </div>
 
       <footer className="landing-footer">
         <p>© 2026 NavoX</p>
+        <MotionControl
+          paused={effectsPaused}
+          onToggle={() => setEffectsPaused((current) => !current)}
+        />
         <p>Private operations, on your terms.</p>
       </footer>
     </main>

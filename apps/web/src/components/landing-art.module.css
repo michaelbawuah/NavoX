@@ -1,0 +1,272 @@
+/* The artwork stays below the interface and cannot intercept clicks. */
+.atmosphere {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+.aurora {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 96% 58%, rgb(95 145 255 / 11%), transparent 28%),
+    radial-gradient(ellipse at 93% 91%, rgb(237 133 79 / 8%), transparent 20%),
+    radial-gradient(ellipse at 4% 25%, rgb(107 216 241 / 8%), transparent 16%);
+}
+
+.shard {
+  position: absolute;
+  width: 4.5rem;
+  opacity: 0.45;
+  filter: drop-shadow(0 0 1.3rem rgb(111 213 255 / 20%));
+  animation: crystal-drift 12s ease-in-out infinite alternate;
+}
+
+.shardWest {
+  top: 15rem;
+  left: max(0.3rem, calc((100% - 91rem) / 2));
+  rotate: -23deg;
+}
+
+.shardEast {
+  top: 55%;
+  right: max(0.6rem, calc((100% - 92rem) / 2));
+  width: 3.8rem;
+  rotate: 29deg;
+  animation-delay: -5s;
+}
+
+.shardSouth {
+  bottom: 5rem;
+  left: 52%;
+  width: 2.25rem;
+  opacity: 0.25;
+  rotate: 48deg;
+  animation-delay: -9s;
+}
+
+.constellation {
+  position: absolute;
+  top: 13rem;
+  right: -3rem;
+  width: clamp(9rem, 15vw, 17rem);
+  height: auto;
+  opacity: 0.65;
+}
+
+.ember {
+  position: absolute;
+  width: 0.18rem;
+  height: 0.65rem;
+  border-radius: 100%;
+  background: #ffcf9b;
+  box-shadow:
+    0 0 0.45rem #ffa65e,
+    0 0 1.6rem 0.2rem rgb(252 118 48 / 26%);
+  rotate: 22deg;
+  animation: ember-drift 7s ease-in-out infinite alternate;
+}
+
+.emberOne {
+  top: 68%;
+  right: 4%;
+}
+
+.emberTwo {
+  top: 80%;
+  right: 8%;
+  height: 0.35rem;
+  animation-delay: -3s;
+}
+
+.emberThree {
+  top: 32%;
+  left: 49%;
+  height: 0.3rem;
+  opacity: 0.55;
+  animation-delay: -5s;
+}
+
+.accessStage {
+  display: grid;
+  justify-self: end;
+  width: 100%;
+  max-width: 29rem;
+  min-width: 0;
+}
+
+.core {
+  position: relative;
+  width: 100%;
+  height: 12rem;
+  margin-bottom: 1rem;
+  pointer-events: none;
+  user-select: none;
+}
+
+.coreGlow {
+  position: absolute;
+  inset: 0 8%;
+  background: radial-gradient(ellipse, rgb(90 210 235 / 17%), transparent 66%);
+}
+
+.orbits {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: min(100%, 24rem);
+  height: 11rem;
+  transform: translateX(-50%);
+}
+
+.coreCrystal {
+  position: absolute;
+  top: 0.7rem;
+  left: calc(50% - 3.15rem);
+  width: 6.3rem;
+  rotate: 12deg;
+  filter: drop-shadow(0 0 1rem rgb(118 219 255 / 28%));
+  animation: crystal-drift 8s ease-in-out infinite alternate;
+}
+
+.coreCaption {
+  position: absolute;
+  bottom: 0.3rem;
+  width: 100%;
+  color: #8fa9c3;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.23em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.motionControl {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  margin-block: -0.9rem;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: #a3b5cd;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.motionControl:hover {
+  color: #c8f7ff;
+}
+
+.motionControl:focus-visible {
+  outline: 2px solid #61dfc4;
+  outline-offset: 3px;
+}
+
+.motionControl[aria-pressed="true"] {
+  border-color: rgb(143 164 201 / 25%);
+}
+
+@keyframes crystal-drift {
+  from {
+    transform: translateY(0) rotate(-3deg);
+  }
+  to {
+    transform: translateY(-12px) rotate(3deg);
+  }
+}
+
+@keyframes ember-drift {
+  from {
+    transform: translateY(8px);
+    opacity: 0.35;
+  }
+  to {
+    transform: translateY(-12px);
+    opacity: 0.8;
+  }
+}
+
+:global(.landing-shell[data-effects-paused="true"]) .motion {
+  animation-play-state: paused;
+}
+
+@media (max-width: 1100px) {
+  .shardWest {
+    left: -1.8rem;
+    opacity: 0.25;
+  }
+
+  .shardEast {
+    right: -1.5rem;
+    opacity: 0.25;
+  }
+
+  .constellation {
+    opacity: 0.3;
+  }
+}
+
+@media (max-width: 900px) {
+  .accessStage {
+    justify-self: stretch;
+    max-width: 38rem;
+  }
+
+  .shardSouth {
+    display: none;
+  }
+
+  .emberThree {
+    left: auto;
+    right: 3%;
+  }
+}
+
+@media (max-width: 650px) {
+  .core {
+    height: 10rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .orbits {
+    height: 9rem;
+  }
+
+  .coreCrystal {
+    top: 0.7rem;
+    left: calc(50% - 2.5rem);
+    width: 5rem;
+  }
+
+  .shardWest,
+  .shardEast {
+    display: none;
+  }
+
+  .motionControl {
+    align-self: flex-start;
+    padding-inline: 0;
+    margin-block: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion {
+    animation: none;
+  }
+
+  .motionControl {
+    display: none;
+  }
+
+  :global(html) {
+    scroll-behavior: auto;
+  }
+}
