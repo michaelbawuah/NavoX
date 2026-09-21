@@ -43,6 +43,17 @@ services:
     ports:
       - "8080:8080"
 
+  migrate:
+    build:
+      context: ./services/api
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://navox:navox@postgres:5432/navox
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
+
   api:
     build:
       context: ./services/api
@@ -55,6 +66,8 @@ services:
         condition: service_healthy
       temporal:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "8000:8000"
 

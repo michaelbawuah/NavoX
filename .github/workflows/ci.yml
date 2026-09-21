@@ -65,3 +65,26 @@ jobs:
         working-directory: services/api
       - run: uv run pip-audit --strict
         working-directory: services/api
+
+  compose-integration:
+    name: Compose integration
+    needs: [web, api, dependency-security]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - run: docker compose up --build -d
+      - name: Wait for NavoX readiness
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://localhost:8000/api/v1/health/ready >/dev/null \
+              && curl --fail --silent --show-error http://localhost:3000 >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose ps
+          docker compose logs
+          exit 1
+      - if: always()
+        run: docker compose down --volumes --remove-orphans
