@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database_url: str = "postgresql+asyncpg://navox:navox@localhost:5432/navox"
     temporal_target: str = "localhost:7233"
-    temporal_task_queue: str = "navox-foundation"
+    temporal_task_queue: str = "navox-agent"
     web_origin: str = "http://localhost:3000"
     session_cookie_name: str = "navox_session"
     session_ttl_hours: int = Field(default=168, ge=1, le=720)

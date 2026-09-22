@@ -1,4 +1,5 @@
 from datetime import timedelta
+from typing import Protocol
 from uuid import UUID
 
 from sqlalchemy import select
@@ -13,6 +14,17 @@ from navox.workflows.handle_commitment import HandleCommitmentInput, HandleCommi
 
 class AgentDispatchError(RuntimeError):
     pass
+
+
+class AgentDispatcher(Protocol):
+    async def dispatch(
+        self,
+        database: AsyncSession,
+        *,
+        plan: Plan,
+        step_ids: list[UUID],
+        settings: Settings,
+    ) -> WorkflowRef: ...
 
 
 class TemporalAgentDispatcher:

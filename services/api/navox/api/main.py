@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from navox.api.agent import router as agent_router
 from navox.api.auth import router as auth_router
 from navox.api.commitment_actions import router as commitment_actions_router
 from navox.api.commitments import router as commitments_router
@@ -26,6 +27,7 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type"],
     )
     app.include_router(health_router, prefix="/api/v1")
+    app.include_router(agent_router, prefix="/api/v1")
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(connections_router, prefix="/api/v1")
     app.include_router(commitments_router, prefix="/api/v1")
