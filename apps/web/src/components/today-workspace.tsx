@@ -61,6 +61,7 @@ interface TodayPayload {
   coming_up: TodayItem[];
   renewals: TodayItem[];
   waiting_on: TodayItem[];
+  completed_recently: TodayItem[];
 }
 
 interface QueryPayload {
@@ -159,6 +160,52 @@ function dueLabel(value: string | null): string {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function priorityLabel(priority: number): string {
+  const labels: Record<number, string> = {
+    1: "Low",
+    2: "Moderate",
+    3: "Standard",
+    4: "Important",
+    5: "Critical",
+  };
+  return labels[priority] ?? "Standard";
+}
+
+function itemUrgency(item: TodayItem): "urgent" | "upcoming" | "completed" | "neutral" {
+  if (item.status === "completed") {
+    return "completed";
+  }
+  if (item.due_at === null) {
+    return "neutral";
+  }
+  const hours = (new Date(item.due_at).getTime() - Date.now()) / (60 * 60 * 1000);
+  return hours <= 48 ? "urgent" : "upcoming";
+}
+
+function urgencyLabel(item: TodayItem): string {
+  const urgency = itemUrgency(item);
+  if (urgency === "urgent") return "Urgent";
+  if (urgency === "completed") return "Completed";
+  if (urgency === "upcoming") return "Upcoming";
+  return priorityLabel(item.priority);
+}
+
+function queryHeading(intent: string): string {
+  const headings: Record<string, string> = {
+    today: "Your day at a glance",
+    attention: "Needs your attention",
+    this_week: "Coming up this week",
+    waiting: "Waiting on",
+    renewals: "Money and renewals",
+    promises: "Promises you made",
+    forgetting: "Worth a second look",
+    meeting_prep: "Next meeting prep",
+    handleable: "NavoX can handle",
+    unsupported: "Try another operational question",
+  };
+  return headings[intent] ?? "NavoX briefing";
 }
 
 function greeting(): string {
@@ -391,20 +438,20 @@ export function TodayWorkspace({
     }
   }
 
-  async function handleCommitment(item: TodayItem) {
-    setHandlingId(item.id);
+  async function handleCommitmentById(commitmentId: string, itemTitle: string) {
+    setHandlingId(commitmentId);
     setWorkspaceError("");
     setWorkspaceMessage("");
     try {
       const response = await fetch(
-        `${apiBaseUrl}/commitments/${item.id}/handle`,
+        `${apiBaseUrl}/commitments/${commitmentId}/handle`,
         {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             request_id: crypto.randomUUID(),
-            goal: `Safely handle ${item.title}`,
+            goal: `Safely handle ${itemTitle}`,
           }),
         },
       );
@@ -423,6 +470,10 @@ export function TodayWorkspace({
     } finally {
       setHandlingId(null);
     }
+  }
+
+  async function handleCommitment(item: TodayItem) {
+    await handleCommitmentById(item.id, item.title);
   }
 
   async function toggleAgent() {
@@ -569,13 +620,17 @@ export function TodayWorkspace({
               <article className={styles.item} key={item.id}>
                 <div className={styles.itemTopline}>
                   <span>{item.type.replaceAll("_", " ")}</span>
-                  <span>Signal {item.score}</span>
+                  <span data-urgency={itemUrgency(item)}>
+                    {urgencyLabel(item)}
+                  </span>
                 </div>
                 <h3>{item.title}</h3>
                 {item.description && <p>{item.description}</p>}
                 <div className={styles.itemMeta}>
                   <span>{dueLabel(item.due_at)}</span>
-                  <span>Priority {item.priority}</span>
+                  <span>
+                    Priority {item.priority} · {priorityLabel(item.priority)}
+                  </span>
                   {item.status === "candidate" && <b>Review required</b>}
                 </div>
                 {item.reasons.length > 0 && (
@@ -672,7 +727,19 @@ export function TodayWorkspace({
 
       <div className={styles.layout}>
         <div className={styles.primaryColumn}>
-          <ProactivePanel timezone={timezone} agentPaused={agentPaused} />
+          <ProactivePanel
+            agentPaused={agentPaused}
+            completedDeadlines={(today?.completed_recently ?? []).filter(
+              (item) => item.type === "deadline",
+            )}
+            deadlines={[
+              ...(today?.needs_attention ?? []),
+              ...(today?.coming_up ?? []),
+            ].filter((item) => item.type === "deadline")}
+            handlingId={handlingId}
+            onHandleCommitment={handleCommitmentById}
+            timezone={timezone}
+          />
           {renderSection("Needs Attention", today?.needs_attention ?? [])}
           {renderSection("Coming Up", today?.coming_up ?? [])}
         </div>
@@ -718,10 +785,10 @@ export function TodayWorkspace({
                     value={priority}
                   >
                     <option value="1">1 · Low</option>
-                    <option value="2">2</option>
-                    <option value="3">3 · Normal</option>
-                    <option value="4">4</option>
-                    <option value="5">5 · High</option>
+                    <option value="2">2 · Moderate</option>
+                    <option value="3">3 · Standard</option>
+                    <option value="4">4 · Important</option>
+                    <option value="5">5 · Critical</option>
                   </select>
                 </label>
               </div>
@@ -761,20 +828,41 @@ export function TodayWorkspace({
             </form>
             {queryResult && (
               <div className={styles.queryAnswer} aria-live="polite">
-                <p>{queryResult.answer}</p>
+                <div className={styles.queryAnswerHeader}>
+                  <div>
+                    <span>NavoX briefing</span>
+                    <strong>{queryHeading(queryResult.intent)}</strong>
+                  </div>
+                  <b>
+                    {queryResult.items.length > 0
+                      ? `${queryResult.items.length} item${queryResult.items.length === 1 ? "" : "s"}`
+                      : "Clear"}
+                  </b>
+                </div>
+                <p className={styles.querySummary}>{queryResult.answer}</p>
                 {queryResult.items.length > 0 && (
-                  <ul>
+                  <div className={styles.queryFocusList}>
                     {queryResult.items.slice(0, 5).map((item) => (
-                      <li key={item.id}>{item.title}</li>
+                      <article className={styles.queryFocusItem} key={item.id}>
+                        <div>
+                          <strong>{item.title}</strong>
+                          <span>
+                            {item.due_at ? dueLabel(item.due_at) : "No due date"}
+                          </span>
+                        </div>
+                        <span data-urgency={itemUrgency(item)}>
+                          {urgencyLabel(item)}
+                        </span>
+                      </article>
                     ))}
-                  </ul>
+                  </div>
                 )}
                 {queryResult.details.length > 0 && (
-                  <ul>
+                  <div className={styles.queryDetails}>
                     {queryResult.details.slice(0, 5).map((detail) => (
-                      <li key={detail}>{detail}</li>
+                      <p key={detail}>{detail}</p>
                     ))}
-                  </ul>
+                  </div>
                 )}
                 {queryResult.intent === "unsupported" && (
                   <small>
