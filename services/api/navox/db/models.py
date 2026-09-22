@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
@@ -6,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -214,6 +216,137 @@ class IncomingEvent(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Person(Base):
+    """Canonical workspace-scoped person resolved from provider identities."""
+
+    __tablename__ = "people"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    canonical_name: Mapped[str | None] = mapped_column(String(256), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PersonIdentity(Base):
+    """Provider-neutral identity mapped deterministically to one canonical person."""
+
+    __tablename__ = "person_identities"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "identity_type",
+            "identity_value",
+            name="uq_person_identities_workspace_type_value",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    person_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("people.id", ondelete="CASCADE"), index=True
+    )
+    provider: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    identity_type: Mapped[str] = mapped_column(String(64), index=True)
+    identity_value: Mapped[str] = mapped_column(String(512), index=True)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), default=Decimal("1.000"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OperationalObservation(Base):
+    """Evidence-backed operational fact proposed by the intelligence layer."""
+
+    __tablename__ = "operational_observations"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    observation_type: Mapped[str] = mapped_column(String(64), index=True)
+    subject_person_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("people.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    object_person_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("people.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    action_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    object_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    effective_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3))
+    status: Mapped[str] = mapped_column(String(32), default="ACTIVE", index=True)
+    extractor_version: Mapped[str] = mapped_column(String(64))
+    model_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
+class ObservationEvidence(Base):
+    """Bounded provenance linking an observation to one authorized provider resource."""
+
+    __tablename__ = "observation_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "observation_id",
+            "connection_id",
+            "provider",
+            "source_type",
+            "external_resource_id",
+            "source_hash",
+            name="uq_observation_evidence_observation_source_hash",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    observation_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("operational_observations.id", ondelete="CASCADE"), index=True
+    )
+    connection_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("connections.id", ondelete="CASCADE"), index=True
+    )
+    provider: Mapped[str] = mapped_column(String(32), index=True)
+    source_type: Mapped[str] = mapped_column(String(64), index=True)
+    external_resource_id: Mapped[str] = mapped_column(String(512), index=True)
+    evidence_locator: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    source_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class IntelligenceFeedback(Base):
+    """Bounded user feedback about intelligence outputs; never an authority grant."""
+
+    __tablename__ = "intelligence_feedback"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    target_type: Mapped[str] = mapped_column(String(64), index=True)
+    target_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    feedback_type: Mapped[str] = mapped_column(String(64), index=True)
+    feedback_metadata: Mapped[dict[str, object]] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
 
 
 class Objective(Base):
