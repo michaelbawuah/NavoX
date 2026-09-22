@@ -5,7 +5,8 @@
     "content": "Please send the budget before tomorrow's review.",
     "expected_observation_types": ["request"],
     "expected_temporal_expressions": ["tomorrow's review"],
-    "expected_people": []
+    "expected_people": [],
+    "expected_relationship_types": []
   },
   {
     "id": "promise-slides",
@@ -13,7 +14,8 @@
     "content": "I'll send the revised slides by Friday.",
     "expected_observation_types": ["promise"],
     "expected_temporal_expressions": ["Friday"],
-    "expected_people": []
+    "expected_people": [],
+    "expected_relationship_types": []
   },
   {
     "id": "meeting-advisor",
@@ -21,7 +23,8 @@
     "content": "Research review with Professor Lee is Tuesday at 2 PM.",
     "expected_observation_types": ["meeting"],
     "expected_temporal_expressions": ["Tuesday at 2 PM"],
-    "expected_people": ["Professor Lee"]
+    "expected_people": ["Professor Lee"],
+    "expected_relationship_types": []
   },
   {
     "id": "follow-up-maya",
@@ -29,7 +32,8 @@
     "content": "If Maya has not replied by Thursday, follow up with her.",
     "expected_observation_types": ["follow_up"],
     "expected_temporal_expressions": ["Thursday"],
-    "expected_people": ["Maya"]
+    "expected_people": ["Maya"],
+    "expected_relationship_types": []
   },
   {
     "id": "deployment-task",
@@ -37,7 +41,8 @@
     "content": "Finish the deployment checklist before release.",
     "expected_observation_types": ["task"],
     "expected_temporal_expressions": [],
-    "expected_people": []
+    "expected_people": [],
+    "expected_relationship_types": []
   },
   {
     "id": "newsletter",
@@ -45,7 +50,8 @@
     "content": "Our fall newsletter is now available. Thanks for reading.",
     "expected_observation_types": [],
     "expected_temporal_expressions": [],
-    "expected_people": []
+    "expected_people": [],
+    "expected_relationship_types": []
   },
   {
     "id": "optional-suggestion",
@@ -53,7 +59,8 @@
     "content": "You might want to explore the new dashboard when you have time.",
     "expected_observation_types": [],
     "expected_temporal_expressions": [],
-    "expected_people": []
+    "expected_people": [],
+    "expected_relationship_types": []
   },
   {
     "id": "advisor-relationship",
@@ -61,6 +68,7 @@
     "content": "Jordan is Priya's advisor.",
     "expected_observation_types": [],
     "expected_temporal_expressions": [],
-    "expected_people": ["Jordan", "Priya"]
+    "expected_people": ["Jordan", "Priya"],
+    "expected_relationship_types": ["advisor_of"]
   }
 ]
