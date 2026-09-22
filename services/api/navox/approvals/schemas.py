@@ -40,3 +40,12 @@ class EditGmailSendRequest(BaseModel):
 
 class ApprovalDecisionRequest(BaseModel):
     request_id: UUID
+
+
+class StoredGmailSendPayload(BaseModel):
+    connection_id: UUID
+    sender: EmailStr
+    to: EmailStr
+    subject: str = Field(min_length=1, max_length=256)
+    body_text: str = Field(min_length=1, max_length=50_000)
+    post_send_state: PostSendState
