@@ -229,9 +229,7 @@ def operational_extraction_metrics(root: Path) -> OperationalExtractionMetrics:
         label_accuracy=label_correct / total if total else 1.0,
         schema_valid_rate=schema_valid / total if total else 1.0,
         evidence_valid_rate=evidence_valid / total if total else 1.0,
-        adversarial_rejection_rate=(
-            rejected / len(adversarial) if adversarial else 1.0
-        ),
+        adversarial_rejection_rate=(rejected / len(adversarial) if adversarial else 1.0),
     )
 
 
