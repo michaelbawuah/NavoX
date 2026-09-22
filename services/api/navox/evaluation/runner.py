@@ -198,9 +198,7 @@ def briefing_policy_metric(root: Path) -> float:
             status=case["status"],
             priority=case["priority"],
             due_at=(
-                now + timedelta(hours=float(due_in_hours))
-                if due_in_hours is not None
-                else None
+                now + timedelta(hours=float(due_in_hours)) if due_in_hours is not None else None
             ),
             confidence=1.0,
             created_by="evaluation",
@@ -236,14 +234,13 @@ def briefing_policy_metric(root: Path) -> float:
             breakdown.score,
             preference,
             quiet=bool(case.get("quiet", False)),
-            interruption_budget_exhausted=bool(
-                case.get("interruption_budget_exhausted", False)
-            ),
+            interruption_budget_exhausted=bool(case.get("interruption_budget_exhausted", False)),
             notifications_allowed=bool(case.get("notifications_allowed", True)),
         )
-        if tier == case["expected_tier"] and signal_type_for(commitment) == case[
-            "expected_signal_type"
-        ]:
+        if (
+            tier == case["expected_tier"]
+            and signal_type_for(commitment) == case["expected_signal_type"]
+        ):
             correct += 1
 
     return correct / len(cases) if cases else 1.0
@@ -368,8 +365,7 @@ def run_evaluation(root: Path | None = None) -> dict[str, Any]:
         "reliability_invariant_rate": reliability.rate,
     }
     gate_results = {
-        name: _gate_result(float(observed[name]), float(minimum))
-        for name, minimum in gates.items()
+        name: _gate_result(float(observed[name]), float(minimum)) for name, minimum in gates.items()
     }
 
     return {
