@@ -630,7 +630,6 @@ async def test_subject_header_injection_is_rejected(
     assert response.status_code == 422
 
 
-
 @pytest.mark.asyncio
 async def test_prepare_request_id_cannot_be_reused_for_different_payload(
     approval_environment: tuple[AsyncClient, async_sessionmaker[AsyncSession], Settings],

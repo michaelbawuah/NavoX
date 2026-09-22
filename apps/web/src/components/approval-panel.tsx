@@ -482,7 +482,8 @@ export function ApprovalPanel({
                 >
                   {gmailConnections.map((connection) => (
                     <option key={connection.id} value={connection.id}>
-                      {connection.external_email ?? "Gmail-enabled Google account"}
+                      {connection.external_email ??
+                        "Gmail-enabled Google account"}
                     </option>
                   ))}
                 </select>
