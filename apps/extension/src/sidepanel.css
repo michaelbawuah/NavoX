@@ -1,0 +1,234 @@
+:root {
+  color-scheme: dark;
+  font-family:
+    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #07101f;
+  color: #eaf1fb;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 85% 3%, rgb(86 218 192 / 12%), transparent 18rem),
+    linear-gradient(180deg, #0b1527, #06101e 70%);
+}
+
+button, input { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: wait; opacity: 0.55; }
+
+.app {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.brand, .row, .topline, .actions, .queryRow {
+  display: flex;
+  align-items: center;
+}
+
+.brand, .topline { justify-content: space-between; }
+
+.brandMark {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.gem {
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgb(105 235 204 / 42%);
+  border-radius: 9px 5px 10px 5px;
+  background:
+    linear-gradient(135deg, rgb(115 238 211 / 28%), transparent 48%),
+    #10243c;
+  box-shadow: inset 0 0 18px rgb(112 231 207 / 12%);
+  transform: rotate(4deg);
+}
+
+.brand strong { font-size: 15px; letter-spacing: -0.03em; }
+.brand small { color: #71849f; display: block; font-size: 9px; margin-top: 1px; }
+
+.iconButton, .button, .quietButton {
+  border: 1px solid rgb(137 163 204 / 20%);
+  border-radius: 8px;
+  background: rgb(18 33 57 / 76%);
+  color: #dce8f8;
+  padding: 7px 9px;
+}
+
+.iconButton { font-size: 11px; }
+
+.panel {
+  display: grid;
+  gap: 9px;
+  border: 1px solid rgb(128 157 202 / 14%);
+  border-radius: 13px;
+  background: rgb(9 20 38 / 72%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%);
+  padding: 11px;
+}
+
+.panelTitle {
+  margin: 0;
+  color: #edf5ff;
+  font-size: 12px;
+  letter-spacing: -0.02em;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #66d9c0;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.headline {
+  margin: 0;
+  color: #b9c7da;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.metric {
+  border-radius: 8px;
+  background: rgb(35 57 89 / 36%);
+  padding: 7px;
+  color: #7287a5;
+  font-size: 8px;
+}
+
+.metric b {
+  display: block;
+  color: #edf5ff;
+  font-size: 17px;
+  letter-spacing: -0.04em;
+}
+
+.item, .signal, .approval, .plan {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid rgb(130 159 201 / 10%);
+  padding-top: 9px;
+}
+
+.item:first-of-type, .signal:first-of-type { border-top: 0; padding-top: 0; }
+
+.item h3, .signal h3, .approval h3, .plan h3 {
+  margin: 0;
+  color: #e5edf8;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.item p, .signal p, .approval p, .plan p {
+  margin: 0;
+  color: #8395af;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.badge {
+  width: fit-content;
+  border: 1px solid rgb(99 222 196 / 22%);
+  border-radius: 999px;
+  color: #8ce0cc;
+  padding: 3px 5px;
+  font-size: 7px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.badge.attention { border-color: rgb(255 177 112 / 30%); color: #ffc38d; }
+
+.actions { flex-wrap: wrap; gap: 5px; }
+.actions button, .queryRow button {
+  border: 1px solid rgb(118 150 198 / 19%);
+  border-radius: 7px;
+  background: rgb(25 43 71 / 80%);
+  color: #cdd9eb;
+  padding: 6px 8px;
+  font-size: 8px;
+}
+
+.actions .primary, .queryRow button {
+  border-color: rgb(94 219 192 / 27%);
+  color: #a1e5d4;
+}
+
+.actions .danger { border-color: rgb(232 116 128 / 22%); color: #ffb4bd; }
+
+.queryRow { gap: 6px; }
+.queryRow input, .login input {
+  width: 100%;
+  border: 1px solid rgb(129 158 201 / 18%);
+  border-radius: 8px;
+  outline: none;
+  background: rgb(4 12 24 / 78%);
+  color: #eef5ff;
+  padding: 8px 9px;
+  font-size: 10px;
+}
+.queryRow input:focus, .login input:focus { border-color: rgb(91 220 191 / 38%); }
+
+.login {
+  display: grid;
+  gap: 10px;
+  margin-top: 12vh;
+}
+
+.login h1 { margin: 0; font-size: 25px; letter-spacing: -0.06em; }
+.login > p { margin: 0; color: #8293ad; font-size: 10px; line-height: 1.5; }
+.login label { display: grid; gap: 4px; color: #8b9bb4; font-size: 9px; }
+.login button {
+  border: 1px solid rgb(101 226 199 / 28%);
+  border-radius: 9px;
+  background: linear-gradient(135deg, rgb(40 112 99 / 62%), rgb(23 57 73 / 80%));
+  color: #e7fff9;
+  padding: 9px;
+}
+
+.notice, .error, .empty {
+  margin: 0;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 9px;
+  line-height: 1.45;
+}
+.notice { background: rgb(42 116 101 / 12%); color: #99dfcf; }
+.error { background: rgb(116 37 52 / 18%); color: #ffc2ca; }
+.empty { color: #6f819c; }
+
+.link {
+  color: #84cdbd;
+  font-size: 9px;
+  text-decoration: none;
+}
+
+.skeleton {
+  height: 62px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, rgb(29 48 76 / 34%), rgb(47 72 105 / 38%), rgb(29 48 76 / 34%));
+  background-size: 200% 100%;
+  animation: drift 1.2s linear infinite;
+}
+
+@keyframes drift { to { background-position: -200% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+}
