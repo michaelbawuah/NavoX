@@ -298,6 +298,7 @@ async def logout(
     response.delete_cookie(key=settings.session_cookie_name, path="/")
     return {"status": "signed_out"}
 
+
 @router.post("/extension/login", response_model=ExtensionLoginResponse)
 async def extension_login(
     payload: LoginRequest,
