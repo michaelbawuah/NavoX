@@ -45,7 +45,11 @@ jobs:
         working-directory: services/api
       - run: uv run alembic upgrade head --sql > /tmp/navox-schema.sql
         working-directory: services/api
-      - run: grep -E "CREATE TABLE (users|workspaces|workspace_memberships|plans|plan_steps|actions|approvals|workflow_refs|audit_events)" /tmp/navox-schema.sql
+      - name: Verify required schema tables
+        run: |
+          for table in users workspaces workspace_memberships plans plan_steps actions approvals workflow_refs audit_events proactive_preferences proactive_signals briefing_snapshots; do
+            grep -F "CREATE TABLE $table" /tmp/navox-schema.sql
+          done
 
   dependency-security:
     name: Dependency security
@@ -181,6 +185,79 @@ jobs:
             sleep 1
           done
           grep -F '"workflow_status":"rejected"' /tmp/navox-action-after.json
+
+          DEADLINE_DUE="$(python -c 'from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc) + timedelta(hours=2)).isoformat())')"
+          MEETING_DUE="$(python -c 'from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc) + timedelta(minutes=90)).isoformat())')"
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            --header "Content-Type: application/json" \
+            --data "{\"request_id\":\"66666666-6666-4666-8666-666666666666\",\"type\":\"deadline\",\"title\":\"Milestone 7 CI deadline\",\"priority\":5,\"due_at\":\"$DEADLINE_DUE\"}" \
+            http://localhost:8000/api/v1/commitments > /tmp/navox-proactive-deadline.json
+          DEADLINE_ID="$(python -c 'import json; print(json.load(open("/tmp/navox-proactive-deadline.json"))["id"])')"
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            --header "Content-Type: application/json" \
+            --data "{\"request_id\":\"77777777-7777-4777-8777-777777777777\",\"type\":\"meeting\",\"title\":\"Milestone 7 CI review\",\"description\":\"Review proactive workflow state.\",\"priority\":4,\"due_at\":\"$MEETING_DUE\"}" \
+            http://localhost:8000/api/v1/commitments > /tmp/navox-proactive-meeting.json
+          MEETING_ID="$(python -c 'import json; print(json.load(open("/tmp/navox-proactive-meeting.json"))["id"])')"
+
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            --header "Content-Type: application/json" \
+            --data '{"timezone":"UTC","notifications_enabled":true,"quiet_hours_start":"22:00","quiet_hours_end":"07:00","daily_briefing_hour":8,"notify_threshold":85,"briefing_threshold":65,"dashboard_threshold":40,"max_interruptions_per_day":3,"cooldown_minutes":240}' \
+            http://localhost:8000/api/v1/proactive/preferences > /tmp/navox-proactive-preferences.json
+          grep -F '"timezone":"UTC"' /tmp/navox-proactive-preferences.json
+
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            --request POST \
+            http://localhost:8000/api/v1/proactive/activate > /tmp/navox-proactive-activation.json
+          grep -F '"workflow_type":"daily_briefing"' /tmp/navox-proactive-activation.json
+          grep -F '"workflow_type":"commitment_lifecycle"' /tmp/navox-proactive-activation.json
+          grep -F '"workflow_type":"meeting_preparation"' /tmp/navox-proactive-activation.json
+          grep -F '"status":"running"' /tmp/navox-proactive-activation.json
+
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            'http://localhost:8000/api/v1/proactive/briefing?timezone=UTC' > /tmp/navox-proactive-briefing.json
+          grep -F '"signal_type":"deadline_warning"' /tmp/navox-proactive-briefing.json
+          grep -F '"signal_type":"meeting_prep"' /tmp/navox-proactive-briefing.json
+          grep -F '"what_happening":' /tmp/navox-proactive-briefing.json
+          grep -F '"why_matters":' /tmp/navox-proactive-briefing.json
+
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            http://localhost:8000/api/v1/proactive/meeting-prep > /tmp/navox-meeting-prep.json
+          grep -F '"title":"Milestone 7 CI review"' /tmp/navox-meeting-prep.json
+          grep -F '"prep_points":' /tmp/navox-meeting-prep.json
+
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            --header "Content-Type: application/json" \
+            --data '{"query":"What am I forgetting?","timezone":"UTC"}' \
+            http://localhost:8000/api/v1/today/query > /tmp/navox-forgetting.json
+          grep -F '"intent":"forgetting"' /tmp/navox-forgetting.json
+          grep -F '"title":"Milestone 7 CI deadline"' /tmp/navox-forgetting.json
+
+          SIGNAL_ID="$(python -c 'import json; b=json.load(open("/tmp/navox-proactive-briefing.json")); print((b["notify_now"]+b["briefing"]+b["dashboard"])[0]["id"])')"
+          SNOOZE_UNTIL="$(python -c 'from datetime import datetime, timedelta, timezone; print((datetime.now(timezone.utc) + timedelta(hours=4)).isoformat())')"
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            --header "Content-Type: application/json" \
+            --data "{\"until\":\"$SNOOZE_UNTIL\"}" \
+            "http://localhost:8000/api/v1/proactive/signals/$SIGNAL_ID/snooze" > /tmp/navox-proactive-snooze.json
+          grep -F '"tier":"suppressed"' /tmp/navox-proactive-snooze.json
+
+          test "$(docker compose exec -T postgres psql -U navox -d navox -Atc "SELECT count(*) FROM actions WHERE commitment_id IN ('$DEADLINE_ID','$MEETING_ID');")" = "0"
+
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            --request POST \
+            "http://localhost:8000/api/v1/commitments/$DEADLINE_ID/complete" >/dev/null
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            --request POST \
+            "http://localhost:8000/api/v1/commitments/$MEETING_ID/complete" >/dev/null
           curl --fail --silent --show-error \
             --cookie /tmp/navox-session.cookie \
             --request POST \

@@ -126,6 +126,7 @@ async def transition_commitment(
     current_account: CurrentAccountDependency,
     database: DatabaseSession,
     completed_at: datetime | None = None,
+    waiting_since: datetime | None = None,
 ) -> CommitmentResponse:
     result = await database.execute(
         update(Commitment)
@@ -135,7 +136,11 @@ async def transition_commitment(
             Commitment.user_id == current_account.user.id,
             Commitment.status.in_(allowed_statuses),
         )
-        .values(status=target_status, completed_at=completed_at)
+        .values(
+            status=target_status,
+            completed_at=completed_at,
+            waiting_since=waiting_since,
+        )
         .returning(Commitment)
     )
     commitment = result.scalar_one_or_none()
@@ -164,6 +169,7 @@ async def mark_waiting(
         target_status="waiting",
         current_account=current_account,
         database=database,
+        waiting_since=datetime.now(UTC),
     )
 
 

@@ -1,0 +1,404 @@
+.shell {
+  display: grid;
+  gap: 1rem;
+  overflow: hidden;
+  border: 1px solid rgb(97 223 196 / 22%);
+  border-radius: 1.1rem;
+  background:
+    radial-gradient(circle at 92% 0%, rgb(97 223 196 / 9%), transparent 19rem),
+    linear-gradient(145deg, rgb(17 33 57 / 94%), rgb(8 17 33 / 94%));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 4%),
+    0 1.5rem 5rem rgb(0 0 0 / 10%);
+  padding: 1.1rem;
+}
+
+.heading,
+.headingActions,
+.signalTopline,
+.signalFooter,
+.signalFooter > div,
+.controlsToggle {
+  display: flex;
+  align-items: center;
+}
+
+.heading,
+.signalFooter,
+.controlsToggle {
+  justify-content: space-between;
+}
+
+.heading {
+  gap: 1rem;
+}
+
+.heading p,
+.meeting p {
+  margin: 0 0 0.35rem;
+  color: #61dfc4;
+  font-size: 0.62rem;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.heading h2 {
+  max-width: 34rem;
+  margin: 0;
+  color: #f1f6ff;
+  font-size: 1.35rem;
+  line-height: 1.12;
+  letter-spacing: -0.045em;
+}
+
+.headingActions {
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: 0.55rem;
+}
+
+.headingActions > span {
+  border: 1px solid rgb(145 168 207 / 18%);
+  border-radius: 999px;
+  padding: 0.34rem 0.5rem;
+  font-size: 0.59rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.live {
+  color: #8de3d0;
+}
+
+.paused {
+  color: #ffc88f;
+}
+
+.headingActions button,
+.signalFooter button,
+.controlsToggle button,
+.controls > button {
+  border: 1px solid rgb(145 168 207 / 22%);
+  border-radius: 0.55rem;
+  background: rgb(18 30 53 / 75%);
+  color: #d9e2f4;
+  cursor: pointer;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+  font-size: 0.64rem;
+}
+
+.headingActions button {
+  border-color: rgb(97 223 196 / 25%);
+  color: #a6eadb;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  border: 1px solid rgb(134 162 205 / 14%);
+  border-radius: 0.82rem;
+  background: rgb(5 13 26 / 44%);
+  padding: 0.85rem;
+}
+
+.summary > div:first-child {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.summary span {
+  color: #7486a2;
+  font-size: 0.61rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.summary strong {
+  color: #c9d5e8;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 0.7rem;
+}
+
+.metrics span {
+  display: grid;
+  min-width: 5rem;
+  text-align: right;
+}
+
+.metrics b {
+  color: #eef5ff;
+  font-size: 1.15rem;
+}
+
+.signalGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.signal {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  border: 1px solid rgb(137 162 202 / 14%);
+  border-radius: 0.82rem;
+  background: linear-gradient(135deg, rgb(19 36 61 / 72%), rgb(9 20 39 / 64%));
+  padding: 0.85rem;
+}
+
+.signalTopline {
+  justify-content: space-between;
+}
+
+.signalTopline span {
+  border: 1px solid rgb(97 223 196 / 20%);
+  border-radius: 999px;
+  color: #8fdbc9;
+  padding: 0.24rem 0.42rem;
+  font-size: 0.55rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.signalTopline span[data-tier="notify_now"] {
+  border-color: rgb(255 170 111 / 28%);
+  color: #ffc38f;
+}
+
+.signalTopline b {
+  color: #f4f7ff;
+  font-size: 1.25rem;
+  letter-spacing: -0.04em;
+}
+
+.signal h3 {
+  margin: 0;
+  color: #e7edf8;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.signal > p {
+  margin: 0;
+  color: #8fa0ba;
+  font-size: 0.7rem;
+  line-height: 1.48;
+}
+
+.scoreLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.scoreLine small {
+  border-radius: 999px;
+  background: rgb(106 132 173 / 10%);
+  color: #788ba8;
+  padding: 0.22rem 0.38rem;
+  font-size: 0.53rem;
+}
+
+.signalFooter {
+  gap: 0.6rem;
+  border-top: 1px solid rgb(137 162 202 / 10%);
+  padding-top: 0.55rem;
+}
+
+.signalFooter > span {
+  color: #94d9c8;
+  font-size: 0.61rem;
+}
+
+.signalFooter > div {
+  gap: 0.35rem;
+}
+
+.signalFooter button {
+  padding: 0.38rem 0.48rem;
+  font-size: 0.56rem;
+}
+
+.meeting {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.7fr) minmax(0, 1.3fr);
+  gap: 1rem;
+  border-left: 2px solid rgb(112 158 255 / 55%);
+  background: rgb(29 48 79 / 24%);
+  padding: 0.8rem 0.9rem;
+}
+
+.meeting h3 {
+  margin: 0;
+  color: #eaf0fa;
+  font-size: 0.9rem;
+}
+
+.meeting span {
+  display: block;
+  margin-top: 0.3rem;
+  color: #7f91ad;
+  font-size: 0.62rem;
+}
+
+.meeting ul {
+  margin: 0;
+  padding-left: 1rem;
+  color: #98a9c2;
+  font-size: 0.66rem;
+  line-height: 1.55;
+}
+
+.controlsToggle {
+  gap: 1rem;
+}
+
+.controlsToggle small {
+  max-width: 34rem;
+  color: #657893;
+  font-size: 0.58rem;
+  line-height: 1.45;
+  text-align: right;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+  border-top: 1px solid rgb(137 162 202 / 12%);
+  padding-top: 0.85rem;
+}
+
+.controls label {
+  display: grid;
+  gap: 0.35rem;
+  color: #8698b3;
+  font-size: 0.61rem;
+}
+
+.controls input {
+  width: 100%;
+  border: 1px solid rgb(142 165 204 / 20%);
+  border-radius: 0.55rem;
+  outline: none;
+  background: rgb(5 13 26 / 60%);
+  color: #eef3ff;
+  padding: 0.58rem 0.62rem;
+}
+
+.controls .check {
+  display: flex;
+  grid-column: span 2;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.check input {
+  width: auto;
+}
+
+.controls > button {
+  grid-column: span 2;
+  border-color: rgb(97 223 196 / 22%);
+}
+
+.message,
+.error,
+.empty {
+  margin: 0;
+  border-radius: 0.6rem;
+  padding: 0.65rem 0.75rem;
+  font-size: 0.66rem;
+}
+
+.message {
+  background: rgb(42 120 103 / 12%);
+  color: #9de1d1;
+}
+
+.error {
+  background: rgb(112 37 49 / 16%);
+  color: #ffc2c8;
+}
+
+.empty {
+  color: #7f91ad;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+@media (max-width: 760px) {
+  .heading,
+  .summary,
+  .meeting {
+    grid-template-columns: 1fr;
+  }
+
+  .heading {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .headingActions {
+    justify-content: start;
+  }
+
+  .summary {
+    display: grid;
+  }
+
+  .metrics {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .metrics span {
+    min-width: 0;
+    text-align: left;
+  }
+
+  .signalGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .controlsToggle {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .controlsToggle small {
+    text-align: left;
+  }
+}
+
+@media (max-width: 480px) {
+  .metrics,
+  .controls {
+    grid-template-columns: 1fr;
+  }
+
+  .controls .check,
+  .controls > button {
+    grid-column: span 1;
+  }
+
+  .signalFooter {
+    align-items: start;
+    flex-direction: column;
+  }
+}
