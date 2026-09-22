@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
@@ -56,14 +56,7 @@ def test_source_document_is_versioned_provider_neutral_and_json_safe() -> None:
 
 def test_source_document_normalizes_aware_timestamps_to_utc() -> None:
     payload = source_document_payload()
-    payload["occurred_at"] = datetime(
-        2026,
-        9,
-        22,
-        5,
-        0,
-        tzinfo=UTC - timedelta(hours=4),
-    )
+    payload["occurred_at"] = datetime.fromisoformat("2026-09-22T05:00:00-04:00")
 
     document = SourceDocument.model_validate(payload)
 
