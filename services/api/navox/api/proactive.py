@@ -1,5 +1,4 @@
 from datetime import UTC, datetime
-from typing import Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -9,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.agent.audit import add_audit_event
 from navox.api.auth import CurrentAccountDependency, DatabaseSession
-from navox.db.models import ProactivePreference, ProactiveSignal
+from navox.db.models import ProactiveSignal
 from navox.proactive.engine import (
     InvalidProactiveTimezone,
     default_preference,
@@ -261,7 +260,7 @@ async def briefing(
     current_account: CurrentAccountDependency,
     database: DatabaseSession,
     timezone_name: str | None = Query(default=None, alias="timezone"),
-    request_id: UUID | None = Query(default=None),
+    request_id: UUID | None = None,
 ) -> BriefingResponse:
     selected_timezone = timezone_name or current_account.user.timezone
     try:

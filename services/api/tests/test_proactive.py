@@ -5,7 +5,6 @@ from uuid import UUID, uuid4
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from navox.api.main import app
@@ -239,7 +238,10 @@ async def test_snooze_dismiss_completion_and_tenant_isolation(
     }
     assert item["id"] not in hidden_ids
 
-    assert (await client.post(f"/api/v1/commitments/{commitment['id']}/complete")).status_code == 200
+    completed = await client.post(
+        f"/api/v1/commitments/{commitment['id']}/complete"
+    )
+    assert completed.status_code == 200
     await client.get("/api/v1/proactive/briefing", params={"timezone": "UTC"})
     async with session_factory() as session:
         signal = await session.get(ProactiveSignal, UUID(item["id"]))

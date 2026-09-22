@@ -1,9 +1,9 @@
-from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
-from hashlib import sha256
 import json
+from dataclasses import dataclass
+from datetime import UTC, datetime, time, timedelta
+from hashlib import sha256
 from typing import cast
-from uuid import UUID, uuid4
+from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
@@ -236,7 +236,10 @@ def why_matters(commitment: Commitment, signal_type: str, now: datetime) -> str:
     if signal_type == "waiting_response":
         return f"{commitment.title} is blocked on someone or something outside your control."
     if signal_type == "candidate_review":
-        return f"{commitment.title} is not confirmed yet, so NavoX will not treat it as settled fact."
+        return (
+            f"{commitment.title} is not confirmed yet, "
+            "so NavoX will not treat it as settled fact."
+        )
     return f"{commitment.title} is priority {commitment.priority} and remains active."
 
 
@@ -406,11 +409,6 @@ async def evaluate_workspace(
             )
         )
     )
-    active_ids = {
-        commitment.id
-        for commitment in commitments
-        if active_commitment(commitment, current_time)
-    }
     existing_signals = list(
         await database.scalars(
             select(ProactiveSignal).where(
