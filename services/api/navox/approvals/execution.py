@@ -202,6 +202,8 @@ async def execute_approved_gmail_send(
         return "completed"
     if action.status == "executing":
         return "executing"
+    if action.status in {"uncertain", "rejected", "expired", "blocked", "failed"}:
+        return action.status
     if action.action_type != "gmail.send" or action.provider != "google":
         return await _mark_blocked(
             database,
