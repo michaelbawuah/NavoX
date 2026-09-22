@@ -628,3 +628,40 @@ async def test_subject_header_injection_is_rejected(
         },
     )
     assert response.status_code == 422
+
+
+
+@pytest.mark.asyncio
+async def test_prepare_request_id_cannot_be_reused_for_different_payload(
+    approval_environment: tuple[AsyncClient, async_sessionmaker[AsyncSession], Settings],
+) -> None:
+    client, session_factory, settings = approval_environment
+    account = await register(client)
+    commitment = await create_commitment(client)
+    connection_id = await add_google_connection(session_factory, settings, account)
+    request_id = uuid4()
+
+    prepared = await prepare_action(
+        client,
+        commitment_id=commitment["id"],
+        connection_id=connection_id,
+        request_id=request_id,
+    )
+    assert prepared["status"] == "awaiting_approval"
+
+    conflict = await client.post(
+        f"/api/v1/commitments/{commitment['id']}/actions/gmail-send/prepare",
+        json={
+            "request_id": str(request_id),
+            "connection_id": str(connection_id),
+            "to": "another-recipient@example.edu",
+            "subject": "Changed subject",
+            "body_text": "A different payload must not replace the original action.",
+            "post_send_state": "completed",
+        },
+    )
+    assert conflict.status_code == 409
+
+    fetched = await client.get(f"/api/v1/actions/{prepared['id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["payload"]["to"] == "advisor@example.edu"
