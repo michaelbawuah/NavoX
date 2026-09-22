@@ -237,7 +237,8 @@ async def query_today(
             item
             for item in all_items
             if item.due_at is not None
-            and local_now <= item.due_at.astimezone(local_now.tzinfo)
+            and local_now
+            <= item.due_at.astimezone(local_now.tzinfo)
             <= local_now + timedelta(days=7)
         ]
     else:
