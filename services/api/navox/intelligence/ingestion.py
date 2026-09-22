@@ -126,6 +126,10 @@ async def process_connection(
                 ),
             )
         )
+    # Provider list order is not causal order (Gmail bootstrap is newest first).
+    # Resolve original requests before later outcome evidence, including documents
+    # recovered outside the bootstrap window during expired-cursor reconciliation.
+    documents.sort(key=lambda document: (document.occurred_at, str(document.id)))
     commitment_ids: set[UUID] = set()
     for document in documents:
         connection, user = await authorized_connection(database, connection_id, source)

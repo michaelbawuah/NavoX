@@ -1,6 +1,6 @@
 import base64
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
@@ -18,6 +18,7 @@ from navox.core.settings import Settings
 from navox.db.base import Base
 from navox.db.models import (
     AuditEvent,
+    Commitment,
     Connection,
     IntelligenceCursor,
     ObservationEvidence,
@@ -28,7 +29,7 @@ from navox.db.models import (
     WorkspaceMembership,
 )
 from navox.intelligence import ingestion
-from navox.intelligence.contracts import SourceDocument
+from navox.intelligence.contracts import SourceDocument, SourceIdentity
 from navox.intelligence.extraction import ModelExtractionResponse, OperationalExtractor
 from navox.providers import google_sources
 from navox.providers.google_sources import (
@@ -682,3 +683,95 @@ def test_normalized_plain_text_keeps_evidence_offsets_stable() -> None:
     document = gmail_document(data, workspace_id=uuid4(), connection_id=uuid4(), now=NOW)
     assert document.content is not None and document.content.startswith("  I will")
     assert document.content[2:34] == "I will send the budget tomorrow."
+
+
+@pytest.mark.asyncio
+async def test_newest_first_batch_resolves_request_before_sent_completion(
+    database: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = await connection_fixture(database)
+    request = SourceDocument(
+        id=uuid4(),
+        workspace_id=connection.workspace_id,
+        provider="google",
+        source_type="gmail_message",
+        external_id="request",
+        external_parent_id="budget-thread",
+        author=SourceIdentity(identity_type="email", identity_value="manager@example.com"),
+        recipients=[SourceIdentity(identity_type="email", identity_value="owner@example.com")],
+        subject="Budget",
+        content="Please send budget.",
+        occurred_at=NOW,
+        retrieved_at=NOW,
+        metadata={"label_ids": ["INBOX"]},
+    )
+    sent = SourceDocument(
+        id=uuid4(),
+        workspace_id=connection.workspace_id,
+        provider="google",
+        source_type="gmail_message",
+        external_id="sent",
+        external_parent_id="budget-thread",
+        author=SourceIdentity(identity_type="email", identity_value="owner@example.com"),
+        recipients=[SourceIdentity(identity_type="email", identity_value="manager@example.com")],
+        subject="Budget",
+        content="Attached budget.",
+        occurred_at=NOW + timedelta(hours=1),
+        retrieved_at=NOW + timedelta(hours=1),
+        metadata={"label_ids": ["SENT"]},
+    )
+    processed: list[str] = []
+
+    class ChronologicalGateway:
+        async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
+            processed.append(document.external_id)
+            assert document.content is not None
+            return ModelExtractionResponse(
+                provider="test",
+                model="fixture",
+                output={
+                    "observations": [
+                        {
+                            "observation_type": "request"
+                            if document.external_id == "request"
+                            else "completion",
+                            "action_text": "send",
+                            "object_text": "budget",
+                            "confidence": 0.99,
+                            "evidence": [
+                                {
+                                    "source": "content",
+                                    "start_char": 0,
+                                    "end_char": len(document.content),
+                                    "text": document.content,
+                                }
+                            ],
+                        }
+                    ],
+                },
+            )
+
+    async def token(*_: Any, **__: Any) -> str:
+        return "test"
+
+    async def batch(*_: Any, **__: Any) -> SourceBatch:
+        return SourceBatch([sent, request], "safely-processed")
+
+    monkeypatch.setattr(ingestion, "access_token_for_connection", token)
+    monkeypatch.setattr(GoogleSourceGateway, "fetch", batch)
+    ids = await ingestion.process_connection(
+        database,
+        connection_id=connection.id,
+        source="gmail",
+        settings=Settings(),
+        extractor=OperationalExtractor(ChronologicalGateway()),
+    )
+    await database.commit()
+    assert processed == ["request", "sent"]
+    assert len(ids) == 1
+    commitment = await database.get(Commitment, ids[0])
+    assert commitment is not None and commitment.status == "completed"
+    assert await database.scalar(select(func.count()).select_from(Commitment)) == 1
+    cursor = await database.scalar(select(IntelligenceCursor))
+    assert cursor is not None and cursor.cursor == "safely-processed"
