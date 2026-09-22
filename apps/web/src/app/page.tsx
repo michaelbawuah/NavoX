@@ -64,6 +64,8 @@ export default function Home() {
         cancelled: "Google connection was cancelled.",
         connected:
           "Google account linked. No Gmail, Calendar, or Drive data was requested.",
+        gmail_send_enabled:
+          "Gmail sending permission enabled. Every send still requires exact approval.",
         failed: "Google could not complete the connection. Please try again.",
         refresh_token_required:
           "Google did not return a refresh credential. Please try connecting again.",
