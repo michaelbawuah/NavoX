@@ -16,7 +16,7 @@ from navox.api.agent import get_agent_dispatcher
 from navox.api.main import app
 from navox.core.settings import Settings, get_settings
 from navox.db.base import Base
-from navox.db.models import Action, AuditEvent, Plan, PlanStep, WorkflowRef
+from navox.db.models import Action, AuditEvent, Plan, WorkflowRef
 from navox.db.session import get_database_session
 
 
@@ -100,7 +100,9 @@ async def register(client: AsyncClient, email: str = "owner@example.com") -> dic
     return response.json()
 
 
-async def create_commitment(client: AsyncClient, title: str = "Ship bounded agent") -> dict[str, object]:
+async def create_commitment(
+    client: AsyncClient, title: str = "Ship bounded agent"
+) -> dict[str, object]:
     response = await client.post(
         "/api/v1/commitments",
         json={

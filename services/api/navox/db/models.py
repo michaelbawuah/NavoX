@@ -386,7 +386,11 @@ class Action(Base):
     __tablename__ = "actions"
     __table_args__ = (
         UniqueConstraint("plan_step_id", name="uq_actions_plan_step_id"),
-        UniqueConstraint("workspace_id", "idempotency_key", name="uq_actions_workspace_idempotency"),
+        UniqueConstraint(
+            "workspace_id",
+            "idempotency_key",
+            name="uq_actions_workspace_idempotency",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)

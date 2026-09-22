@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from navox.agent.audit import add_audit_event
 from navox.agent.context import ContextBuilder
 from navox.agent.contracts import get_action_contract
-from navox.agent.planner import DeterministicPlanner, MAX_PLAN_STEPS
+from navox.agent.planner import MAX_PLAN_STEPS, DeterministicPlanner
 from navox.db.models import Commitment, Plan, PlanStep, User
 
 HANDLEABLE_STATUSES = {"confirmed", "waiting", "attention"}

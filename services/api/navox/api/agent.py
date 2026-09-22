@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from navox.agent.audit import add_audit_event
-from navox.agent.dispatcher import AgentDispatchError, AgentDispatcher, TemporalAgentDispatcher
+from navox.agent.dispatcher import AgentDispatcher, AgentDispatchError, TemporalAgentDispatcher
 from navox.agent.service import (
     AgentPausedError,
     AgentPlanConflictError,

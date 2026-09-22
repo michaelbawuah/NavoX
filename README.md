@@ -2,7 +2,7 @@
 
 NavoX is an AI Operations Platform that helps people understand, prioritize, and safely handle work across their connected tools.
 
-The current implementation includes the **Engineering Foundation**, Milestone 1 identity, Milestone 2's content-minimized event pipeline, and Milestone 3's Commitment Engine: email/password authentication, opaque server-side sessions, automatic creation of one personal workspace, an opt-in Google identity connection, authenticated provider-event receivers, normalized `incoming_events`, deterministic commitment confidence policy, workspace-scoped deduplication, source provenance, and commitment relations. The Google flow still requests only OpenID profile and verified-email scopes; no Gmail, Calendar, or Drive data is requested or ingested. External actions remain deliberately absent until their dedicated milestones described in [SPEC-001](docs/architecture/SPEC-001-navox.md).
+The current implementation includes the **Engineering Foundation** through **Milestone 5's Bounded Agent**: identity and personal workspaces, authenticated content-minimized events, the Commitment Engine, the Today operational workspace, bounded read-only Today queries, and a durable Handle This runtime backed by PostgreSQL and Temporal. Plans, ordered steps, action records, workflow references, and audit events are persisted; action risk is owned by code-level contracts, plan creation is idempotent, and Milestone 5 automatically executes only internal R0/R1 reads and preparation. The Google flow still requests only OpenID profile and verified-email scopes; no Gmail, Calendar, or Drive content is read, and no external provider action executes in this milestone.
 
 ## Repository layout
 
@@ -52,12 +52,14 @@ npm run dev --workspace=@navox/web
 
 Open the web shell at `http://localhost:3000`, API documentation at `http://localhost:8000/docs`, and the Temporal UI at `http://localhost:8080`.
 
-To run the Temporal foundation worker after services are ready:
+To run the Temporal worker after services are ready:
 
 ```bash
 cd services/api
-uv run python ../../workflows/temporal/worker.py
+uv run python -m navox.workflows.worker
 ```
+
+The worker hosts the foundation workflow and Milestone 5's `HandleCommitmentWorkflow`. Docker Compose starts the same worker automatically.
 
 To run all checks that do not require local Docker services:
 
@@ -135,3 +137,15 @@ There is intentionally no client-facing endpoint to submit extraction output, an
 ## License
 
 The repository is private and no open-source license has been selected yet. No permission is granted for external use until the owner makes that legal decision.
+
+
+## Bounded agent endpoints
+
+- `POST /api/v1/commitments/{id}/handle` creates an idempotent, persisted plan and dispatches its safe steps to Temporal.
+- `GET /api/v1/plans` lists recent plans in the authenticated workspace.
+- `GET /api/v1/plans/{id}` returns persisted step, action, risk, result, and workflow progress.
+- `GET /api/v1/agent/state` returns whether agent execution is paused.
+- `POST /api/v1/agent/pause` prevents new plans and causes future steps to fail closed at policy evaluation.
+- `POST /api/v1/agent/resume` re-enables bounded execution.
+
+Milestone 5 has a hard eight-step ceiling and two-replan design limit. The current deterministic planner uses three internal actions: `navox.commitment.inspect` (R0), `navox.context.prepare` (R1), and `navox.next_steps.prepare` (R1). Gmail, Calendar, and Drive contracts are registered with fixed risk and permission requirements so future planners cannot invent or downgrade risk, but provider executors remain disabled until the matching scope and milestone are deliberately implemented. R2+ actions are never executed by the Milestone 5 worker.
