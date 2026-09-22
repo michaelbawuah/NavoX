@@ -67,6 +67,55 @@ interface QueryPayload {
   supported_queries: string[];
 }
 
+interface PlanAction {
+  id: string;
+  provider: string;
+  action_type: string;
+  risk_level: string;
+  requires_approval: boolean;
+  status: string;
+  policy_reason: string | null;
+  payload_hash: string;
+  result: Record<string, unknown>;
+  created_at: string;
+  executed_at: string | null;
+}
+
+interface PlanStep {
+  id: string;
+  sequence_number: number;
+  action_type: string;
+  description: string;
+  status: string;
+  risk_level: string;
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  action: PlanAction | null;
+}
+
+interface PlanSummary {
+  id: string;
+  commitment_id: string | null;
+  goal: string;
+  status: string;
+  planner_version: string;
+  context_hash: string;
+  max_steps: number;
+  replan_count: number;
+  error_code: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+interface PlanDetail extends PlanSummary {
+  steps: PlanStep[];
+  workflow: {
+    workflow_id: string;
+    status: string;
+    run_id: string | null;
+  } | null;
+}
+
 interface TodayWorkspaceProps {
   account: Account;
   connections: GoogleConnection[];
@@ -83,9 +132,19 @@ const apiBaseUrl =
 
 async function readApiError(response: Response): Promise<string> {
   const body = (await response.json().catch(() => null)) as {
-    detail?: string;
+    detail?: string | { message?: string };
   } | null;
-  return body?.detail ?? "NavoX could not complete that request.";
+  if (typeof body?.detail === "string") {
+    return body.detail;
+  }
+  if (body?.detail && typeof body.detail.message === "string") {
+    return body.detail.message;
+  }
+  return "NavoX could not complete that request.";
+}
+
+function isTerminalPlan(status: string): boolean {
+  return ["completed", "blocked", "failed", "dispatch_failed"].includes(status);
 }
 
 function dueLabel(value: string | null): string {
@@ -149,6 +208,12 @@ export function TodayWorkspace({
   const [queryResult, setQueryResult] = useState<QueryPayload | null>(null);
   const [querying, setQuerying] = useState(false);
 
+  const [agentPaused, setAgentPaused] = useState(false);
+  const [togglingAgent, setTogglingAgent] = useState(false);
+  const [handlingId, setHandlingId] = useState<string | null>(null);
+  const [activePlan, setActivePlan] = useState<PlanDetail | null>(null);
+  const [recentPlans, setRecentPlans] = useState<PlanSummary[]>([]);
+
   useEffect(() => {
     const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
     if (detected) {
@@ -176,9 +241,64 @@ export function TodayWorkspace({
     }
   }, [timezone]);
 
+  const refreshPlans = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiBaseUrl}/plans?limit=5`, {
+        credentials: "include",
+      });
+      if (response.ok) {
+        setRecentPlans((await response.json()) as PlanSummary[]);
+      }
+    } catch {
+      // Today remains usable even if plan history cannot be refreshed.
+    }
+  }, []);
+
+  const refreshAgentState = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiBaseUrl}/agent/state`, {
+        credentials: "include",
+      });
+      if (response.ok) {
+        const state = (await response.json()) as { paused: boolean };
+        setAgentPaused(state.paused);
+      }
+    } catch {
+      // Execution controls fail closed server-side even if this badge is stale.
+    }
+  }, []);
+
+  const loadPlan = useCallback(async (planId: string) => {
+    try {
+      const response = await fetch(`${apiBaseUrl}/plans/${planId}`, {
+        credentials: "include",
+      });
+      if (response.ok) {
+        setActivePlan((await response.json()) as PlanDetail);
+      }
+    } catch {
+      // Polling is best effort; persisted state remains authoritative.
+    }
+  }, []);
+
   useEffect(() => {
     void refreshToday();
   }, [refreshToday]);
+
+  useEffect(() => {
+    void refreshPlans();
+    void refreshAgentState();
+  }, [refreshAgentState, refreshPlans]);
+
+  useEffect(() => {
+    if (activePlan === null || isTerminalPlan(activePlan.status)) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void loadPlan(activePlan.id);
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [activePlan, loadPlan]);
 
   const firstName = useMemo(() => {
     const value = account.display_name?.trim();
@@ -245,6 +365,66 @@ export function TodayWorkspace({
     }
   }
 
+  async function handleCommitment(item: TodayItem) {
+    setHandlingId(item.id);
+    setWorkspaceError("");
+    setWorkspaceMessage("");
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/commitments/${item.id}/handle`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            request_id: crypto.randomUUID(),
+            goal: `Safely handle ${item.title}`,
+          }),
+        },
+      );
+      if (!response.ok) {
+        setWorkspaceError(await readApiError(response));
+        return;
+      }
+      const plan = (await response.json()) as PlanDetail;
+      setActivePlan(plan);
+      setWorkspaceMessage(
+        "Bounded plan started. NavoX will only execute permitted R0/R1 steps.",
+      );
+      await refreshPlans();
+    } catch {
+      setWorkspaceError("NavoX could not start that bounded plan.");
+    } finally {
+      setHandlingId(null);
+    }
+  }
+
+  async function toggleAgent() {
+    setTogglingAgent(true);
+    setWorkspaceError("");
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/agent/${agentPaused ? "resume" : "pause"}`,
+        { method: "POST", credentials: "include" },
+      );
+      if (!response.ok) {
+        setWorkspaceError(await readApiError(response));
+        return;
+      }
+      const state = (await response.json()) as { paused: boolean };
+      setAgentPaused(state.paused);
+      setWorkspaceMessage(
+        state.paused
+          ? "Agent execution paused. New plans and future steps will fail closed."
+          : "Agent execution resumed.",
+      );
+    } catch {
+      setWorkspaceError("NavoX could not update the agent state.");
+    } finally {
+      setTogglingAgent(false);
+    }
+  }
+
   async function askNavox(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setQuerying(true);
@@ -306,6 +486,13 @@ export function TodayWorkspace({
           >
             Complete
           </button>
+          <button
+            disabled={handlingId === item.id || agentPaused}
+            onClick={() => void handleCommitment(item)}
+            type="button"
+          >
+            {handlingId === item.id ? "Planning…" : "Handle this"}
+          </button>
         </div>
       );
     }
@@ -324,6 +511,13 @@ export function TodayWorkspace({
           type="button"
         >
           Complete
+        </button>
+        <button
+          disabled={handlingId === item.id || agentPaused}
+          onClick={() => void handleCommitment(item)}
+          type="button"
+        >
+          {handlingId === item.id ? "Planning…" : "Handle this"}
         </button>
       </div>
     );
@@ -555,6 +749,103 @@ export function TodayWorkspace({
                   </small>
                 )}
               </div>
+            )}
+          </section>
+
+          <section className={`${styles.controlCard} ${styles.agentCard}`}>
+            <div className={styles.controlHeading}>
+              <p>Agent runtime</p>
+              <span className={styles.controlMeta}>Bounded · R0 / R1</span>
+            </div>
+            <div className={styles.agentStateRow}>
+              <div>
+                <span
+                  className={
+                    agentPaused ? styles.agentPausedDot : styles.agentLiveDot
+                  }
+                />
+                <strong>{agentPaused ? "Paused" : "Ready"}</strong>
+              </div>
+              <button
+                disabled={togglingAgent}
+                onClick={() => void toggleAgent()}
+                type="button"
+              >
+                {togglingAgent
+                  ? "Updating…"
+                  : agentPaused
+                    ? "Resume agent"
+                    : "Pause agent"}
+              </button>
+            </div>
+            <p className={styles.mutedCopy}>
+              Milestone 5 automatically executes only internal reads and
+              preparation. External provider actions remain unavailable, and R2+
+              actions cannot run without the later approval system.
+            </p>
+
+            {activePlan ? (
+              <div className={styles.planPanel} aria-live="polite">
+                <div className={styles.planHeader}>
+                  <div>
+                    <small>Active plan</small>
+                    <h3>{activePlan.goal}</h3>
+                  </div>
+                  <span data-status={activePlan.status}>
+                    {activePlan.status.replaceAll("_", " ")}
+                  </span>
+                </div>
+                <div className={styles.planMeta}>
+                  <span>{activePlan.planner_version}</span>
+                  <span>
+                    {activePlan.steps.length} / {activePlan.max_steps} steps
+                  </span>
+                  <span>Replans {activePlan.replan_count} / 2</span>
+                </div>
+                <ol className={styles.planSteps}>
+                  {activePlan.steps.map((step) => (
+                    <li key={step.id}>
+                      <div className={styles.stepNumber}>
+                        {String(step.sequence_number).padStart(2, "0")}
+                      </div>
+                      <div className={styles.stepBody}>
+                        <div className={styles.stepTopline}>
+                          <strong>{step.description}</strong>
+                          <span className={styles.riskBadge}>
+                            {step.risk_level}
+                          </span>
+                        </div>
+                        <p>{step.action_type}</p>
+                        <small>{step.status.replaceAll("_", " ")}</small>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+                {activePlan.error_code && (
+                  <p className={styles.planError}>
+                    Stopped safely: {activePlan.error_code.replaceAll("_", " ")}
+                  </p>
+                )}
+              </div>
+            ) : recentPlans.length > 0 ? (
+              <div className={styles.recentPlans}>
+                <small>Recent plans</small>
+                {recentPlans.map((plan) => (
+                  <button
+                    key={plan.id}
+                    onClick={() => void loadPlan(plan.id)}
+                    type="button"
+                  >
+                    <span>{plan.goal}</span>
+                    <b>{plan.status.replaceAll("_", " ")}</b>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className={styles.emptyAgent}>
+                Choose <strong>Handle this</strong> on a confirmed commitment to
+                create the first bounded plan.
+              </p>
             )}
           </section>
 
