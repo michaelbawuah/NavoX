@@ -248,7 +248,7 @@ async def test_gmail_send_scope_is_incremental_and_bound_to_existing_connection(
     requested_scopes = set(query["scope"][0].split())
     assert "openid" in requested_scopes
     assert "https://www.googleapis.com/auth/userinfo.email" in requested_scopes
-    assert "https://www.googleapis.com/auth/userinfo.profile" in requested_scopes
+    assert "https://www.googleapis.com/auth/userinfo.profile" not in requested_scopes
     assert "https://www.googleapis.com/auth/gmail.send" in requested_scopes
     capability_state = query["state"][0]
 

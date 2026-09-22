@@ -28,6 +28,10 @@ GOOGLE_IDENTITY_SCOPES = (
     "https://www.googleapis.com/auth/userinfo.profile",
 )
 GOOGLE_GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+GOOGLE_ACCOUNT_BINDING_SCOPES = (
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+)
 GOOGLE_ALLOWED_SCOPES = frozenset((*GOOGLE_IDENTITY_SCOPES, GOOGLE_GMAIL_SEND_SCOPE))
 OAUTH_ATTEMPT_TTL = timedelta(minutes=10)
 
@@ -255,7 +259,7 @@ async def start_google_gmail_send_authorization(
             provider="google",
             purpose="gmail_send",
             connection_id=connection.id,
-            requested_scopes=[*GOOGLE_IDENTITY_SCOPES, GOOGLE_GMAIL_SEND_SCOPE],
+            requested_scopes=[*GOOGLE_ACCOUNT_BINDING_SCOPES, GOOGLE_GMAIL_SEND_SCOPE],
             state_hash=hash_value(state_value),
             code_verifier=code_verifier,
             expires_at=datetime.now(UTC) + OAUTH_ATTEMPT_TTL,
@@ -267,10 +271,10 @@ async def start_google_gmail_send_authorization(
             state_value,
             code_verifier,
             settings,
-            scopes=(*GOOGLE_IDENTITY_SCOPES, GOOGLE_GMAIL_SEND_SCOPE),
+            scopes=(*GOOGLE_ACCOUNT_BINDING_SCOPES, GOOGLE_GMAIL_SEND_SCOPE),
             include_granted_scopes=True,
         ),
-        requested_scopes=[*GOOGLE_IDENTITY_SCOPES, GOOGLE_GMAIL_SEND_SCOPE],
+        requested_scopes=[*GOOGLE_ACCOUNT_BINDING_SCOPES, GOOGLE_GMAIL_SEND_SCOPE],
     )
 
 
@@ -340,7 +344,7 @@ async def complete_google_authorization(
             return connection_redirect(settings, "scope_mismatch")
         if not set(returned_scopes).issubset(GOOGLE_ALLOWED_SCOPES):
             return connection_redirect(settings, "scope_mismatch")
-        if not set(GOOGLE_IDENTITY_SCOPES).issubset(returned_scopes):
+        if not set(GOOGLE_ACCOUNT_BINDING_SCOPES).issubset(returned_scopes):
             return connection_redirect(settings, "scope_mismatch")
 
         try:
