@@ -50,7 +50,7 @@ class EvidenceSpan(BaseModel):
     text: str = Field(min_length=1, max_length=512)
 
     @model_validator(mode="after")
-    def require_non_empty_range(self) -> "EvidenceSpan":
+    def require_non_empty_range(self) -> EvidenceSpan:
         if self.end_char <= self.start_char:
             raise ValueError("Evidence end_char must be greater than start_char")
         return self
@@ -87,7 +87,7 @@ class PersonMention(BaseModel):
     evidence: list[EvidenceSpan] = Field(min_length=1, max_length=8)
 
     @model_validator(mode="after")
-    def require_identity_pair(self) -> "PersonMention":
+    def require_identity_pair(self) -> PersonMention:
         if (self.identity_type is None) is not (self.identity_value is None):
             raise ValueError("identity_type and identity_value must be supplied together")
         return self
