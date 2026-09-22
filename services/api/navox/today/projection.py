@@ -195,7 +195,11 @@ async def build_today_projection(
         key=sort_key,
     )
     coming = sorted(
-        (item for commitment, item in items if not needs_attention(commitment, current_time, timezone)),
+        (
+            item
+            for commitment, item in items
+            if not needs_attention(commitment, current_time, timezone)
+        ),
         key=sort_key,
     )
     renewals = sorted(
