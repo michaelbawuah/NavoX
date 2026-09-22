@@ -121,9 +121,7 @@ class TemporalApprovalDispatcher:
     ) -> None:
         try:
             client = await Client.connect(settings.temporal_target)
-            handle = client.get_workflow_handle(
-                workflow_id=f"navox-approved-action-{action_id}"
-            )
+            handle = client.get_workflow_handle(workflow_id=f"navox-approved-action-{action_id}")
             await handle.signal("approval_decision", decision)
         except Exception as error:
             raise ApprovalDispatchError("Approval workflow signal failed") from error
