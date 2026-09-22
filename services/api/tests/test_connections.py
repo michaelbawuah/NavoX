@@ -88,7 +88,11 @@ async def test_callback_creates_scoped_connection_without_exposing_tokens(
         }
 
     async def profile(_: str) -> dict[str, object]:
-        return {"sub": "google-account-123", "email_verified": True}
+        return {
+            "sub": "google-account-123",
+            "email": "connected@example.com",
+            "email_verified": True,
+        }
 
     monkeypatch.setattr(connections, "exchange_authorization_code", exchange)
     monkeypatch.setattr(connections, "fetch_google_profile", profile)
@@ -124,7 +128,11 @@ async def test_connection_health_refreshes_without_returning_a_token(
         }
 
     async def profile(_: str) -> dict[str, object]:
-        return {"sub": "google-account-123", "email_verified": True}
+        return {
+            "sub": "google-account-123",
+            "email": "connected@example.com",
+            "email_verified": True,
+        }
 
     async def refresh(_: str, __: Settings) -> dict[str, object]:
         return {"access_token": "new-access-token", "expires_in": 3600}
@@ -165,7 +173,11 @@ async def test_callback_rejects_an_unrequested_scope(
         }
 
     async def profile(_: str) -> dict[str, object]:
-        return {"sub": "google-account-123", "email_verified": True}
+        return {
+            "sub": "google-account-123",
+            "email": "connected@example.com",
+            "email_verified": True,
+        }
 
     monkeypatch.setattr(connections, "exchange_authorization_code", exchange)
     monkeypatch.setattr(connections, "fetch_google_profile", profile)

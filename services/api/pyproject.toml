@@ -12,6 +12,7 @@ dependencies = [
   "pydantic-settings>=2.8,<3",
   "pwdlib[argon2]>=0.3,<1",
   "cryptography>=50,<51",
+  "google-auth[requests]>=2.40,<3",
   "sqlalchemy[asyncio]>=2.0.54,<2.1",
   "temporalio>=1.16,<2",
 ]

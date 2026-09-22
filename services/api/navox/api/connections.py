@@ -253,12 +253,19 @@ async def complete_google_authorization(
         return connection_redirect(settings, "failed")
 
     external_account_id = profile.get("sub")
+    external_email = profile.get("email")
     email_verified = profile.get("email_verified")
     verified_email = email_verified is True or (
         isinstance(email_verified, str) and email_verified == "true"
     )
-    if not isinstance(external_account_id, str) or not verified_email:
+    if (
+        not isinstance(external_account_id, str)
+        or not isinstance(external_email, str)
+        or not external_email.strip()
+        or not verified_email
+    ):
         return connection_redirect(settings, "unverified")
+    normalized_external_email = external_email.strip().casefold()
 
     refresh_token = token_response.get("refresh_token")
     scopes_value = token_response.get("scope", " ".join(GOOGLE_IDENTITY_SCOPES))
@@ -313,6 +320,7 @@ async def complete_google_authorization(
                     workspace_id=current_account.workspace.id,
                     provider="google",
                     external_account_id=external_account_id,
+                    external_email=normalized_external_email,
                     status="active",
                     granted_scopes=granted_scopes,
                     credential_reference=credential_reference,
@@ -322,6 +330,7 @@ async def complete_google_authorization(
             )
         else:
             existing.status = "active"
+            existing.external_email = normalized_external_email
             existing.granted_scopes = granted_scopes
             existing.credential_reference = credential_reference
             existing.access_token_expires_at = expires_at

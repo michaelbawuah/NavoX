@@ -2,7 +2,7 @@
 
 NavoX is an AI Operations Platform that helps people understand, prioritize, and safely handle work across their connected tools.
 
-The current implementation includes the **Engineering Foundation** plus the first bounded Milestone 1 slices: email/password authentication, opaque server-side sessions, automatic creation of one personal workspace, and an opt-in Google identity connection. The Google flow requests only OpenID profile and verified-email scopes; no Gmail, Calendar, or Drive data is requested or ingested. AI providers and external actions remain deliberately absent until their dedicated milestones described in [SPEC-001](docs/architecture/SPEC-001-navox.md).
+The current implementation includes the **Engineering Foundation**, Milestone 1 identity, and Milestone 2's content-minimized event pipeline: email/password authentication, opaque server-side sessions, automatic creation of one personal workspace, an opt-in Google identity connection, authenticated provider-event receivers, normalized `incoming_events`, and durable deduplication. The Google flow still requests only OpenID profile and verified-email scopes; no Gmail, Calendar, or Drive data is requested or ingested. AI providers and external actions remain deliberately absent until their dedicated milestones described in [SPEC-001](docs/architecture/SPEC-001-navox.md).
 
 ## Repository layout
 
@@ -83,6 +83,8 @@ Generate the encryption key without printing any other secret material:
 (cd services/api && uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
 ```
 
+Milestone 2's event endpoints are intentionally not configured by local defaults. Calendar and Drive notifications must use a server-created notification channel with an opaque channel token; Gmail needs an authenticated Pub/Sub push subscription. Set the four `GOOGLE_*PUSH*` event-delivery values only in protected deployment configuration after a public HTTPS endpoint exists. Do not put those values in source control or expose them to the browser.
+
 ## Authentication endpoints
 
 - `POST /api/v1/auth/register` creates an account, one personal workspace, owner membership, and session.
@@ -96,6 +98,16 @@ Generate the encryption key without printing any other secret material:
 - `GET /api/v1/connections/google/callback` finishes the provider callback and redirects to the web client; it never returns tokens to the browser.
 - `GET /api/v1/connections/google` lists only the current user's workspace-scoped Google connections.
 - `POST /api/v1/connections/google/{connection_id}/health` validates a stored connection with Google’s token endpoint only; it does not access any Google content API.
+
+## Provider event endpoints
+
+These public machine-to-machine endpoints never receive a user or workspace ID from the caller. NavoX resolves ownership only from a stored connection or server-created notification channel, stores normalized references and hashes rather than raw provider content, and treats repeated delivery IDs as idempotent.
+
+- `POST /api/v1/events/calendar` accepts a Google Calendar notification only when its channel ID, resource ID, and server-issued channel token match an active stored subscription.
+- `POST /api/v1/events/drive` uses the same server-created-channel verification for Drive notifications.
+- `POST /api/v1/events/gmail` requires both a configured Pub/Sub verification token and a signed Google Pub/Sub OIDC JWT, then records the Gmail history-change reference against exactly one active Google connection.
+
+The watch-creation and renewal worker that creates Calendar/Drive channels and Gmail mailbox watches is intentionally deferred until users explicitly opt into the appropriate Google content scopes. The event pipeline is ready to receive those authenticated notifications, but does not fetch or retain mail, calendar, or Drive content yet.
 
 ## Local containers
 

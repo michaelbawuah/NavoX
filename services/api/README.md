@@ -1,4 +1,3 @@
 # NavoX API
 
-The FastAPI service owns the API gateway, policy-enforced application logic, and PostgreSQL operational state. Its first migration establishes the workspace tenancy foundation only; authentication and Google OAuth begin in Milestone 1.
-
+The FastAPI service owns the API gateway, policy-enforced application logic, and PostgreSQL operational state. It now includes Milestone 1 identity and Milestone 2's authenticated, content-minimized provider event pipeline. See the repository [README](../../README.md) for local setup and event-delivery constraints.
