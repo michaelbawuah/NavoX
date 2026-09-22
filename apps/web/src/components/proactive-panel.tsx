@@ -1,6 +1,12 @@
 "use client";
 
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import styles from "./proactive-panel.module.css";
 
 interface ProactiveSignal {
@@ -66,9 +72,21 @@ interface Activation {
   }>;
 }
 
+export interface DeadlineItem {
+  id: string;
+  title: string;
+  status: string;
+  priority: number;
+  due_at: string | null;
+}
+
 interface ProactivePanelProps {
   timezone: string;
   agentPaused: boolean;
+  deadlines: DeadlineItem[];
+  completedDeadlines: DeadlineItem[];
+  handlingId: string | null;
+  onHandleCommitment: (commitmentId: string, title: string) => Promise<void>;
 }
 
 const apiBaseUrl =
@@ -87,26 +105,6 @@ async function apiError(response: Response): Promise<string> {
   return "NavoX could not complete that proactive request.";
 }
 
-function humanTier(value: string): string {
-  if (value === "notify_now") {
-    return "Notify now";
-  }
-  return value.replaceAll("_", " ");
-}
-
-function capabilityLabel(value: string | null): string {
-  if (value === "meeting.prepare") {
-    return "Prepare meeting";
-  }
-  if (value === "commitment.review") {
-    return "Review commitment";
-  }
-  if (value === "commitment.handle") {
-    return "Handle this";
-  }
-  return "Keep watching";
-}
-
 function formatTime(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
@@ -114,7 +112,70 @@ function formatTime(value: string): string {
   }).format(new Date(value));
 }
 
-export function ProactivePanel({ timezone, agentPaused }: ProactivePanelProps) {
+function priorityLabel(priority: number): string {
+  const labels: Record<number, string> = {
+    1: "Low",
+    2: "Moderate",
+    3: "Standard",
+    4: "Important",
+    5: "Critical",
+  };
+  return labels[priority] ?? "Standard";
+}
+
+type DeadlineTone = "urgent" | "upcoming" | "completed";
+
+function deadlineTone(item: DeadlineItem): DeadlineTone {
+  if (item.status === "completed") {
+    return "completed";
+  }
+  if (item.due_at === null) {
+    return "upcoming";
+  }
+  const hours =
+    (new Date(item.due_at).getTime() - Date.now()) / (60 * 60 * 1000);
+  return hours <= 48 ? "urgent" : "upcoming";
+}
+
+function deadlineTiming(item: DeadlineItem): string {
+  if (item.status === "completed") {
+    return "Completed";
+  }
+  if (item.due_at === null) {
+    return "No due date";
+  }
+  const due = new Date(item.due_at);
+  const hours = (due.getTime() - Date.now()) / (60 * 60 * 1000);
+  if (hours < 0) {
+    const overdueHours = Math.max(1, Math.round(Math.abs(hours)));
+    return overdueHours < 24
+      ? `Overdue by about ${overdueHours}h`
+      : `Overdue by about ${Math.max(1, Math.round(overdueHours / 24))}d`;
+  }
+  if (hours < 24) {
+    return `Due in about ${Math.max(1, Math.round(hours))}h`;
+  }
+  return `Due in about ${Math.max(1, Math.round(hours / 24))}d`;
+}
+
+function signalLabel(signal: ProactiveSignal): string {
+  if (signal.tier === "notify_now") {
+    return "Important now";
+  }
+  if (signal.tier === "briefing") {
+    return "Briefing";
+  }
+  return "On your radar";
+}
+
+export function ProactivePanel({
+  timezone,
+  agentPaused,
+  deadlines,
+  completedDeadlines,
+  handlingId,
+  onHandleCommitment,
+}: ProactivePanelProps) {
   const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [preference, setPreference] = useState<Preference | null>(null);
   const [meeting, setMeeting] = useState<MeetingPrep | null>(null);
@@ -169,6 +230,28 @@ export function ProactivePanel({ timezone, agentPaused }: ProactivePanelProps) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const deadlineRows = useMemo(
+    () => [
+      ...deadlines.map((item) => ({ ...item, tone: deadlineTone(item) })),
+      ...completedDeadlines.map((item) => ({
+        ...item,
+        tone: "completed" as const,
+      })),
+    ],
+    [completedDeadlines, deadlines],
+  );
+
+  const otherSignals = useMemo(() => {
+    if (!briefing) {
+      return [];
+    }
+    return [
+      ...briefing.notify_now,
+      ...briefing.briefing,
+      ...briefing.dashboard,
+    ].filter((signal) => signal.signal_type !== "deadline_warning");
+  }, [briefing]);
 
   async function activate(): Promise<void> {
     setActivating(true);
@@ -259,25 +342,25 @@ export function ProactivePanel({ timezone, agentPaused }: ProactivePanelProps) {
         return;
       }
       setPreference((await response.json()) as Preference);
-      setMessage("Proactive controls updated.");
+      setMessage("Attention controls updated.");
       await load();
     } catch {
-      setError("NavoX could not save proactive controls.");
+      setError("NavoX could not save attention controls.");
     } finally {
       setSaving(false);
     }
   }
-
-  const signals = briefing
-    ? [...briefing.notify_now, ...briefing.briefing, ...briefing.dashboard]
-    : [];
 
   return (
     <section className={styles.shell} aria-busy={loading}>
       <div className={styles.heading}>
         <div>
           <p>Proactive NavoX</p>
-          <h2>What deserves attention before it becomes a problem?</h2>
+          <h2>Deadlines to meet</h2>
+          <span className={styles.headingCopy}>
+            A clear view of what is urgent, what is coming up, and what you have
+            already finished.
+          </span>
         </div>
         <div className={styles.headingActions}>
           <span className={agentPaused ? styles.paused : styles.live}>
@@ -293,28 +376,21 @@ export function ProactivePanel({ timezone, agentPaused }: ProactivePanelProps) {
         </div>
       </div>
 
-      <div className={styles.summary}>
-        <div>
-          <span>Operational briefing</span>
-          <strong>
-            {loading ? "Re-evaluating current state…" : briefing?.headline}
-          </strong>
-        </div>
-        <div className={styles.metrics}>
-          <span>
-            <b>{briefing?.notify_now.length ?? 0}</b>
-            notify-now tier
-          </span>
-          <span>
-            <b>{briefing?.briefing.length ?? 0}</b>
-            briefing tier
-          </span>
-          <span>
-            <b>{briefing?.dashboard.length ?? 0}</b>
-            dashboard tier
-          </span>
-        </div>
-      </div>
+      <fieldset className={styles.legend}>
+        <legend>Status key</legend>
+        <span data-tone="urgent">
+          <i />
+          Urgent
+        </span>
+        <span data-tone="upcoming">
+          <i />
+          Upcoming
+        </span>
+        <span data-tone="completed">
+          <i />
+          Completed
+        </span>
+      </fieldset>
 
       {(message || error) && (
         <p
@@ -328,29 +404,80 @@ export function ProactivePanel({ timezone, agentPaused }: ProactivePanelProps) {
         </p>
       )}
 
-      {signals.length > 0 ? (
-        <div className={styles.signalGrid}>
-          {signals.slice(0, 6).map((signal) => (
-            <article className={styles.signal} key={signal.id}>
-              <div className={styles.signalTopline}>
-                <span data-tier={signal.tier}>{humanTier(signal.tier)}</span>
-                <b>{signal.attention_score}</b>
-              </div>
-              <h3>{signal.what_happening}</h3>
-              <p>{signal.why_matters}</p>
-              <div className={styles.scoreLine}>
-                {Object.entries(signal.score_components)
-                  .filter(([, value]) => value !== 0)
-                  .slice(0, 4)
-                  .map(([name, value]) => (
-                    <small key={name}>
-                      {name.replaceAll("_", " ")} {value > 0 ? "+" : ""}
-                      {value}
-                    </small>
-                  ))}
-              </div>
-              <div className={styles.signalFooter}>
-                <span>{capabilityLabel(signal.suggested_capability)}</span>
+      {deadlineRows.length > 0 ? (
+        <div className={styles.deadlineList}>
+          {deadlineRows.slice(0, 8).map((item) => {
+            const isCompleted = item.tone === "completed";
+            const canHandle = !agentPaused && item.status !== "candidate";
+            return (
+              <article
+                className={styles.deadlineRow}
+                data-tone={item.tone}
+                key={item.id}
+              >
+                <span className={styles.statusRail} aria-hidden="true" />
+                <div className={styles.deadlineBody}>
+                  <div className={styles.deadlineTopline}>
+                    <span className={styles.deadlineStatus}>
+                      {item.tone === "urgent"
+                        ? "Urgent"
+                        : item.tone === "completed"
+                          ? "Completed"
+                          : "Upcoming"}
+                    </span>
+                    <span>{priorityLabel(item.priority)} priority</span>
+                  </div>
+                  <strong className={styles.deadlineTitle}>{item.title}</strong>
+                  <div className={styles.deadlineMeta}>
+                    <span>{deadlineTiming(item)}</span>
+                    {item.due_at && <span>{formatTime(item.due_at)}</span>}
+                  </div>
+                </div>
+                <div className={styles.deadlineAction}>
+                  {isCompleted ? (
+                    <span className={styles.completedMark}>✓ Done</span>
+                  ) : (
+                    <button
+                      disabled={!canHandle || handlingId === item.id}
+                      onClick={() =>
+                        void onHandleCommitment(item.id, item.title)
+                      }
+                      type="button"
+                    >
+                      {item.status === "candidate"
+                        ? "Review first"
+                        : handlingId === item.id
+                          ? "Planning…"
+                          : "Handle this"}
+                    </button>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <p className={styles.empty}>
+          {loading
+            ? "Reading your deadlines…"
+            : "No deadlines are currently saved."}
+        </p>
+      )}
+
+      {otherSignals.length > 0 && (
+        <div className={styles.radar}>
+          <div className={styles.radarHeading}>
+            <p>Also on your radar</p>
+            <span>{otherSignals.length}</span>
+          </div>
+          <div className={styles.radarGrid}>
+            {otherSignals.slice(0, 4).map((signal) => (
+              <article className={styles.radarItem} key={signal.id}>
+                <span>{signalLabel(signal)}</span>
+                <strong className={styles.radarTitle}>
+                  {signal.what_happening}
+                </strong>
+                <p>{signal.why_matters}</p>
                 <div>
                   <button
                     disabled={mutatingSignal === signal.id}
@@ -367,16 +494,10 @@ export function ProactivePanel({ timezone, agentPaused }: ProactivePanelProps) {
                     Dismiss
                   </button>
                 </div>
-              </div>
-            </article>
-          ))}
+              </article>
+            ))}
+          </div>
         </div>
-      ) : (
-        <p className={styles.empty}>
-          {loading
-            ? "Reading current operational state…"
-            : "Nothing proactive needs surfacing right now."}
-        </p>
       )}
 
       {meeting && (
@@ -405,8 +526,8 @@ export function ProactivePanel({ timezone, agentPaused }: ProactivePanelProps) {
           {showControls ? "Hide attention controls" : "Attention controls"}
         </button>
         <small>
-          Notify-now is NavoX&apos;s highest in-app priority tier; no OS push
-          transport is implied.
+          Red means the deadline is overdue or within 48 hours. Yellow means it
+          is upcoming. Green records recently completed work.
         </small>
       </div>
 

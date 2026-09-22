@@ -2,11 +2,11 @@
   display: grid;
   gap: 1rem;
   overflow: hidden;
-  border: 1px solid rgb(97 223 196 / 22%);
-  border-radius: 1.1rem;
+  border: 1px solid rgb(97 223 196 / 18%);
+  border-radius: 1.15rem;
   background:
-    radial-gradient(circle at 92% 0%, rgb(97 223 196 / 9%), transparent 19rem),
-    linear-gradient(145deg, rgb(17 33 57 / 94%), rgb(8 17 33 / 94%));
+    radial-gradient(circle at 92% 0%, rgb(97 223 196 / 8%), transparent 20rem),
+    linear-gradient(145deg, rgb(16 31 54 / 97%), rgb(7 16 31 / 97%));
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 4%),
     0 1.5rem 5rem rgb(0 0 0 / 10%);
@@ -15,17 +15,20 @@
 
 .heading,
 .headingActions,
-.signalTopline,
-.signalFooter,
-.signalFooter > div,
-.controlsToggle {
+.legend,
+.deadlineTopline,
+.deadlineMeta,
+.deadlineAction,
+.controlsToggle,
+.radarHeading,
+.radarItem > div {
   display: flex;
   align-items: center;
 }
 
 .heading,
-.signalFooter,
-.controlsToggle {
+.controlsToggle,
+.radarHeading {
   justify-content: space-between;
 }
 
@@ -34,8 +37,9 @@
 }
 
 .heading p,
-.meeting p {
-  margin: 0 0 0.35rem;
+.meeting p,
+.radarHeading p {
+  margin: 0 0 0.3rem;
   color: #61dfc4;
   font-size: 0.62rem;
   font-weight: 850;
@@ -44,12 +48,20 @@
 }
 
 .heading h2 {
-  max-width: 34rem;
   margin: 0;
-  color: #f1f6ff;
-  font-size: 1.35rem;
-  line-height: 1.12;
+  color: #f5f8ff;
+  font-size: 1.45rem;
+  line-height: 1.1;
   letter-spacing: -0.045em;
+}
+
+.headingCopy {
+  display: block;
+  max-width: 36rem;
+  margin-top: 0.4rem;
+  color: #7f91ad;
+  font-size: 0.7rem;
+  line-height: 1.45;
 }
 
 .headingActions {
@@ -70,18 +82,18 @@
 .live {
   color: #8de3d0;
 }
-
 .paused {
   color: #ffc88f;
 }
 
 .headingActions button,
-.signalFooter button,
+.deadlineAction button,
 .controlsToggle button,
-.controls > button {
+.controls > button,
+.radarItem button {
   border: 1px solid rgb(145 168 207 / 22%);
   border-radius: 0.55rem;
-  background: rgb(18 30 53 / 75%);
+  background: rgb(18 30 53 / 78%);
   color: #d9e2f4;
   cursor: pointer;
   padding: 0.55rem 0.7rem;
@@ -89,142 +101,231 @@
   font-size: 0.64rem;
 }
 
-.headingActions button {
+.headingActions button,
+.deadlineAction button {
   border-color: rgb(97 223 196 / 25%);
   color: #a6eadb;
 }
 
-.summary {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 1rem;
-  border: 1px solid rgb(134 162 205 / 14%);
-  border-radius: 0.82rem;
-  background: rgb(5 13 26 / 44%);
-  padding: 0.85rem;
+.legend {
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin: 0;
+  border: 1px solid rgb(135 159 199 / 11%);
+  border-radius: 0.8rem;
+  background: rgb(4 11 23 / 35%);
+  padding: 0.65rem 0.75rem;
 }
 
-.summary > div:first-child {
-  display: grid;
-  gap: 0.3rem;
-}
-
-.summary span {
-  color: #7486a2;
-  font-size: 0.61rem;
-  font-weight: 760;
+.legend legend {
+  padding: 0 0.35rem;
+  color: #60738f;
+  font-size: 0.54rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.summary strong {
-  color: #c9d5e8;
-  font-size: 0.78rem;
-  line-height: 1.4;
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  color: #8294af;
+  font-size: 0.62rem;
+  font-weight: 700;
 }
 
-.metrics {
+.legend i {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+}
+
+.legend span[data-tone="urgent"] i {
+  background: #ff6877;
+  box-shadow: 0 0 0.7rem rgb(255 104 119 / 32%);
+}
+.legend span[data-tone="upcoming"] i {
+  background: #f4bd5b;
+  box-shadow: 0 0 0.7rem rgb(244 189 91 / 24%);
+}
+.legend span[data-tone="completed"] i {
+  background: #58d39f;
+  box-shadow: 0 0 0.7rem rgb(88 211 159 / 24%);
+}
+
+.deadlineList {
   display: grid;
-  grid-template-columns: repeat(3, auto);
-  gap: 0.7rem;
-}
-
-.metrics span {
-  display: grid;
-  min-width: 5rem;
-  text-align: right;
-}
-
-.metrics b {
-  color: #eef5ff;
-  font-size: 1.15rem;
-}
-
-.signalGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.65rem;
 }
 
-.signal {
+.deadlineRow {
+  position: relative;
   display: grid;
-  gap: 0.55rem;
-  min-width: 0;
-  border: 1px solid rgb(137 162 202 / 14%);
-  border-radius: 0.82rem;
-  background: linear-gradient(135deg, rgb(19 36 61 / 72%), rgb(9 20 39 / 64%));
+  grid-template-columns: 0.28rem minmax(0, 1fr) auto;
+  gap: 0.85rem;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid rgb(139 163 202 / 13%);
+  border-radius: 0.9rem;
+  background: linear-gradient(120deg, rgb(18 34 59 / 78%), rgb(8 18 34 / 72%));
   padding: 0.85rem;
 }
 
-.signalTopline {
-  justify-content: space-between;
+.statusRail {
+  align-self: stretch;
+  border-radius: 999px;
 }
 
-.signalTopline span {
-  border: 1px solid rgb(97 223 196 / 20%);
-  border-radius: 999px;
-  color: #8fdbc9;
-  padding: 0.24rem 0.42rem;
-  font-size: 0.55rem;
-  font-weight: 850;
+.deadlineRow[data-tone="urgent"] .statusRail {
+  background: #ff6877;
+}
+.deadlineRow[data-tone="upcoming"] .statusRail {
+  background: #f4bd5b;
+}
+.deadlineRow[data-tone="completed"] .statusRail {
+  background: #58d39f;
+}
+
+.deadlineRow[data-tone="urgent"] {
+  border-color: rgb(255 104 119 / 20%);
+}
+.deadlineRow[data-tone="upcoming"] {
+  border-color: rgb(244 189 91 / 18%);
+}
+.deadlineRow[data-tone="completed"] {
+  border-color: rgb(88 211 159 / 18%);
+  background: linear-gradient(120deg, rgb(17 52 49 / 42%), rgb(8 24 30 / 60%));
+}
+
+.deadlineBody {
+  min-width: 0;
+}
+
+.deadlineTopline {
+  justify-content: space-between;
+  gap: 0.65rem;
+  color: #7183a0;
+  font-size: 0.58rem;
+  font-weight: 800;
   text-transform: uppercase;
 }
 
-.signalTopline span[data-tier="notify_now"] {
-  border-color: rgb(255 170 111 / 28%);
-  color: #ffc38f;
+.deadlineStatus {
+  letter-spacing: 0.075em;
 }
 
-.signalTopline b {
+.deadlineRow[data-tone="urgent"] .deadlineStatus {
+  color: #ff9ca7;
+}
+.deadlineRow[data-tone="upcoming"] .deadlineStatus {
+  color: #f8cf83;
+}
+.deadlineRow[data-tone="completed"] .deadlineStatus {
+  color: #8be0ba;
+}
+
+.deadlineTitle {
+  display: block;
+  margin-top: 0.3rem;
   color: #f4f7ff;
-  font-size: 1.25rem;
-  letter-spacing: -0.04em;
+  font-size: 0.93rem;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
 }
 
-.signal h3 {
+.deadlineRow[data-tone="completed"] .deadlineTitle {
+  color: #c4e8d9;
+}
+
+.deadlineMeta {
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 0.35rem;
+  color: #8fa0ba;
+  font-size: 0.64rem;
+}
+
+.deadlineAction {
+  justify-content: end;
+}
+
+.deadlineAction button:disabled,
+.radarItem button:disabled,
+.headingActions button:disabled,
+.controls > button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.completedMark {
+  border: 1px solid rgb(88 211 159 / 24%);
+  border-radius: 999px;
+  background: rgb(53 137 105 / 12%);
+  color: #92dfbd;
+  padding: 0.36rem 0.55rem;
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.radar {
+  display: grid;
+  gap: 0.65rem;
+  border-top: 1px solid rgb(139 163 202 / 10%);
+  padding-top: 0.85rem;
+}
+
+.radarHeading p {
   margin: 0;
-  color: #e7edf8;
-  font-size: 0.82rem;
+}
+.radarHeading span {
+  color: #7284a0;
+  font-size: 0.6rem;
+}
+
+.radarGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.radarItem {
+  display: grid;
+  gap: 0.4rem;
+  border: 1px solid rgb(139 163 202 / 12%);
+  border-radius: 0.75rem;
+  background: rgb(9 20 38 / 58%);
+  padding: 0.75rem;
+}
+
+.radarItem > span {
+  color: #72d8c1;
+  font-size: 0.56rem;
+  font-weight: 850;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.radarTitle {
+  color: #dfe8f7;
+  font-size: 0.72rem;
   line-height: 1.35;
 }
 
-.signal > p {
+.radarItem > p {
   margin: 0;
-  color: #8fa0ba;
-  font-size: 0.7rem;
-  line-height: 1.48;
+  color: #8798b2;
+  font-size: 0.65rem;
+  line-height: 1.45;
 }
 
-.scoreLine {
-  display: flex;
-  flex-wrap: wrap;
+.radarItem > div {
   gap: 0.35rem;
+  margin-top: 0.2rem;
 }
 
-.scoreLine small {
-  border-radius: 999px;
-  background: rgb(106 132 173 / 10%);
-  color: #788ba8;
-  padding: 0.22rem 0.38rem;
-  font-size: 0.53rem;
-}
-
-.signalFooter {
-  gap: 0.6rem;
-  border-top: 1px solid rgb(137 162 202 / 10%);
-  padding-top: 0.55rem;
-}
-
-.signalFooter > span {
-  color: #94d9c8;
-  font-size: 0.61rem;
-}
-
-.signalFooter > div {
-  gap: 0.35rem;
-}
-
-.signalFooter button {
-  padding: 0.38rem 0.48rem;
+.radarItem button {
+  padding: 0.4rem 0.5rem;
   font-size: 0.56rem;
 }
 
@@ -263,7 +364,7 @@
 }
 
 .controlsToggle small {
-  max-width: 34rem;
+  max-width: 38rem;
   color: #657893;
   font-size: 0.58rem;
   line-height: 1.45;
@@ -305,7 +406,6 @@
 .check input {
   width: auto;
 }
-
 .controls > button {
   grid-column: span 2;
   border-color: rgb(97 223 196 / 22%);
@@ -324,28 +424,15 @@
   background: rgb(42 120 103 / 12%);
   color: #9de1d1;
 }
-
 .error {
   background: rgb(112 37 49 / 16%);
   color: #ffc2c8;
 }
-
 .empty {
   color: #7f91ad;
 }
 
-button:disabled {
-  cursor: wait;
-  opacity: 0.55;
-}
-
 @media (max-width: 760px) {
-  .heading,
-  .summary,
-  .meeting {
-    grid-template-columns: 1fr;
-  }
-
   .heading {
     align-items: start;
     flex-direction: column;
@@ -355,20 +442,17 @@ button:disabled {
     justify-content: start;
   }
 
-  .summary {
-    display: grid;
+  .deadlineRow {
+    grid-template-columns: 0.24rem minmax(0, 1fr);
   }
 
-  .metrics {
-    grid-template-columns: repeat(3, 1fr);
+  .deadlineAction {
+    grid-column: 2;
+    justify-content: start;
   }
 
-  .metrics span {
-    min-width: 0;
-    text-align: left;
-  }
-
-  .signalGrid {
+  .radarGrid,
+  .meeting {
     grid-template-columns: 1fr;
   }
 
@@ -387,7 +471,6 @@ button:disabled {
 }
 
 @media (max-width: 480px) {
-  .metrics,
   .controls {
     grid-template-columns: 1fr;
   }
@@ -395,10 +478,5 @@ button:disabled {
   .controls .check,
   .controls > button {
     grid-column: span 1;
-  }
-
-  .signalFooter {
-    align-items: start;
-    flex-direction: column;
   }
 }

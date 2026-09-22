@@ -325,6 +325,18 @@
   text-transform: uppercase;
 }
 
+.itemTopline span[data-urgency="urgent"] {
+  color: #ff9ca7;
+}
+
+.itemTopline span[data-urgency="upcoming"] {
+  color: #f8cf83;
+}
+
+.itemTopline span[data-urgency="completed"] {
+  color: #8be0ba;
+}
+
 .item h3 {
   margin: 0;
   color: #f2f6ff;
@@ -463,28 +475,134 @@
 }
 
 .queryAnswer {
-  border-left: 2px solid rgb(97 223 196 / 56%);
-  padding: 0.2rem 0 0.2rem 0.75rem;
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid rgb(97 223 196 / 16%);
+  border-radius: 0.85rem;
+  background:
+    radial-gradient(circle at 100% 0%, rgb(97 223 196 / 7%), transparent 12rem),
+    rgb(6 16 31 / 62%);
+  padding: 0.85rem;
 }
 
-.queryAnswer p {
+.queryAnswerHeader,
+.queryFocusItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.queryAnswerHeader > div {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.queryAnswerHeader span {
+  color: #67d8c0;
+  font-size: 0.56rem;
+  font-weight: 850;
+  letter-spacing: 0.085em;
+  text-transform: uppercase;
+}
+
+.queryAnswerHeader strong {
+  color: #eef4ff;
+  font-size: 0.86rem;
+  letter-spacing: -0.02em;
+}
+
+.queryAnswerHeader > b {
+  border: 1px solid rgb(97 223 196 / 18%);
+  border-radius: 999px;
+  color: #9de3d3;
+  padding: 0.28rem 0.48rem;
+  font-size: 0.57rem;
+  text-transform: uppercase;
+}
+
+.querySummary {
   margin: 0;
-  color: #cbd6e8;
-  font-size: 0.78rem;
-  line-height: 1.5;
+  color: #93a5bf;
+  font-size: 0.7rem;
+  line-height: 1.45;
 }
 
-.queryAnswer ul {
-  margin: 0.55rem 0 0;
-  padding-left: 1.05rem;
-  color: #99abc7;
+.queryFocusList {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.queryFocusItem {
+  border: 1px solid rgb(139 162 202 / 12%);
+  border-radius: 0.68rem;
+  background: rgb(14 28 49 / 68%);
+  padding: 0.65rem 0.7rem;
+}
+
+.queryFocusItem > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.queryFocusItem strong {
+  overflow: hidden;
+  color: #f1f5fc;
   font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queryDue {
+  color: #71839f;
+  font-size: 0.59rem;
+}
+
+.queryUrgency {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgb(91 111 148 / 12%);
+  color: #90a2bc;
+  padding: 0.27rem 0.45rem;
+  font-size: 0.54rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.queryUrgency[data-urgency="urgent"] {
+  background: rgb(150 50 63 / 16%);
+  color: #ffabb4;
+}
+
+.queryUrgency[data-urgency="upcoming"] {
+  background: rgb(148 106 33 / 16%);
+  color: #f5cd81;
+}
+
+.queryUrgency[data-urgency="completed"] {
+  background: rgb(43 129 99 / 16%);
+  color: #8cdeb9;
+}
+
+.queryDetails {
+  display: grid;
+  gap: 0.35rem;
+  border-top: 1px solid rgb(139 162 202 / 10%);
+  padding-top: 0.6rem;
+}
+
+.queryDetails p {
+  margin: 0;
+  color: #8295b0;
+  font-size: 0.64rem;
+  line-height: 1.45;
 }
 
 .queryAnswer small {
-  display: block;
-  margin-top: 0.55rem;
   color: #7485a2;
+  font-size: 0.61rem;
+  line-height: 1.4;
 }
 
 .mutedCopy {

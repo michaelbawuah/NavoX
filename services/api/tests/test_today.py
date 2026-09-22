@@ -114,7 +114,12 @@ async def test_manual_create_is_idempotent_and_today_refreshes_after_completion(
 
     refreshed = await client.get("/api/v1/today", params={"timezone": "UTC"})
     assert refreshed.status_code == 200
-    assert refreshed.json()["total"] == 0
+    refreshed_body = refreshed.json()
+    assert refreshed_body["total"] == 0
+    assert [item["title"] for item in refreshed_body["completed_recently"]] == [
+        "Submit systems report"
+    ]
+    assert refreshed_body["completed_recently"][0]["status"] == "completed"
 
 
 @pytest.mark.asyncio

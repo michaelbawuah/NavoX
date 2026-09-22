@@ -47,6 +47,7 @@ class TodayProjection:
     coming_up: tuple[TodayItem, ...]
     renewals: tuple[TodayItem, ...]
     waiting_on: tuple[TodayItem, ...]
+    completed_recently: tuple[TodayItem, ...]
 
 
 def validated_timezone(name: str) -> ZoneInfo:
@@ -147,7 +148,15 @@ async def build_today_projection(
         )
     )
     active = [commitment for commitment in commitments if active_at(commitment, current_time)]
-    commitment_ids = [commitment.id for commitment in active]
+    completed_cutoff = current_time - timedelta(days=7)
+    completed_recently = [
+        commitment
+        for commitment in commitments
+        if commitment.status == "completed"
+        and commitment.completed_at is not None
+        and aware(commitment.completed_at) >= completed_cutoff
+    ]
+    commitment_ids = [commitment.id for commitment in [*active, *completed_recently]]
 
     source_map: dict[UUID, list[TodaySource]] = {}
     if commitment_ids:
@@ -210,6 +219,26 @@ async def build_today_projection(
         (item for commitment, item in items if commitment.status == "waiting"),
         key=sort_key,
     )
+    completed_items = sorted(
+        (
+            TodayItem(
+                id=commitment.id,
+                type=commitment.commitment_type,
+                title=commitment.title,
+                description=commitment.description,
+                status=commitment.status,
+                priority=commitment.priority,
+                due_at=commitment.due_at,
+                confidence=commitment.confidence,
+                created_by=commitment.created_by,
+                score=0,
+                reasons=("Completed",),
+                sources=tuple(source_map.get(commitment.id, [])),
+            )
+            for commitment in completed_recently
+        ),
+        key=lambda item: item.title.casefold(),
+    )
 
     return TodayProjection(
         generated_at=current_time,
@@ -219,4 +248,5 @@ async def build_today_projection(
         coming_up=tuple(coming),
         renewals=tuple(renewals),
         waiting_on=tuple(waiting),
+        completed_recently=tuple(completed_items),
     )

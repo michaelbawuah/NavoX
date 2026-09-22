@@ -232,3 +232,190 @@ button:disabled { cursor: wait; opacity: 0.55; }
 @media (prefers-reduced-motion: reduce) {
   .skeleton { animation: none; }
 }
+
+
+.urgentMetric b { color: #ff9ca7; }
+.upcomingMetric b { color: #f4cc7d; }
+.completedMetric b { color: #82dcb5; }
+
+.deadlinePanel {
+  border-color: rgb(98 220 194 / 18%);
+}
+
+.deadlineLegend,
+.deadlineTopline,
+.queryResultTopline,
+.queryResultItem {
+  display: flex;
+  align-items: center;
+}
+
+.deadlineLegend {
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #8092ad;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.legendUrgent { color: #ff9ca7; }
+.legendUpcoming { color: #f4cc7d; }
+.legendCompleted { color: #82dcb5; }
+
+.deadlineRow {
+  display: grid;
+  grid-template-columns: 4px minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  border: 1px solid rgb(132 159 200 / 12%);
+  border-radius: 10px;
+  background: rgb(12 25 46 / 68%);
+  padding: 9px;
+}
+
+.deadlineRail {
+  align-self: stretch;
+  border-radius: 99px;
+}
+
+.deadlineRow.urgent { border-color: rgb(255 104 119 / 20%); }
+.deadlineRow.upcoming { border-color: rgb(244 189 91 / 18%); }
+.deadlineRow.completed { border-color: rgb(88 211 159 / 18%); background: rgb(12 39 37 / 52%); }
+
+.deadlineRow.urgent .deadlineRail { background: #ff6877; }
+.deadlineRow.upcoming .deadlineRail { background: #f4bd5b; }
+.deadlineRow.completed .deadlineRail { background: #58d39f; }
+
+.deadlineContent { min-width: 0; }
+.deadlineTopline {
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 4px;
+  color: #7386a3;
+  font-size: 7px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.deadlineRow.urgent .deadlineStatus { color: #ff9ca7; }
+.deadlineRow.upcoming .deadlineStatus { color: #f4cc7d; }
+.deadlineRow.completed .deadlineStatus { color: #82dcb5; }
+
+.deadlineContent h3 {
+  margin: 0;
+  color: #f2f6ff;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.deadlineContent p {
+  margin: 3px 0 0;
+  color: #8597b2;
+  font-size: 8px;
+}
+
+.deadlineRow > button {
+  border: 1px solid rgb(94 219 192 / 26%);
+  border-radius: 7px;
+  background: rgb(25 43 71 / 80%);
+  color: #a1e5d4;
+  padding: 6px 8px;
+  font-size: 8px;
+}
+
+.doneMark {
+  border: 1px solid rgb(88 211 159 / 23%);
+  border-radius: 999px;
+  color: #8bdcb8;
+  padding: 4px 6px;
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.queryResultCard {
+  display: grid;
+  gap: 7px;
+  border: 1px solid rgb(94 219 192 / 15%);
+  border-radius: 10px;
+  background: rgb(5 15 29 / 66%);
+  padding: 9px;
+}
+
+.queryResultTopline {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.queryResultTopline > div {
+  display: grid;
+  gap: 2px;
+}
+
+.queryResultTopline strong {
+  color: #edf4ff;
+  font-size: 10px;
+}
+
+.queryResultTopline > b {
+  border: 1px solid rgb(94 219 192 / 18%);
+  border-radius: 999px;
+  color: #99ddcd;
+  padding: 3px 5px;
+  font-size: 7px;
+  text-transform: uppercase;
+}
+
+.querySummary {
+  margin: 0;
+  color: #8799b3;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.queryResultItem {
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid rgb(132 159 200 / 11%);
+  border-radius: 8px;
+  background: rgb(17 31 53 / 70%);
+  padding: 7px;
+}
+
+.queryResultItem > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.queryResultItem strong {
+  overflow: hidden;
+  color: #edf3fd;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queryResultItem > div > span {
+  color: #71849f;
+  font-size: 7px;
+}
+
+.queryUrgency {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 3px 5px;
+  font-size: 7px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.queryUrgency.urgent { background: rgb(150 50 63 / 16%); color: #ffabb4; }
+.queryUrgency.upcoming { background: rgb(148 106 33 / 16%); color: #f5cd81; }
+.queryUrgency.completed { background: rgb(43 129 99 / 16%); color: #8cdeb9; }
+
+.queryDetail {
+  margin: 0;
+  color: #7c8faa;
+  font-size: 8px;
+  line-height: 1.45;
+}
