@@ -97,3 +97,63 @@ async def test_login_and_logout_revoke_the_server_side_session(client: AsyncClie
 
     assert valid_login.status_code == 200
     assert (await client.get("/api/v1/auth/me")).status_code == 200
+
+
+
+@pytest.mark.asyncio
+async def test_extension_session_is_bearer_scoped_revocable_and_not_cookie_backed(
+    client: AsyncClient,
+) -> None:
+    registration = {
+        "email": "extension@example.com",
+        "password": "twelve-character-password",
+        "display_name": "Extension Owner",
+    }
+    assert (await client.post("/api/v1/auth/register", json=registration)).status_code == 201
+    await client.post("/api/v1/auth/logout")
+
+    login = await client.post(
+        "/api/v1/auth/extension/login",
+        json={"email": registration["email"], "password": registration["password"]},
+    )
+
+    assert login.status_code == 200
+    body = login.json()
+    assert body["token_type"] == "bearer"
+    assert body["access_token"]
+    assert body["account"]["email"] == registration["email"]
+    assert "set-cookie" not in login.headers
+
+    token = body["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    current_account = await client.get("/api/v1/auth/me", headers=headers)
+    assert current_account.status_code == 200
+    assert current_account.json()["email"] == registration["email"]
+
+    logout = await client.post("/api/v1/auth/extension/logout", headers=headers)
+    assert logout.status_code == 200
+    assert (await client.get("/api/v1/auth/me", headers=headers)).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_extension_login_rejects_invalid_credentials_and_malformed_bearer(
+    client: AsyncClient,
+) -> None:
+    registration = {
+        "email": "extension-invalid@example.com",
+        "password": "twelve-character-password",
+        "display_name": "Owner",
+    }
+    assert (await client.post("/api/v1/auth/register", json=registration)).status_code == 201
+
+    invalid = await client.post(
+        "/api/v1/auth/extension/login",
+        json={"email": registration["email"], "password": "wrong-password"},
+    )
+    assert invalid.status_code == 401
+
+    malformed = await client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": "Basic not-a-bearer-token"},
+    )
+    assert malformed.status_code == 401

@@ -47,6 +47,13 @@ class AccountResponse(BaseModel):
     workspace: WorkspaceResponse
 
 
+class ExtensionLoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_at: datetime
+    account: AccountResponse
+
+
 class CurrentAccount:
     def __init__(self, user: User, workspace: Workspace) -> None:
         self.user = user
@@ -105,16 +112,70 @@ def account_response(user: User, workspace: Workspace) -> AccountResponse:
     )
 
 
-async def create_session(database: AsyncSession, user_id: UUID, settings: Settings) -> str:
+async def create_session(
+    database: AsyncSession,
+    user_id: UUID,
+    settings: Settings,
+    *,
+    client_type: str = "web",
+    ttl_hours: int | None = None,
+) -> tuple[str, datetime]:
     token = token_urlsafe(32)
+    expires_at = datetime.now(UTC) + timedelta(
+        hours=ttl_hours if ttl_hours is not None else settings.session_ttl_hours
+    )
     database.add(
         UserSession(
             user_id=user_id,
             token_hash=hash_session_token(token),
-            expires_at=datetime.now(UTC) + timedelta(hours=settings.session_ttl_hours),
+            client_type=client_type,
+            expires_at=expires_at,
         )
     )
-    return token
+    return token, expires_at
+
+
+def request_session_token(request: Request, settings: Settings) -> str | None:
+    authorization = request.headers.get("Authorization")
+    if authorization is not None:
+        scheme, separator, token = authorization.partition(" ")
+        if separator != " " or scheme.casefold() != "bearer" or not token.strip():
+            return None
+        return token.strip()
+    return request.cookies.get(settings.session_cookie_name)
+
+
+def request_bearer_token(request: Request) -> str | None:
+    authorization = request.headers.get("Authorization")
+    if authorization is None:
+        return None
+    scheme, separator, token = authorization.partition(" ")
+    if separator != " " or scheme.casefold() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
+async def password_account(
+    payload: LoginRequest,
+    database: AsyncSession,
+) -> tuple[User, Workspace]:
+    email = normalized_email(payload.email)
+    user = await database.scalar(select(User).where(User.email == email))
+    if user is None or user.password_hash is None:
+        password_hasher.verify(payload.password, dummy_password_hash)
+        raise invalid_credentials()
+    if not password_hasher.verify(payload.password, user.password_hash):
+        raise invalid_credentials()
+
+    workspace = await database.scalar(
+        select(Workspace)
+        .join(WorkspaceMembership, WorkspaceMembership.workspace_id == Workspace.id)
+        .where(WorkspaceMembership.user_id == user.id, WorkspaceMembership.role == "owner")
+        .order_by(Workspace.created_at)
+    )
+    if workspace is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No accessible workspace")
+    return user, workspace
 
 
 async def get_current_account(
@@ -122,7 +183,7 @@ async def get_current_account(
     database: DatabaseSession,
     settings: SettingsDependency,
 ) -> CurrentAccount:
-    token = request.cookies.get(settings.session_cookie_name)
+    token = request_session_token(request, settings)
     if token is None:
         raise authentication_required()
 
@@ -207,24 +268,8 @@ async def login(
     database: DatabaseSession,
     settings: SettingsDependency,
 ) -> AccountResponse:
-    email = normalized_email(payload.email)
-    user = await database.scalar(select(User).where(User.email == email))
-    if user is None or user.password_hash is None:
-        password_hasher.verify(payload.password, dummy_password_hash)
-        raise invalid_credentials()
-    if not password_hasher.verify(payload.password, user.password_hash):
-        raise invalid_credentials()
-
-    workspace = await database.scalar(
-        select(Workspace)
-        .join(WorkspaceMembership, WorkspaceMembership.workspace_id == Workspace.id)
-        .where(WorkspaceMembership.user_id == user.id, WorkspaceMembership.role == "owner")
-        .order_by(Workspace.created_at)
-    )
-    if workspace is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No accessible workspace")
-
-    token = await create_session(database, user.id, settings)
+    user, workspace = await password_account(payload, database)
+    token, _expires_at = await create_session(database, user.id, settings)
     await database.commit()
     set_session_cookie(response, token, settings)
     return account_response(user, workspace)
@@ -251,4 +296,50 @@ async def logout(
         )
         await database.commit()
     response.delete_cookie(key=settings.session_cookie_name, path="/")
+    return {"status": "signed_out"}
+
+
+
+@router.post("/extension/login", response_model=ExtensionLoginResponse)
+async def extension_login(
+    payload: LoginRequest,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> ExtensionLoginResponse:
+    user, workspace = await password_account(payload, database)
+    token, expires_at = await create_session(
+        database,
+        user.id,
+        settings,
+        client_type="extension",
+        ttl_hours=settings.extension_session_ttl_hours,
+    )
+    await database.commit()
+    return ExtensionLoginResponse(
+        access_token=token,
+        expires_at=expires_at,
+        account=account_response(user, workspace),
+    )
+
+
+@router.post("/extension/logout")
+async def extension_logout(
+    request: Request,
+    database: DatabaseSession,
+) -> dict[str, str]:
+    token = request_bearer_token(request)
+    if token is None:
+        raise authentication_required()
+    session = await database.scalar(
+        select(UserSession).where(
+            UserSession.token_hash == hash_session_token(token),
+            UserSession.client_type == "extension",
+            UserSession.revoked_at.is_(None),
+            UserSession.expires_at > datetime.now(UTC),
+        )
+    )
+    if session is None:
+        raise authentication_required()
+    session.revoked_at = datetime.now(UTC)
+    await database.commit()
     return {"status": "signed_out"}
