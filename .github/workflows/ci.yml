@@ -110,9 +110,37 @@ jobs:
       - run: uv run pip-audit --strict
         working-directory: services/api
 
+  evaluation-hardening:
+    name: Evaluation & hardening
+    needs: [api]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.15"
+      - run: uv sync --locked --all-groups
+        working-directory: services/api
+      - name: Run deterministic release evaluation
+        run: |
+          uv run python -m navox.evaluation \
+            --fail-on-gate \
+            --output /tmp/navox-evaluation.json \
+            --markdown /tmp/navox-evaluation.md
+        working-directory: services/api
+      - name: Upload evaluation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: navox-evaluation-report
+          path: |
+            /tmp/navox-evaluation.json
+            /tmp/navox-evaluation.md
+          if-no-files-found: error
+          retention-days: 30
+
   compose-integration:
     name: Compose integration
-    needs: [web, extension, api, dependency-security]
+    needs: [web, extension, api, dependency-security, evaluation-hardening]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

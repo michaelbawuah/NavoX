@@ -2,7 +2,7 @@
 
 NavoX is an AI Operations Platform that helps people understand, prioritize, and safely handle work across their connected tools.
 
-The current implementation includes the **Engineering Foundation through Milestone 8 Chrome Extension**: identity and personal workspaces, authenticated content-minimized events, the Commitment Engine, Today, the bounded agent runtime, exact-action Gmail approval/execution, and deterministic proactive intelligence. NavoX now derives auditable deadline, meeting, renewal, promise, follow-up, and waiting-on-response signals from saved operational state, applies user-controlled quiet hours and fatigue policy, prepares dynamic daily briefings, and uses Temporal for durable lifecycle timers. Google sign-in remains identity-only by default; Gmail send authority is still separate and approval-bound. Milestone 7 adds no Gmail-read, Calendar-read, or Drive-read authority and performs no proactive provider writes.
+The current implementation includes the **Engineering Foundation through Milestone 9 Evaluation and Hardening**: identity and personal workspaces, authenticated content-minimized events, the Commitment Engine, Today, the bounded agent runtime, exact-action Gmail approval/execution, deterministic proactive intelligence, the Chrome side panel, and a measurable release-quality evaluation gate. NavoX now derives auditable deadline, meeting, renewal, promise, follow-up, and waiting-on-response signals from saved operational state, applies user-controlled quiet hours and fatigue policy, prepares dynamic daily briefings, and uses Temporal for durable lifecycle timers. Google sign-in remains identity-only by default; Gmail send authority is still separate and approval-bound. Milestone 7 adds no Gmail-read, Calendar-read, or Drive-read authority and performs no proactive provider writes.
 
 ## Repository layout
 
@@ -130,6 +130,44 @@ Authenticated review endpoints are workspace- and user-scoped:
 - `POST /api/v1/commitments/{commitment_id}/reject` rejects a moderate-confidence candidate.
 
 There is intentionally no client-facing endpoint to submit extraction output, and these endpoints never trigger an external action.
+
+
+## Evaluation and hardening
+
+Milestone 9 adds an offline, deterministic release gate over the same policies and
+boundaries used by the product. The committed evaluation data is synthetic and
+contains no user content.
+
+Run it from `services/api`:
+
+```bash
+uv run python -m navox.evaluation --fail-on-gate \
+  --output /tmp/navox-evaluation.json \
+  --markdown /tmp/navox-evaluation.md
+```
+
+The gate measures commitment precision/recall, structured-output reliability,
+malicious-output rejection, false-positive suppression, proactive attention
+policy, action-policy behavior, documented security-control evidence, and
+reliability invariants such as plan bounds, exact approval TTL, event/action
+idempotency constraints, and Gmail at-most-once semantics.
+
+Provider snapshots share one schema so future OpenAI, Gemini, Claude, or other
+provider runs can be compared on the same labeled cases for quality, latency,
+tokens, and estimated cost. The committed `synthetic-reference-v1` snapshot is
+only a deterministic plumbing baseline and is not represented as a live model
+benchmark.
+
+API hardening also adds opaque request correlation IDs, server timing, metadata-
+only structured request logs that omit query strings, non-cacheable API
+responses, defensive response headers, explicit CORS client headers, and
+production HTTPS configuration validation.
+
+CI publishes `navox-evaluation-report` as a build artifact and blocks the
+Compose integration gate when evaluation thresholds fail.
+
+See `docs/architecture/milestone-9-evaluation-hardening.md` for the complete
+boundary and remaining deployment-level work.
 
 ## Local containers
 

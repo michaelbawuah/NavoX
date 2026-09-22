@@ -1,0 +1,11 @@
+{
+  "commitment_precision": 0.95,
+  "commitment_recall": 0.95,
+  "structured_output_rate": 1.0,
+  "malicious_rejection_rate": 1.0,
+  "false_positive_suppression_rate": 1.0,
+  "briefing_policy_accuracy": 1.0,
+  "planning_policy_accuracy": 1.0,
+  "security_control_coverage": 1.0,
+  "reliability_invariant_rate": 1.0
+}

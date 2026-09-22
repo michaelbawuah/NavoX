@@ -1,0 +1,40 @@
+[
+  {
+    "id": "explicit-deadline",
+    "expected": [{"type": "deadline", "title": "Submit capstone report"}]
+  },
+  {
+    "id": "promise-and-follow-up",
+    "expected": [
+      {"type": "promise", "title": "Send the revised slides"},
+      {"type": "follow_up", "title": "Check in with Maya"}
+    ]
+  },
+  {
+    "id": "renewal",
+    "expected": [{"type": "renewal", "title": "Renew the design software"}]
+  },
+  {
+    "id": "meeting",
+    "expected": [{"type": "meeting", "title": "Research review with advisor"}]
+  },
+  {
+    "id": "polite-signoff",
+    "expected": []
+  },
+  {
+    "id": "optional-suggestion",
+    "expected": []
+  },
+  {
+    "id": "explicit-task",
+    "expected": [{"type": "task", "title": "Finish the deployment checklist"}]
+  },
+  {
+    "id": "mixed-operational-state",
+    "expected": [
+      {"type": "deadline", "title": "Pay conference registration"},
+      {"type": "follow_up", "title": "Confirm travel details"}
+    ]
+  }
+]

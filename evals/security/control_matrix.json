@@ -1,0 +1,101 @@
+[
+  {
+    "id": "prompt_injection",
+    "evidence": [
+      {
+        "path": "evals/commitments/malicious_outputs.json",
+        "contains": "instruction-in-title"
+      }
+    ]
+  },
+  {
+    "id": "cross_tenant_access",
+    "evidence": [
+      {
+        "path": "services/api/tests/test_approvals.py",
+        "contains": "test_action_routes_are_tenant_scoped"
+      }
+    ]
+  },
+  {
+    "id": "approval_tampering",
+    "evidence": [
+      {
+        "path": "services/api/tests/test_approvals.py",
+        "contains": "test_payload_tamper_after_approval_is_blocked_before_provider"
+      }
+    ]
+  },
+  {
+    "id": "approval_bypass",
+    "evidence": [
+      {
+        "path": "services/api/tests/test_approvals.py",
+        "contains": "test_expired_approval_cannot_be_used"
+      }
+    ]
+  },
+  {
+    "id": "tool_escalation",
+    "evidence": [
+      {
+        "path": "evals/planning/action_policy_cases.json",
+        "contains": "calendar-write-cannot-be-automatic"
+      }
+    ]
+  },
+  {
+    "id": "webhook_replay",
+    "evidence": [
+      {
+        "path": "services/api/tests/test_events.py",
+        "contains": "test_calendar_notification_is_authenticated_normalized_and_deduplicated"
+      }
+    ]
+  },
+  {
+    "id": "duplicate_execution",
+    "evidence": [
+      {
+        "path": "services/api/tests/test_approvals.py",
+        "contains": "test_exact_approval_executes_once_verifies_and_updates_commitment"
+      }
+    ]
+  },
+  {
+    "id": "oauth_scope_minimization",
+    "evidence": [
+      {
+        "path": "services/api/tests/test_approvals.py",
+        "contains": "test_prepare_requires_exact_gmail_scope_and_never_sends"
+      }
+    ]
+  },
+  {
+    "id": "malformed_model_output",
+    "evidence": [
+      {
+        "path": "evals/commitments/malicious_outputs.json",
+        "contains": "unsupported-execution-field"
+      }
+    ]
+  },
+  {
+    "id": "data_exfiltration",
+    "evidence": [
+      {
+        "path": "services/api/navox/commitments/schema.py",
+        "contains": "exfiltrate"
+      }
+    ]
+  },
+  {
+    "id": "agent_loop_bound",
+    "evidence": [
+      {
+        "path": "services/api/navox/agent/planner.py",
+        "contains": "MAX_PLAN_STEPS = 8"
+      }
+    ]
+  }
+]

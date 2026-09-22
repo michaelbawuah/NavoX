@@ -9,6 +9,7 @@ from navox.api.commitments import router as commitments_router
 from navox.api.connections import router as connections_router
 from navox.api.events import router as events_router
 from navox.api.health import router as health_router
+from navox.api.middleware import RequestHardeningMiddleware
 from navox.api.proactive import router as proactive_router
 from navox.api.today import router as today_router
 from navox.core.settings import get_settings
@@ -26,8 +27,11 @@ def create_app() -> FastAPI:
         allow_origins=[settings.web_origin],
         allow_credentials=True,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        expose_headers=["Server-Timing", "X-Request-ID"],
+        max_age=600,
     )
+    app.add_middleware(RequestHardeningMiddleware)
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(proactive_router, prefix="/api/v1")
     app.include_router(actions_router, prefix="/api/v1")
