@@ -17,6 +17,11 @@ def test_tenant_foundation_tables_are_registered() -> None:
         "commitments",
         "commitment_sources",
         "commitment_relations",
+        "plans",
+        "plan_steps",
+        "actions",
+        "workflow_refs",
+        "audit_events",
     } <= set(Base.metadata.tables)
 
 
@@ -65,4 +70,33 @@ def test_commitment_graph_tables_preserve_tenant_scope_and_provenance() -> None:
     }
     assert {foreign_key.target_fullname for foreign_key in relation.foreign_keys} == {
         "commitments.id"
+    }
+
+
+
+def test_agent_execution_tables_are_tenant_scoped_and_persisted() -> None:
+    plan = Base.metadata.tables["plans"]
+    action = Base.metadata.tables["actions"]
+    workflow_ref = Base.metadata.tables["workflow_refs"]
+    audit_event = Base.metadata.tables["audit_events"]
+
+    assert {foreign_key.target_fullname for foreign_key in plan.foreign_keys} == {
+        "commitments.id",
+        "objectives.id",
+        "users.id",
+        "workspaces.id",
+    }
+    assert {foreign_key.target_fullname for foreign_key in action.foreign_keys} == {
+        "commitments.id",
+        "plan_steps.id",
+        "users.id",
+        "workspaces.id",
+    }
+    assert {foreign_key.target_fullname for foreign_key in workflow_ref.foreign_keys} == {
+        "users.id",
+        "workspaces.id",
+    }
+    assert {foreign_key.target_fullname for foreign_key in audit_event.foreign_keys} == {
+        "users.id",
+        "workspaces.id",
     }

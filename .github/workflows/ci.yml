@@ -45,7 +45,7 @@ jobs:
         working-directory: services/api
       - run: uv run alembic upgrade head --sql > /tmp/navox-schema.sql
         working-directory: services/api
-      - run: grep -E "CREATE TABLE (users|workspaces|workspace_memberships)" /tmp/navox-schema.sql
+      - run: grep -E "CREATE TABLE (users|workspaces|workspace_memberships|plans|plan_steps|actions|workflow_refs|audit_events)" /tmp/navox-schema.sql
 
   dependency-security:
     name: Dependency security
@@ -123,6 +123,31 @@ jobs:
             http://localhost:8000/api/v1/today/query > /tmp/navox-query.json
           grep -F '"intent":"today"' /tmp/navox-query.json
           grep -F '"title":"Verify Today loop"' /tmp/navox-query.json
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            --header "Content-Type: application/json" \
+            --data '{"request_id":"22222222-2222-4222-8222-222222222222","goal":"Safely prepare the next move"}' \
+            "http://localhost:8000/api/v1/commitments/$COMMITMENT_ID/handle" > /tmp/navox-plan.json
+          PLAN_ID="$(python -c 'import json; print(json.load(open("/tmp/navox-plan.json"))["id"])')"
+          for attempt in $(seq 1 30); do
+            curl --fail --silent --show-error \
+              --cookie /tmp/navox-session.cookie \
+              "http://localhost:8000/api/v1/plans/$PLAN_ID" > /tmp/navox-plan-status.json
+            PLAN_STATUS="$(python -c 'import json; print(json.load(open("/tmp/navox-plan-status.json"))["status"])')"
+            if [ "$PLAN_STATUS" = "completed" ]; then
+              break
+            fi
+            if [ "$PLAN_STATUS" = "blocked" ] || [ "$PLAN_STATUS" = "failed" ] || [ "$PLAN_STATUS" = "dispatch_failed" ]; then
+              cat /tmp/navox-plan-status.json
+              docker compose logs worker
+              exit 1
+            fi
+            sleep 1
+          done
+          grep -F '"status":"completed"' /tmp/navox-plan-status.json
+          grep -F '"risk_level":"R0"' /tmp/navox-plan-status.json
+          grep -F '"risk_level":"R1"' /tmp/navox-plan-status.json
+          grep -F '"external_actions_executed":false' /tmp/navox-plan-status.json
           curl --fail --silent --show-error \
             --cookie /tmp/navox-session.cookie \
             --request POST \
