@@ -181,10 +181,8 @@ def format_answer(intent: QueryIntent, items: list[TodayItem], projection: Today
         )
     if not items:
         empty_messages: dict[QueryIntent, str] = {
-            "today": (
-                "Nothing needs your attention right now, "
-                "and there is no other active work saved."
-            ),
+            "today": "Nothing needs your attention right now, "
+            "and there is no other active work saved.",
             "attention": "Nothing currently needs your attention.",
             "this_week": "No saved commitments are due in the next 7 days.",
             "waiting": "You are not currently waiting on any saved commitments.",
