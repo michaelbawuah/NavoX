@@ -9,9 +9,12 @@ from navox.api.commitments import router as commitments_router
 from navox.api.connections import router as connections_router
 from navox.api.events import router as events_router
 from navox.api.health import router as health_router
+from navox.api.intelligence import router as intelligence_router
+from navox.api.intelligence_sync import router as intelligence_sync_router
 from navox.api.middleware import RequestHardeningMiddleware
 from navox.api.proactive import router as proactive_router
 from navox.api.today import router as today_router
+from navox.api.workspace import router as workspace_router
 from navox.core.settings import get_settings
 
 
@@ -33,6 +36,9 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(RequestHardeningMiddleware)
     app.include_router(health_router, prefix="/api/v1")
+    app.include_router(intelligence_router, prefix="/api/v1")
+    app.include_router(intelligence_sync_router, prefix="/api/v1")
+    app.include_router(workspace_router, prefix="/api/v1")
     app.include_router(proactive_router, prefix="/api/v1")
     app.include_router(actions_router, prefix="/api/v1")
     app.include_router(agent_router, prefix="/api/v1")

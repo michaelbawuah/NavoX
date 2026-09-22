@@ -216,6 +216,7 @@ class IncomingEvent(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    intelligence_status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
 
 
 class Person(Base):
@@ -332,8 +333,12 @@ class IntelligenceFeedback(Base):
     """Bounded user feedback about intelligence outputs; never an authority grant."""
 
     __tablename__ = "intelligence_feedback"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "user_id", "request_id", name="uq_feedback_request"),
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    request_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     workspace_id: Mapped[UUID] = mapped_column(
         Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
     )
@@ -403,6 +408,10 @@ class Commitment(Base):
     confidence: Mapped[float] = mapped_column(default=1.0)
     created_by: Mapped[str] = mapped_column(String(32), default="ai")
     dedupe_key: Mapped[str] = mapped_column(String(64))
+    intelligence_metadata: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    attention_score: Mapped[int] = mapped_column(default=0)
+    attention_factors: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    attention_band: Mapped[str] = mapped_column(String(32), default="SUPPRESS")
     valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_verified_at: Mapped[datetime | None] = mapped_column(
@@ -707,7 +716,7 @@ class ProactiveSignal(Base):
     status: Mapped[str] = mapped_column(String(32), default="active", index=True)
     tier: Mapped[str] = mapped_column(String(32), default="dashboard", index=True)
     attention_score: Mapped[int] = mapped_column(default=0, index=True)
-    score_components: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
+    score_components: Mapped[dict[str, float]] = mapped_column(JSON, default=dict)
     what_happening: Mapped[str] = mapped_column(Text)
     why_matters: Mapped[str] = mapped_column(Text)
     suggested_capability: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -755,3 +764,48 @@ class BriefingSnapshot(Base):
     generated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )
+
+
+class IntelligenceCursor(Base):
+    __tablename__ = "intelligence_cursors"
+    __table_args__ = (UniqueConstraint("connection_id", "source", name="uq_intelligence_cursor"),)
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    connection_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("connections.id", ondelete="CASCADE"), index=True
+    )
+    source: Mapped[str] = mapped_column(String(32))
+    cursor: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class IntelligencePreference(Base):
+    __tablename__ = "intelligence_preferences"
+
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    weights: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class WorkspaceDisplayPreference(Base):
+    __tablename__ = "workspace_display_preferences"
+
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    clock_format: Mapped[str] = mapped_column(String(8), default="12h")
+    temperature_unit: Mapped[str] = mapped_column(String(16), default="celsius")
+    weather_visible: Mapped[bool] = mapped_column(Boolean, default=False)
+    weather_city: Mapped[str | None] = mapped_column(String(128), nullable=True)

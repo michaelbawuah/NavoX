@@ -45,7 +45,7 @@ class SignalResponse(BaseModel):
     status: str
     tier: str
     attention_score: int
-    score_components: dict[str, int]
+    score_components: dict[str, float]
     what_happening: str
     why_matters: str
     suggested_capability: str | None

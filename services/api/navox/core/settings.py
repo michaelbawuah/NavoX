@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     google_oauth_redirect_uri: str = "http://localhost:8000/api/v1/connections/google/callback"
     google_token_encryption_key: SecretStr | None = None
     google_gmail_push_subscription: str = ""
+    google_gmail_watch_topic: str = ""
+    google_calendar_push_url: str = ""
     google_pubsub_push_audience: str = ""
     google_pubsub_push_service_account: str = ""
     google_gmail_push_verification_token: SecretStr | None = None
