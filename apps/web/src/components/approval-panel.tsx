@@ -1,6 +1,12 @@
 "use client";
 
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import styles from "./today-workspace.module.css";
 
 const apiBaseUrl =
@@ -344,7 +350,8 @@ export function ApprovalPanel({
           <strong>Gmail sending is off.</strong>
           <p>
             Google identity access does not include email authority. Enable only
-            the send scope when you want NavoX to prepare approved email actions.
+            the send scope when you want NavoX to prepare approved email
+            actions.
           </p>
           {connectionToUpgrade ? (
             <button
@@ -417,11 +424,7 @@ export function ApprovalPanel({
               >
                 {busy === "approve" ? "Approving…" : "Approve exact send"}
               </button>
-              <button
-                disabled={busy !== ""}
-                onClick={beginEdit}
-                type="button"
-              >
+              <button disabled={busy !== ""} onClick={beginEdit} type="button">
                 Revise
               </button>
               <button
@@ -547,14 +550,16 @@ export function ApprovalPanel({
             )}
           </div>
           {!editing && commitments.length === 0 && (
-            <small>Add or confirm a commitment before preparing an email.</small>
+            <small>
+              Add or confirm a commitment before preparing an email.
+            </small>
           )}
         </form>
       )}
 
       {recentActions.length > 1 && (
         <div className={styles.recentActions}>
-          <span>Recent Gmail actions</span>
+          <span className={styles.recentActionsLabel}>Recent Gmail actions</span>
           {recentActions.slice(0, 4).map((action) => (
             <button
               key={action.id}
@@ -564,8 +569,12 @@ export function ApprovalPanel({
               }}
               type="button"
             >
-              <b>{action.payload.subject ?? "Prepared email"}</b>
-              <small>{action.status.replaceAll("_", " ")}</small>
+              <b className={styles.recentActionTitle}>
+                {action.payload.subject ?? "Prepared email"}
+              </b>
+              <small className={styles.recentActionStatus}>
+                {action.status.replaceAll("_", " ")}
+              </small>
             </button>
           ))}
         </div>

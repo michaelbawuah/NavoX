@@ -803,7 +803,6 @@
   line-height: 1.5;
 }
 
-
 .approvalCard {
   border-color: rgb(255 191 117 / 20%);
 }
@@ -901,7 +900,7 @@
 .actionPayload dt,
 .emailBody > span,
 .approvalHash > span,
-.recentActions > span {
+.recentActionsLabel {
   color: #71819d;
   font-size: 0.58rem;
   font-weight: 800;
@@ -1034,7 +1033,7 @@
   text-align: left;
 }
 
-.recentActions b {
+.recentActionTitle {
   overflow: hidden;
   color: #b9c7dc;
   font-size: 0.65rem;
@@ -1042,7 +1041,7 @@
   white-space: nowrap;
 }
 
-.recentActions small {
+.recentActionStatus {
   flex: 0 0 auto;
   color: #7e91ae;
   font-size: 0.56rem;

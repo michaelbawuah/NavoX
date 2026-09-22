@@ -785,7 +785,9 @@ export function TodayWorkspace({
           <section className={`${styles.controlCard} ${styles.agentCard}`}>
             <div className={styles.controlHeading}>
               <p>Agent runtime</p>
-              <span className={styles.controlMeta}>Bounded · approval gated</span>
+              <span className={styles.controlMeta}>
+                Bounded · approval gated
+              </span>
             </div>
             <div className={styles.agentStateRow}>
               <div>
