@@ -729,25 +729,22 @@ export function TodayWorkspace({
       )}
 
       <div className={styles.layout}>
-        <div className={styles.primaryColumn}>
-          <ProactivePanel
-            agentPaused={agentPaused}
-            completedDeadlines={(today?.completed_recently ?? []).filter(
-              (item) => item.type === "deadline",
-            )}
-            deadlines={[
-              ...(today?.needs_attention ?? []),
-              ...(today?.coming_up ?? []),
-            ].filter((item) => item.type === "deadline")}
-            handlingId={handlingId}
-            onHandleCommitment={handleCommitmentById}
-            timezone={timezone}
-          />
-          {renderSection("Needs Attention", today?.needs_attention ?? [])}
-          {renderSection("Coming Up", today?.coming_up ?? [])}
-        </div>
-
-        <aside className={styles.sideColumn}>
+        <div className={styles.topWorkspace}>
+          <div className={styles.deadlinesSlot}>
+            <ProactivePanel
+              agentPaused={agentPaused}
+              completedDeadlines={(today?.completed_recently ?? []).filter(
+                (item) => item.type === "deadline",
+              )}
+              deadlines={[
+                ...(today?.needs_attention ?? []),
+                ...(today?.coming_up ?? []),
+              ].filter((item) => item.type === "deadline")}
+              handlingId={handlingId}
+              onHandleCommitment={handleCommitmentById}
+              timezone={timezone}
+            />
+          </div>
           <section className={styles.controlCard}>
             <div className={styles.controlHeading}>
               <p>Capture</p>
@@ -808,7 +805,10 @@ export function TodayWorkspace({
               </button>
             </form>
           </section>
+        </div>
 
+        <div className={styles.dashboardGrid}>
+          {renderSection("Needs Attention", today?.needs_attention ?? [])}
           <section className={styles.controlCard}>
             <div className={styles.controlHeading}>
               <p>Ask NavoX</p>
@@ -882,14 +882,13 @@ export function TodayWorkspace({
               </div>
             )}
           </section>
-
+          {renderSection("Coming Up", today?.coming_up ?? [])}
           <ApprovalPanel
             agentPaused={agentPaused}
             commitments={approvalCommitments}
             connections={connections}
             onStateChanged={refreshToday}
           />
-
           <section className={`${styles.controlCard} ${styles.agentCard}`}>
             <div className={styles.controlHeading}>
               <p>Agent runtime</p>
@@ -988,10 +987,6 @@ export function TodayWorkspace({
               </p>
             )}
           </section>
-
-          {renderSection("Money / Renewals", today?.renewals ?? [])}
-          {renderSection("Waiting On", today?.waiting_on ?? [])}
-
           <section className={styles.controlCard}>
             <div className={styles.controlHeading}>
               <p>Connections</p>
@@ -1029,7 +1024,9 @@ export function TodayWorkspace({
               </div>
             )}
           </section>
-        </aside>
+          {renderSection("Money / Renewals", today?.renewals ?? [])}
+          {renderSection("Waiting On", today?.waiting_on ?? [])}
+        </div>
       </div>
     </main>
   );
