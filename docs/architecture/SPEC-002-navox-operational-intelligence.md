@@ -157,7 +157,7 @@ CREATE TABLE operational_observations (
 
 CREATE TABLE observation_evidence (
  id UUID PRIMARY KEY,
- observation_id UUID NOT NULL REFERENCES operational_observations(id) ON DELERE CASCADE,
+ observation_id UUID NOT NULL REFERENCES operational_observations(id) ON DELETE CASCADE,
  connection_id UUID NOT NULL REFERENCES connections(id),
  provider TEXT NOT NULL,
  source_type TEXT NOT NULL,
@@ -379,4 +379,18 @@ recall.
     Grok with evaluated routing/fallback/privacy/cost/latency policies.
 -   **SPEC-006:** NavoX News Intelligence --- permitted sources,
     clustering, summaries, provenance, original-source links.
--   **SPD
+-   **SPEC-007:** Universal Search & Connected Knowledge across
+    authorized tools and NavoX state.
+
+### SPEC-001 Amendment Dependency
+
+The NavoX workspace includes configurable date, live local time, and
+compact current weather. Store canonical timezone, 12h/24h preference,
+temperature unit, weather visibility/location preferences, and avoid
+continuous precise-location tracking. Weather may later become a
+SPEC-002 context signal when operationally relevant, but decorative
+weather must not generate proactive noise.
+
+## Need Professional Help in Developing Your Architecture?
+
+Please contact me at [sammuti.com](https://sammuti.com) :)
