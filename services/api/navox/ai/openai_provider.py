@@ -77,7 +77,9 @@ class OpenAIResponsesProvider:
                 )
 
         if response.status_code >= 400:
-            raise AIProviderError(f"OpenAI Responses request failed with HTTP {response.status_code}")
+            raise AIProviderError(
+                f"OpenAI Responses request failed with HTTP {response.status_code}"
+            )
 
         try:
             body = response.json()
