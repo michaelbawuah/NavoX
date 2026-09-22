@@ -7,6 +7,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { ApprovalPanel } from "./approval-panel";
 import styles from "./today-workspace.module.css";
 
 interface Account {
@@ -23,6 +24,7 @@ interface Account {
 interface GoogleConnection {
   id: string;
   provider: "google";
+  external_email: string | null;
   status: string;
   granted_scopes: string[];
   last_checked_at: string | null;
@@ -299,6 +301,28 @@ export function TodayWorkspace({
     }, 900);
     return () => window.clearTimeout(timer);
   }, [activePlan, loadPlan]);
+
+  const approvalCommitments = useMemo(() => {
+    const combined = [
+      ...(today?.needs_attention ?? []),
+      ...(today?.coming_up ?? []),
+      ...(today?.waiting_on ?? []),
+    ];
+    const seen = new Set<string>();
+    return combined
+      .filter((item) => {
+        if (seen.has(item.id) || item.status === "candidate") {
+          return false;
+        }
+        seen.add(item.id);
+        return true;
+      })
+      .map((item) => ({
+        id: item.id,
+        title: item.title,
+        status: item.status,
+      }));
+  }, [today]);
 
   const firstName = useMemo(() => {
     const value = account.display_name?.trim();
@@ -752,10 +776,19 @@ export function TodayWorkspace({
             )}
           </section>
 
+          <ApprovalPanel
+            agentPaused={agentPaused}
+            commitments={approvalCommitments}
+            connections={connections}
+            onStateChanged={refreshToday}
+          />
+
           <section className={`${styles.controlCard} ${styles.agentCard}`}>
             <div className={styles.controlHeading}>
               <p>Agent runtime</p>
-              <span className={styles.controlMeta}>Bounded · R0 / R1</span>
+              <span className={styles.controlMeta}>
+                Bounded · approval gated
+              </span>
             </div>
             <div className={styles.agentStateRow}>
               <div>
@@ -779,9 +812,9 @@ export function TodayWorkspace({
               </button>
             </div>
             <p className={styles.mutedCopy}>
-              Milestone 5 automatically executes only internal reads and
-              preparation. External provider actions remain unavailable, and R2+
-              actions cannot run without the later approval system.
+              Internal R0/R1 work can run automatically. Consequential R3
+              actions, including Gmail send, require exact user approval before
+              the provider boundary can execute them.
             </p>
 
             {activePlan ? (
@@ -855,12 +888,12 @@ export function TodayWorkspace({
           <section className={styles.controlCard}>
             <div className={styles.controlHeading}>
               <p>Connections</p>
-              <span className={styles.controlMeta}>Identity scope only</span>
+              <span className={styles.controlMeta}>Least privilege</span>
             </div>
             <h2>Google</h2>
             <p className={styles.mutedCopy}>
-              The current connection verifies identity only. Gmail, Calendar,
-              and Drive content are not being read.
+              Google identity stays minimal. Gmail send is granted separately
+              when you enable it; Calendar and Drive content are still not read.
             </p>
             {connections.length === 0 ? (
               <button

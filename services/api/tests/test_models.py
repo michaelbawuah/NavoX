@@ -22,6 +22,7 @@ def test_tenant_foundation_tables_are_registered() -> None:
         "actions",
         "workflow_refs",
         "audit_events",
+        "approvals",
     } <= set(Base.metadata.tables)
 
 
@@ -96,6 +97,15 @@ def test_agent_execution_tables_are_tenant_scoped_and_persisted() -> None:
         "workspaces.id",
     }
     assert {foreign_key.target_fullname for foreign_key in audit_event.foreign_keys} == {
+        "users.id",
+        "workspaces.id",
+    }
+
+
+def test_approvals_bind_exact_actions_to_user_and_workspace() -> None:
+    approval = Base.metadata.tables["approvals"]
+    assert {foreign_key.target_fullname for foreign_key in approval.foreign_keys} == {
+        "actions.id",
         "users.id",
         "workspaces.id",
     }

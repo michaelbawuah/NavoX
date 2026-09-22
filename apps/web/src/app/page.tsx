@@ -24,6 +24,7 @@ interface Account {
 interface GoogleConnection {
   id: string;
   provider: "google";
+  external_email: string | null;
   status: string;
   granted_scopes: string[];
   last_checked_at: string | null;
@@ -64,11 +65,15 @@ export default function Home() {
         cancelled: "Google connection was cancelled.",
         connected:
           "Google account linked. No Gmail, Calendar, or Drive data was requested.",
+        gmail_send_enabled:
+          "Gmail sending permission enabled. Every send still requires exact approval.",
         failed: "Google could not complete the connection. Please try again.",
         refresh_token_required:
           "Google did not return a refresh credential. Please try connecting again.",
         scope_mismatch:
           "Google returned an unrequested permission. NavoX did not link the account.",
+        account_mismatch:
+          "Gmail permission was granted from a different Google account, so NavoX rejected it.",
         unverified: "Google did not confirm a verified email address.",
       };
       setMessage(

@@ -45,7 +45,7 @@ jobs:
         working-directory: services/api
       - run: uv run alembic upgrade head --sql > /tmp/navox-schema.sql
         working-directory: services/api
-      - run: grep -E "CREATE TABLE (users|workspaces|workspace_memberships|plans|plan_steps|actions|workflow_refs|audit_events)" /tmp/navox-schema.sql
+      - run: grep -E "CREATE TABLE (users|workspaces|workspace_memberships|plans|plan_steps|actions|approvals|workflow_refs|audit_events)" /tmp/navox-schema.sql
 
   dependency-security:
     name: Dependency security
@@ -148,6 +148,39 @@ jobs:
           grep -F '"risk_level":"R0"' /tmp/navox-plan-status.json
           grep -F '"risk_level":"R1"' /tmp/navox-plan-status.json
           grep -F '"external_actions_executed":false' /tmp/navox-plan-status.json
+
+          USER_ID="$(python -c 'import json; print(json.load(open("/tmp/navox-account.json"))["id"])')"
+          WORKSPACE_ID="$(python -c 'import json; print(json.load(open("/tmp/navox-account.json"))["workspace"]["id"])')"
+          CONNECTION_ID="33333333-3333-4333-8333-333333333333"
+          docker compose exec -T postgres psql -U navox -d navox -v ON_ERROR_STOP=1 -c             "INSERT INTO connections (id,user_id,workspace_id,provider,external_account_id,external_email,status,granted_scopes,created_at,updated_at) VALUES ('$CONNECTION_ID','$USER_ID','$WORKSPACE_ID','google','ci-google','owner@example.com','active','[\"openid\",\"https://www.googleapis.com/auth/gmail.send\"]',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP);"
+
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            --header "Content-Type: application/json" \
+            --data "{\"request_id\":\"44444444-4444-4444-8444-444444444444\",\"connection_id\":\"$CONNECTION_ID\",\"to\":\"recipient@example.com\",\"subject\":\"CI exact approval\",\"body_text\":\"Prepared but never sent in CI.\",\"post_send_state\":\"unchanged\"}" \
+            "http://localhost:8000/api/v1/commitments/$COMMITMENT_ID/actions/gmail-send/prepare" > /tmp/navox-action.json
+          ACTION_ID="$(python -c 'import json; print(json.load(open("/tmp/navox-action.json"))["id"])')"
+          grep -F '"risk_level":"R3"' /tmp/navox-action.json
+          grep -F '"status":"awaiting_approval"' /tmp/navox-action.json
+          grep -F '"approval":{"id":' /tmp/navox-action.json
+
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            --header "Content-Type: application/json" \
+            --data '{"request_id":"55555555-5555-4555-8555-555555555555"}' \
+            "http://localhost:8000/api/v1/actions/$ACTION_ID/reject" > /tmp/navox-rejected-action.json
+          grep -F '"status":"rejected"' /tmp/navox-rejected-action.json
+          for attempt in $(seq 1 15); do
+            curl --fail --silent --show-error \
+              --cookie /tmp/navox-session.cookie \
+              "http://localhost:8000/api/v1/actions/$ACTION_ID" > /tmp/navox-action-after.json
+            WORKFLOW_STATUS="$(python -c 'import json; print(json.load(open("/tmp/navox-action-after.json"))["workflow_status"])')"
+            if [ "$WORKFLOW_STATUS" = "rejected" ]; then
+              break
+            fi
+            sleep 1
+          done
+          grep -F '"workflow_status":"rejected"' /tmp/navox-action-after.json
           curl --fail --silent --show-error \
             --cookie /tmp/navox-session.cookie \
             --request POST \

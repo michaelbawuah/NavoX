@@ -802,3 +802,248 @@
   font-size: 0.7rem;
   line-height: 1.5;
 }
+
+.approvalCard {
+  border-color: rgb(255 191 117 / 20%);
+}
+
+.permissionGate,
+.approvalPanel,
+.approvalForm,
+.recentActions {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.permissionGate {
+  border: 1px solid rgb(255 191 117 / 18%);
+  border-radius: 0.75rem;
+  background: rgb(80 55 25 / 18%);
+  padding: 0.8rem;
+}
+
+.permissionGate strong {
+  color: #ffe2b9;
+  font-size: 0.82rem;
+}
+
+.permissionGate p,
+.approvalCard .permissionGateMessage {
+  margin: 0;
+  color: #9da9bd;
+  font-size: 0.69rem;
+  line-height: 1.5;
+}
+
+.permissionGate button,
+.approvalActions button,
+.secondaryAction,
+.recentActions button {
+  border: 1px solid rgb(145 168 207 / 22%);
+  border-radius: 0.55rem;
+  background: rgb(18 30 53 / 76%);
+  color: #d9e2f4;
+  cursor: pointer;
+  padding: 0.58rem 0.72rem;
+}
+
+.permissionGate button:first-of-type,
+.approvalActions button:first-child {
+  border-color: rgb(97 223 196 / 28%);
+  background: linear-gradient(135deg, #a3f6e1, #61dfc4);
+  color: #05231e;
+  font-weight: 850;
+}
+
+.approvalTopline,
+.approvalTopline > div,
+.approvalActions {
+  display: flex;
+  align-items: center;
+}
+
+.approvalTopline {
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.approvalTopline > div,
+.approvalActions {
+  gap: 0.48rem;
+}
+
+.approvalTopline strong {
+  color: #e9eef8;
+  font-size: 0.72rem;
+  text-transform: capitalize;
+}
+
+.approvalTopline small {
+  color: #8e9bb1;
+  font-size: 0.61rem;
+}
+
+.actionPayload {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+}
+
+.actionPayload > div {
+  display: grid;
+  grid-template-columns: 4rem 1fr;
+  gap: 0.5rem;
+  border-bottom: 1px solid rgb(143 164 201 / 10%);
+  padding-bottom: 0.4rem;
+}
+
+.approvalCard .actionPayloadLabel,
+.approvalCard .emailBodyLabel,
+.approvalCard .approvalHashLabel,
+.approvalCard .recentActionsLabel {
+  color: #71819d;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.actionPayload dd {
+  overflow-wrap: anywhere;
+  margin: 0;
+  color: #c5d0e1;
+  font-size: 0.7rem;
+}
+
+.emailBody,
+.approvalHash,
+.verificationReceipt,
+.manualReview {
+  border-radius: 0.68rem;
+  padding: 0.7rem;
+}
+
+.emailBody {
+  border: 1px solid rgb(138 162 202 / 14%);
+  background: rgb(4 11 23 / 42%);
+}
+
+.emailBody p {
+  margin: 0.4rem 0 0;
+  color: #c2ccdc;
+  font-size: 0.7rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.approvalHash {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid rgb(255 191 117 / 13%);
+  background: rgb(78 55 27 / 12%);
+}
+
+.approvalHash code {
+  overflow: hidden;
+  color: #d6b98b;
+  font-size: 0.58rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.verificationReceipt {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border: 1px solid rgb(97 223 196 / 19%);
+  background: rgb(36 112 96 / 13%);
+  color: #a8e4d6;
+  font-size: 0.63rem;
+}
+
+.manualReview,
+.inlineError {
+  margin: 0;
+  color: #ffc3c9;
+  font-size: 0.67rem;
+  line-height: 1.5;
+}
+
+.manualReview {
+  border: 1px solid rgb(255 143 151 / 20%);
+  background: rgb(99 31 42 / 16%);
+}
+
+.approvalForm label {
+  display: grid;
+  gap: 0.38rem;
+  color: #a8b5ca;
+  font-size: 0.69rem;
+  font-weight: 700;
+}
+
+.approvalForm input,
+.approvalForm select,
+.approvalForm textarea {
+  width: 100%;
+  border: 1px solid rgb(142 165 204 / 21%);
+  border-radius: 0.62rem;
+  outline: none;
+  background: rgb(5 13 26 / 62%);
+  color: #eef3ff;
+  padding: 0.72rem 0.75rem;
+  font: inherit;
+}
+
+.approvalForm textarea {
+  resize: vertical;
+}
+
+.approvalForm input:focus,
+.approvalForm select:focus,
+.approvalForm textarea:focus {
+  border-color: rgb(97 223 196 / 62%);
+  box-shadow: 0 0 0 3px rgb(97 223 196 / 8%);
+}
+
+.approvalActions {
+  flex-wrap: wrap;
+}
+
+.approvalActions button:disabled,
+.permissionGate button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.secondaryAction {
+  width: fit-content;
+}
+
+.recentActions {
+  border-top: 1px solid rgb(143 164 201 / 12%);
+  padding-top: 0.72rem;
+}
+
+.recentActions button {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  width: 100%;
+  text-align: left;
+}
+
+.approvalCard .recentActionTitle {
+  overflow: hidden;
+  color: #b9c7dc;
+  font-size: 0.65rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approvalCard .recentActionStatus {
+  flex: 0 0 auto;
+  color: #7e91ae;
+  font-size: 0.56rem;
+  text-transform: capitalize;
+}
