@@ -1,6 +1,12 @@
 "use client";
 
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import styles from "./proactive-panel.module.css";
 
 interface ProactiveSignal {
@@ -126,7 +132,8 @@ function deadlineTone(item: DeadlineItem): DeadlineTone {
   if (item.due_at === null) {
     return "upcoming";
   }
-  const hours = (new Date(item.due_at).getTime() - Date.now()) / (60 * 60 * 1000);
+  const hours =
+    (new Date(item.due_at).getTime() - Date.now()) / (60 * 60 * 1000);
   return hours <= 48 ? "urgent" : "upcoming";
 }
 
@@ -369,15 +376,21 @@ export function ProactivePanel({
         </div>
       </div>
 
-      <div
-        aria-label="Deadline status legend"
-        className={styles.legend}
-        role="group"
-      >
-        <span data-tone="urgent"><i />Urgent</span>
-        <span data-tone="upcoming"><i />Upcoming</span>
-        <span data-tone="completed"><i />Completed</span>
-      </div>
+      <fieldset className={styles.legend}>
+        <legend>Status key</legend>
+        <span data-tone="urgent">
+          <i />
+          Urgent
+        </span>
+        <span data-tone="upcoming">
+          <i />
+          Upcoming
+        </span>
+        <span data-tone="completed">
+          <i />
+          Completed
+        </span>
+      </fieldset>
 
       {(message || error) && (
         <p
@@ -417,9 +430,7 @@ export function ProactivePanel({
                   <strong className={styles.deadlineTitle}>{item.title}</strong>
                   <div className={styles.deadlineMeta}>
                     <span>{deadlineTiming(item)}</span>
-                    {item.due_at && (
-                      <span>{formatTime(item.due_at)}</span>
-                    )}
+                    {item.due_at && <span>{formatTime(item.due_at)}</span>}
                   </div>
                 </div>
                 <div className={styles.deadlineAction}>

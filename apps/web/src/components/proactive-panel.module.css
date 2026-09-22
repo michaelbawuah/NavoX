@@ -110,10 +110,20 @@
 .legend {
   flex-wrap: wrap;
   gap: 0.55rem;
+  margin: 0;
   border: 1px solid rgb(135 159 199 / 11%);
   border-radius: 0.8rem;
   background: rgb(4 11 23 / 35%);
   padding: 0.65rem 0.75rem;
+}
+
+.legend legend {
+  padding: 0 0.35rem;
+  color: #60738f;
+  font-size: 0.54rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .legend span {

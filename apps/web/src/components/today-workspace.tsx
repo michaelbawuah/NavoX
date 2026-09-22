@@ -173,14 +173,17 @@ function priorityLabel(priority: number): string {
   return labels[priority] ?? "Standard";
 }
 
-function itemUrgency(item: TodayItem): "urgent" | "upcoming" | "completed" | "neutral" {
+function itemUrgency(
+  item: TodayItem,
+): "urgent" | "upcoming" | "completed" | "neutral" {
   if (item.status === "completed") {
     return "completed";
   }
   if (item.due_at === null) {
     return "neutral";
   }
-  const hours = (new Date(item.due_at).getTime() - Date.now()) / (60 * 60 * 1000);
+  const hours =
+    (new Date(item.due_at).getTime() - Date.now()) / (60 * 60 * 1000);
   return hours <= 48 ? "urgent" : "upcoming";
 }
 
@@ -847,7 +850,9 @@ export function TodayWorkspace({
                         <div>
                           <strong>{item.title}</strong>
                           <span className={styles.queryDue}>
-                            {item.due_at ? dueLabel(item.due_at) : "No due date"}
+                            {item.due_at
+                              ? dueLabel(item.due_at)
+                              : "No due date"}
                           </span>
                         </div>
                         <span
