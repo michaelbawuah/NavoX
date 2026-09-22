@@ -732,298 +732,298 @@ export function TodayWorkspace({
         <div className={styles.topWorkspace}>
           <div className={styles.deadlinesSlot}>
             <ProactivePanel
-                        agentPaused={agentPaused}
-                        completedDeadlines={(today?.completed_recently ?? []).filter(
-                          (item) => item.type === "deadline",
-                        )}
-                        deadlines={[
-                          ...(today?.needs_attention ?? []),
-                          ...(today?.coming_up ?? []),
-                        ].filter((item) => item.type === "deadline")}
-                        handlingId={handlingId}
-                        onHandleCommitment={handleCommitmentById}
-                        timezone={timezone}
-                      />
+              agentPaused={agentPaused}
+              completedDeadlines={(today?.completed_recently ?? []).filter(
+                (item) => item.type === "deadline",
+              )}
+              deadlines={[
+                ...(today?.needs_attention ?? []),
+                ...(today?.coming_up ?? []),
+              ].filter((item) => item.type === "deadline")}
+              handlingId={handlingId}
+              onHandleCommitment={handleCommitmentById}
+              timezone={timezone}
+            />
           </div>
           <section className={styles.controlCard}>
-                      <div className={styles.controlHeading}>
-                        <p>Capture</p>
-                        <span className={styles.controlMeta}>Manual · explicit</span>
-                      </div>
-                      <h2>Add a commitment</h2>
-                      <form className={styles.captureForm} onSubmit={createCommitment}>
-                        <label>
-                          What needs to happen?
-                          <input
-                            maxLength={256}
-                            minLength={3}
-                            onChange={(event) => setTitle(event.target.value)}
-                            placeholder="e.g. Submit ECE lab"
-                            required
-                            value={title}
-                          />
-                        </label>
-                        <div className={styles.formRow}>
-                          <label>
-                            Type
-                            <select
-                              onChange={(event) => setCommitmentType(event.target.value)}
-                              value={commitmentType}
-                            >
-                              <option value="task">Task</option>
-                              <option value="deadline">Deadline</option>
-                              <option value="meeting">Meeting</option>
-                              <option value="follow_up">Follow-up</option>
-                              <option value="promise">Promise</option>
-                              <option value="renewal">Renewal</option>
-                            </select>
-                          </label>
-                          <label>
-                            Priority
-                            <select
-                              onChange={(event) => setPriority(event.target.value)}
-                              value={priority}
-                            >
-                              <option value="1">1 · Low</option>
-                              <option value="2">2 · Moderate</option>
-                              <option value="3">3 · Standard</option>
-                              <option value="4">4 · Important</option>
-                              <option value="5">5 · Critical</option>
-                            </select>
-                          </label>
-                        </div>
-                        <label>
-                          Due
-                          <input
-                            onChange={(event) => setDueAt(event.target.value)}
-                            type="datetime-local"
-                            value={dueAt}
-                          />
-                        </label>
-                        <button disabled={creating} type="submit">
-                          {creating ? "Saving…" : "Add to NavoX"}
-                        </button>
-                      </form>
-                    </section>
+            <div className={styles.controlHeading}>
+              <p>Capture</p>
+              <span className={styles.controlMeta}>Manual · explicit</span>
+            </div>
+            <h2>Add a commitment</h2>
+            <form className={styles.captureForm} onSubmit={createCommitment}>
+              <label>
+                What needs to happen?
+                <input
+                  maxLength={256}
+                  minLength={3}
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="e.g. Submit ECE lab"
+                  required
+                  value={title}
+                />
+              </label>
+              <div className={styles.formRow}>
+                <label>
+                  Type
+                  <select
+                    onChange={(event) => setCommitmentType(event.target.value)}
+                    value={commitmentType}
+                  >
+                    <option value="task">Task</option>
+                    <option value="deadline">Deadline</option>
+                    <option value="meeting">Meeting</option>
+                    <option value="follow_up">Follow-up</option>
+                    <option value="promise">Promise</option>
+                    <option value="renewal">Renewal</option>
+                  </select>
+                </label>
+                <label>
+                  Priority
+                  <select
+                    onChange={(event) => setPriority(event.target.value)}
+                    value={priority}
+                  >
+                    <option value="1">1 · Low</option>
+                    <option value="2">2 · Moderate</option>
+                    <option value="3">3 · Standard</option>
+                    <option value="4">4 · Important</option>
+                    <option value="5">5 · Critical</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                Due
+                <input
+                  onChange={(event) => setDueAt(event.target.value)}
+                  type="datetime-local"
+                  value={dueAt}
+                />
+              </label>
+              <button disabled={creating} type="submit">
+                {creating ? "Saving…" : "Add to NavoX"}
+              </button>
+            </form>
+          </section>
         </div>
 
         <div className={styles.dashboardGrid}>
           {renderSection("Needs Attention", today?.needs_attention ?? [])}
           <section className={styles.controlCard}>
-                      <div className={styles.controlHeading}>
-                        <p>Ask NavoX</p>
-                        <span className={styles.controlMeta}>Read-only</span>
-                      </div>
-                      <h2>What do you need to know?</h2>
-                      <form className={styles.queryForm} onSubmit={askNavox}>
-                        <label className={styles.visuallyHidden} htmlFor="navox-query">
-                          Ask NavoX
-                        </label>
-                        <input
-                          id="navox-query"
-                          maxLength={500}
-                          onChange={(event) => setQuery(event.target.value)}
-                          value={query}
-                        />
-                        <button disabled={querying} type="submit">
-                          {querying ? "Reading state…" : "Ask"}
-                        </button>
-                      </form>
-                      {queryResult && (
-                        <div className={styles.queryAnswer} aria-live="polite">
-                          <div className={styles.queryAnswerHeader}>
-                            <div>
-                              <span>NavoX briefing</span>
-                              <strong>{queryHeading(queryResult.intent)}</strong>
-                            </div>
-                            <b>
-                              {queryResult.items.length > 0
-                                ? `${queryResult.items.length} item${queryResult.items.length === 1 ? "" : "s"}`
-                                : "Clear"}
-                            </b>
-                          </div>
-                          <p className={styles.querySummary}>{queryResult.answer}</p>
-                          {queryResult.items.length > 0 && (
-                            <div className={styles.queryFocusList}>
-                              {queryResult.items.slice(0, 5).map((item) => (
-                                <article className={styles.queryFocusItem} key={item.id}>
-                                  <div>
-                                    <strong>{item.title}</strong>
-                                    <span className={styles.queryDue}>
-                                      {item.due_at
-                                        ? dueLabel(item.due_at)
-                                        : "No due date"}
-                                    </span>
-                                  </div>
-                                  <span
-                                    className={styles.queryUrgency}
-                                    data-urgency={itemUrgency(item)}
-                                  >
-                                    {urgencyLabel(item)}
-                                  </span>
-                                </article>
-                              ))}
-                            </div>
-                          )}
-                          {queryResult.details.length > 0 && (
-                            <div className={styles.queryDetails}>
-                              {queryResult.details.slice(0, 5).map((detail) => (
-                                <p key={detail}>{detail}</p>
-                              ))}
-                            </div>
-                          )}
-                          {queryResult.intent === "unsupported" && (
-                            <small>
-                              Try today, attention, this week, waiting, renewals,
-                              promises, forgetting, meeting prep, or what NavoX can
-                              handle.
-                            </small>
-                          )}
+            <div className={styles.controlHeading}>
+              <p>Ask NavoX</p>
+              <span className={styles.controlMeta}>Read-only</span>
+            </div>
+            <h2>What do you need to know?</h2>
+            <form className={styles.queryForm} onSubmit={askNavox}>
+              <label className={styles.visuallyHidden} htmlFor="navox-query">
+                Ask NavoX
+              </label>
+              <input
+                id="navox-query"
+                maxLength={500}
+                onChange={(event) => setQuery(event.target.value)}
+                value={query}
+              />
+              <button disabled={querying} type="submit">
+                {querying ? "Reading state…" : "Ask"}
+              </button>
+            </form>
+            {queryResult && (
+              <div className={styles.queryAnswer} aria-live="polite">
+                <div className={styles.queryAnswerHeader}>
+                  <div>
+                    <span>NavoX briefing</span>
+                    <strong>{queryHeading(queryResult.intent)}</strong>
+                  </div>
+                  <b>
+                    {queryResult.items.length > 0
+                      ? `${queryResult.items.length} item${queryResult.items.length === 1 ? "" : "s"}`
+                      : "Clear"}
+                  </b>
+                </div>
+                <p className={styles.querySummary}>{queryResult.answer}</p>
+                {queryResult.items.length > 0 && (
+                  <div className={styles.queryFocusList}>
+                    {queryResult.items.slice(0, 5).map((item) => (
+                      <article className={styles.queryFocusItem} key={item.id}>
+                        <div>
+                          <strong>{item.title}</strong>
+                          <span className={styles.queryDue}>
+                            {item.due_at
+                              ? dueLabel(item.due_at)
+                              : "No due date"}
+                          </span>
                         </div>
-                      )}
-                    </section>
+                        <span
+                          className={styles.queryUrgency}
+                          data-urgency={itemUrgency(item)}
+                        >
+                          {urgencyLabel(item)}
+                        </span>
+                      </article>
+                    ))}
+                  </div>
+                )}
+                {queryResult.details.length > 0 && (
+                  <div className={styles.queryDetails}>
+                    {queryResult.details.slice(0, 5).map((detail) => (
+                      <p key={detail}>{detail}</p>
+                    ))}
+                  </div>
+                )}
+                {queryResult.intent === "unsupported" && (
+                  <small>
+                    Try today, attention, this week, waiting, renewals,
+                    promises, forgetting, meeting prep, or what NavoX can
+                    handle.
+                  </small>
+                )}
+              </div>
+            )}
+          </section>
           {renderSection("Coming Up", today?.coming_up ?? [])}
           <ApprovalPanel
-                      agentPaused={agentPaused}
-                      commitments={approvalCommitments}
-                      connections={connections}
-                      onStateChanged={refreshToday}
-                    />
+            agentPaused={agentPaused}
+            commitments={approvalCommitments}
+            connections={connections}
+            onStateChanged={refreshToday}
+          />
           <section className={`${styles.controlCard} ${styles.agentCard}`}>
-                      <div className={styles.controlHeading}>
-                        <p>Agent runtime</p>
-                        <span className={styles.controlMeta}>
-                          Bounded · approval gated
-                        </span>
-                      </div>
-                      <div className={styles.agentStateRow}>
-                        <div>
-                          <span
-                            className={
-                              agentPaused ? styles.agentPausedDot : styles.agentLiveDot
-                            }
-                          />
-                          <strong>{agentPaused ? "Paused" : "Ready"}</strong>
-                        </div>
-                        <button
-                          disabled={togglingAgent}
-                          onClick={() => void toggleAgent()}
-                          type="button"
-                        >
-                          {togglingAgent
-                            ? "Updating…"
-                            : agentPaused
-                              ? "Resume agent"
-                              : "Pause agent"}
-                        </button>
-                      </div>
-                      <p className={styles.mutedCopy}>
-                        Internal R0/R1 work can run automatically. Consequential R3
-                        actions, including Gmail send, require exact user approval before
-                        the provider boundary can execute them.
-                      </p>
+            <div className={styles.controlHeading}>
+              <p>Agent runtime</p>
+              <span className={styles.controlMeta}>
+                Bounded · approval gated
+              </span>
+            </div>
+            <div className={styles.agentStateRow}>
+              <div>
+                <span
+                  className={
+                    agentPaused ? styles.agentPausedDot : styles.agentLiveDot
+                  }
+                />
+                <strong>{agentPaused ? "Paused" : "Ready"}</strong>
+              </div>
+              <button
+                disabled={togglingAgent}
+                onClick={() => void toggleAgent()}
+                type="button"
+              >
+                {togglingAgent
+                  ? "Updating…"
+                  : agentPaused
+                    ? "Resume agent"
+                    : "Pause agent"}
+              </button>
+            </div>
+            <p className={styles.mutedCopy}>
+              Internal R0/R1 work can run automatically. Consequential R3
+              actions, including Gmail send, require exact user approval before
+              the provider boundary can execute them.
+            </p>
           
-                      {activePlan ? (
-                        <div className={styles.planPanel} aria-live="polite">
-                          <div className={styles.planHeader}>
-                            <div>
-                              <small>Active plan</small>
-                              <h3>{activePlan.goal}</h3>
-                            </div>
-                            <span data-status={activePlan.status}>
-                              {activePlan.status.replaceAll("_", " ")}
-                            </span>
-                          </div>
-                          <div className={styles.planMeta}>
-                            <span>{activePlan.planner_version}</span>
-                            <span>
-                              {activePlan.steps.length} / {activePlan.max_steps} steps
-                            </span>
-                            <span>Replans {activePlan.replan_count} / 2</span>
-                          </div>
-                          <ol className={styles.planSteps}>
-                            {activePlan.steps.map((step) => (
-                              <li key={step.id}>
-                                <div className={styles.stepNumber}>
-                                  {String(step.sequence_number).padStart(2, "0")}
-                                </div>
-                                <div className={styles.stepBody}>
-                                  <div className={styles.stepTopline}>
-                                    <strong>{step.description}</strong>
-                                    <span className={styles.riskBadge}>
-                                      {step.risk_level}
-                                    </span>
-                                  </div>
-                                  <p>{step.action_type}</p>
-                                  <small>{step.status.replaceAll("_", " ")}</small>
-                                </div>
-                              </li>
-                            ))}
-                          </ol>
-                          {activePlan.error_code && (
-                            <p className={styles.planError}>
-                              Stopped safely: {activePlan.error_code.replaceAll("_", " ")}
-                            </p>
-                          )}
-                        </div>
-                      ) : recentPlans.length > 0 ? (
-                        <div className={styles.recentPlans}>
-                          <small>Recent plans</small>
-                          {recentPlans.map((plan) => (
-                            <button
-                              key={plan.id}
-                              onClick={() => void loadPlan(plan.id)}
-                              type="button"
-                            >
-                              <span>{plan.goal}</span>
-                              <b>{plan.status.replaceAll("_", " ")}</b>
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className={styles.emptyAgent}>
-                          Choose <strong>Handle this</strong> on a confirmed commitment to
-                          create the first bounded plan.
-                        </p>
-                      )}
-                    </section>
-          <section className={styles.controlCard}>
-                      <div className={styles.controlHeading}>
-                        <p>Connections</p>
-                        <span className={styles.controlMeta}>Least privilege</span>
+            {activePlan ? (
+              <div className={styles.planPanel} aria-live="polite">
+                <div className={styles.planHeader}>
+                  <div>
+                    <small>Active plan</small>
+                    <h3>{activePlan.goal}</h3>
+                  </div>
+                  <span data-status={activePlan.status}>
+                    {activePlan.status.replaceAll("_", " ")}
+                  </span>
+                </div>
+                <div className={styles.planMeta}>
+                  <span>{activePlan.planner_version}</span>
+                  <span>
+                    {activePlan.steps.length} / {activePlan.max_steps} steps
+                  </span>
+                  <span>Replans {activePlan.replan_count} / 2</span>
+                </div>
+                <ol className={styles.planSteps}>
+                  {activePlan.steps.map((step) => (
+                    <li key={step.id}>
+                      <div className={styles.stepNumber}>
+                        {String(step.sequence_number).padStart(2, "0")}
                       </div>
-                      <h2>Google</h2>
-                      <p className={styles.mutedCopy}>
-                        Google identity stays minimal. Gmail send is granted separately
-                        when you enable it; Calendar and Drive content are still not read.
-                      </p>
-                      {connections.length === 0 ? (
-                        <button
-                          disabled={isConnectingGoogle}
-                          onClick={() => void onConnectGoogle()}
-                          type="button"
-                        >
-                          {isConnectingGoogle ? "Opening Google…" : "Connect Google"}
-                        </button>
-                      ) : (
-                        <div className={styles.connectionList}>
-                          {connections.map((connection) => (
-                            <div key={connection.id}>
-                              <span>{connection.status.replaceAll("_", " ")}</span>
-                              <button
-                                disabled={checkingConnectionId === connection.id}
-                                onClick={() => void onCheckGoogle(connection.id)}
-                                type="button"
-                              >
-                                {checkingConnectionId === connection.id
-                                  ? "Checking…"
-                                  : "Check"}
-                              </button>
-                            </div>
-                          ))}
+                      <div className={styles.stepBody}>
+                        <div className={styles.stepTopline}>
+                          <strong>{step.description}</strong>
+                          <span className={styles.riskBadge}>
+                            {step.risk_level}
+                          </span>
                         </div>
-                      )}
-                    </section>
+                        <p>{step.action_type}</p>
+                        <small>{step.status.replaceAll("_", " ")}</small>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+                {activePlan.error_code && (
+                  <p className={styles.planError}>
+                    Stopped safely: {activePlan.error_code.replaceAll("_", " ")}
+                  </p>
+                )}
+              </div>
+            ) : recentPlans.length > 0 ? (
+              <div className={styles.recentPlans}>
+                <small>Recent plans</small>
+                {recentPlans.map((plan) => (
+                  <button
+                    key={plan.id}
+                    onClick={() => void loadPlan(plan.id)}
+                    type="button"
+                  >
+                    <span>{plan.goal}</span>
+                    <b>{plan.status.replaceAll("_", " ")}</b>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className={styles.emptyAgent}>
+                Choose <strong>Handle this</strong> on a confirmed commitment to
+                create the first bounded plan.
+              </p>
+            )}
+          </section>
+          <section className={styles.controlCard}>
+            <div className={styles.controlHeading}>
+              <p>Connections</p>
+              <span className={styles.controlMeta}>Least privilege</span>
+            </div>
+            <h2>Google</h2>
+            <p className={styles.mutedCopy}>
+              Google identity stays minimal. Gmail send is granted separately
+              when you enable it; Calendar and Drive content are still not read.
+            </p>
+            {connections.length === 0 ? (
+              <button
+                disabled={isConnectingGoogle}
+                onClick={() => void onConnectGoogle()}
+                type="button"
+              >
+                {isConnectingGoogle ? "Opening Google…" : "Connect Google"}
+              </button>
+            ) : (
+              <div className={styles.connectionList}>
+                {connections.map((connection) => (
+                  <div key={connection.id}>
+                    <span>{connection.status.replaceAll("_", " ")}</span>
+                    <button
+                      disabled={checkingConnectionId === connection.id}
+                      onClick={() => void onCheckGoogle(connection.id)}
+                      type="button"
+                    >
+                      {checkingConnectionId === connection.id
+                        ? "Checking…"
+                        : "Check"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
           {renderSection("Money / Renewals", today?.renewals ?? [])}
           {renderSection("Waiting On", today?.waiting_on ?? [])}
         </div>
