@@ -27,6 +27,8 @@ GOOGLE_IDENTITY_SCOPES = (
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
 )
+GOOGLE_GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+GOOGLE_ALLOWED_SCOPES = frozenset((*GOOGLE_IDENTITY_SCOPES, GOOGLE_GMAIL_SEND_SCOPE))
 OAUTH_ATTEMPT_TTL = timedelta(minutes=10)
 
 
@@ -82,22 +84,29 @@ def google_vault(settings: Settings) -> CredentialVault:
         ) from error
 
 
-def authorization_url(state_value: str, code_verifier: str, settings: Settings) -> str:
+def authorization_url(
+    state_value: str,
+    code_verifier: str,
+    settings: Settings,
+    *,
+    scopes: tuple[str, ...] = GOOGLE_IDENTITY_SCOPES,
+    include_granted_scopes: bool = False,
+) -> str:
     google_client_secret(settings)
-    query = urlencode(
-        {
-            "access_type": "offline",
-            "client_id": settings.google_oauth_client_id,
-            "code_challenge": pkce_challenge(code_verifier),
-            "code_challenge_method": "S256",
-            "prompt": "consent",
-            "redirect_uri": settings.google_oauth_redirect_uri,
-            "response_type": "code",
-            "scope": " ".join(GOOGLE_IDENTITY_SCOPES),
-            "state": state_value,
-        }
-    )
-    return f"{GOOGLE_AUTHORIZATION_ENDPOINT}?{query}"
+    query_values = {
+        "access_type": "offline",
+        "client_id": settings.google_oauth_client_id,
+        "code_challenge": pkce_challenge(code_verifier),
+        "code_challenge_method": "S256",
+        "prompt": "consent",
+        "redirect_uri": settings.google_oauth_redirect_uri,
+        "response_type": "code",
+        "scope": " ".join(scopes),
+        "state": state_value,
+    }
+    if include_granted_scopes:
+        query_values["include_granted_scopes"] = "true"
+    return f"{GOOGLE_AUTHORIZATION_ENDPOINT}?{urlencode(query_values)}"
 
 
 async def exchange_authorization_code(
@@ -191,6 +200,8 @@ async def start_google_authorization(
             user_id=current_account.user.id,
             workspace_id=current_account.workspace.id,
             provider="google",
+            purpose="identity",
+            requested_scopes=list(GOOGLE_IDENTITY_SCOPES),
             state_hash=hash_value(state_value),
             code_verifier=code_verifier,
             expires_at=datetime.now(UTC) + OAUTH_ATTEMPT_TTL,
@@ -200,6 +211,65 @@ async def start_google_authorization(
     return GoogleAuthorizationStartResponse(
         authorization_url=authorization_url(state_value, code_verifier, settings),
         requested_scopes=list(GOOGLE_IDENTITY_SCOPES),
+    )
+
+
+
+@router.get(
+    "/google/{connection_id}/gmail-send/start",
+    response_model=GoogleAuthorizationStartResponse,
+)
+async def start_google_gmail_send_authorization(
+    connection_id: UUID,
+    current_account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> GoogleAuthorizationStartResponse:
+    google_vault(settings)
+    connection = await database.scalar(
+        select(Connection).where(
+            Connection.id == connection_id,
+            Connection.user_id == current_account.user.id,
+            Connection.workspace_id == current_account.workspace.id,
+            Connection.provider == "google",
+        )
+    )
+    if connection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Google connection not found",
+        )
+    if GOOGLE_GMAIL_SEND_SCOPE in connection.granted_scopes:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Gmail send permission is already granted",
+        )
+
+    state_value = token_urlsafe(32)
+    code_verifier = token_urlsafe(64)
+    database.add(
+        OAuthAuthorizationAttempt(
+            user_id=current_account.user.id,
+            workspace_id=current_account.workspace.id,
+            provider="google",
+            purpose="gmail_send",
+            connection_id=connection.id,
+            requested_scopes=[GOOGLE_GMAIL_SEND_SCOPE],
+            state_hash=hash_value(state_value),
+            code_verifier=code_verifier,
+            expires_at=datetime.now(UTC) + OAUTH_ATTEMPT_TTL,
+        )
+    )
+    await database.commit()
+    return GoogleAuthorizationStartResponse(
+        authorization_url=authorization_url(
+            state_value,
+            code_verifier,
+            settings,
+            scopes=(GOOGLE_GMAIL_SEND_SCOPE,),
+            include_granted_scopes=True,
+        ),
+        requested_scopes=[GOOGLE_GMAIL_SEND_SCOPE],
     )
 
 
@@ -248,6 +318,75 @@ async def complete_google_authorization(
         access_token = token_response.get("access_token")
         if not isinstance(access_token, str) or not access_token:
             raise GoogleOAuthProviderError("Google did not return an access token")
+    except GoogleOAuthProviderError:
+        return connection_redirect(settings, "failed")
+
+    if attempt.purpose == "gmail_send":
+        connection = await database.scalar(
+            select(Connection).where(
+                Connection.id == attempt.connection_id,
+                Connection.user_id == current_account.user.id,
+                Connection.workspace_id == current_account.workspace.id,
+                Connection.provider == "google",
+            )
+        )
+        if connection is None:
+            return connection_redirect(settings, "failed")
+
+        scopes_value = token_response.get("scope", "")
+        returned_scopes = scopes_value.split() if isinstance(scopes_value, str) else []
+        if GOOGLE_GMAIL_SEND_SCOPE not in returned_scopes:
+            return connection_redirect(settings, "scope_mismatch")
+        if not set(returned_scopes).issubset(GOOGLE_ALLOWED_SCOPES):
+            return connection_redirect(settings, "scope_mismatch")
+
+        refresh_token = token_response.get("refresh_token")
+        existing_credential = (
+            await database.get(ConnectionCredential, connection.credential_reference)
+            if connection.credential_reference is not None
+            else None
+        )
+        if not isinstance(refresh_token, str) or not refresh_token:
+            if existing_credential is None:
+                return connection_redirect(settings, "refresh_token_required")
+
+        expires_in = token_response.get("expires_in")
+        expires_at = (
+            datetime.now(UTC) + timedelta(seconds=int(expires_in))
+            if isinstance(expires_in, int | str) and str(expires_in).isdigit()
+            else None
+        )
+        vault = google_vault(settings)
+        previous_credential_reference = connection.credential_reference
+        if isinstance(refresh_token, str) and refresh_token:
+            credential = ConnectionCredential(
+                encrypted_refresh_token=vault.seal_refresh_token(refresh_token)
+            )
+            database.add(credential)
+            await database.flush()
+            connection.credential_reference = credential.id
+
+        connection.granted_scopes = sorted(set(connection.granted_scopes) | set(returned_scopes))
+        connection.status = "active"
+        connection.access_token_expires_at = expires_at
+        connection.last_checked_at = datetime.now(UTC)
+        connection.last_error = None
+
+        if (
+            previous_credential_reference is not None
+            and previous_credential_reference != connection.credential_reference
+        ):
+            previous_credential = await database.get(
+                ConnectionCredential,
+                previous_credential_reference,
+            )
+            if previous_credential is not None:
+                await database.delete(previous_credential)
+
+        await database.commit()
+        return connection_redirect(settings, "gmail_send_enabled")
+
+    try:
         profile = await fetch_google_profile(access_token)
     except GoogleOAuthProviderError:
         return connection_redirect(settings, "failed")
@@ -272,7 +411,7 @@ async def complete_google_authorization(
     granted_scopes = (
         scopes_value.split() if isinstance(scopes_value, str) else list(GOOGLE_IDENTITY_SCOPES)
     )
-    if not set(granted_scopes).issubset(GOOGLE_IDENTITY_SCOPES):
+    if not set(granted_scopes).issubset(set(GOOGLE_IDENTITY_SCOPES)):
         return connection_redirect(settings, "scope_mismatch")
     expires_in = token_response.get("expires_in")
     expires_at = (
