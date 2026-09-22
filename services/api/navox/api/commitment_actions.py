@@ -140,9 +140,7 @@ async def transition_commitment(
     )
     commitment = result.scalar_one_or_none()
     if commitment is None:
-        existing = await current_workspace_commitment(
-            commitment_id, current_account, database
-        )
+        existing = await current_workspace_commitment(commitment_id, current_account, database)
         if target_status == "completed" and existing.status == "completed":
             return response_from_commitment(existing)
         allowed = ", ".join(allowed_statuses)
