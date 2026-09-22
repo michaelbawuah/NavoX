@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -106,11 +107,14 @@ async def scoped_action(
 
 
 async def latest_approval(database: AsyncSession, action_id: UUID) -> Approval | None:
-    return await database.scalar(
+    return cast(
+        Approval | None,
+        await database.scalar(
         select(Approval)
         .where(Approval.action_id == action_id)
         .order_by(Approval.version.desc())
         .limit(1)
+        ),
     )
 
 

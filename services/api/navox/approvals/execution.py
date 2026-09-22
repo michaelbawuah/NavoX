@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -24,12 +25,15 @@ APPROVAL_TTL = timedelta(minutes=15)
 
 
 async def _workflow_ref(database: AsyncSession, action_id: UUID) -> WorkflowRef | None:
-    return await database.scalar(
+    return cast(
+        WorkflowRef | None,
+        await database.scalar(
         select(WorkflowRef).where(
             WorkflowRef.entity_type == "action",
             WorkflowRef.entity_id == action_id,
             WorkflowRef.workflow_type == "approved_action",
         )
+        ),
     )
 
 

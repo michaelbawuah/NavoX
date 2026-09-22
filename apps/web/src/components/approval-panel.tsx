@@ -362,7 +362,9 @@ export function ApprovalPanel({
               {busy === "grant" ? "Opening Google…" : "Enable Gmail sending"}
             </button>
           ) : (
-            <span>Connect Google first.</span>
+            <span className={styles.permissionGateMessage}>
+              Connect Google first.
+            </span>
           )}
         </div>
       ) : activeAction && !editing ? (
@@ -559,7 +561,9 @@ export function ApprovalPanel({
 
       {recentActions.length > 1 && (
         <div className={styles.recentActions}>
-          <span className={styles.recentActionsLabel}>Recent Gmail actions</span>
+          <span className={styles.recentActionsLabel}>
+            Recent Gmail actions
+          </span>
           {recentActions.slice(0, 4).map((action) => (
             <button
               key={action.id}

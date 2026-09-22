@@ -828,7 +828,7 @@
 }
 
 .permissionGate p,
-.permissionGate span {
+.approvalCard .permissionGateMessage {
   margin: 0;
   color: #9da9bd;
   font-size: 0.69rem;
