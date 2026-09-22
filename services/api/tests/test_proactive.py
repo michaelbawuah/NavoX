@@ -15,7 +15,6 @@ from navox.db.session import get_database_session
 from navox.proactive.activities import next_briefing_delay
 from navox.proactive.engine import evaluate_workspace
 
-
 @pytest_asyncio.fixture
 async def proactive_environment() -> AsyncIterator[
     tuple[AsyncClient, async_sessionmaker[AsyncSession]]
@@ -304,7 +303,6 @@ async def test_briefing_refresh_resolves_stale_state(
     ]
     assert all(item["commitment_id"] != commitment["id"] for item in after_items)
 
-
 @pytest.mark.asyncio
 async def test_today_signature_queries_use_proactive_saved_state(
     proactive_environment: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
@@ -366,8 +364,6 @@ async def test_today_signature_queries_use_proactive_saved_state(
     assert handleable.status_code == 200
     assert handleable.json()["intent"] == "handleable"
     assert handleable.json()["items"]
-
-
 
 def test_daily_briefing_delay_respects_dst_offset_changes() -> None:
     before_fall_back = datetime(2026, 11, 1, 5, 30, tzinfo=UTC)
