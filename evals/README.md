@@ -9,7 +9,11 @@ about the quality, latency, or cost of any external model.
 
 ## Suites
 
-- `intelligence/extraction_cases.json`: SPEC-002 operational extraction labels.\n- `intelligence/adversarial_cases.json`: prompt-injection, authority, and evidence-boundary attacks.\n- `intelligence/reference-baseline.json`: deterministic SPEC-002 extraction plumbing snapshot.\n- `commitments/labeled_cases.json`: precision and recall labels.\n- `commitments/malicious_outputs.json`: strict-schema and prompt-injection rejection.
+- `intelligence/extraction_cases.json`: SPEC-002 operational extraction labels.
+- `intelligence/adversarial_cases.json`: prompt-injection, authority, and evidence-boundary attacks.
+- `intelligence/reference-baseline.json`: deterministic SPEC-002 extraction plumbing snapshot.
+- `commitments/labeled_cases.json`: precision and recall labels.
+- `commitments/malicious_outputs.json`: strict-schema and prompt-injection rejection.
 - `commitments/false_positive_outputs.json`: confidence-policy suppression.
 - `briefing/cases.json`: attention-tier and signal-type policy.
 - `planning/action_policy_cases.json`: tool/risk/permission decisions.
@@ -27,5 +31,10 @@ uv run python -m navox.evaluation --fail-on-gate \
   --markdown /tmp/navox-evaluation.md
 ```
 
-SPEC-002 operational extraction is gated on exact reference labels, strict schema validation, bounded source evidence, and adversarial rejection. The reference baseline proves evaluation plumbing only.\n\nA real provider comparison must use the same case IDs and snapshot schema. Keep\nprivate prompts, credentials, emails, and production content out of committed
+SPEC-002 operational extraction is gated on exact reference labels, strict
+schema validation, bounded source evidence, and adversarial rejection. The
+reference baseline proves evaluation plumbing only.
+
+A real provider comparison must use the same case IDs and snapshot schema. Keep
+private prompts, credentials, emails, and production content out of committed
 evaluation artifacts.
