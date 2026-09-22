@@ -87,7 +87,10 @@ ACTION_CONTRACTS: dict[str, ActionContract] = {
         "google",
         "R3",
         permissions=("https://www.googleapis.com/auth/gmail.send",),
+        idempotency="navox_at_most_once_no_ambiguous_retry",
+        timeout_seconds=20,
         verification="provider_message_id",
+        executable=True,
     ),
     "calendar.search": _contract(
         "calendar.search",

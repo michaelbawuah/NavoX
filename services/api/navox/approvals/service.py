@@ -335,6 +335,10 @@ class ApprovalService:
                 raise ApprovalConflictError(
                     "That decision request ID is already bound to another action"
                 )
+            if decision_reuse.status not in {"approved", "consuming", "consumed"}:
+                raise ApprovalConflictError(
+                    "That decision request ID was already used for a different decision"
+                )
             return action, decision_reuse
 
         approval = await latest_approval(database, action.id)
@@ -400,6 +404,10 @@ class ApprovalService:
             if decision_reuse.action_id != action.id:
                 raise ApprovalConflictError(
                     "That decision request ID is already bound to another action"
+                )
+            if decision_reuse.status != "rejected":
+                raise ApprovalConflictError(
+                    "That decision request ID was already used for a different decision"
                 )
             return action, decision_reuse
 
