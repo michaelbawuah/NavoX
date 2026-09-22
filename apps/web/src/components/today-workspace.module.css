@@ -576,3 +576,230 @@
     transition-duration: 0.01ms;
   }
 }
+
+
+.agentCard {
+  gap: 1rem;
+}
+
+.agentStateRow,
+.agentStateRow > div,
+.planHeader,
+.planMeta,
+.stepTopline {
+  display: flex;
+  align-items: center;
+}
+
+.agentStateRow,
+.planHeader {
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.agentStateRow > div {
+  gap: 0.5rem;
+  color: #dce5f6;
+  font-size: 0.78rem;
+}
+
+.agentStateRow > button,
+.recentPlans button {
+  border: 1px solid rgb(145 168 207 / 22%);
+  border-radius: 0.55rem;
+  background: rgb(18 30 53 / 65%);
+  color: #d9e2f4;
+  cursor: pointer;
+  padding: 0.55rem 0.72rem;
+}
+
+.agentStateRow > button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.agentLiveDot,
+.agentPausedDot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+}
+
+.agentLiveDot {
+  background: #61dfc4;
+  box-shadow: 0 0 0.8rem rgb(97 223 196 / 72%);
+}
+
+.agentPausedDot {
+  background: #ffbf75;
+  box-shadow: 0 0 0.8rem rgb(255 191 117 / 45%);
+}
+
+.planPanel {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid rgb(101 222 197 / 18%);
+  border-radius: 0.85rem;
+  background: rgb(5 13 26 / 46%);
+  padding: 0.85rem;
+}
+
+.planHeader small,
+.recentPlans > small {
+  color: #7183a0;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.planHeader h3 {
+  max-width: 19rem;
+  margin: 0.2rem 0 0;
+  color: #edf3ff;
+  font-size: 0.86rem;
+  line-height: 1.3;
+}
+
+.planHeader > span {
+  border: 1px solid rgb(97 223 196 / 22%);
+  border-radius: 999px;
+  background: rgb(48 135 117 / 12%);
+  color: #a6e8d7;
+  padding: 0.28rem 0.48rem;
+  font-size: 0.58rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.planHeader > span[data-status="blocked"],
+.planHeader > span[data-status="failed"],
+.planHeader > span[data-status="dispatch_failed"] {
+  border-color: rgb(255 143 151 / 24%);
+  background: rgb(114 38 49 / 20%);
+  color: #ffc8cd;
+}
+
+.planMeta {
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  color: #6f829f;
+  font-size: 0.6rem;
+}
+
+.planMeta span {
+  border: 1px solid rgb(136 162 204 / 14%);
+  border-radius: 999px;
+  padding: 0.24rem 0.42rem;
+}
+
+.planSteps {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.planSteps li {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.65rem;
+  padding: 0.65rem;
+  border: 1px solid rgb(139 162 202 / 13%);
+  border-radius: 0.7rem;
+  background: rgb(16 29 51 / 58%);
+}
+
+.stepNumber {
+  display: grid;
+  place-items: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border: 1px solid rgb(97 223 196 / 19%);
+  border-radius: 0.5rem;
+  color: #78d7c3;
+  font-size: 0.58rem;
+  font-weight: 850;
+}
+
+.stepBody {
+  min-width: 0;
+}
+
+.stepTopline {
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.stepTopline strong {
+  color: #dce6f7;
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+.riskBadge {
+  flex: 0 0 auto;
+  border: 1px solid rgb(99 225 199 / 22%);
+  border-radius: 999px;
+  color: #8ee0ce;
+  padding: 0.2rem 0.36rem;
+  font-size: 0.53rem;
+  font-weight: 900;
+}
+
+.stepBody p,
+.stepBody small {
+  margin: 0.22rem 0 0;
+  color: #71829f;
+  font-size: 0.58rem;
+}
+
+.stepBody small {
+  display: block;
+  color: #96a6bf;
+  text-transform: capitalize;
+}
+
+.planError {
+  margin: 0;
+  border-left: 2px solid rgb(255 143 151 / 65%);
+  color: #ffc3c9;
+  padding-left: 0.6rem;
+  font-size: 0.67rem;
+}
+
+.recentPlans {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.recentPlans button {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  width: 100%;
+  text-align: left;
+}
+
+.recentPlans button span {
+  overflow: hidden;
+  color: #b8c5d9;
+  font-size: 0.67rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recentPlans button b {
+  flex: 0 0 auto;
+  color: #7fdcc8;
+  font-size: 0.56rem;
+  text-transform: uppercase;
+}
+
+.emptyAgent {
+  margin: 0;
+  color: #7f91ad;
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
