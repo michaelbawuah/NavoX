@@ -102,14 +102,8 @@ class PreferenceUpdateRequest(BaseModel):
         return value
 
     def validate_order(self) -> None:
-        if not (
-            self.dashboard_threshold
-            < self.briefing_threshold
-            < self.notify_threshold
-        ):
-            raise ValueError(
-                "Thresholds must satisfy dashboard < briefing < notify"
-            )
+        if not (self.dashboard_threshold < self.briefing_threshold < self.notify_threshold):
+            raise ValueError("Thresholds must satisfy dashboard < briefing < notify")
 
 
 class SnoozeRequest(BaseModel):
@@ -419,7 +413,6 @@ async def meeting_prep(
         ],
         prep_points=list(prep.prep_points),
     )
-
 
 
 class ProactiveWorkflowResponse(BaseModel):

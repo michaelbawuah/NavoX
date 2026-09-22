@@ -513,7 +513,6 @@ class AuditEvent(Base):
     )
 
 
-
 class ProactivePreference(Base):
     __tablename__ = "proactive_preferences"
     __table_args__ = (

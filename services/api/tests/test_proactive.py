@@ -199,9 +199,7 @@ async def test_snooze_dismiss_completion_and_tenant_isolation(
     )
     briefing = await client.get("/api/v1/proactive/briefing", params={"timezone": "UTC"})
     item = (
-        briefing.json()["notify_now"]
-        + briefing.json()["briefing"]
-        + briefing.json()["dashboard"]
+        briefing.json()["notify_now"] + briefing.json()["briefing"] + briefing.json()["dashboard"]
     )[0]
 
     snoozed = await client.post(
@@ -238,9 +236,7 @@ async def test_snooze_dismiss_completion_and_tenant_isolation(
     }
     assert item["id"] not in hidden_ids
 
-    completed = await client.post(
-        f"/api/v1/commitments/{commitment['id']}/complete"
-    )
+    completed = await client.post(f"/api/v1/commitments/{commitment['id']}/complete")
     assert completed.status_code == 200
     await client.get("/api/v1/proactive/briefing", params={"timezone": "UTC"})
     async with session_factory() as session:
@@ -290,21 +286,11 @@ async def test_briefing_refresh_resolves_stale_state(
         due_at=datetime.now(UTC) + timedelta(hours=1),
     )
     before = await client.get("/api/v1/proactive/briefing", params={"timezone": "UTC"})
-    before_items = (
-        before.json()["notify_now"]
-        + before.json()["briefing"]
-        + before.json()["dashboard"]
-    )
+    before_items = before.json()["notify_now"] + before.json()["briefing"] + before.json()["dashboard"]
     assert any(item["commitment_id"] == commitment["id"] for item in before_items)
 
-    completed = await client.post(
-        f"/api/v1/commitments/{commitment['id']}/complete"
-    )
+    completed = await client.post(f"/api/v1/commitments/{commitment['id']}/complete")
     assert completed.status_code == 200
     after = await client.get("/api/v1/proactive/briefing", params={"timezone": "UTC"})
-    after_items = (
-        after.json()["notify_now"]
-        + after.json()["briefing"]
-        + after.json()["dashboard"]
-    )
+    after_items = after.json()["notify_now"] + after.json()["briefing"] + after.json()["dashboard"]
     assert all(item["commitment_id"] != commitment["id"] for item in after_items)

@@ -288,8 +288,7 @@ async def query_today(
         important_ids = {
             signal.commitment_id
             for signal in signals
-            if signal.commitment_id is not None
-            and signal.tier in {"notify_now", "briefing"}
+            if signal.commitment_id is not None and signal.tier in {"notify_now", "briefing"}
         }
         selected = [item for item in all_items if item.id in important_ids]
     elif intent == "meeting_prep":
@@ -305,9 +304,7 @@ async def query_today(
             details = list(prep.prep_points)
     elif intent == "handleable":
         selected = [
-            item
-            for item in all_items
-            if item.status in {"confirmed", "attention", "waiting"}
+            item for item in all_items if item.status in {"confirmed", "attention", "waiting"}
         ]
     else:
         selected = []

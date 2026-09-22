@@ -183,9 +183,7 @@ async def daily_briefing_delay_activity(payload: ProactiveWorkspaceInput) -> int
 @activity.defn
 async def record_scheduled_briefing_activity(payload: ProactiveWorkspaceInput) -> str:
     async with get_session_factory()() as database:
-        user = await database.scalar(
-            select(User).where(User.id == UUID(payload.user_id))
-        )
+        user = await database.scalar(select(User).where(User.id == UUID(payload.user_id)))
         if user is None:
             return "missing_user"
         preference = await database.scalar(
@@ -229,11 +227,7 @@ async def record_scheduled_briefing_activity(payload: ProactiveWorkspaceInput) -
         )
 
         interruptive = [signal for signal in signals if signal.tier == "notify_now"]
-        if (
-            not user.agent_paused
-            and preference.notifications_enabled
-            and interruptive
-        ):
+        if not user.agent_paused and preference.notifications_enabled and interruptive:
             await mark_signals_surfaced(
                 database,
                 user_id=UUID(payload.user_id),
@@ -251,8 +245,7 @@ async def record_scheduled_briefing_activity(payload: ProactiveWorkspaceInput) -
             entity_id=snapshot.id,
             metadata={
                 "item_count": snapshot.item_count,
-                "delivery_suppressed": user.agent_paused
-                or not preference.notifications_enabled,
+                "delivery_suppressed": user.agent_paused or not preference.notifications_enabled,
             },
         )
         await database.commit()

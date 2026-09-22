@@ -114,7 +114,6 @@ def test_approvals_bind_exact_actions_to_user_and_workspace() -> None:
     }
 
 
-
 def test_proactive_tables_are_tenant_scoped_and_commitment_bound() -> None:
     preference = Base.metadata.tables["proactive_preferences"]
     signal = Base.metadata.tables["proactive_signals"]

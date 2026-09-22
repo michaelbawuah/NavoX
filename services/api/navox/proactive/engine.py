@@ -203,9 +203,7 @@ def fingerprint_for(commitment: Commitment, signal_type: str) -> str:
         "priority": commitment.priority,
         "status": commitment.status,
     }
-    return sha256(
-        json.dumps(material, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    return sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def what_happening(commitment: Commitment, signal_type: str) -> str:
@@ -237,8 +235,7 @@ def why_matters(commitment: Commitment, signal_type: str, now: datetime) -> str:
         return f"{commitment.title} is blocked on someone or something outside your control."
     if signal_type == "candidate_review":
         return (
-            f"{commitment.title} is not confirmed yet, "
-            "so NavoX will not treat it as settled fact."
+            f"{commitment.title} is not confirmed yet, so NavoX will not treat it as settled fact."
         )
     return f"{commitment.title} is priority {commitment.priority} and remains active."
 
@@ -359,11 +356,7 @@ def tier_for(
         return "dashboard"
     if score < preference.notify_threshold:
         return "briefing"
-    if (
-        not notifications_allowed
-        or quiet
-        or interruption_budget_exhausted
-    ):
+    if not notifications_allowed or quiet or interruption_budget_exhausted:
         return "briefing"
     return "notify_now"
 
@@ -700,9 +693,7 @@ async def next_meeting_prep(
 
     relations = list(
         await database.scalars(
-            select(CommitmentRelation).where(
-                CommitmentRelation.from_commitment_id == meeting.id
-            )
+            select(CommitmentRelation).where(CommitmentRelation.from_commitment_id == meeting.id)
         )
     )
     related_ids = {relation.to_commitment_id for relation in relations}

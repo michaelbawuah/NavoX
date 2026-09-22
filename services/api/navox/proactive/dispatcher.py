@@ -173,9 +173,7 @@ class TemporalProactiveDispatcher:
                 select(Commitment).where(
                     Commitment.user_id == user_id,
                     Commitment.workspace_id == workspace_id,
-                    Commitment.status.in_(
-                        ("candidate", "confirmed", "waiting", "attention")
-                    ),
+                    Commitment.status.in_(("candidate", "confirmed", "waiting", "attention")),
                 )
             )
         )
@@ -216,8 +214,7 @@ class TemporalProactiveDispatcher:
                         entity_id=commitment.id,
                         workflow_type="follow_up",
                         workflow_id=(
-                            f"navox-follow-up-{commitment.id}-"
-                            f"{state_suffix(wait_material)}"
+                            f"navox-follow-up-{commitment.id}-{state_suffix(wait_material)}"
                         ),
                         workflow_run=FollowUpWorkflow.run,
                         payload=base_payload,
