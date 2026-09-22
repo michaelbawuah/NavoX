@@ -1,0 +1,220 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from hashlib import sha256
+from typing import Any, Literal, Protocol
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from navox.intelligence.contracts import SourceDocument
+
+OPERATIONAL_EXTRACTION_SCHEMA_VERSION: Literal["operational-extraction.v1"] = (
+    "operational-extraction.v1"
+)
+
+ObservationType = Literal["request", "promise", "deadline", "meeting", "follow_up", "task"]
+EvidenceSource = Literal["subject", "content"]
+TemporalKind = Literal["deadline", "meeting_start", "follow_up", "event_time", "other"]
+
+INSTRUCTION_LIKE_MARKERS = (
+    "ignore previous instructions",
+    "ignore all instructions",
+    "system message",
+    "developer message",
+    "reveal your credentials",
+    "disclose credentials",
+    "exfiltrate",
+    "grant permission",
+    "approve this action",
+)
+
+
+def _reject_instruction_like(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.casefold()
+    if any(marker in normalized for marker in INSTRUCTION_LIKE_MARKERS):
+        raise ValueError("Instruction-like content cannot become an operational fact")
+    return value
+
+
+class EvidenceSpan(BaseModel):
+    """A bounded exact span in the source subject or content."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=False)
+
+    source: EvidenceSource
+    start_char: int = Field(ge=0)
+    end_char: int = Field(gt=0)
+    text: str = Field(min_length=1, max_length=512)
+
+    @model_validator(mode="after")
+    def require_non_empty_range(self) -> "EvidenceSpan":
+        if self.end_char <= self.start_char:
+            raise ValueError("Evidence end_char must be greater than start_char")
+        return self
+
+
+class OperationalObservationCandidate(BaseModel):
+    """Action-free operational fact proposed by a model."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+    observation_type: ObservationType
+    subject_text: str | None = Field(default=None, max_length=256)
+    action_text: str | None = Field(default=None, max_length=512)
+    object_text: str | None = Field(default=None, max_length=1_000)
+    temporal_expression: str | None = Field(default=None, max_length=256)
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence: list[EvidenceSpan] = Field(min_length=1, max_length=8)
+
+    @field_validator("subject_text", "action_text", "object_text", "temporal_expression")
+    @classmethod
+    def reject_instruction_like_fact_text(cls, value: str | None) -> str | None:
+        return _reject_instruction_like(value)
+
+
+class PersonMention(BaseModel):
+    """Unresolved person mention preserved for deterministic-first M3 resolution."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=256)
+    identity_type: str | None = Field(default=None, max_length=64)
+    identity_value: str | None = Field(default=None, max_length=512)
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence: list[EvidenceSpan] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode="after")
+    def require_identity_pair(self) -> "PersonMention":
+        if (self.identity_type is None) is not (self.identity_value is None):
+            raise ValueError("identity_type and identity_value must be supplied together")
+        return self
+
+
+class TemporalMention(BaseModel):
+    """Unresolved temporal expression; M2 must not invent a resolved timestamp."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+    expression: str = Field(min_length=1, max_length=256)
+    kind: TemporalKind
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence: list[EvidenceSpan] = Field(min_length=1, max_length=8)
+
+
+class RelationshipCandidate(BaseModel):
+    """Unresolved relationship between two source-grounded entities."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+    relationship_type: str = Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_]*$")
+    subject_text: str = Field(min_length=1, max_length=256)
+    object_text: str = Field(min_length=1, max_length=256)
+    confidence: float = Field(ge=0.0, le=1.0)
+    evidence: list[EvidenceSpan] = Field(min_length=1, max_length=8)
+
+    @field_validator("relationship_type", "subject_text", "object_text")
+    @classmethod
+    def reject_instruction_like_relationship_text(cls, value: str) -> str:
+        checked = _reject_instruction_like(value)
+        if checked is None:
+            raise ValueError("Relationship text cannot be empty")
+        return checked
+
+
+class OperationalExtraction(BaseModel):
+    """Strict schema-constrained model output for SPEC-002 M2."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["operational-extraction.v1"] = OPERATIONAL_EXTRACTION_SCHEMA_VERSION
+    observations: list[OperationalObservationCandidate] = Field(default_factory=list, max_length=64)
+    people: list[PersonMention] = Field(default_factory=list, max_length=64)
+    temporals: list[TemporalMention] = Field(default_factory=list, max_length=64)
+    relationships: list[RelationshipCandidate] = Field(default_factory=list, max_length=64)
+
+    def validate_evidence(self, document: SourceDocument) -> None:
+        """Reject hallucinated, stale, or out-of-bounds evidence before persistence."""
+
+        for span in self._all_evidence():
+            source_text = document.subject if span.source == "subject" else document.content
+            if source_text is None:
+                raise ValueError(f"Evidence references missing {span.source}")
+            if span.end_char > len(source_text):
+                raise ValueError("Evidence span exceeds source bounds")
+            if source_text[span.start_char : span.end_char] != span.text:
+                raise ValueError("Evidence span does not exactly match the source")
+
+    def _all_evidence(self) -> list[EvidenceSpan]:
+        spans: list[EvidenceSpan] = []
+        for item in (*self.observations, *self.people, *self.temporals, *self.relationships):
+            spans.extend(item.evidence)
+        return spans
+
+
+@dataclass(frozen=True)
+class ModelExtractionResponse:
+    """Provider metadata plus untrusted structured model output."""
+
+    output: Mapping[str, Any]
+    provider: str
+    model: str
+
+
+class OperationalExtractionGateway(Protocol):
+    """Narrow provider-neutral AI gateway surface used by operational extraction."""
+
+    async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
+        ...
+
+
+@dataclass(frozen=True)
+class OperationalExtractionResult:
+    extraction: OperationalExtraction
+    extractor_version: str
+    model_provider: str
+    model_name: str
+    source_hash: str
+
+
+class OperationalExtractor:
+    """Validates AI proposals without granting them authority or database access."""
+
+    def __init__(
+        self,
+        gateway: OperationalExtractionGateway,
+        *,
+        extractor_version: str = "operational-extraction.v1",
+    ) -> None:
+        self.gateway = gateway
+        self.extractor_version = extractor_version
+
+    async def extract(self, document: SourceDocument) -> OperationalExtractionResult:
+        response = await self.gateway.extract_operational(document)
+        extraction = OperationalExtraction.model_validate(response.output)
+        extraction.validate_evidence(document)
+        return OperationalExtractionResult(
+            extraction=extraction,
+            extractor_version=self.extractor_version,
+            model_provider=response.provider,
+            model_name=response.model,
+            source_hash=source_document_hash(document),
+        )
+
+
+def source_document_hash(document: SourceDocument) -> str:
+    """Stable hash for bounded provenance without persisting the complete source body."""
+
+    canonical = "\x00".join(
+        (
+            document.schema_version,
+            document.provider,
+            document.source_type,
+            document.external_id,
+            document.subject or "",
+            document.content or "",
+        )
+    )
+    return sha256(canonical.encode("utf-8")).hexdigest()
