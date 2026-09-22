@@ -143,9 +143,7 @@ def test_spec_002_people_and_identities_are_workspace_scoped() -> None:
     person = Base.metadata.tables["people"]
     identity = Base.metadata.tables["person_identities"]
 
-    assert {foreign_key.target_fullname for foreign_key in person.foreign_keys} == {
-        "workspaces.id"
-    }
+    assert {foreign_key.target_fullname for foreign_key in person.foreign_keys} == {"workspaces.id"}
     assert {foreign_key.target_fullname for foreign_key in identity.foreign_keys} == {
         "people.id",
         "workspaces.id",
