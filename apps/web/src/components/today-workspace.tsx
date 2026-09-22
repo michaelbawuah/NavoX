@@ -922,7 +922,7 @@ export function TodayWorkspace({
               actions, including Gmail send, require exact user approval before
               the provider boundary can execute them.
             </p>
-          
+
             {activePlan ? (
               <div className={styles.planPanel} aria-live="polite">
                 <div className={styles.planHeader}>
