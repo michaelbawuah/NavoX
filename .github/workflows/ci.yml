@@ -130,13 +130,28 @@ jobs:
             --output /tmp/navox-evaluation.json \
             --markdown /tmp/navox-evaluation.md
         working-directory: services/api
+      - name: Execute SPEC-002 acceptance and security regressions
+        run: |
+          uv run pytest tests/test_intelligence_*.py \
+            --junitxml=/tmp/navox-spec002-tests.xml
+        working-directory: services/api
+      - name: Report executed SPEC-002 regression gates
+        if: always()
+        run: |
+          uv run python -m navox.evaluation.intelligence_report \
+            --junit /tmp/navox-spec002-tests.xml \
+            --output /tmp/navox-spec002-regression.json
+        working-directory: services/api
       - name: Upload evaluation report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: navox-evaluation-report
           path: |
             /tmp/navox-evaluation.json
             /tmp/navox-evaluation.md
+            /tmp/navox-spec002-tests.xml
+            /tmp/navox-spec002-regression.json
           if-no-files-found: error
           retention-days: 30
 

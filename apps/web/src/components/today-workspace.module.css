@@ -384,6 +384,53 @@
   font-size: 0.64rem;
 }
 
+.evidence {
+  padding-block: 0.4rem;
+  color: #94a6c0;
+  font-size: 0.68rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.evidence summary {
+  cursor: pointer;
+  color: #a7dfd0;
+}
+
+.evidence dl {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.6rem 0;
+}
+
+.evidence :where(dl) > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.evidence dt {
+  text-transform: capitalize;
+}
+.evidence dd {
+  margin: 0;
+  color: #b3c7de;
+}
+.evidenceSource {
+  display: grid;
+  gap: 0.2rem;
+  border-top: 1px solid rgb(145 168 207 / 12%);
+  padding-top: 0.55rem;
+  margin-top: 0.55rem;
+}
+.evidenceSource strong {
+  color: #b7cbe3;
+  text-transform: capitalize;
+}
+.evidenceSource p {
+  margin: 0;
+}
+
 .itemActions {
   margin-top: 0.2rem;
 }

@@ -6,24 +6,23 @@ The current implementation includes the **Engineering Foundation through Milesto
 
 ## SPEC-002 Operational Intelligence
 
-SPEC-002 extends the SPEC-001 platform with a provider-independent intelligence
-layer. Milestone 1 establishes the canonical input and persistence boundary
-without granting any new provider authority.
+SPEC-002 now connects authorized Gmail/Calendar changes to evidence-backed
+observations, deterministic resolution, commitment state, attention, Today, and
+bounded feedback. The implementation covers M1–M7; live provider acceptance and
+model-quality targets are reported separately from synthetic regression tests.
 
-- `SourceDocument` and `SourceIdentity` are strict, versioned, provider-neutral
-  contracts under `navox.intelligence`.
-- `people` and `person_identities` provide workspace-scoped identity anchors.
-- `operational_observations` stores evidence-backed proposed facts with
-  extractor/model provenance and calibrated confidence.
-- `observation_evidence` binds observations to authorized connections and
-  bounded source locators/hashes.
-- `intelligence_feedback` stores bounded user feedback and carries no action,
-  approval, or permission authority.
-- No Gmail-read, Calendar-read, extraction-model, resolution, or autonomous
-  execution capability is introduced by this milestone.
+- Explicit read consent and account binding; incremental history/sync cursors.
+- Schema-validated model proposals, exact evidence checks and minimal storage.
+- Scoped identities, timezone-aware date windows, deduplication and correction.
+- Conservative completion/waiting inference, with preserved user decisions.
+- Shared explainable Today/proactive ranking and bounded preference learning.
+- Temporal source processing, time reevaluation, watch renewal and reconciliation.
+- Configurable date, live time and optional city weather.
 
-The authoritative architecture is
-`docs/architecture/SPEC-002-navox-operational-intelligence.md`.
+See [operation and verification](docs/architecture/spec-002-operations.md) for
+configuration, read-scope consent, scan boundaries and live-validation steps.
+The authoritative architecture remains
+[ SPEC-002 ](docs/architecture/SPEC-002-navox-operational-intelligence.md).
 
 ## Repository layout
 
