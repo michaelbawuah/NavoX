@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
-from uuid import UUID, NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -228,13 +228,18 @@ async def record_scheduled_briefing_activity(payload: ProactiveWorkspaceInput) -
             now=now,
         )
 
-        if not user.agent_paused and preference.notifications_enabled:
+        interruptive = [signal for signal in signals if signal.tier == "notify_now"]
+        if (
+            not user.agent_paused
+            and preference.notifications_enabled
+            and interruptive
+        ):
             await mark_signals_surfaced(
                 database,
                 user_id=UUID(payload.user_id),
                 workspace_id=UUID(payload.workspace_id),
-                signals=signals,
-                surface="scheduled_briefing",
+                signals=interruptive,
+                surface="notify_now",
                 now=now,
             )
         add_audit_event(

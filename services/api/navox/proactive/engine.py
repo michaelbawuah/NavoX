@@ -466,6 +466,12 @@ async def evaluate_workspace(
             and aware(signal.snoozed_until) > current_time
         )
         dismissed = signal is not None and signal.status == "dismissed"
+        if (
+            signal is not None
+            and signal.snoozed_until is not None
+            and aware(signal.snoozed_until) <= current_time
+        ):
+            signal.snoozed_until = None
         tier = (
             "suppressed"
             if snoozed or dismissed

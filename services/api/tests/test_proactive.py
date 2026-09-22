@@ -297,7 +297,10 @@ async def test_briefing_refresh_resolves_stale_state(
     )
     assert any(item["commitment_id"] == commitment["id"] for item in before_items)
 
-    assert (await client.post(f"/api/v1/commitments/{commitment['id']}/complete")).status_code == 200
+    completed = await client.post(
+        f"/api/v1/commitments/{commitment['id']}/complete"
+    )
+    assert completed.status_code == 200
     after = await client.get("/api/v1/proactive/briefing", params={"timezone": "UTC"})
     after_items = (
         after.json()["notify_now"]

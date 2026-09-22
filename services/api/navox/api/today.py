@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from navox.api.auth import CurrentAccountDependency, DatabaseSession
+from navox.proactive.engine import evaluate_workspace, next_meeting_prep, visible_signals
 from navox.today.projection import (
     InvalidTimezoneError,
     TodayItem,
@@ -54,6 +55,9 @@ QueryIntent = Literal[
     "waiting",
     "renewals",
     "promises",
+    "forgetting",
+    "meeting_prep",
+    "handleable",
     "unsupported",
 ]
 
@@ -68,6 +72,7 @@ class TodayQueryResponse(BaseModel):
     answer: str
     items: list[TodayItemResponse]
     supported_queries: list[str]
+    details: list[str] = Field(default_factory=list)
 
 
 SUPPORTED_QUERIES = [
@@ -77,6 +82,10 @@ SUPPORTED_QUERIES = [
     "What am I waiting on?",
     "What renewals are coming up?",
     "What promises have I made?",
+    "What am I forgetting?",
+    "Prepare me for my next meeting.",
+    "Anything costing me money soon?",
+    "What can you handle for me?",
 ]
 
 
@@ -148,8 +157,17 @@ async def get_today(
 
 def classify_query(query: str) -> QueryIntent:
     normalized = " ".join(query.casefold().split())
-    if any(word in normalized for word in ("renewal", "renew", "subscription")):
+    if any(
+        word in normalized
+        for word in ("renewal", "renew", "subscription", "costing me money", "money soon")
+    ):
         return "renewals"
+    if any(phrase in normalized for phrase in ("next meeting", "prepare me", "meeting prep")):
+        return "meeting_prep"
+    if any(phrase in normalized for phrase in ("forgetting", "forgot", "missed something")):
+        return "forgetting"
+    if any(phrase in normalized for phrase in ("handle for me", "can you handle", "you handle")):
+        return "handleable"
     if any(word in normalized for word in ("waiting", "wait on", "waiting on")):
         return "waiting"
     if "promise" in normalized:
@@ -188,10 +206,19 @@ def format_answer(intent: QueryIntent, items: list[TodayItem], projection: Today
             "waiting": "You are not currently waiting on any saved commitments.",
             "renewals": "No active renewals are currently saved.",
             "promises": "No active promises are currently saved.",
+            "forgetting": "NavoX is not currently surfacing anything you appear to be forgetting.",
+            "meeting_prep": "No upcoming saved meeting is available to prepare.",
+            "handleable": "No active confirmed commitment is currently ready for Handle this.",
             "unsupported": "",
         }
         return empty_messages[intent]
 
+    if intent == "meeting_prep":
+        return f"Your next saved meeting is {items[0].title}."
+    if intent == "forgetting":
+        return f"{len(items)} proactive item(s) are important enough for a second look."
+    if intent == "handleable":
+        return f"{len(items)} active commitment(s) can enter the bounded Handle this flow."
     if intent == "today":
         return (
             f"You have {projection.total} active commitments. "
@@ -204,6 +231,9 @@ def format_answer(intent: QueryIntent, items: list[TodayItem], projection: Today
         "waiting": "are waiting",
         "renewals": "are active renewals",
         "promises": "are active promises",
+        "forgetting": "are worth a second look",
+        "meeting_prep": "are relevant to your next meeting",
+        "handleable": "can be handed to the bounded agent",
         "today": "",
         "unsupported": "",
     }
@@ -221,6 +251,7 @@ async def query_today(
     primary = list(projection.needs_attention) + list(projection.coming_up)
     all_items = deduplicate(primary)
 
+    details: list[str] = []
     if intent == "today":
         selected = all_items
     elif intent == "attention":
@@ -241,6 +272,43 @@ async def query_today(
             <= item.due_at.astimezone(local_now.tzinfo)
             <= local_now + timedelta(days=7)
         ]
+    elif intent == "forgetting":
+        selected_timezone = payload.timezone or current_account.user.timezone
+        await evaluate_workspace(
+            database,
+            user_id=current_account.user.id,
+            workspace_id=current_account.workspace.id,
+            timezone_name=selected_timezone,
+        )
+        signals = await visible_signals(
+            database,
+            user_id=current_account.user.id,
+            workspace_id=current_account.workspace.id,
+        )
+        important_ids = {
+            signal.commitment_id
+            for signal in signals
+            if signal.commitment_id is not None
+            and signal.tier in {"notify_now", "briefing"}
+        }
+        selected = [item for item in all_items if item.id in important_ids]
+    elif intent == "meeting_prep":
+        prep = await next_meeting_prep(
+            database,
+            user_id=current_account.user.id,
+            workspace_id=current_account.workspace.id,
+        )
+        if prep is None:
+            selected = []
+        else:
+            selected = [item for item in all_items if item.id == prep.commitment_id]
+            details = list(prep.prep_points)
+    elif intent == "handleable":
+        selected = [
+            item
+            for item in all_items
+            if item.status in {"confirmed", "attention", "waiting"}
+        ]
     else:
         selected = []
 
@@ -249,4 +317,5 @@ async def query_today(
         answer=format_answer(intent, selected, projection),
         items=[item_response(item) for item in selected[:12]],
         supported_queries=SUPPORTED_QUERIES,
+        details=details,
     )

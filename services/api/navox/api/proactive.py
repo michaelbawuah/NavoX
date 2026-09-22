@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,15 +11,14 @@ from navox.agent.audit import add_audit_event
 from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
 from navox.db.models import ProactiveSignal
 from navox.proactive.dispatcher import (
-    ProactiveDispatchError,
     ProactiveDispatcher,
+    ProactiveDispatchError,
     TemporalProactiveDispatcher,
 )
 from navox.proactive.engine import (
     InvalidProactiveTimezone,
     default_preference,
     evaluate_workspace,
-    mark_signals_surfaced,
     next_meeting_prep,
     record_briefing,
     timezone_for,
@@ -35,7 +34,7 @@ def get_proactive_dispatcher() -> ProactiveDispatcher:
 
 ProactiveDispatcherDependency = Annotated[
     ProactiveDispatcher,
-    __import__("fastapi").Depends(get_proactive_dispatcher),
+    Depends(get_proactive_dispatcher),
 ]
 
 
@@ -305,14 +304,6 @@ async def briefing(
         request_id=request_id or uuid4(),
         signals=signals,
     )
-    await mark_signals_surfaced(
-        database,
-        user_id=current_account.user.id,
-        workspace_id=current_account.workspace.id,
-        signals=signals,
-        surface="briefing",
-    )
-
     notify = [signal for signal in signals if signal.tier == "notify_now"]
     briefing_items = [signal for signal in signals if signal.tier == "briefing"]
     dashboard = [signal for signal in signals if signal.tier == "dashboard"]
