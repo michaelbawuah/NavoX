@@ -43,6 +43,17 @@ class Settings(BaseSettings):
             <= self.commitment_moderate_confidence_threshold
         ):
             raise ValueError("High commitment confidence threshold must exceed moderate threshold")
+
+        if self.app_environment.casefold() in {"production", "prod"}:
+            if not self.web_origin.casefold().startswith("https://"):
+                raise ValueError("Production web origin must use HTTPS")
+            if self.google_oauth_client_id:
+                if not self.google_oauth_redirect_uri.casefold().startswith("https://"):
+                    raise ValueError("Production Google OAuth redirect must use HTTPS")
+                if self.google_oauth_client_secret is None:
+                    raise ValueError("Production Google OAuth requires a client secret")
+                if self.google_token_encryption_key is None:
+                    raise ValueError("Production Google OAuth requires token encryption")
         return self
 
     model_config = SettingsConfigDict(
