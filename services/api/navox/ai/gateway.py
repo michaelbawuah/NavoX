@@ -6,8 +6,8 @@ from typing import Any, Protocol
 
 from navox.intelligence.contracts import SourceDocument
 from navox.intelligence.extraction import (
-    ModelExtractionResponse,
     OPERATIONAL_EXTRACTION_SCHEMA_VERSION,
+    ModelExtractionResponse,
 )
 
 OPERATIONAL_EXTRACTION_INSTRUCTIONS = """You are NavoX's bounded operational extractor.
