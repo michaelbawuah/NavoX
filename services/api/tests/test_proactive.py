@@ -15,6 +15,7 @@ from navox.db.session import get_database_session
 from navox.proactive.activities import next_briefing_delay
 from navox.proactive.engine import evaluate_workspace
 
+
 @pytest_asyncio.fixture
 async def proactive_environment() -> AsyncIterator[
     tuple[AsyncClient, async_sessionmaker[AsyncSession]]
@@ -74,6 +75,7 @@ async def create_commitment(
     )
     assert response.status_code == 201, response.text
     return response.json()
+
 
 @pytest.mark.asyncio
 async def test_briefing_surfaces_deadlines_renewals_promises_and_waiting(
@@ -135,6 +137,7 @@ async def test_briefing_surfaces_deadlines_renewals_promises_and_waiting(
         assert item["why_matters"]
         assert item["score_components"]
 
+
 @pytest.mark.asyncio
 async def test_quiet_hours_downgrade_interruptions_without_lowering_score(
     proactive_environment: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
@@ -180,6 +183,7 @@ async def test_quiet_hours_downgrade_interruptions_without_lowering_score(
     signal = next(item for item in signals if item.signal_type == "deadline_warning")
     assert signal.attention_score >= 70
     assert signal.tier == "briefing"
+
 
 @pytest.mark.asyncio
 async def test_snooze_dismiss_completion_and_tenant_isolation(
@@ -248,6 +252,7 @@ async def test_snooze_dismiss_completion_and_tenant_isolation(
     isolated = await client.post(f"/api/v1/proactive/signals/{item['id']}/dismiss")
     assert isolated.status_code == 404
 
+
 @pytest.mark.asyncio
 async def test_meeting_prep_uses_saved_state_only(
     proactive_environment: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
@@ -269,6 +274,7 @@ async def test_meeting_prep_uses_saved_state_only(
     assert body["commitment_id"] == meeting["id"]
     assert body["title"] == "Project review"
     assert any("Review launch risks" in point for point in body["prep_points"])
+
 
 @pytest.mark.asyncio
 async def test_briefing_refresh_resolves_stale_state(
@@ -302,6 +308,7 @@ async def test_briefing_refresh_resolves_stale_state(
         *after_body["dashboard"],
     ]
     assert all(item["commitment_id"] != commitment["id"] for item in after_items)
+
 
 @pytest.mark.asyncio
 async def test_today_signature_queries_use_proactive_saved_state(
@@ -364,6 +371,7 @@ async def test_today_signature_queries_use_proactive_saved_state(
     assert handleable.status_code == 200
     assert handleable.json()["intent"] == "handleable"
     assert handleable.json()["items"]
+
 
 def test_daily_briefing_delay_respects_dst_offset_changes() -> None:
     before_fall_back = datetime(2026, 11, 1, 5, 30, tzinfo=UTC)
