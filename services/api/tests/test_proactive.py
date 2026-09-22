@@ -198,9 +198,12 @@ async def test_snooze_dismiss_completion_and_tenant_isolation(
         due_at=datetime.now(UTC) + timedelta(hours=4),
     )
     briefing = await client.get("/api/v1/proactive/briefing", params={"timezone": "UTC"})
-    item = (
-        briefing.json()["notify_now"] + briefing.json()["briefing"] + briefing.json()["dashboard"]
-    )[0]
+    briefing_body = briefing.json()
+    item = [
+        *briefing_body["notify_now"],
+        *briefing_body["briefing"],
+        *briefing_body["dashboard"],
+    ][0]
 
     snoozed = await client.post(
         f"/api/v1/proactive/signals/{item['id']}/snooze",
@@ -286,11 +289,85 @@ async def test_briefing_refresh_resolves_stale_state(
         due_at=datetime.now(UTC) + timedelta(hours=1),
     )
     before = await client.get("/api/v1/proactive/briefing", params={"timezone": "UTC"})
-    before_items = before.json()["notify_now"] + before.json()["briefing"] + before.json()["dashboard"]
+    before_body = before.json()
+    before_items = [
+        *before_body["notify_now"],
+        *before_body["briefing"],
+        *before_body["dashboard"],
+    ]
     assert any(item["commitment_id"] == commitment["id"] for item in before_items)
 
     completed = await client.post(f"/api/v1/commitments/{commitment['id']}/complete")
     assert completed.status_code == 200
     after = await client.get("/api/v1/proactive/briefing", params={"timezone": "UTC"})
-    after_items = after.json()["notify_now"] + after.json()["briefing"] + after.json()["dashboard"]
+    after_body = after.json()
+    after_items = [
+        *after_body["notify_now"],
+        *after_body["briefing"],
+        *after_body["dashboard"],
+    ]
     assert all(item["commitment_id"] != commitment["id"] for item in after_items)
+
+
+
+@pytest.mark.asyncio
+async def test_today_signature_queries_use_proactive_saved_state(
+    proactive_environment: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
+) -> None:
+    client, _ = proactive_environment
+    await register(client)
+    await create_commitment(
+        client,
+        title="Prepare launch review",
+        commitment_type="meeting",
+        priority=5,
+        due_at=datetime.now(UTC) + timedelta(hours=2),
+        description="Review launch risks.",
+    )
+    await create_commitment(
+        client,
+        title="File grant deadline",
+        commitment_type="deadline",
+        priority=5,
+        due_at=datetime.now(UTC) + timedelta(hours=3),
+    )
+    await create_commitment(
+        client,
+        title="Renew hosting",
+        commitment_type="renewal",
+        priority=4,
+        due_at=datetime.now(UTC) + timedelta(days=5),
+    )
+
+    forgetting = await client.post(
+        "/api/v1/today/query",
+        json={"query": "What am I forgetting?", "timezone": "UTC"},
+    )
+    assert forgetting.status_code == 200
+    assert forgetting.json()["intent"] == "forgetting"
+    assert forgetting.json()["items"]
+
+    meeting = await client.post(
+        "/api/v1/today/query",
+        json={"query": "Prepare me for my next meeting.", "timezone": "UTC"},
+    )
+    assert meeting.status_code == 200
+    assert meeting.json()["intent"] == "meeting_prep"
+    assert meeting.json()["items"][0]["title"] == "Prepare launch review"
+    assert meeting.json()["details"]
+
+    money = await client.post(
+        "/api/v1/today/query",
+        json={"query": "Anything costing me money soon?", "timezone": "UTC"},
+    )
+    assert money.status_code == 200
+    assert money.json()["intent"] == "renewals"
+    assert money.json()["items"][0]["title"] == "Renew hosting"
+
+    handleable = await client.post(
+        "/api/v1/today/query",
+        json={"query": "What can you handle for me?", "timezone": "UTC"},
+    )
+    assert handleable.status_code == 200
+    assert handleable.json()["intent"] == "handleable"
+    assert handleable.json()["items"]
