@@ -214,7 +214,6 @@ async def start_google_authorization(
     )
 
 
-
 @router.get(
     "/google/{connection_id}/gmail-send/start",
     response_model=GoogleAuthorizationStartResponse,

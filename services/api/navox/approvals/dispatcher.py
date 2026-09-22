@@ -66,8 +66,9 @@ class TemporalApprovalDispatcher:
         if existing.status in {"running", "completed", "manual_review", "rejected", "expired"}:
             return existing
 
-        client = await Client.connect(settings.temporal_target)
+        client: Client | None = None
         try:
+            client = await Client.connect(settings.temporal_target)
             await client.start_workflow(
                 ApprovedActionWorkflow.run,
                 ApprovedActionInput(action_id=str(action.id)),
@@ -76,10 +77,15 @@ class TemporalApprovalDispatcher:
                 execution_timeout=timedelta(hours=24),
             )
         except Exception as start_error:
-            handle = client.get_workflow_handle(workflow_id=workflow_id)
-            try:
-                await handle.describe()
-            except Exception:
+            already_exists = False
+            if client is not None:
+                handle = client.get_workflow_handle(workflow_id=workflow_id)
+                try:
+                    await handle.describe()
+                    already_exists = True
+                except Exception:
+                    already_exists = False
+            if not already_exists:
                 existing.status = "dispatch_failed"
                 add_audit_event(
                     database,
@@ -91,9 +97,7 @@ class TemporalApprovalDispatcher:
                     metadata={"workflow_id": workflow_id},
                 )
                 await database.commit()
-                raise ApprovalDispatchError(
-                    "Approval workflow dispatch failed"
-                ) from start_error
+                raise ApprovalDispatchError("Approval workflow dispatch failed") from start_error
 
         existing.status = "running"
         add_audit_event(
@@ -115,9 +119,11 @@ class TemporalApprovalDispatcher:
         decision: str,
         settings: Settings,
     ) -> None:
-        client = await Client.connect(settings.temporal_target)
-        handle = client.get_workflow_handle(workflow_id=f"navox-approved-action-{action_id}")
         try:
+            client = await Client.connect(settings.temporal_target)
+            handle = client.get_workflow_handle(
+                workflow_id=f"navox-approved-action-{action_id}"
+            )
             await handle.signal("approval_decision", decision)
         except Exception as error:
             raise ApprovalDispatchError("Approval workflow signal failed") from error

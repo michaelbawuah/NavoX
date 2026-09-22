@@ -102,7 +102,6 @@ def test_agent_execution_tables_are_tenant_scoped_and_persisted() -> None:
     }
 
 
-
 def test_approvals_bind_exact_actions_to_user_and_workspace() -> None:
     approval = Base.metadata.tables["approvals"]
     assert {foreign_key.target_fullname for foreign_key in approval.foreign_keys} == {

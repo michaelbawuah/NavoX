@@ -157,9 +157,7 @@ async def add_google_connection(
     assert isinstance(workspace, dict)
     async with session_factory() as session:
         credential = ConnectionCredential(
-            encrypted_refresh_token=CredentialVault(settings).seal_refresh_token(
-                "refresh-token"
-            )
+            encrypted_refresh_token=CredentialVault(settings).seal_refresh_token("refresh-token")
         )
         session.add(credential)
         await session.flush()

@@ -65,6 +65,27 @@ def gmail_payload(
     }
 
 
+def ensure_same_prepare_request(action: Action, request: PrepareGmailSendRequest) -> None:
+    expected = {
+        "connection_id": str(request.connection_id),
+        "to": str(request.to),
+        "subject": request.subject,
+        "body_text": request.body_text,
+        "post_send_state": request.post_send_state,
+    }
+    actual = {
+        "connection_id": action.payload.get("connection_id"),
+        "to": action.payload.get("to"),
+        "subject": action.payload.get("subject"),
+        "body_text": action.payload.get("body_text"),
+        "post_send_state": action.payload.get("post_send_state"),
+    }
+    if actual != expected:
+        raise ApprovalConflictError(
+            "That request ID is already bound to a different Gmail send payload"
+        )
+
+
 async def scoped_action(
     database: AsyncSession,
     *,
@@ -138,6 +159,7 @@ class ApprovalService:
             existing_approval = await latest_approval(database, existing_action.id)
             if existing_approval is None:
                 raise ApprovalConflictError("Existing approval record is incomplete")
+            ensure_same_prepare_request(existing_action, request)
             return existing_action, existing_approval, False
 
         user = await database.scalar(select(User).where(User.id == user_id))
@@ -303,6 +325,7 @@ class ApprovalService:
             existing_approval = await latest_approval(database, existing_action.id)
             if existing_approval is None:
                 raise
+            ensure_same_prepare_request(existing_action, request)
             return existing_action, existing_approval, False
 
         return action, approval, True

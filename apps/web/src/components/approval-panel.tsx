@@ -159,22 +159,19 @@ export function ApprovalPanel({
         return;
       }
       const actions = (await response.json()) as ExternalAction[];
-      setRecentActions(actions.filter((action) => action.action_type === "gmail.send"));
-      if (activeAction) {
-        const updated = actions.find((action) => action.id === activeAction.id);
-        if (updated) {
-          setActiveAction(updated);
+      setRecentActions(
+        actions.filter((action) => action.action_type === "gmail.send"),
+      );
+      setActiveAction((current) => {
+        if (current) {
+          return actions.find((action) => action.id === current.id) ?? current;
         }
-      } else {
-        const actionable = actions.find((action) => !terminal(action.status));
-        if (actionable) {
-          setActiveAction(actionable);
-        }
-      }
+        return actions.find((action) => !terminal(action.status)) ?? null;
+      });
     } catch {
       // The approval card remains usable with its last persisted snapshot.
     }
-  }, [activeAction]);
+  }, []);
 
   useEffect(() => {
     void refreshActions();
