@@ -33,11 +33,17 @@ class Settings(BaseSettings):
     google_pubsub_push_audience: str = ""
     google_pubsub_push_service_account: str = ""
     google_gmail_push_verification_token: SecretStr | None = None
+    ai_provider: str = "disabled"
+    openai_api_key: SecretStr | None = None
+    openai_model: str = "gpt-5.6-luna"
     commitment_moderate_confidence_threshold: float = Field(default=0.65, ge=0.0, lt=1.0)
     commitment_high_confidence_threshold: float = Field(default=0.85, gt=0.0, le=1.0)
 
     @model_validator(mode="after")
     def validate_commitment_confidence_thresholds(self) -> "Settings":
+        if self.ai_provider.casefold().strip() not in {"disabled", "openai"}:
+            raise ValueError("AI_PROVIDER must be disabled or openai")
+
         if (
             self.commitment_high_confidence_threshold
             <= self.commitment_moderate_confidence_threshold
