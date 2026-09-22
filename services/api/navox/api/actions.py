@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
 from navox.approvals.dispatcher import (
     ApprovalDispatcher,
     ApprovalDispatchError,
@@ -24,7 +25,6 @@ from navox.approvals.service import (
     ApprovalService,
     latest_approval,
 )
-from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
 from navox.db.models import Action, Approval, PlanStep, WorkflowRef
 
 router = APIRouter(tags=["actions"])

@@ -1,12 +1,12 @@
+import base64
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from email import message_from_bytes
-import base64
 from uuid import UUID, uuid4
 
-from cryptography.fernet import Fernet
 import pytest
 import pytest_asyncio
+from cryptography.fernet import Fernet
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -26,7 +26,6 @@ from navox.db.models import (
     ConnectionCredential,
     Plan,
     PlanStep,
-    User,
     WorkflowRef,
 )
 from navox.db.session import get_database_session
