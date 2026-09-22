@@ -24,6 +24,8 @@ from navox.db.models import (
     ProactivePreference,
     WorkflowRef,
 )
+from navox.intelligence.contracts import SourceDocument
+from navox.intelligence.extraction import OperationalExtraction
 from navox.proactive.engine import base_score, signal_type_for, tier_for
 
 
@@ -41,6 +43,15 @@ class ProviderMetrics:
     total_estimated_cost_usd: float
     input_tokens: int
     output_tokens: int
+
+
+@dataclass(frozen=True)
+class OperationalExtractionMetrics:
+    cases: int
+    label_accuracy: float
+    schema_valid_rate: float
+    evidence_valid_rate: float
+    adversarial_rejection_rate: float
 
 
 @dataclass(frozen=True)
@@ -145,6 +156,80 @@ def provider_metrics(
         total_estimated_cost_usd=total_cost,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+    )
+
+
+def _evaluation_source_document(case: dict[str, Any], index: int) -> SourceDocument:
+    occurred_at = datetime(2026, 9, 22, 12, 0, tzinfo=UTC)
+    return SourceDocument(
+        id=UUID(int=10_000 + index),
+        workspace_id=UUID("22222222-2222-4222-8222-222222222222"),
+        provider="evaluation",
+        source_type="synthetic_case",
+        external_id=str(case.get("id") or case.get("name") or index),
+        subject=str(case["subject"]) if case.get("subject") is not None else None,
+        content=str(case["content"]) if case.get("content") is not None else None,
+        occurred_at=occurred_at,
+        retrieved_at=occurred_at,
+    )
+
+
+def operational_extraction_metrics(root: Path) -> OperationalExtractionMetrics:
+    dataset = load_json(root / "evals/intelligence/extraction_cases.json")
+    snapshot = load_json(root / "evals/intelligence/reference-baseline.json")
+    outputs = {str(case["case_id"]): case["output"] for case in snapshot["cases"]}
+    expected_ids = {str(case["id"]) for case in dataset}
+    if set(outputs) != expected_ids:
+        missing = sorted(expected_ids - set(outputs))
+        unexpected = sorted(set(outputs) - expected_ids)
+        raise ValueError(
+            f"Operational extraction snapshot mismatch: missing={missing}, unexpected={unexpected}"
+        )
+
+    schema_valid = evidence_valid = label_correct = 0
+    for index, case in enumerate(dataset):
+        case_id = str(case["id"])
+        try:
+            extraction = OperationalExtraction.model_validate(outputs[case_id])
+        except ValidationError:
+            continue
+        schema_valid += 1
+
+        document = _evaluation_source_document(case, index)
+        try:
+            extraction.validate_evidence(document)
+        except ValueError:
+            continue
+        evidence_valid += 1
+
+        observed_types = {item.observation_type for item in extraction.observations}
+        observed_temporals = {item.expression for item in extraction.temporals}
+        observed_people = {item.name for item in extraction.people}
+        observed_relationships = {item.relationship_type for item in extraction.relationships}
+        if (
+            observed_types == set(case.get("expected_observation_types", []))
+            and observed_temporals == set(case.get("expected_temporal_expressions", []))
+            and observed_people == set(case.get("expected_people", []))
+            and observed_relationships == set(case.get("expected_relationship_types", []))
+        ):
+            label_correct += 1
+
+    adversarial = load_json(root / "evals/intelligence/adversarial_cases.json")
+    rejected = 0
+    for index, case in enumerate(adversarial):
+        try:
+            extraction = OperationalExtraction.model_validate(case["model_output"])
+            extraction.validate_evidence(_evaluation_source_document(case, 1_000 + index))
+        except (ValidationError, ValueError):
+            rejected += 1
+
+    total = len(dataset)
+    return OperationalExtractionMetrics(
+        cases=total,
+        label_accuracy=label_correct / total if total else 1.0,
+        schema_valid_rate=schema_valid / total if total else 1.0,
+        evidence_valid_rate=evidence_valid / total if total else 1.0,
+        adversarial_rejection_rate=(rejected / len(adversarial) if adversarial else 1.0),
     )
 
 
@@ -348,6 +433,7 @@ def run_evaluation(root: Path | None = None) -> dict[str, Any]:
         raise ValueError("At least one provider evaluation snapshot is required")
 
     primary = providers[0]
+    operational_extraction = operational_extraction_metrics(repository_root)
     security = commitment_security_metrics(repository_root, policy)
     briefing_accuracy = briefing_policy_metric(repository_root)
     planning_accuracy = planning_policy_metric(repository_root)
@@ -358,6 +444,12 @@ def run_evaluation(root: Path | None = None) -> dict[str, Any]:
         "commitment_precision": primary.precision,
         "commitment_recall": primary.recall,
         "structured_output_rate": primary.schema_valid_rate,
+        "operational_extraction_label_accuracy": operational_extraction.label_accuracy,
+        "operational_extraction_schema_valid_rate": operational_extraction.schema_valid_rate,
+        "operational_extraction_evidence_valid_rate": operational_extraction.evidence_valid_rate,
+        "operational_extraction_adversarial_rejection_rate": (
+            operational_extraction.adversarial_rejection_rate
+        ),
         **security,
         "briefing_policy_accuracy": briefing_accuracy,
         "planning_policy_accuracy": planning_accuracy,
@@ -373,6 +465,7 @@ def run_evaluation(root: Path | None = None) -> dict[str, Any]:
         "generated_at": datetime.now(UTC).isoformat(),
         "dataset": "navox-m9-synthetic-v1",
         "providers": [asdict(metrics) for metrics in providers],
+        "operational_extraction": asdict(operational_extraction),
         "security": {
             **security,
             "control_coverage": {
@@ -420,8 +513,16 @@ def markdown_report(report: dict[str, Any]) -> str:
                 cost=provider["total_estimated_cost_usd"],
             )
         )
+    operational = report["operational_extraction"]
     lines.extend(
         [
+            "",
+            "## SPEC-002 operational extraction",
+            "",
+            f"- Label accuracy: {operational['label_accuracy']:.3f}",
+            f"- Schema-valid rate: {operational['schema_valid_rate']:.3f}",
+            f"- Evidence-valid rate: {operational['evidence_valid_rate']:.3f}",
+            f"- Adversarial rejection rate: {operational['adversarial_rejection_rate']:.3f}",
             "",
             "## Release gates",
             "",

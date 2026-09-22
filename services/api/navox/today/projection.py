@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -6,9 +6,22 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from navox.db.models import Commitment, CommitmentSource
+from navox.db.models import (
+    Commitment,
+    CommitmentSource,
+    ObservationEvidence,
+    OperationalObservation,
+)
+from navox.intelligence.attention import AttentionResult, score_commitment, workspace_attention
 
-ACTIVE_STATUSES = {"candidate", "confirmed", "waiting", "attention"}
+ACTIVE_STATUSES = {
+    "candidate",
+    "confirmed",
+    "waiting",
+    "waiting_on_external",
+    "attention",
+    "upcoming",
+}
 
 
 class InvalidTimezoneError(ValueError):
@@ -20,6 +33,8 @@ class TodaySource:
     provider: str
     source_type: str
     external_resource_id: str | None
+    evidence_locator: dict[str, object] | None = None
+    observed_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -36,6 +51,10 @@ class TodayItem:
     score: int
     reasons: tuple[str, ...]
     sources: tuple[TodaySource, ...]
+    category: str = "COMING_UP"
+    band: str = "DASHBOARD"
+    factors: dict[str, float] = field(default_factory=dict)
+    suggested_capability: str | None = None
 
 
 @dataclass(frozen=True)
@@ -74,43 +93,8 @@ def active_at(commitment: Commitment, now: datetime) -> bool:
 def item_score_and_reasons(
     commitment: Commitment, now: datetime, timezone: ZoneInfo
 ) -> tuple[int, tuple[str, ...]]:
-    reasons: list[str] = []
-    score = min(commitment.priority * 8, 40)
-    local_today = now.astimezone(timezone).date()
-
-    if commitment.status == "candidate":
-        reasons.append("Needs your review")
-        score += 35
-    if commitment.status == "attention":
-        reasons.append("Marked for attention")
-        score += 30
-    if commitment.status == "waiting":
-        reasons.append("Waiting on someone or something")
-        score += 8
-
-    if commitment.due_at is not None:
-        due_date = aware(commitment.due_at).astimezone(timezone).date()
-        if due_date < local_today:
-            reasons.append("Overdue")
-            score += 50
-        elif due_date == local_today:
-            reasons.append("Due today")
-            score += 45
-        elif due_date <= local_today + timedelta(days=7):
-            reasons.append("Due within 7 days")
-            score += 20
-        else:
-            reasons.append("Upcoming")
-            score += 5
-    elif commitment.priority >= 4:
-        reasons.append("High priority")
-        score += 25
-
-    if commitment.commitment_type == "renewal":
-        reasons.append("Renewal")
-        score += 5
-
-    return min(score, 100), tuple(reasons)
+    result = score_commitment(commitment, now=now)
+    return result.score, result.reasons
 
 
 def needs_attention(commitment: Commitment, now: datetime, timezone: ZoneInfo) -> bool:
@@ -123,9 +107,44 @@ def needs_attention(commitment: Commitment, now: datetime, timezone: ZoneInfo) -
     return commitment.priority >= 4 and commitment.due_at is None
 
 
+def category_for(
+    commitment: Commitment,
+    result: AttentionResult,
+    now: datetime,
+    timezone: ZoneInfo,
+) -> str:
+    if commitment.status in {"waiting", "waiting_on_external"}:
+        return "WAITING_ON"
+    if commitment.commitment_type == "renewal":
+        return "RENEWALS"
+    if needs_attention(commitment, now, timezone) or result.score >= 70:
+        return "NEEDS_ATTENTION"
+    return "COMING_UP"
+
+
 def sort_key(item: TodayItem) -> tuple[int, float, str]:
     due = aware(item.due_at).timestamp() if item.due_at is not None else float("inf")
     return (-item.score, due, item.title.casefold())
+
+
+def bounded_locator(value: dict[str, object]) -> dict[str, object]:
+    """Return locators only; no raw source body or arbitrary model metadata."""
+    raw = value.get("spans", [value])
+    spans: list[dict[str, object]] = []
+    if isinstance(raw, list):
+        for candidate in raw[:16]:
+            if not isinstance(candidate, dict):
+                continue
+            source = candidate.get("source")
+            start, end = candidate.get("start_char"), candidate.get("end_char")
+            if (
+                source in {"subject", "content"}
+                and isinstance(start, int)
+                and isinstance(end, int)
+                and 0 <= start < end
+            ):
+                spans.append({"source": source, "start_char": start, "end_char": end})
+    return {"spans": spans}
 
 
 async def build_today_projection(
@@ -139,15 +158,17 @@ async def build_today_projection(
     timezone = validated_timezone(timezone_name)
     current_time = aware(now or datetime.now(UTC))
 
-    commitments = list(
-        await database.scalars(
-            select(Commitment).where(
-                Commitment.workspace_id == workspace_id,
-                Commitment.user_id == user_id,
-            )
-        )
+    commitments, attention_results = await workspace_attention(
+        database,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        now=current_time,
     )
-    active = [commitment for commitment in commitments if active_at(commitment, current_time)]
+    active = [
+        commitment
+        for commitment in commitments
+        if active_at(commitment, current_time) and not attention_results[commitment.id].suppressed
+    ]
     completed_cutoff = current_time - timedelta(days=7)
     completed_recently = [
         commitment
@@ -167,18 +188,58 @@ async def build_today_projection(
                 .order_by(CommitmentSource.extracted_at)
             )
         )
+        observation_ids: dict[UUID, UUID] = {}
         for source in sources:
+            value = source.source_metadata.get("observation_id")
+            if value:
+                try:
+                    observation_ids[source.id] = UUID(value)
+                except (ValueError, TypeError):
+                    pass
+        evidence_rows = (
+            list(
+                await database.scalars(
+                    select(ObservationEvidence)
+                    .join(OperationalObservation)
+                    .where(
+                        OperationalObservation.id.in_(list(observation_ids.values())),
+                        OperationalObservation.workspace_id == workspace_id,
+                        OperationalObservation.user_id == user_id,
+                    )
+                )
+            )
+            if observation_ids
+            else []
+        )
+        for source in sources:
+            evidence = next(
+                (
+                    row
+                    for row in evidence_rows
+                    if row.observation_id == observation_ids.get(source.id)
+                    and row.connection_id == source.connection_id
+                    and row.provider == source.provider
+                    and row.source_type == source.source_type
+                    and row.external_resource_id == source.external_resource_id
+                ),
+                None,
+            )
+            locator = None
+            if evidence and evidence.evidence_locator:
+                locator = bounded_locator(evidence.evidence_locator)
             source_map.setdefault(source.commitment_id, []).append(
                 TodaySource(
                     provider=source.provider,
                     source_type=source.source_type,
                     external_resource_id=source.external_resource_id,
+                    evidence_locator=locator,
+                    observed_at=evidence.observed_at if evidence else None,
                 )
             )
 
     items: list[tuple[Commitment, TodayItem]] = []
     for commitment in active:
-        score, reasons = item_score_and_reasons(commitment, current_time, timezone)
+        result = attention_results[commitment.id]
         items.append(
             (
                 commitment,
@@ -192,15 +253,24 @@ async def build_today_projection(
                     due_at=commitment.due_at,
                     confidence=commitment.confidence,
                     created_by=commitment.created_by,
-                    score=score,
-                    reasons=reasons,
+                    score=result.score,
+                    reasons=result.reasons,
+                    factors=result.factors,
+                    band=result.band,
+                    category=category_for(commitment, result, current_time, timezone),
+                    suggested_capability=result.suggested_capability,
                     sources=tuple(source_map.get(commitment.id, [])),
                 ),
             )
         )
 
     attention = sorted(
-        (item for commitment, item in items if needs_attention(commitment, current_time, timezone)),
+        (
+            item
+            for commitment, item in items
+            if needs_attention(commitment, current_time, timezone)
+            or attention_results[commitment.id].score >= 70
+        ),
         key=sort_key,
     )
     coming = sorted(
@@ -208,6 +278,7 @@ async def build_today_projection(
             item
             for commitment, item in items
             if not needs_attention(commitment, current_time, timezone)
+            and attention_results[commitment.id].score < 70
         ),
         key=sort_key,
     )
@@ -216,7 +287,11 @@ async def build_today_projection(
         key=sort_key,
     )
     waiting = sorted(
-        (item for commitment, item in items if commitment.status == "waiting"),
+        (
+            item
+            for commitment, item in items
+            if commitment.status in {"waiting", "waiting_on_external"}
+        ),
         key=sort_key,
     )
     completed_items = sorted(
@@ -233,6 +308,8 @@ async def build_today_projection(
                 created_by=commitment.created_by,
                 score=0,
                 reasons=("Completed",),
+                category="COMPLETED",
+                band="SUPPRESS",
                 sources=tuple(source_map.get(commitment.id, [])),
             )
             for commitment in completed_recently

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "evaluation_kind": "synthetic_application_regression",
+  "minimum_executed_tests": 4,
+  "maximum_failed_tests": 0,
+  "maximum_skipped_tests": 0,
+  "required_tests": [
+    "test_demo_budget_before_tomorrows_meeting_to_today_feedback_and_sent_completion",
+    "test_demo_approval_request_waits_for_expected_counterparty_before_completion",
+    "test_demo_newsletter_duplicate_and_injection_cannot_create_authority_or_noise",
+    "test_cross_workspace_source_today_and_feedback_isolation"
+  ],
+  "scope": "Real application pipeline with synthetic source documents and recorded model responses",
+  "live_provider_quality_measured": false
+}

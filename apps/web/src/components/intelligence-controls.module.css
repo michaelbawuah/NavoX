@@ -1,0 +1,230 @@
+.card,
+.context {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid rgb(136 162 204 / 18%);
+  border-radius: 1.05rem;
+  background: linear-gradient(145deg, rgb(18 32 57 / 88%), rgb(9 18 35 / 90%));
+  color: #dce5f6;
+}
+
+.card {
+  display: grid;
+  gap: 0.85rem;
+  align-content: start;
+}
+
+.heading,
+.actions,
+.contextLine,
+.formRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.heading {
+  justify-content: space-between;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.badge {
+  color: #8bddc8;
+  font-size: 0.59rem;
+}
+.card h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  letter-spacing: -0.035em;
+}
+.copy,
+.stats {
+  margin: 0;
+  color: #9babc4;
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+.stats {
+  color: #77cdb9;
+}
+.connection {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.85rem;
+  border: 1px solid rgb(145 168 207 / 14%);
+  border-radius: 0.75rem;
+  min-width: 0;
+}
+.connection strong {
+  font-size: 0.77rem;
+  overflow-wrap: anywhere;
+}
+.sourceState {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  color: #94acc7;
+  font-size: 0.64rem;
+}
+.actions button,
+.secondary {
+  border: 1px solid rgb(145 168 207 / 22%);
+  border-radius: 0.5rem;
+  background: rgb(18 30 53 / 65%);
+  color: #d9e2f4;
+  cursor: pointer;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+  font-size: 0.69rem;
+}
+.secondary {
+  justify-self: start;
+}
+.primary {
+  border: 1px solid transparent;
+  border-radius: 0.6rem;
+  background: linear-gradient(135deg, #a3f6e1, #61dfc4);
+  color: #05231e;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 0.75rem 0.85rem;
+}
+.card button:disabled,
+.feedback button:disabled,
+.preferences button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.actions button[aria-pressed="true"] {
+  border-color: #61dfc4;
+  color: #a3f6e1;
+}
+.error {
+  color: #ffc8cd;
+  font-size: 0.73rem;
+  margin: 0;
+  line-height: 1.5;
+}
+.message {
+  color: #a3f6e1;
+  font-size: 0.73rem;
+  margin: 0;
+  line-height: 1.5;
+}
+.feedback {
+  border-top: 1px solid rgb(145 168 207 / 12%);
+  padding-top: 0.6rem;
+}
+.feedback summary,
+.settings summary {
+  cursor: pointer;
+  color: #a2b7d2;
+  font-size: 0.7rem;
+}
+.feedback p {
+  color: #8f9fba;
+  font-size: 0.67rem;
+  line-height: 1.5;
+}
+.context {
+  margin-bottom: 1rem;
+}
+.contextLine {
+  justify-content: space-between;
+  gap: 1rem;
+}
+.contextLine > div {
+  display: grid;
+  gap: 0.25rem;
+}
+.contextLabel {
+  color: #78d8c3;
+  font-size: 0.59rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.context time {
+  font-size: 0.92rem;
+  font-variant-numeric: tabular-nums;
+}
+.timezone,
+.weather span,
+.weather small {
+  color: #8da1bd;
+  font-size: 0.65rem;
+}
+.weather strong {
+  font-size: 1.1rem;
+}
+
+.weather a {
+  color: #9bcebf;
+  font-size: 0.6rem;
+}
+.settings {
+  margin-top: 0.8rem;
+}
+.preferences {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.85rem;
+  max-width: 30rem;
+}
+.preferences label {
+  display: grid;
+  gap: 0.3rem;
+  color: #a9bad3;
+  font-size: 0.72rem;
+}
+.preferences input,
+.preferences select {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid rgb(145 168 207 / 24%);
+  border-radius: 0.5rem;
+  background: #081326;
+  color: #eaf0fc;
+  padding: 0.6rem;
+  font: inherit;
+}
+.preferences .check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.check input {
+  width: auto;
+  accent-color: #61dfc4;
+}
+.formRow {
+  align-items: start;
+}
+.formRow label {
+  flex: 1 1 9rem;
+}
+.preferences small {
+  color: #8f9fba;
+  line-height: 1.5;
+}
+.card button:focus-visible,
+.feedback button:focus-visible,
+.settings summary:focus-visible,
+.feedback summary:focus-visible,
+.preferences :focus-visible {
+  outline: 2px solid #61dfc4;
+  outline-offset: 3px;
+}
+@media (max-width: 480px) {
+  .connection {
+    padding: 0.65rem;
+  }
+  .heading {
+    align-items: start;
+  }
+}

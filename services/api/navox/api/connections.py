@@ -16,6 +16,7 @@ from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDe
 from navox.core.credential_vault import CredentialVault, CredentialVaultError
 from navox.core.settings import Settings
 from navox.db.models import Connection, ConnectionCredential, OAuthAuthorizationAttempt
+from navox.providers.google_sources import CALENDAR_READ_SCOPE, GMAIL_READ_SCOPE
 
 router = APIRouter(prefix="/connections", tags=["connections"])
 
@@ -32,7 +33,9 @@ GOOGLE_ACCOUNT_BINDING_SCOPES = (
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
 )
-GOOGLE_ALLOWED_SCOPES = frozenset((*GOOGLE_IDENTITY_SCOPES, GOOGLE_GMAIL_SEND_SCOPE))
+GOOGLE_ALLOWED_SCOPES = frozenset(
+    (*GOOGLE_IDENTITY_SCOPES, GOOGLE_GMAIL_SEND_SCOPE, GMAIL_READ_SCOPE, CALENDAR_READ_SCOPE)
+)
 OAUTH_ATTEMPT_TTL = timedelta(minutes=10)
 
 
@@ -278,6 +281,52 @@ async def start_google_gmail_send_authorization(
     )
 
 
+@router.post(
+    "/google/{connection_id}/intelligence/start",
+    response_model=GoogleAuthorizationStartResponse,
+)
+async def start_google_intelligence_authorization(
+    connection_id: UUID,
+    current_account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> GoogleAuthorizationStartResponse:
+    """Request read permissions only after the user explicitly enables intelligence."""
+    google_vault(settings)
+    connection = await database.scalar(
+        select(Connection).where(
+            Connection.id == connection_id,
+            Connection.user_id == current_account.user.id,
+            Connection.workspace_id == current_account.workspace.id,
+            Connection.provider == "google",
+        )
+    )
+    if connection is None:
+        raise HTTPException(status_code=404, detail="Google connection not found")
+    scopes = (*GOOGLE_ACCOUNT_BINDING_SCOPES, GMAIL_READ_SCOPE, CALENDAR_READ_SCOPE)
+    state_value, code_verifier = token_urlsafe(32), token_urlsafe(64)
+    database.add(
+        OAuthAuthorizationAttempt(
+            user_id=current_account.user.id,
+            workspace_id=current_account.workspace.id,
+            provider="google",
+            purpose="intelligence_read",
+            connection_id=connection.id,
+            requested_scopes=list(scopes),
+            state_hash=hash_value(state_value),
+            code_verifier=code_verifier,
+            expires_at=datetime.now(UTC) + OAUTH_ATTEMPT_TTL,
+        )
+    )
+    await database.commit()
+    return GoogleAuthorizationStartResponse(
+        authorization_url=authorization_url(
+            state_value, code_verifier, settings, scopes=scopes, include_granted_scopes=True
+        ),
+        requested_scopes=list(scopes),
+    )
+
+
 @router.get("/google/callback", include_in_schema=False)
 async def complete_google_authorization(
     current_account: CurrentAccountDependency,
@@ -326,7 +375,7 @@ async def complete_google_authorization(
     except GoogleOAuthProviderError:
         return connection_redirect(settings, "failed")
 
-    if attempt.purpose == "gmail_send":
+    if attempt.purpose in {"gmail_send", "intelligence_read"}:
         connection = await database.scalar(
             select(Connection).where(
                 Connection.id == attempt.connection_id,
@@ -340,7 +389,12 @@ async def complete_google_authorization(
 
         scopes_value = token_response.get("scope", "")
         returned_scopes = scopes_value.split() if isinstance(scopes_value, str) else []
-        if GOOGLE_GMAIL_SEND_SCOPE not in returned_scopes:
+        required_scopes = (
+            {GOOGLE_GMAIL_SEND_SCOPE}
+            if attempt.purpose == "gmail_send"
+            else {GMAIL_READ_SCOPE, CALENDAR_READ_SCOPE}
+        )
+        if not required_scopes.issubset(returned_scopes):
             return connection_redirect(settings, "scope_mismatch")
         if not set(returned_scopes).issubset(GOOGLE_ALLOWED_SCOPES):
             return connection_redirect(settings, "scope_mismatch")
@@ -391,7 +445,8 @@ async def complete_google_authorization(
             await database.flush()
             connection.credential_reference = credential.id
 
-        connection.granted_scopes = sorted(set(connection.granted_scopes) | set(returned_scopes))
+        # The provider response is authoritative; never preserve a revoked grant.
+        connection.granted_scopes = sorted(set(returned_scopes))
         connection.status = "active"
         connection.access_token_expires_at = expires_at
         connection.last_checked_at = datetime.now(UTC)
@@ -409,7 +464,10 @@ async def complete_google_authorization(
                 await database.delete(previous_credential)
 
         await database.commit()
-        return connection_redirect(settings, "gmail_send_enabled")
+        outcome = (
+            "gmail_send_enabled" if attempt.purpose == "gmail_send" else "intelligence_enabled"
+        )
+        return connection_redirect(settings, outcome)
 
     try:
         profile = await fetch_google_profile(access_token)

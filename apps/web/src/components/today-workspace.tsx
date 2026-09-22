@@ -5,9 +5,15 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { ApprovalPanel } from "./approval-panel";
+import {
+  IntelligenceControls,
+  IntelligenceFeedback,
+  WorkspaceContext,
+} from "./intelligence-controls";
 import { ProactivePanel } from "./proactive-panel";
 import styles from "./today-workspace.module.css";
 
@@ -15,6 +21,7 @@ interface Account {
   id: string;
   email: string;
   display_name: string | null;
+  timezone?: string;
   workspace: {
     id: string;
     name: string;
@@ -36,6 +43,8 @@ interface TodaySource {
   provider: string;
   source_type: string;
   external_resource_id: string | null;
+  evidence_locator?: Record<string, unknown> | null;
+  observed_at?: string | null;
 }
 
 interface TodayItem {
@@ -50,6 +59,9 @@ interface TodayItem {
   created_by: string;
   score: number;
   reasons: string[];
+  band?: string;
+  factors?: Record<string, number>;
+  suggested_capability?: string | null;
   sources: TodaySource[];
 }
 
@@ -152,13 +164,14 @@ function isTerminalPlan(status: string): boolean {
   return ["completed", "blocked", "failed", "dispatch_failed"].includes(status);
 }
 
-function dueLabel(value: string | null): string {
+function dueLabel(value: string | null, timezone: string): string {
   if (value === null) {
     return "No due date";
   }
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
+    timeZone: timezone,
   }).format(new Date(value));
 }
 
@@ -178,6 +191,9 @@ function itemUrgency(
 ): "urgent" | "upcoming" | "completed" | "neutral" {
   if (item.status === "completed") {
     return "completed";
+  }
+  if (item.band === "NOW" || item.band === "TODAY_HIGH") {
+    return "urgent";
   }
   if (item.due_at === null) {
     return "neutral";
@@ -211,8 +227,14 @@ function queryHeading(intent: string): string {
   return headings[intent] ?? "NavoX briefing";
 }
 
-function greeting(): string {
-  const hour = new Date().getHours();
+function greeting(timezone: string): string {
+  const hour = Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "numeric",
+      hourCycle: "h23",
+    }).format(new Date()),
+  );
   if (hour < 12) {
     return "Good morning";
   }
@@ -245,11 +267,12 @@ export function TodayWorkspace({
   onCheckGoogle,
   onSignOut,
 }: TodayWorkspaceProps) {
-  const [timezone, setTimezone] = useState("UTC");
+  const [timezone, setTimezone] = useState(account.timezone ?? "UTC");
   const [today, setToday] = useState<TodayPayload | null>(null);
   const [workspaceError, setWorkspaceError] = useState("");
   const [workspaceMessage, setWorkspaceMessage] = useState("");
   const [loadingToday, setLoadingToday] = useState(true);
+  const todayRequest = useRef(0);
   const [mutatingId, setMutatingId] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
@@ -268,30 +291,28 @@ export function TodayWorkspace({
   const [activePlan, setActivePlan] = useState<PlanDetail | null>(null);
   const [recentPlans, setRecentPlans] = useState<PlanSummary[]>([]);
 
-  useEffect(() => {
-    const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (detected) {
-      setTimezone(detected);
-    }
-  }, []);
-
   const refreshToday = useCallback(async () => {
+    const requestNumber = ++todayRequest.current;
     setLoadingToday(true);
     setWorkspaceError("");
     const params = new URLSearchParams({ timezone });
     try {
       const response = await fetch(`${apiBaseUrl}/today?${params.toString()}`, {
         credentials: "include",
+        cache: "no-store",
       });
+      if (requestNumber !== todayRequest.current) return;
       if (!response.ok) {
         setWorkspaceError(await readApiError(response));
         return;
       }
-      setToday((await response.json()) as TodayPayload);
+      const payload = (await response.json()) as TodayPayload;
+      if (requestNumber === todayRequest.current) setToday(payload);
     } catch {
-      setWorkspaceError("NavoX could not reach the workspace service.");
+      if (requestNumber === todayRequest.current)
+        setWorkspaceError("NavoX could not reach the workspace service.");
     } finally {
-      setLoadingToday(false);
+      if (requestNumber === todayRequest.current) setLoadingToday(false);
     }
   }, [timezone]);
 
@@ -549,7 +570,7 @@ export function TodayWorkspace({
         </div>
       );
     }
-    if (item.status === "waiting") {
+    if (item.status === "waiting" || item.status === "waiting_on_external") {
       return (
         <div className={styles.itemActions}>
           <button
@@ -630,7 +651,7 @@ export function TodayWorkspace({
                 <h3>{item.title}</h3>
                 {item.description && <p>{item.description}</p>}
                 <div className={styles.itemMeta}>
-                  <span>{dueLabel(item.due_at)}</span>
+                  <span>{dueLabel(item.due_at, timezone)}</span>
                   <span>
                     Priority {item.priority} · {priorityLabel(item.priority)}
                   </span>
@@ -645,15 +666,61 @@ export function TodayWorkspace({
                     ))}
                   </div>
                 )}
-                {item.sources.length > 0 && (
-                  <p className={styles.sourceLine}>
-                    Source:{" "}
-                    {item.sources
-                      .map((source) => source.source_type)
-                      .join(", ")}
+                <details className={styles.evidence}>
+                  <summary>Why this is here</summary>
+                  <p>
+                    {item.created_by === "user"
+                      ? "You added this commitment."
+                      : `${Math.round(item.confidence * 100)}% confidence · ${item.status === "candidate" ? "Your confirmation is needed" : "Supported by connected sources"}`}
                   </p>
-                )}
+                  {item.factors && (
+                    <dl>
+                      {Object.entries(item.factors)
+                        .filter(([, value]) => value > 0)
+                        .map(([name, value]) => (
+                          <div key={name}>
+                            <dt>{name.replaceAll("_", " ")}</dt>
+                            <dd>{Math.round(value * 100)}%</dd>
+                          </div>
+                        ))}
+                    </dl>
+                  )}
+                  {item.sources.map((source) => (
+                    <div
+                      className={styles.evidenceSource}
+                      key={`${source.provider}:${source.source_type}:${source.external_resource_id}`}
+                    >
+                      <strong>
+                        {source.provider} ·{" "}
+                        {source.source_type.replaceAll("_", " ")}
+                      </strong>
+                      {source.external_resource_id && (
+                        <small>
+                          Source reference: {source.external_resource_id}
+                        </small>
+                      )}
+                      {source.observed_at && (
+                        <small>
+                          Observed {dueLabel(source.observed_at, timezone)}
+                        </small>
+                      )}
+                      {source.evidence_locator &&
+                        Object.entries(source.evidence_locator)
+                          .filter(([, value]) => typeof value === "string")
+                          .map(([name, value]) => (
+                            <p key={name}>
+                              {name.replaceAll("_", " ")}:{" "}
+                              {String(value).slice(0, 500)}
+                            </p>
+                          ))}
+                    </div>
+                  ))}
+                </details>
                 {renderActions(item)}
+                <IntelligenceFeedback
+                  commitmentId={item.id}
+                  onRefresh={refreshToday}
+                />
               </article>
             ))}
           </div>
@@ -667,6 +734,7 @@ export function TodayWorkspace({
         weekday: "long",
         month: "short",
         day: "numeric",
+        timeZone: timezone,
       }).format(new Date(today.generated_at))
     : "Today";
 
@@ -697,15 +765,15 @@ export function TodayWorkspace({
         <div>
           <p className={styles.kicker}>Today · {generatedLabel}</p>
           <h1>
-            {greeting()}, {firstName}.
+            {greeting(timezone)}, {firstName}.
             <span className={styles.heroAccent}>
               Here&apos;s what matters now.
             </span>
           </h1>
           <p className={styles.heroCopy}>
-            One operational view of the commitments NavoX actually has saved.
-            Nothing here is fabricated, and nothing external happens from this
-            screen.
+            Your commitments, connected context, and next steps in one private
+            workspace. Stay informed, review the evidence, and decide what
+            happens next.
           </p>
         </div>
         <div className={styles.posture}>
@@ -718,6 +786,8 @@ export function TodayWorkspace({
           </div>
         </div>
       </section>
+
+      <WorkspaceContext timezone={timezone} onTimezoneChange={setTimezone} />
 
       {(workspaceError || workspaceMessage || message) && (
         <div
@@ -793,7 +863,7 @@ export function TodayWorkspace({
                 </label>
               </div>
               <label>
-                Due
+                Due · this device&apos;s local time
                 <input
                   onChange={(event) => setDueAt(event.target.value)}
                   type="datetime-local"
@@ -851,7 +921,7 @@ export function TodayWorkspace({
                           <strong>{item.title}</strong>
                           <span className={styles.queryDue}>
                             {item.due_at
-                              ? dueLabel(item.due_at)
+                              ? dueLabel(item.due_at, timezone)
                               : "No due date"}
                           </span>
                         </div>
@@ -987,6 +1057,11 @@ export function TodayWorkspace({
               </p>
             )}
           </section>
+          <IntelligenceControls
+            connections={connections}
+            paused={agentPaused}
+            onRefresh={refreshToday}
+          />
           <section className={styles.controlCard}>
             <div className={styles.controlHeading}>
               <p>Connections</p>
@@ -994,8 +1069,9 @@ export function TodayWorkspace({
             </div>
             <h2>Google</h2>
             <p className={styles.mutedCopy}>
-              Google identity stays minimal. Gmail send is granted separately
-              when you enable it; Calendar and Drive content are still not read.
+              Manage your Google connection here. Choose read access in
+              Connected understanding; email sending requires its own permission
+              and approval.
             </p>
             {connections.length === 0 ? (
               <button

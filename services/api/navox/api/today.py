@@ -2,7 +2,7 @@ from datetime import timedelta
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 
 from navox.api.auth import CurrentAccountDependency, DatabaseSession
@@ -21,6 +21,8 @@ class TodaySourceResponse(BaseModel):
     provider: str
     source_type: str
     external_resource_id: str | None
+    evidence_locator: dict[str, object] | None = None
+    observed_at: str | None = None
 
 
 class TodayItemResponse(BaseModel):
@@ -36,6 +38,10 @@ class TodayItemResponse(BaseModel):
     score: int
     reasons: list[str]
     sources: list[TodaySourceResponse]
+    category: str
+    band: str
+    factors: dict[str, float]
+    suggested_capability: str | None
 
 
 class TodayResponse(BaseModel):
@@ -103,11 +109,17 @@ def item_response(item: TodayItem) -> TodayItemResponse:
         created_by=item.created_by,
         score=item.score,
         reasons=list(item.reasons),
+        category=item.category,
+        band=item.band,
+        factors=item.factors,
+        suggested_capability=item.suggested_capability,
         sources=[
             TodaySourceResponse(
                 provider=source.provider,
                 source_type=source.source_type,
                 external_resource_id=source.external_resource_id,
+                evidence_locator=source.evidence_locator,
+                observed_at=source.observed_at.isoformat() if source.observed_at else None,
             )
             for source in item.sources
         ],
@@ -151,8 +163,10 @@ async def current_projection(
 async def get_today(
     current_account: CurrentAccountDependency,
     database: DatabaseSession,
+    response: Response,
     timezone_name: str | None = Query(default=None, alias="timezone"),
 ) -> TodayResponse:
+    response.headers["Cache-Control"] = "no-store"
     projection = await current_projection(current_account, database, timezone_name)
     return projection_response(projection)
 

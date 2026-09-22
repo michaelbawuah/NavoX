@@ -17,6 +17,7 @@ from navox.db.models import (
     ProactivePreference,
     ProactiveSignal,
 )
+from navox.intelligence.attention import workspace_attention
 
 ACTIVE_COMMITMENT_STATUSES = {"candidate", "confirmed", "waiting", "attention"}
 TERMINAL_COMMITMENT_STATUSES = {"completed", "rejected", "expired"}
@@ -361,6 +362,8 @@ def tier_for(
 
 
 def should_have_signal(commitment: Commitment, now: datetime) -> bool:
+    if commitment.intelligence_metadata:
+        return True
     if commitment.status in {"candidate", "waiting", "attention"}:
         return True
     if commitment.due_at is not None:
@@ -393,13 +396,11 @@ async def evaluate_workspace(
     )
     budget_exhausted = interruptions >= preference.max_interruptions_per_day
 
-    commitments = list(
-        await database.scalars(
-            select(Commitment).where(
-                Commitment.user_id == user_id,
-                Commitment.workspace_id == workspace_id,
-            )
-        )
+    commitments, intelligence_scores = await workspace_attention(
+        database,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        now=current_time,
     )
     existing_signals = list(
         await database.scalars(
@@ -438,6 +439,21 @@ async def evaluate_workspace(
         fingerprint = fingerprint_for(commitment, signal_type)
         current_fingerprints.add(fingerprint)
         signal = signal_by_fingerprint.get(fingerprint)
+        intelligence = bool(commitment.intelligence_metadata)
+        if intelligence and signal is None:
+            # A source correction retains the same alert and its dismissal/cooldown
+            # history instead of manufacturing a fresh notification identity.
+            signal = next(
+                (
+                    item
+                    for item in existing_signals
+                    if item.commitment_id == commitment.id and item.status != "resolved"
+                ),
+                None,
+            )
+            if signal is not None:
+                signal.fingerprint = fingerprint
+                signal.signal_type = signal_type
         fatigue = fatigue_penalty(
             signal,
             now=current_time,
@@ -476,6 +492,41 @@ async def evaluate_workspace(
             )
         )
 
+        components_data = {name: float(value) for name, value in components.as_dict().items()}
+        explanation = why_matters(commitment, signal_type, current_time)
+        capability = capability_for(signal_type)
+        if intelligence:
+            result = intelligence_scores[commitment.id]
+            score = result.score
+            components_data = dict(result.factors)
+            explanation = "; ".join(result.reasons)
+            capability = result.suggested_capability
+            band_tiers = {
+                "NOW": "notify_now",
+                "TODAY_HIGH": "briefing",
+                "TODAY": "briefing",
+                "DASHBOARD": "dashboard",
+                "SUPPRESS": "suppressed",
+            }
+            tier = band_tiers[result.band]
+            allowed = tier_for(
+                score,
+                preference,
+                quiet=quiet,
+                interruption_budget_exhausted=budget_exhausted,
+                notifications_allowed=preference.notifications_enabled,
+            )
+            order = {"suppressed": 0, "dashboard": 1, "briefing": 2, "notify_now": 3}
+            if order[allowed] < order[tier]:
+                tier = allowed
+            if commitment.status == "candidate" and order[tier] > 1:
+                tier = "dashboard"
+            if result.suppressed or snoozed or dismissed:
+                tier = "suppressed"
+            commitment.attention_score = score
+            commitment.attention_factors = dict(result.factors)
+            commitment.attention_band = result.band
+
         if signal is None:
             signal = ProactiveSignal(
                 user_id=user_id,
@@ -486,10 +537,10 @@ async def evaluate_workspace(
                 status="active",
                 tier=tier,
                 attention_score=score,
-                score_components=components.as_dict(),
+                score_components=components_data,
                 what_happening=what_happening(commitment, signal_type),
-                why_matters=why_matters(commitment, signal_type, current_time),
-                suggested_capability=capability_for(signal_type),
+                why_matters=explanation,
+                suggested_capability=capability,
                 last_evaluated_at=current_time,
             )
             database.add(signal)
@@ -511,10 +562,10 @@ async def evaluate_workspace(
         else:
             signal.tier = tier
             signal.attention_score = score
-            signal.score_components = components.as_dict()
+            signal.score_components = components_data
             signal.what_happening = what_happening(commitment, signal_type)
-            signal.why_matters = why_matters(commitment, signal_type, current_time)
-            signal.suggested_capability = capability_for(signal_type)
+            signal.why_matters = explanation
+            signal.suggested_capability = capability
             signal.last_evaluated_at = current_time
             if signal.status == "resolved":
                 signal.status = "active"

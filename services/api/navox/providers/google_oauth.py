@@ -28,6 +28,8 @@ async def access_token_for_connection(
     connection: Connection,
     settings: Settings,
 ) -> str:
+    if connection.provider != "google" or connection.status != "active":
+        raise GoogleAccessTokenError("Google connection is not active")
     if connection.credential_reference is None:
         raise GoogleAccessTokenError("Google credential is unavailable")
     credential = await database.get(ConnectionCredential, connection.credential_reference)
@@ -60,6 +62,10 @@ async def access_token_for_connection(
     access_token = data.get("access_token")
     if not isinstance(access_token, str) or not access_token:
         raise GoogleAccessTokenError("Google did not return an access token")
+    scopes = data.get("scope")
+    if isinstance(scopes, str):
+        # Refresh responses may narrow grants; the old permission list is not authority.
+        connection.granted_scopes = scopes.split()
 
     expires_in = data.get("expires_in")
     connection.access_token_expires_at = (

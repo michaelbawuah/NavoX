@@ -1,0 +1,312 @@
+{
+  "provider": "navox-reference",
+  "model": "synthetic-operational-reference-v1",
+  "snapshot_kind": "synthetic_reference",
+  "cases": [
+    {
+      "case_id": "budget-before-review",
+      "output": {
+        "schema_version": "operational-extraction.v1",
+        "observations": [
+          {
+            "observation_type": "request",
+            "action_text": "send",
+            "object_text": "the budget",
+            "temporal_expression": "before tomorrow's review",
+            "confidence": 0.97,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 48,
+                "text": "Please send the budget before tomorrow's review."
+              }
+            ]
+          }
+        ],
+        "temporals": [
+          {
+            "expression": "tomorrow's review",
+            "kind": "deadline",
+            "confidence": 0.92,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 48,
+                "text": "Please send the budget before tomorrow's review."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "promise-slides",
+      "output": {
+        "schema_version": "operational-extraction.v1",
+        "observations": [
+          {
+            "observation_type": "promise",
+            "action_text": "send",
+            "object_text": "the revised slides",
+            "temporal_expression": "by Friday",
+            "confidence": 0.96,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 39,
+                "text": "I'll send the revised slides by Friday."
+              }
+            ]
+          }
+        ],
+        "temporals": [
+          {
+            "expression": "Friday",
+            "kind": "deadline",
+            "confidence": 0.94,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 39,
+                "text": "I'll send the revised slides by Friday."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "meeting-advisor",
+      "output": {
+        "schema_version": "operational-extraction.v1",
+        "observations": [
+          {
+            "observation_type": "meeting",
+            "object_text": "Research review with Professor Lee",
+            "temporal_expression": "Tuesday at 2 PM",
+            "confidence": 0.98,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 54,
+                "text": "Research review with Professor Lee is Tuesday at 2 PM."
+              }
+            ]
+          }
+        ],
+        "people": [
+          {
+            "name": "Professor Lee",
+            "confidence": 0.99,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 54,
+                "text": "Research review with Professor Lee is Tuesday at 2 PM."
+              }
+            ]
+          }
+        ],
+        "temporals": [
+          {
+            "expression": "Tuesday at 2 PM",
+            "kind": "meeting_start",
+            "confidence": 0.98,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 54,
+                "text": "Research review with Professor Lee is Tuesday at 2 PM."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "follow-up-maya",
+      "output": {
+        "schema_version": "operational-extraction.v1",
+        "observations": [
+          {
+            "observation_type": "follow_up",
+            "action_text": "follow up",
+            "object_text": "Maya",
+            "temporal_expression": "by Thursday",
+            "confidence": 0.95,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 56,
+                "text": "If Maya has not replied by Thursday, follow up with her."
+              }
+            ]
+          }
+        ],
+        "people": [
+          {
+            "name": "Maya",
+            "confidence": 0.99,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 56,
+                "text": "If Maya has not replied by Thursday, follow up with her."
+              }
+            ]
+          }
+        ],
+        "temporals": [
+          {
+            "expression": "Thursday",
+            "kind": "follow_up",
+            "confidence": 0.96,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 56,
+                "text": "If Maya has not replied by Thursday, follow up with her."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "deployment-task",
+      "output": {
+        "schema_version": "operational-extraction.v1",
+        "observations": [
+          {
+            "observation_type": "task",
+            "action_text": "finish",
+            "object_text": "the deployment checklist",
+            "confidence": 0.95,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 47,
+                "text": "Finish the deployment checklist before release."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "newsletter",
+      "output": {
+        "schema_version": "operational-extraction.v1"
+      }
+    },
+    {
+      "case_id": "optional-suggestion",
+      "output": {
+        "schema_version": "operational-extraction.v1"
+      }
+    },
+    {
+      "case_id": "advisor-relationship",
+      "output": {
+        "schema_version": "operational-extraction.v1",
+        "people": [
+          {
+            "name": "Jordan",
+            "confidence": 0.99,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 26,
+                "text": "Jordan is Priya's advisor."
+              }
+            ]
+          },
+          {
+            "name": "Priya",
+            "confidence": 0.99,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 26,
+                "text": "Jordan is Priya's advisor."
+              }
+            ]
+          }
+        ],
+        "relationships": [
+          {
+            "relationship_type": "advisor_of",
+            "subject_text": "Jordan",
+            "object_text": "Priya",
+            "confidence": 0.98,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 26,
+                "text": "Jordan is Priya's advisor."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "budget-sent",
+      "output": {
+        "schema_version": "operational-extraction.v1",
+        "observations": [
+          {
+            "observation_type": "completion",
+            "action_text": "send",
+            "object_text": "the budget",
+            "confidence": 0.96,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 18,
+                "text": "I sent the budget."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "approval-waiting",
+      "output": {
+        "schema_version": "operational-extraction.v1",
+        "observations": [
+          {
+            "observation_type": "waiting",
+            "action_text": "obtain",
+            "object_text": "the approval",
+            "confidence": 0.96,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 68,
+                "text": "I sent the approval request to Maya and am waiting for her response."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

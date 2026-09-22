@@ -1,6 +1,7 @@
 import asyncio
 
 from temporalio.client import Client
+from temporalio.exceptions import WorkflowAlreadyStartedError
 from temporalio.worker import Worker
 
 from navox.agent.activities import execute_plan_step_activity, finalize_plan_activity
@@ -10,6 +11,12 @@ from navox.approvals.activities import (
     mark_execution_uncertain_activity,
 )
 from navox.core.settings import get_settings
+from navox.intelligence.activities import (
+    intelligence_workspaces_activity,
+    pending_intelligence_activity,
+    process_source_activity,
+    refresh_intelligence_activity,
+)
 from navox.proactive.activities import (
     commitment_timing_state_activity,
     daily_briefing_delay_activity,
@@ -21,6 +28,14 @@ from navox.proactive.activities import (
 from navox.workflows.approved_action import ApprovedActionWorkflow
 from navox.workflows.foundation import FoundationHeartbeatWorkflow
 from navox.workflows.handle_commitment import HandleCommitmentWorkflow
+from navox.workflows.intelligence import (
+    AttentionEvaluationWorkflow,
+    FeedbackLearningWorkflow,
+    IntelligenceReconciliationWorkflow,
+    ProcessSourceEventWorkflow,
+    ReevaluateCommitmentWorkflow,
+    TodayRefreshWorkflow,
+)
 from navox.workflows.proactive import (
     CommitmentLifecycleWorkflow,
     DailyBriefingWorkflow,
@@ -36,6 +51,12 @@ async def main() -> None:
         client,
         task_queue=settings.temporal_task_queue,
         workflows=[
+            ProcessSourceEventWorkflow,
+            ReevaluateCommitmentWorkflow,
+            AttentionEvaluationWorkflow,
+            TodayRefreshWorkflow,
+            FeedbackLearningWorkflow,
+            IntelligenceReconciliationWorkflow,
             FoundationHeartbeatWorkflow,
             HandleCommitmentWorkflow,
             ApprovedActionWorkflow,
@@ -45,6 +66,10 @@ async def main() -> None:
             DailyBriefingWorkflow,
         ],
         activities=[
+            intelligence_workspaces_activity,
+            process_source_activity,
+            refresh_intelligence_activity,
+            pending_intelligence_activity,
             execute_plan_step_activity,
             finalize_plan_activity,
             action_authorization_state_activity,
@@ -58,7 +83,17 @@ async def main() -> None:
             record_scheduled_briefing_activity,
         ],
     )
-    await worker.run()
+    async with worker:
+        if settings.ai_provider != "disabled":
+            try:
+                await client.start_workflow(
+                    IntelligenceReconciliationWorkflow.run,
+                    id="navox-intelligence-reconciliation-v1",
+                    task_queue=settings.temporal_task_queue,
+                )
+            except WorkflowAlreadyStartedError:
+                pass
+        await asyncio.Event().wait()
 
 
 if __name__ == "__main__":

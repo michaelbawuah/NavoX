@@ -18,9 +18,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from navox.api.auth import DatabaseSession, SettingsDependency
-from navox.core.settings import Settings
+from navox.core.settings import Settings, get_settings
 from navox.db.models import Connection, IncomingEvent, ProviderEventSubscription
 from navox.events.processor import IncomingEventProcessor, NormalizedProviderEvent
+from navox.intelligence.dispatcher import dispatch_source
+from navox.intelligence.jobs import SourceWork
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -225,6 +227,23 @@ async def record_normalized_event(
 
     IncomingEventProcessor().process(event)
     await database.commit()
+    settings = get_settings()
+    if event.source in {"gmail", "calendar"} and settings.ai_provider != "disabled":
+        try:
+            await dispatch_source(
+                SourceWork(
+                    str(event.connection_id),
+                    str(event.user_id),
+                    str(event.workspace_id),
+                    event.source,
+                    str(event.id),
+                ),
+                settings=settings,
+                request_id=str(event.id),
+            )
+        except Exception:
+            # The persisted pending row is an outbox; reconciliation retries dispatch.
+            pass
     return "processed"
 
 

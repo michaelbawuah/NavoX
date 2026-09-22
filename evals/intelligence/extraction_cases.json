@@ -1,0 +1,123 @@
+[
+  {
+    "id": "budget-before-review",
+    "subject": "Budget review",
+    "content": "Please send the budget before tomorrow's review.",
+    "expected_observation_types": [
+      "request"
+    ],
+    "expected_temporal_expressions": [
+      "tomorrow's review"
+    ],
+    "expected_people": [],
+    "expected_relationship_types": []
+  },
+  {
+    "id": "promise-slides",
+    "subject": "Slides",
+    "content": "I'll send the revised slides by Friday.",
+    "expected_observation_types": [
+      "promise"
+    ],
+    "expected_temporal_expressions": [
+      "Friday"
+    ],
+    "expected_people": [],
+    "expected_relationship_types": []
+  },
+  {
+    "id": "meeting-advisor",
+    "subject": "Research review",
+    "content": "Research review with Professor Lee is Tuesday at 2 PM.",
+    "expected_observation_types": [
+      "meeting"
+    ],
+    "expected_temporal_expressions": [
+      "Tuesday at 2 PM"
+    ],
+    "expected_people": [
+      "Professor Lee"
+    ],
+    "expected_relationship_types": []
+  },
+  {
+    "id": "follow-up-maya",
+    "subject": "Maya follow-up",
+    "content": "If Maya has not replied by Thursday, follow up with her.",
+    "expected_observation_types": [
+      "follow_up"
+    ],
+    "expected_temporal_expressions": [
+      "Thursday"
+    ],
+    "expected_people": [
+      "Maya"
+    ],
+    "expected_relationship_types": []
+  },
+  {
+    "id": "deployment-task",
+    "subject": "Deployment",
+    "content": "Finish the deployment checklist before release.",
+    "expected_observation_types": [
+      "task"
+    ],
+    "expected_temporal_expressions": [],
+    "expected_people": [],
+    "expected_relationship_types": []
+  },
+  {
+    "id": "newsletter",
+    "subject": "Fall newsletter",
+    "content": "Our fall newsletter is now available. Thanks for reading.",
+    "expected_observation_types": [],
+    "expected_temporal_expressions": [],
+    "expected_people": [],
+    "expected_relationship_types": []
+  },
+  {
+    "id": "optional-suggestion",
+    "subject": "Suggestion",
+    "content": "You might want to explore the new dashboard when you have time.",
+    "expected_observation_types": [],
+    "expected_temporal_expressions": [],
+    "expected_people": [],
+    "expected_relationship_types": []
+  },
+  {
+    "id": "advisor-relationship",
+    "subject": "Team context",
+    "content": "Jordan is Priya's advisor.",
+    "expected_observation_types": [],
+    "expected_temporal_expressions": [],
+    "expected_people": [
+      "Jordan",
+      "Priya"
+    ],
+    "expected_relationship_types": [
+      "advisor_of"
+    ]
+  },
+  {
+    "id": "budget-sent",
+    "subject": "Budget approval",
+    "content": "I sent the budget.",
+    "expected_observation_types": [
+      "completion"
+    ],
+    "expected_temporal_expressions": [],
+    "expected_people": [],
+    "expected_relationship_types": []
+  },
+  {
+    "id": "approval-waiting",
+    "subject": "Budget approval",
+    "content": "I sent the approval request to Maya and am waiting for her response.",
+    "expected_observation_types": [
+      "waiting"
+    ],
+    "expected_temporal_expressions": [],
+    "expected_people": [],
+    "expected_relationship_types": []
+  }
+]

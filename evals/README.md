@@ -9,6 +9,9 @@ about the quality, latency, or cost of any external model.
 
 ## Suites
 
+- `intelligence/extraction_cases.json`: SPEC-002 operational extraction labels.
+- `intelligence/adversarial_cases.json`: prompt-injection, authority, and evidence-boundary attacks.
+- `intelligence/reference-baseline.json`: deterministic SPEC-002 extraction plumbing snapshot.
 - `commitments/labeled_cases.json`: precision and recall labels.
 - `commitments/malicious_outputs.json`: strict-schema and prompt-injection rejection.
 - `commitments/false_positive_outputs.json`: confidence-policy suppression.
@@ -27,6 +30,10 @@ uv run python -m navox.evaluation --fail-on-gate \
   --output /tmp/navox-evaluation.json \
   --markdown /tmp/navox-evaluation.md
 ```
+
+SPEC-002 operational extraction is gated on exact reference labels, strict
+schema validation, bounded source evidence, and adversarial rejection. The
+reference baseline proves evaluation plumbing only.
 
 A real provider comparison must use the same case IDs and snapshot schema. Keep
 private prompts, credentials, emails, and production content out of committed
