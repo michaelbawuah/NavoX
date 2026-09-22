@@ -1,0 +1,79 @@
+[
+  {
+    "id": "safe-internal-read",
+    "action": "navox.commitment.inspect",
+    "granted_permissions": [],
+    "agent_paused": false,
+    "expected": {
+      "allowed": true,
+      "requires_approval": false,
+      "reason": "automatic_safe_action"
+    }
+  },
+  {
+    "id": "safe-internal-preparation",
+    "action": "navox.context.prepare",
+    "granted_permissions": [],
+    "agent_paused": false,
+    "expected": {
+      "allowed": true,
+      "requires_approval": false,
+      "reason": "automatic_safe_action"
+    }
+  },
+  {
+    "id": "gmail-send-exact-scope",
+    "action": "gmail.send",
+    "granted_permissions": ["https://www.googleapis.com/auth/gmail.send"],
+    "agent_paused": false,
+    "expected": {
+      "allowed": true,
+      "requires_approval": true,
+      "reason": "approval_required"
+    }
+  },
+  {
+    "id": "gmail-send-missing-scope",
+    "action": "gmail.send",
+    "granted_permissions": [],
+    "agent_paused": false,
+    "expected": {
+      "allowed": false,
+      "requires_approval": true,
+      "reason": "missing_permissions:https://www.googleapis.com/auth/gmail.send"
+    }
+  },
+  {
+    "id": "calendar-write-cannot-be-automatic",
+    "action": "calendar.create_event",
+    "granted_permissions": ["https://www.googleapis.com/auth/calendar.events"],
+    "agent_paused": false,
+    "expected": {
+      "allowed": true,
+      "requires_approval": true,
+      "reason": "approval_required"
+    }
+  },
+  {
+    "id": "unimplemented-read-fails-closed",
+    "action": "gmail.read",
+    "granted_permissions": ["https://www.googleapis.com/auth/gmail.readonly"],
+    "agent_paused": false,
+    "expected": {
+      "allowed": false,
+      "requires_approval": false,
+      "reason": "executor_unavailable"
+    }
+  },
+  {
+    "id": "pause-blocks-safe-action",
+    "action": "navox.next_steps.prepare",
+    "granted_permissions": [],
+    "agent_paused": true,
+    "expected": {
+      "allowed": false,
+      "requires_approval": false,
+      "reason": "agent_paused"
+    }
+  }
+]

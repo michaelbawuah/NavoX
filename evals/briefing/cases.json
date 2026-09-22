@@ -1,0 +1,78 @@
+[
+  {
+    "id": "urgent-objective-deadline",
+    "type": "deadline",
+    "status": "confirmed",
+    "priority": 5,
+    "due_in_hours": 2,
+    "objective_active": true,
+    "expected_tier": "notify_now",
+    "expected_signal_type": "deadline_warning"
+  },
+  {
+    "id": "urgent-during-quiet-hours",
+    "type": "deadline",
+    "status": "confirmed",
+    "priority": 5,
+    "due_in_hours": 2,
+    "objective_active": true,
+    "quiet": true,
+    "expected_tier": "briefing",
+    "expected_signal_type": "deadline_warning"
+  },
+  {
+    "id": "deadline-five-days-out",
+    "type": "deadline",
+    "status": "confirmed",
+    "priority": 3,
+    "due_in_hours": 120,
+    "expected_tier": "dashboard",
+    "expected_signal_type": "deadline_warning"
+  },
+  {
+    "id": "low-salience-renewal",
+    "type": "renewal",
+    "status": "confirmed",
+    "priority": 2,
+    "due_in_hours": 480,
+    "expected_tier": "suppressed",
+    "expected_signal_type": "renewal_warning"
+  },
+  {
+    "id": "overdue-promise",
+    "type": "promise",
+    "status": "confirmed",
+    "priority": 5,
+    "due_in_hours": -8,
+    "expected_tier": "briefing",
+    "expected_signal_type": "promise_follow_up"
+  },
+  {
+    "id": "unconfirmed-candidate",
+    "type": "task",
+    "status": "candidate",
+    "priority": 3,
+    "expected_tier": "suppressed",
+    "expected_signal_type": "candidate_review"
+  },
+  {
+    "id": "waiting-eight-days",
+    "type": "follow_up",
+    "status": "waiting",
+    "priority": 4,
+    "waiting_for_hours": 192,
+    "expected_tier": "dashboard",
+    "expected_signal_type": "waiting_response"
+  },
+  {
+    "id": "fatigued-urgent-deadline",
+    "type": "deadline",
+    "status": "confirmed",
+    "priority": 5,
+    "due_in_hours": 2,
+    "objective_active": true,
+    "notification_fatigue": 24,
+    "expected_tier": "dashboard",
+    "expected_signal_type": "deadline_warning"
+  }
+]

@@ -1,0 +1,166 @@
+{
+  "provider": "navox-reference",
+  "model": "synthetic-reference-v1",
+  "snapshot_kind": "synthetic_reference",
+  "cases": [
+    {
+      "case_id": "explicit-deadline",
+      "output": {
+        "candidates": [
+          {
+            "type": "deadline",
+            "title": "Submit capstone report",
+            "due_at": "2026-10-02T21:00:00Z",
+            "priority": 5,
+            "confidence": 0.96
+          }
+        ]
+      },
+      "latency_ms": 110,
+      "input_tokens": 82,
+      "output_tokens": 38,
+      "estimated_cost_usd": 0.00018
+    },
+    {
+      "case_id": "promise-and-follow-up",
+      "output": {
+        "candidates": [
+          {
+            "type": "promise",
+            "title": "Send the revised slides",
+            "priority": 4,
+            "confidence": 0.94
+          },
+          {
+            "type": "follow_up",
+            "title": "Check in with Maya",
+            "priority": 3,
+            "confidence": 0.91
+          }
+        ]
+      },
+      "latency_ms": 138,
+      "input_tokens": 120,
+      "output_tokens": 61,
+      "estimated_cost_usd": 0.00027
+    },
+    {
+      "case_id": "renewal",
+      "output": {
+        "candidates": [
+          {
+            "type": "renewal",
+            "title": "Renew the design software",
+            "due_at": "2026-10-15T12:00:00Z",
+            "priority": 4,
+            "confidence": 0.93
+          }
+        ]
+      },
+      "latency_ms": 103,
+      "input_tokens": 74,
+      "output_tokens": 36,
+      "estimated_cost_usd": 0.00016
+    },
+    {
+      "case_id": "meeting",
+      "output": {
+        "candidates": [
+          {
+            "type": "meeting",
+            "title": "Research review with advisor",
+            "due_at": "2026-09-25T18:00:00Z",
+            "priority": 4,
+            "confidence": 0.95
+          }
+        ]
+      },
+      "latency_ms": 117,
+      "input_tokens": 78,
+      "output_tokens": 39,
+      "estimated_cost_usd": 0.00017
+    },
+    {
+      "case_id": "polite-signoff",
+      "output": {
+        "candidates": [
+          {
+            "type": "follow_up",
+            "title": "Thanks again for your help",
+            "priority": 1,
+            "confidence": 0.21
+          }
+        ]
+      },
+      "latency_ms": 92,
+      "input_tokens": 54,
+      "output_tokens": 28,
+      "estimated_cost_usd": 0.00012
+    },
+    {
+      "case_id": "optional-suggestion",
+      "output": {
+        "candidates": [
+          {
+            "type": "task",
+            "title": "Consider reading the optional paper",
+            "priority": 1,
+            "confidence": 0.34
+          }
+        ]
+      },
+      "latency_ms": 95,
+      "input_tokens": 59,
+      "output_tokens": 30,
+      "estimated_cost_usd": 0.00013
+    },
+    {
+      "case_id": "explicit-task",
+      "output": {
+        "candidates": [
+          {
+            "type": "task",
+            "title": "Finish the deployment checklist",
+            "priority": 4,
+            "confidence": 0.92
+          }
+        ]
+      },
+      "latency_ms": 108,
+      "input_tokens": 69,
+      "output_tokens": 33,
+      "estimated_cost_usd": 0.00015
+    },
+    {
+      "case_id": "mixed-operational-state",
+      "output": {
+        "candidates": [
+          {
+            "type": "deadline",
+            "title": "Pay conference registration",
+            "due_at": "2026-09-30T16:00:00Z",
+            "priority": 5,
+            "confidence": 0.97
+          },
+          {
+            "type": "follow_up",
+            "title": "Confirm travel details",
+            "priority": 4,
+            "confidence": 0.9
+          }
+        ],
+        "relations": [
+          {
+            "from_index": 0,
+            "to_index": 1,
+            "relation_type": "related_to"
+          }
+        ]
+      },
+      "latency_ms": 146,
+      "input_tokens": 128,
+      "output_tokens": 68,
+      "estimated_cost_usd": 0.00029
+    }
+  ]
+}
