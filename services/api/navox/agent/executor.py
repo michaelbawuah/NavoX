@@ -1,6 +1,4 @@
-import json
 from datetime import UTC, datetime
-from hashlib import sha256
 from typing import cast
 from uuid import UUID
 
@@ -8,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.agent.audit import add_audit_event
+from navox.agent.hashing import payload_hash
 from navox.agent.contracts import ActionContract, get_action_contract
 from navox.agent.policy import ActionPolicy
 from navox.db.models import (
@@ -19,11 +18,6 @@ from navox.db.models import (
     User,
     WorkflowRef,
 )
-
-
-def payload_hash(payload: dict[str, object]) -> str:
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return sha256(encoded).hexdigest()
 
 
 async def granted_permissions(
