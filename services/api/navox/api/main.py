@@ -9,6 +9,7 @@ from navox.api.commitments import router as commitments_router
 from navox.api.connections import router as connections_router
 from navox.api.events import router as events_router
 from navox.api.health import router as health_router
+from navox.api.proactive import router as proactive_router
 from navox.api.today import router as today_router
 from navox.core.settings import get_settings
 
@@ -28,6 +29,7 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type"],
     )
     app.include_router(health_router, prefix="/api/v1")
+    app.include_router(proactive_router, prefix="/api/v1")
     app.include_router(actions_router, prefix="/api/v1")
     app.include_router(agent_router, prefix="/api/v1")
     app.include_router(auth_router, prefix="/api/v1")
