@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -7,8 +8,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.agent.audit import add_audit_event
-from navox.api.auth import CurrentAccountDependency, DatabaseSession
+from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
 from navox.db.models import ProactiveSignal
+from navox.proactive.dispatcher import (
+    ProactiveDispatchError,
+    ProactiveDispatcher,
+    TemporalProactiveDispatcher,
+)
 from navox.proactive.engine import (
     InvalidProactiveTimezone,
     default_preference,
@@ -21,6 +27,16 @@ from navox.proactive.engine import (
 )
 
 router = APIRouter(prefix="/proactive", tags=["proactive"])
+
+
+def get_proactive_dispatcher() -> ProactiveDispatcher:
+    return TemporalProactiveDispatcher()
+
+
+ProactiveDispatcherDependency = Annotated[
+    ProactiveDispatcher,
+    __import__("fastapi").Depends(get_proactive_dispatcher),
+]
 
 
 class SignalResponse(BaseModel):
@@ -411,4 +427,49 @@ async def meeting_prep(
             for item in prep.related_commitments
         ],
         prep_points=list(prep.prep_points),
+    )
+
+
+
+class ProactiveWorkflowResponse(BaseModel):
+    entity_type: str
+    entity_id: UUID
+    workflow_type: str
+    status: str
+
+
+class ProactiveActivationResponse(BaseModel):
+    workflows: list[ProactiveWorkflowResponse]
+
+
+@router.post("/activate", response_model=ProactiveActivationResponse)
+async def activate_proactive_navox(
+    current_account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    dispatcher: ProactiveDispatcherDependency,
+) -> ProactiveActivationResponse:
+    try:
+        refs = await dispatcher.activate(
+            database,
+            user_id=current_account.user.id,
+            workspace_id=current_account.workspace.id,
+            timezone=current_account.user.timezone,
+            settings=settings,
+        )
+    except ProactiveDispatchError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Proactive scheduling could not be started",
+        ) from error
+    return ProactiveActivationResponse(
+        workflows=[
+            ProactiveWorkflowResponse(
+                entity_type=ref.entity_type,
+                entity_id=ref.entity_id,
+                workflow_type=ref.workflow_type,
+                status=ref.status,
+            )
+            for ref in refs
+        ]
     )
