@@ -322,10 +322,14 @@ function approvalPanel(actions) {
         element("p", { text: summary.body }),
         element("p", {
           className: "empty",
-          text: `Approval expires ${new Date(action.approval.expires_at).toLocaleString()}. The server verifies this exact payload hash before execution.`,
+          text: action.approval
+            ? `Approval expires ${new Date(action.approval.expires_at).toLocaleString()}. The server verifies this exact payload hash before execution.`
+            : "Approval details are unavailable; use the full workspace before deciding.",
         }),
         element("div", { className: "actions" }, [
-          button("Approve exact action", () => void decideAction(action, "approve"), "primary"),
+          action.approval
+            ? button("Approve exact action", () => void decideAction(action, "approve"), "primary")
+            : element("span", { className: "empty", text: "Approval unavailable" }),
           button("Reject", () => void decideAction(action, "reject"), "danger"),
         ]),
       ]),
