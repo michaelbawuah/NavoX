@@ -114,10 +114,7 @@ function formatTime(value: string): string {
   }).format(new Date(value));
 }
 
-export function ProactivePanel({
-  timezone,
-  agentPaused,
-}: ProactivePanelProps) {
+export function ProactivePanel({ timezone, agentPaused }: ProactivePanelProps) {
   const [briefing, setBriefing] = useState<Briefing | null>(null);
   const [preference, setPreference] = useState<Preference | null>(null);
   const [meeting, setMeeting] = useState<MeetingPrep | null>(null);
@@ -229,7 +226,9 @@ export function ProactivePanel({
         setError(await apiError(response));
         return;
       }
-      setMessage(mode === "snooze" ? "Snoozed for four hours." : "Signal dismissed.");
+      setMessage(
+        mode === "snooze" ? "Snoozed for four hours." : "Signal dismissed.",
+      );
       await load();
     } catch {
       setError("NavoX could not update that proactive signal.");
@@ -238,7 +237,9 @@ export function ProactivePanel({
     }
   }
 
-  async function savePreferences(event: FormEvent<HTMLFormElement>): Promise<void> {
+  async function savePreferences(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
     event.preventDefault();
     if (preference === null) {
       return;
@@ -282,7 +283,11 @@ export function ProactivePanel({
           <span className={agentPaused ? styles.paused : styles.live}>
             {agentPaused ? "Delivery paused" : "Intelligence live"}
           </span>
-          <button disabled={activating} onClick={() => void activate()} type="button">
+          <button
+            disabled={activating}
+            onClick={() => void activate()}
+            type="button"
+          >
             {activating ? "Starting…" : "Enable durable scheduling"}
           </button>
         </div>
@@ -291,7 +296,9 @@ export function ProactivePanel({
       <div className={styles.summary}>
         <div>
           <span>Operational briefing</span>
-          <strong>{loading ? "Re-evaluating current state…" : briefing?.headline}</strong>
+          <strong>
+            {loading ? "Re-evaluating current state…" : briefing?.headline}
+          </strong>
         </div>
         <div className={styles.metrics}>
           <span>
@@ -310,9 +317,14 @@ export function ProactivePanel({
       </div>
 
       {(message || error) && (
-        <p className={error ? styles.error : styles.message} role={error ? "alert" : "status"}>
+        <p
+          className={error ? styles.error : styles.message}
+          role={error ? "alert" : "status"}
+        >
           {error || message}
-          {workflowCount !== null && !error ? ` · ${workflowCount} workflow(s)` : ""}
+          {workflowCount !== null && !error
+            ? ` · ${workflowCount} workflow(s)`
+            : ""}
         </p>
       )}
 
@@ -373,7 +385,8 @@ export function ProactivePanel({
             <p>Next meeting prep</p>
             <h3>{meeting.title}</h3>
             <span>
-              {formatTime(meeting.starts_at)} · about {meeting.minutes_until} min
+              {formatTime(meeting.starts_at)} · about {meeting.minutes_until}{" "}
+              min
             </span>
           </div>
           <ul>
@@ -385,7 +398,10 @@ export function ProactivePanel({
       )}
 
       <div className={styles.controlsToggle}>
-        <button onClick={() => setShowControls((value) => !value)} type="button">
+        <button
+          onClick={() => setShowControls((value) => !value)}
+          type="button"
+        >
           {showControls ? "Hide attention controls" : "Attention controls"}
         </button>
         <small>
@@ -400,7 +416,10 @@ export function ProactivePanel({
             Quiet hours start
             <input
               onChange={(event) =>
-                setPreference({ ...preference, quiet_hours_start: event.target.value })
+                setPreference({
+                  ...preference,
+                  quiet_hours_start: event.target.value,
+                })
               }
               type="time"
               value={preference.quiet_hours_start}
@@ -410,7 +429,10 @@ export function ProactivePanel({
             Quiet hours end
             <input
               onChange={(event) =>
-                setPreference({ ...preference, quiet_hours_end: event.target.value })
+                setPreference({
+                  ...preference,
+                  quiet_hours_end: event.target.value,
+                })
               }
               type="time"
               value={preference.quiet_hours_end}

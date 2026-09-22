@@ -778,8 +778,9 @@ export function TodayWorkspace({
                 )}
                 {queryResult.intent === "unsupported" && (
                   <small>
-                    Try today, attention, this week, waiting, renewals, promises,
-                    forgetting, meeting prep, or what NavoX can handle.
+                    Try today, attention, this week, waiting, renewals,
+                    promises, forgetting, meeting prep, or what NavoX can
+                    handle.
                   </small>
                 )}
               </div>
