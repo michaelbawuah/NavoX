@@ -2,7 +2,6 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from hashlib import sha256
-from typing import cast
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -269,7 +268,7 @@ async def default_preference(
         )
     )
     if existing is not None:
-        return cast(ProactivePreference, existing)
+        return existing
     preference = ProactivePreference(user_id=user_id, workspace_id=workspace_id)
     database.add(preference)
     await database.flush()
@@ -597,7 +596,7 @@ async def record_briefing(
         )
     )
     if existing is not None:
-        return cast(BriefingSnapshot, existing)
+        return existing
     snapshot = BriefingSnapshot(
         user_id=user_id,
         workspace_id=workspace_id,
