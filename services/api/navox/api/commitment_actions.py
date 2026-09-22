@@ -28,9 +28,17 @@ class ManualCommitmentRequest(BaseModel):
     priority: int = Field(default=3, ge=1, le=5)
     due_at: datetime | None = None
 
-    @field_validator("title", "description")
+    @field_validator("title")
     @classmethod
-    def normalize_text(cls, value: str | None) -> str | None:
+    def normalize_title(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 3:
+            raise ValueError("title must contain at least 3 non-whitespace characters")
+        return normalized
+
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str | None) -> str | None:
         if value is None:
             return None
         normalized = value.strip()
