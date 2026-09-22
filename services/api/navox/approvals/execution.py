@@ -385,6 +385,7 @@ async def execute_approved_gmail_send(
         receipt = await gmail.send(
             access_token=access_token,
             payload=GmailSendPayload(
+                sender=str(payload.sender),
                 to=str(payload.to),
                 subject=payload.subject,
                 body_text=payload.body_text,

@@ -587,6 +587,7 @@ async def test_google_gateway_builds_base64url_mime_and_requires_message_id(
     receipt = await GoogleGmailGateway().send(
         access_token="token",
         payload=GmailSendPayload(
+            sender="owner@example.com",
             to="person@example.com",
             subject="Subject",
             body_text="Body",
@@ -599,6 +600,31 @@ async def test_google_gateway_builds_base64url_mime_and_requires_message_id(
     raw = body["raw"]
     assert isinstance(raw, str)
     parsed = message_from_bytes(base64.urlsafe_b64decode(raw.encode()))
+    assert parsed["From"] == "owner@example.com"
     assert parsed["To"] == "person@example.com"
     assert parsed["Subject"] == "Subject"
     assert "Body" in parsed.get_payload()
+
+
+
+@pytest.mark.asyncio
+async def test_subject_header_injection_is_rejected(
+    approval_environment: tuple[AsyncClient, async_sessionmaker[AsyncSession], Settings],
+) -> None:
+    client, session_factory, settings = approval_environment
+    account = await register(client)
+    commitment = await create_commitment(client)
+    connection_id = await add_google_connection(session_factory, settings, account)
+
+    response = await client.post(
+        f"/api/v1/commitments/{commitment['id']}/actions/gmail-send/prepare",
+        json={
+            "request_id": str(uuid4()),
+            "connection_id": str(connection_id),
+            "to": "advisor@example.edu",
+            "subject": "Hello\nBcc: attacker@example.com",
+            "body_text": "Safe body.",
+            "post_send_state": "waiting",
+        },
+    )
+    assert response.status_code == 422

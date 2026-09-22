@@ -40,6 +40,7 @@ class GoogleAuthorizationStartResponse(BaseModel):
 class ConnectionResponse(BaseModel):
     id: UUID
     provider: str
+    external_email: str | None
     status: str
     granted_scopes: list[str]
     last_checked_at: datetime | None
@@ -174,6 +175,7 @@ def response_from_connection(connection: Connection) -> ConnectionResponse:
     return ConnectionResponse(
         id=connection.id,
         provider=connection.provider,
+        external_email=connection.external_email,
         status=connection.status,
         granted_scopes=connection.granted_scopes,
         last_checked_at=connection.last_checked_at,
@@ -253,7 +255,7 @@ async def start_google_gmail_send_authorization(
             provider="google",
             purpose="gmail_send",
             connection_id=connection.id,
-            requested_scopes=[GOOGLE_GMAIL_SEND_SCOPE],
+            requested_scopes=[*GOOGLE_IDENTITY_SCOPES, GOOGLE_GMAIL_SEND_SCOPE],
             state_hash=hash_value(state_value),
             code_verifier=code_verifier,
             expires_at=datetime.now(UTC) + OAUTH_ATTEMPT_TTL,
@@ -265,10 +267,10 @@ async def start_google_gmail_send_authorization(
             state_value,
             code_verifier,
             settings,
-            scopes=(GOOGLE_GMAIL_SEND_SCOPE,),
+            scopes=(*GOOGLE_IDENTITY_SCOPES, GOOGLE_GMAIL_SEND_SCOPE),
             include_granted_scopes=True,
         ),
-        requested_scopes=[GOOGLE_GMAIL_SEND_SCOPE],
+        requested_scopes=[*GOOGLE_IDENTITY_SCOPES, GOOGLE_GMAIL_SEND_SCOPE],
     )
 
 
@@ -338,6 +340,26 @@ async def complete_google_authorization(
             return connection_redirect(settings, "scope_mismatch")
         if not set(returned_scopes).issubset(GOOGLE_ALLOWED_SCOPES):
             return connection_redirect(settings, "scope_mismatch")
+        if not set(GOOGLE_IDENTITY_SCOPES).issubset(returned_scopes):
+            return connection_redirect(settings, "scope_mismatch")
+
+        try:
+            profile = await fetch_google_profile(access_token)
+        except GoogleOAuthProviderError:
+            return connection_redirect(settings, "failed")
+        external_account_id = profile.get("sub")
+        external_email = profile.get("email")
+        email_verified = profile.get("email_verified")
+        verified_email = email_verified is True or (
+            isinstance(email_verified, str) and email_verified == "true"
+        )
+        if (
+            external_account_id != connection.external_account_id
+            or not isinstance(external_email, str)
+            or external_email.strip().casefold() != connection.external_email
+            or not verified_email
+        ):
+            return connection_redirect(settings, "account_mismatch")
 
         refresh_token = token_response.get("refresh_token")
         existing_credential = (

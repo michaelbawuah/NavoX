@@ -244,7 +244,11 @@ async def test_gmail_send_scope_is_incremental_and_bound_to_existing_connection(
     assert capability_start.status_code == 200
     query = parse_qs(urlparse(capability_start.json()["authorization_url"]).query)
     assert query["include_granted_scopes"] == ["true"]
-    assert query["scope"] == ["https://www.googleapis.com/auth/gmail.send"]
+    requested_scopes = set(query["scope"][0].split())
+    assert "openid" in requested_scopes
+    assert "https://www.googleapis.com/auth/userinfo.email" in requested_scopes
+    assert "https://www.googleapis.com/auth/userinfo.profile" in requested_scopes
+    assert "https://www.googleapis.com/auth/gmail.send" in requested_scopes
     capability_state = query["state"][0]
 
     callback = await client.get(
@@ -320,3 +324,74 @@ async def test_incremental_gmail_grant_rejects_unrequested_drive_scope(
     assert callback.headers["location"].endswith("?google_connection=scope_mismatch")
     listed = await client.get("/api/v1/connections/google")
     assert "https://www.googleapis.com/auth/gmail.send" not in listed.json()[0]["granted_scopes"]
+
+
+@pytest.mark.asyncio
+async def test_incremental_gmail_grant_rejects_a_different_google_account(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await register(client)
+
+    async def identity_exchange(_: str, __: str, ___: Settings) -> dict[str, object]:
+        return {
+            "access_token": "identity-access-token",
+            "refresh_token": "identity-refresh-token",
+            "scope": (
+                "openid https://www.googleapis.com/auth/userinfo.email "
+                "https://www.googleapis.com/auth/userinfo.profile"
+            ),
+        }
+
+    async def connected_profile(access_token: str) -> dict[str, object]:
+        if access_token == "gmail-access-token":
+            return {
+                "sub": "different-google-account",
+                "email": "other@example.com",
+                "email_verified": True,
+            }
+        return {
+            "sub": "google-account-123",
+            "email": "connected@example.com",
+            "email_verified": True,
+        }
+
+    monkeypatch.setattr(connections, "exchange_authorization_code", identity_exchange)
+    monkeypatch.setattr(connections, "fetch_google_profile", connected_profile)
+    start = await client.get("/api/v1/connections/google/start")
+    state = parse_qs(urlparse(start.json()["authorization_url"]).query)["state"][0]
+    assert (
+        await client.get(
+            f"/api/v1/connections/google/callback?code=identity-code&state={state}",
+            follow_redirects=False,
+        )
+    ).status_code == 303
+    connection = (await client.get("/api/v1/connections/google")).json()[0]
+
+    capability_start = await client.get(
+        f"/api/v1/connections/google/{connection['id']}/gmail-send/start"
+    )
+    capability_state = parse_qs(urlparse(capability_start.json()["authorization_url"]).query)[
+        "state"
+    ][0]
+
+    async def gmail_exchange(_: str, __: str, ___: Settings) -> dict[str, object]:
+        return {
+            "access_token": "gmail-access-token",
+            "refresh_token": "gmail-refresh-token",
+            "scope": (
+                "openid https://www.googleapis.com/auth/userinfo.email "
+                "https://www.googleapis.com/auth/userinfo.profile "
+                "https://www.googleapis.com/auth/gmail.send"
+            ),
+        }
+
+    monkeypatch.setattr(connections, "exchange_authorization_code", gmail_exchange)
+    callback = await client.get(
+        f"/api/v1/connections/google/callback?code=gmail-code&state={capability_state}",
+        follow_redirects=False,
+    )
+    assert callback.status_code == 303
+    assert callback.headers["location"].endswith("?google_connection=account_mismatch")
+    updated = (await client.get("/api/v1/connections/google")).json()[0]
+    assert "https://www.googleapis.com/auth/gmail.send" not in updated["granted_scopes"]

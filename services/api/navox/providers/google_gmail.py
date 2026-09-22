@@ -14,6 +14,7 @@ class GmailProviderError(RuntimeError):
 
 @dataclass(frozen=True)
 class GmailSendPayload:
+    sender: str
     to: str
     subject: str
     body_text: str
@@ -37,6 +38,7 @@ class GmailGateway(Protocol):
 
 def encode_message(payload: GmailSendPayload) -> str:
     message = EmailMessage()
+    message["From"] = payload.sender
     message["To"] = payload.to
     message["Subject"] = payload.subject
     message.set_content(payload.body_text)

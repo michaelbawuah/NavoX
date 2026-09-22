@@ -14,12 +14,22 @@ class PrepareGmailSendRequest(BaseModel):
     body_text: str = Field(min_length=1, max_length=50_000)
     post_send_state: PostSendState = "waiting"
 
-    @field_validator("subject", "body_text")
+    @field_validator("subject")
     @classmethod
-    def normalize_text(cls, value: str) -> str:
+    def normalize_subject(cls, value: str) -> str:
         normalized = value.strip()
         if not normalized:
-            raise ValueError("value must contain non-whitespace characters")
+            raise ValueError("subject must contain non-whitespace characters")
+        if "\r" in normalized or "\n" in normalized:
+            raise ValueError("subject must be a single line")
+        return normalized
+
+    @field_validator("body_text")
+    @classmethod
+    def normalize_body(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("body_text must contain non-whitespace characters")
         return normalized
 
 
@@ -29,12 +39,22 @@ class EditGmailSendRequest(BaseModel):
     body_text: str = Field(min_length=1, max_length=50_000)
     post_send_state: PostSendState = "waiting"
 
-    @field_validator("subject", "body_text")
+    @field_validator("subject")
     @classmethod
-    def normalize_text(cls, value: str) -> str:
+    def normalize_subject(cls, value: str) -> str:
         normalized = value.strip()
         if not normalized:
-            raise ValueError("value must contain non-whitespace characters")
+            raise ValueError("subject must contain non-whitespace characters")
+        if "\r" in normalized or "\n" in normalized:
+            raise ValueError("subject must be a single line")
+        return normalized
+
+    @field_validator("body_text")
+    @classmethod
+    def normalize_body(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("body_text must contain non-whitespace characters")
         return normalized
 
 
