@@ -335,9 +335,7 @@ async def finalize_plan(database: AsyncSession, plan_id: UUID) -> str:
         return "failed"
     steps = list(
         await database.scalars(
-            select(PlanStep)
-            .where(PlanStep.plan_id == plan.id)
-            .order_by(PlanStep.sequence_number)
+            select(PlanStep).where(PlanStep.plan_id == plan.id).order_by(PlanStep.sequence_number)
         )
     )
     if not steps:

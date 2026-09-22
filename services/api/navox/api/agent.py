@@ -126,9 +126,7 @@ def summary_response(plan: Plan) -> PlanSummaryResponse:
 async def detail_response(database: DatabaseSession, plan: Plan) -> PlanDetailResponse:
     steps = list(
         await database.scalars(
-            select(PlanStep)
-            .where(PlanStep.plan_id == plan.id)
-            .order_by(PlanStep.sequence_number)
+            select(PlanStep).where(PlanStep.plan_id == plan.id).order_by(PlanStep.sequence_number)
         )
     )
     actions_by_step: dict[UUID, Action] = {}
@@ -260,9 +258,7 @@ async def list_plans(
     )
     if commitment_id is not None:
         statement = statement.where(Plan.commitment_id == commitment_id)
-    plans = list(
-        await database.scalars(statement.order_by(Plan.created_at.desc()).limit(limit))
-    )
+    plans = list(await database.scalars(statement.order_by(Plan.created_at.desc()).limit(limit)))
     return [summary_response(plan) for plan in plans]
 
 

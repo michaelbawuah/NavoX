@@ -70,9 +70,7 @@ class BoundedAgentService:
             )
             return existing, steps, False
 
-        user = await database.scalar(
-            select(User).where(User.id == user_id)
-        )
+        user = await database.scalar(select(User).where(User.id == user_id))
         if user is None:
             raise AgentPlanNotFoundError("User not found")
         if user.agent_paused:

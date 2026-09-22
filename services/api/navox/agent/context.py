@@ -182,9 +182,7 @@ class ContextBuilder:
         relations: list[ContextRelation] = []
         for relation in relation_rows:
             outgoing = relation.from_commitment_id == commitment.id
-            related_id = (
-                relation.to_commitment_id if outgoing else relation.from_commitment_id
-            )
+            related_id = relation.to_commitment_id if outgoing else relation.from_commitment_id
             related_commitment = related.get(related_id)
             if related_commitment is None:
                 continue

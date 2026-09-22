@@ -154,9 +154,7 @@ async def test_handle_is_idempotent_persisted_and_limited_to_safe_r0_r1(
     async with session_factory() as session:
         plan_count = len(list(await session.scalars(select(Plan))))
         action_count = len(list(await session.scalars(select(Action))))
-        audit_types = {
-            event.event_type for event in await session.scalars(select(AuditEvent))
-        }
+        audit_types = {event.event_type for event in await session.scalars(select(AuditEvent))}
     assert plan_count == 1
     assert action_count == 3
     assert "agent.plan.created" in audit_types

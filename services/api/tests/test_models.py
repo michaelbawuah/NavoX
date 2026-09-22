@@ -73,7 +73,6 @@ def test_commitment_graph_tables_preserve_tenant_scope_and_provenance() -> None:
     }
 
 
-
 def test_agent_execution_tables_are_tenant_scoped_and_persisted() -> None:
     plan = Base.metadata.tables["plans"]
     action = Base.metadata.tables["actions"]
