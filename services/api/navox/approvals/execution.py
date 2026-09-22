@@ -28,11 +28,11 @@ async def _workflow_ref(database: AsyncSession, action_id: UUID) -> WorkflowRef 
     return cast(
         WorkflowRef | None,
         await database.scalar(
-        select(WorkflowRef).where(
-            WorkflowRef.entity_type == "action",
-            WorkflowRef.entity_id == action_id,
-            WorkflowRef.workflow_type == "approved_action",
-        )
+            select(WorkflowRef).where(
+                WorkflowRef.entity_type == "action",
+                WorkflowRef.entity_id == action_id,
+                WorkflowRef.workflow_type == "approved_action",
+            )
         ),
     )
 
