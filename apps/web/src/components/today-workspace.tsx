@@ -161,7 +161,7 @@ export function TodayWorkspace({
     setWorkspaceError("");
     const params = new URLSearchParams({ timezone });
     try {
-      const response = await fetch(apiBaseUrl + "/today?" + params.toString(), {
+      const response = await fetch(`${apiBaseUrl}/today?${params.toString()}`, {
         credentials: "include",
       });
       if (!response.ok) {
@@ -191,7 +191,7 @@ export function TodayWorkspace({
     setWorkspaceError("");
     setWorkspaceMessage("");
     try {
-      const response = await fetch(apiBaseUrl + "/commitments", {
+      const response = await fetch(`${apiBaseUrl}/commitments`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -225,7 +225,7 @@ export function TodayWorkspace({
     setWorkspaceMessage("");
     try {
       const response = await fetch(
-        apiBaseUrl + "/commitments/" + id + "/" + action,
+        `${apiBaseUrl}/commitments/${id}/${action}`,
         { method: "POST", credentials: "include" },
       );
       if (!response.ok) {
@@ -250,7 +250,7 @@ export function TodayWorkspace({
     setQuerying(true);
     setWorkspaceError("");
     try {
-      const response = await fetch(apiBaseUrl + "/today/query", {
+      const response = await fetch(`${apiBaseUrl}/today/query`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -335,7 +335,7 @@ export function TodayWorkspace({
         <div className={styles.sectionHeading}>
           <div>
             <p>{label}</p>
-            <span>{items.length.toString().padStart(2, "0")}</span>
+            <span className={styles.sectionCount}>{items.length.toString().padStart(2, "0")}</span>
           </div>
           <i aria-hidden="true" />
         </div>
@@ -359,13 +359,16 @@ export function TodayWorkspace({
                 {item.reasons.length > 0 && (
                   <div className={styles.reasons}>
                     {item.reasons.map((reason) => (
-                      <span key={reason}>{reason}</span>
+                      <span className={styles.reasonPill} key={reason}>{reason}</span>
                     ))}
                   </div>
                 )}
                 {item.sources.length > 0 && (
                   <p className={styles.sourceLine}>
-                    Source: {item.sources.map((source) => source.source_type).join(", ")}
+                    Source:{" "}
+                    {item.sources
+                      .map((source) => source.source_type)
+                      .join(", ")}
                   </p>
                 )}
                 {renderActions(item)}
@@ -412,12 +415,12 @@ export function TodayWorkspace({
         <div>
           <p className={styles.kicker}>Today · {generatedLabel}</p>
           <h1>
-            {greeting()}, {firstName}.
-            <span>Here&apos;s what matters now.</span>
+            {greeting()}, {firstName}.<span className={styles.heroAccent}>Here&apos;s what matters now.</span>
           </h1>
           <p className={styles.heroCopy}>
             One operational view of the commitments NavoX actually has saved.
-            Nothing here is fabricated, and nothing external happens from this screen.
+            Nothing here is fabricated, and nothing external happens from this
+            screen.
           </p>
         </div>
         <div className={styles.posture}>
@@ -425,7 +428,7 @@ export function TodayWorkspace({
           <div>
             <small>Operational state</small>
             <strong>
-              {loadingToday ? "Syncing" : String(today?.total ?? 0) + " active"}
+              {loadingToday ? "Syncing" : `${String(today?.total ?? 0)} active`}
             </strong>
           </div>
         </div>
@@ -450,7 +453,7 @@ export function TodayWorkspace({
           <section className={styles.controlCard}>
             <div className={styles.controlHeading}>
               <p>Capture</p>
-              <span>Manual · explicit</span>
+              <span className={styles.controlMeta}>Manual · explicit</span>
             </div>
             <h2>Add a commitment</h2>
             <form className={styles.captureForm} onSubmit={createCommitment}>
@@ -511,7 +514,7 @@ export function TodayWorkspace({
           <section className={styles.controlCard}>
             <div className={styles.controlHeading}>
               <p>Ask NavoX</p>
-              <span>Read-only</span>
+              <span className={styles.controlMeta}>Read-only</span>
             </div>
             <h2>What do you need to know?</h2>
             <form className={styles.queryForm} onSubmit={askNavox}>
@@ -540,7 +543,8 @@ export function TodayWorkspace({
                 )}
                 {queryResult.intent === "unsupported" && (
                   <small>
-                    Try today, attention, this week, waiting, renewals, or promises.
+                    Try today, attention, this week, waiting, renewals, or
+                    promises.
                   </small>
                 )}
               </div>
@@ -553,12 +557,12 @@ export function TodayWorkspace({
           <section className={styles.controlCard}>
             <div className={styles.controlHeading}>
               <p>Connections</p>
-              <span>Identity scope only</span>
+              <span className={styles.controlMeta}>Identity scope only</span>
             </div>
             <h2>Google</h2>
             <p className={styles.mutedCopy}>
-              The current connection verifies identity only. Gmail, Calendar, and Drive
-              content are not being read.
+              The current connection verifies identity only. Gmail, Calendar,
+              and Drive content are not being read.
             </p>
             {connections.length === 0 ? (
               <button
@@ -578,7 +582,9 @@ export function TodayWorkspace({
                       onClick={() => void onCheckGoogle(connection.id)}
                       type="button"
                     >
-                      {checkingConnectionId === connection.id ? "Checking…" : "Check"}
+                      {checkingConnectionId === connection.id
+                        ? "Checking…"
+                        : "Check"}
                     </button>
                   </div>
                 ))}
