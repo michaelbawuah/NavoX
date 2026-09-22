@@ -53,7 +53,7 @@ class ManualCommitmentRequest(BaseModel):
 
 
 def manual_request_key(request_id: UUID) -> str:
-    return sha256(f"manual-request:{request_id}".encode("utf-8")).hexdigest()
+    return sha256(f"manual-request:{request_id}".encode()).hexdigest()
 
 
 @router.post("", response_model=CommitmentResponse, status_code=status.HTTP_201_CREATED)
