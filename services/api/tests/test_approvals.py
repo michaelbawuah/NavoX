@@ -606,7 +606,6 @@ async def test_google_gateway_builds_base64url_mime_and_requires_message_id(
     assert "Body" in parsed.get_payload()
 
 
-
 @pytest.mark.asyncio
 async def test_subject_header_injection_is_rejected(
     approval_environment: tuple[AsyncClient, async_sessionmaker[AsyncSession], Settings],
