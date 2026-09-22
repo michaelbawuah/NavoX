@@ -12,6 +12,7 @@ from navox.core.settings import Settings, get_settings
 from navox.db.base import Base
 from navox.db.models import Commitment, ProactiveSignal
 from navox.db.session import get_database_session
+from navox.proactive.activities import next_briefing_delay
 from navox.proactive.engine import evaluate_workspace
 
 
@@ -371,3 +372,14 @@ async def test_today_signature_queries_use_proactive_saved_state(
     assert handleable.status_code == 200
     assert handleable.json()["intent"] == "handleable"
     assert handleable.json()["items"]
+
+
+
+def test_daily_briefing_delay_respects_dst_offset_changes() -> None:
+    before_fall_back = datetime(2026, 11, 1, 5, 30, tzinfo=UTC)
+    delay = next_briefing_delay(
+        timezone_name="America/New_York",
+        briefing_hour=8,
+        now=before_fall_back,
+    )
+    assert delay == 7 * 60 * 60 + 30 * 60

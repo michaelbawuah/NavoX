@@ -2,7 +2,7 @@
 
 NavoX is an AI Operations Platform that helps people understand, prioritize, and safely handle work across their connected tools.
 
-The current implementation includes the **Engineering Foundation through Milestone 6 Approval and Execution**: identity and personal workspaces, authenticated content-minimized events, the Commitment Engine, Today, the bounded agent runtime, and exact-action approval for verified Gmail sending. Google sign-in remains identity-only by default. Gmail send authority is requested separately and incrementally, and NavoX can execute an R3 Gmail send only after an unexpired approval matches the exact canonical payload hash. The provider response must include a Gmail message ID before NavoX marks the action verified. Calendar and Drive execution remain disabled.
+The current implementation includes the **Engineering Foundation through Milestone 7 Proactive NavoX**: identity and personal workspaces, authenticated content-minimized events, the Commitment Engine, Today, the bounded agent runtime, exact-action Gmail approval/execution, and deterministic proactive intelligence. NavoX now derives auditable deadline, meeting, renewal, promise, follow-up, and waiting-on-response signals from saved operational state, applies user-controlled quiet hours and fatigue policy, prepares dynamic daily briefings, and uses Temporal for durable lifecycle timers. Google sign-in remains identity-only by default; Gmail send authority is still separate and approval-bound. Milestone 7 adds no Gmail-read, Calendar-read, or Drive-read authority and performs no proactive provider writes.
 
 ## Repository layout
 
@@ -59,7 +59,7 @@ cd services/api
 uv run python -m navox.workflows.worker
 ```
 
-The worker hosts the foundation workflow, Milestone 5's `HandleCommitmentWorkflow`, and Milestone 6's durable `ApprovedActionWorkflow`. Docker Compose starts the same worker automatically.
+The worker hosts the foundation workflow, Milestone 5's `HandleCommitmentWorkflow`, Milestone 6's durable `ApprovedActionWorkflow`, and Milestone 7's commitment-lifecycle, follow-up, meeting-preparation, and daily-briefing workflows. Docker Compose starts the same worker automatically.
 
 To run all checks that do not require local Docker services:
 
@@ -174,3 +174,34 @@ Security and reliability invariants:
 - a returned Gmail message ID is the independent verification signal stored in the action result and audit event.
 
 See `docs/architecture/milestone-6-approval-execution.md` for the full boundary.
+
+
+## Proactive NavoX
+
+Milestone 7 turns persisted operational state into proactive, explainable attention signals. The engine uses deterministic score components—urgency, consequence, user priority, objective relevance, actionability, waiting duration, interruption cost, and notification fatigue—and stores the full breakdown alongside every signal.
+
+The default attention tiers are evaluation policy, not hidden model behavior:
+
+- `notify_now`: score 85–100, subject to quiet hours, pause state, cooldown, and daily interruption budget;
+- `briefing`: score 65–84, or a higher score whose interruption is suppressed by fatigue policy;
+- `dashboard`: score 40–64;
+- `suppressed`: below 40, snoozed, dismissed, or otherwise not appropriate to surface.
+
+Every visible signal answers what is happening, why it matters, and which bounded NavoX capability can help. Opening a briefing manually does not count as an interruption. Only actual notify-now surfacing contributes to notification fatigue.
+
+Authenticated proactive endpoints:
+
+- `GET /api/v1/proactive/preferences` reads quiet hours, thresholds, briefing hour, cooldown, and interruption budget.
+- `POST /api/v1/proactive/preferences` updates those user-controlled policies and the workspace timezone.
+- `POST /api/v1/proactive/evaluate` deterministically refreshes proactive state.
+- `GET /api/v1/proactive/briefing` recomputes a fresh briefing from current state and records only an audit snapshot.
+- `GET /api/v1/proactive/meeting-prep` prepares the next saved meeting from NavoX state and related commitments.
+- `POST /api/v1/proactive/signals/{id}/snooze` suppresses a signal until an explicit future timestamp.
+- `POST /api/v1/proactive/signals/{id}/dismiss` dismisses the current material version of a signal.
+- `POST /api/v1/proactive/activate` idempotently starts durable Temporal scheduling for the workspace and eligible commitments.
+
+Today chat now also supports “What am I forgetting?”, “Prepare me for my next meeting”, “Anything costing me money soon?”, and “What can you handle for me?” using the same saved state rather than a separate chat memory.
+
+The current `notify_now` label is an **in-product attention tier**. Milestone 7 does not claim OS push, SMS, email-notification, or mobile background delivery. Scheduled workflows keep state and briefing readiness durable; a future delivery channel must be added explicitly and permissioned separately.
+
+See `docs/architecture/milestone-7-proactive-navox.md` for scoring, fatigue, persistence, workflow, and safety invariants.
