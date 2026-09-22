@@ -1,9 +1,13 @@
 import { WEB_APP_URL } from "./config.js";
 import {
   actionSummary,
+  deadlineItems,
+  deadlineTone,
   flattenSignals,
+  priorityLabel,
   terminalPlan,
   uniqueTodayItems,
+  urgencyLabel,
 } from "./presentation.js";
 
 const app = document.querySelector("#app");
@@ -122,21 +126,39 @@ function loginView() {
   return form;
 }
 
-function metrics(today, briefing) {
+function metrics(today) {
+  const deadlines = deadlineItems(today);
+  const urgent = deadlines.filter((item) => deadlineTone(item) === "urgent").length;
+  const upcoming = deadlines.filter((item) => deadlineTone(item) === "upcoming").length;
+  const completed = deadlines.filter((item) => deadlineTone(item) === "completed").length;
   return element("div", { className: "metrics" }, [
-    element("div", { className: "metric" }, [
-      element("b", { text: today?.needs_attention?.length ?? 0 }),
-      document.createTextNode("attention"),
+    element("div", { className: "metric urgentMetric" }, [
+      element("b", { text: urgent }),
+      document.createTextNode("urgent"),
     ]),
-    element("div", { className: "metric" }, [
-      element("b", { text: briefing?.notify_now?.length ?? 0 }),
-      document.createTextNode("notify tier"),
+    element("div", { className: "metric upcomingMetric" }, [
+      element("b", { text: upcoming }),
+      document.createTextNode("upcoming"),
     ]),
-    element("div", { className: "metric" }, [
-      element("b", { text: today?.waiting_on?.length ?? 0 }),
-      document.createTextNode("waiting"),
+    element("div", { className: "metric completedMetric" }, [
+      element("b", { text: completed }),
+      document.createTextNode("completed"),
     ]),
   ]);
+}
+
+function deadlineTiming(item) {
+  if (item.status === "completed") return "Completed";
+  if (!item.due_at) return "No due date";
+  const hours = (new Date(item.due_at).getTime() - Date.now()) / (60 * 60 * 1000);
+  if (hours < 0) {
+    const overdueHours = Math.max(1, Math.round(Math.abs(hours)));
+    return overdueHours < 24
+      ? `Overdue by about ${overdueHours}h`
+      : `Overdue by about ${Math.max(1, Math.round(overdueHours / 24))}d`;
+  }
+  if (hours < 24) return `Due in about ${Math.max(1, Math.round(hours))}h`;
+  return `Due in about ${Math.max(1, Math.round(hours / 24))}d`;
 }
 
 async function handleCommitment(item) {
@@ -169,23 +191,74 @@ async function watchPlan(planId) {
   return null;
 }
 
-function todayPanel(today) {
-  const items = uniqueTodayItems(today).slice(0, 6);
-  const panel = element("section", { className: "panel" }, [
-    element("div", {}, [
-      element("p", { className: "eyebrow", text: "Today" }),
-      element("h2", { className: "panelTitle", text: "What needs attention?" }),
+function deadlinePanel(today) {
+  const items = deadlineItems(today).slice(0, 8);
+  const panel = element("section", { className: "panel deadlinePanel" }, [
+    element("p", { className: "eyebrow", text: "Proactive NavoX" }),
+    element("h2", { className: "panelTitle", text: "Deadlines to meet" }),
+    element("p", {
+      className: "headline",
+      text: "Urgent work first, upcoming work next, and completed work clearly recorded.",
+    }),
+    element("div", { className: "deadlineLegend" }, [
+      element("span", { className: "legendUrgent", text: "● Urgent" }),
+      element("span", { className: "legendUpcoming", text: "● Upcoming" }),
+      element("span", { className: "legendCompleted", text: "● Completed" }),
     ]),
   ]);
   if (!items.length) {
-    panel.append(element("p", { className: "empty", text: "No active commitments are surfacing." }));
+    panel.append(element("p", { className: "empty", text: "No deadlines are currently saved." }));
+    return panel;
+  }
+  for (const item of items) {
+    const tone = deadlineTone(item);
+    const row = element("article", { className: `deadlineRow ${tone}` }, [
+      element("span", { className: "deadlineRail" }),
+      element("div", { className: "deadlineContent" }, [
+        element("div", { className: "deadlineTopline" }, [
+          element("span", { className: "deadlineStatus", text: urgencyLabel(item) }),
+          element("span", {
+            className: "deadlinePriority",
+            text: `${priorityLabel(item.priority)} priority`,
+          }),
+        ]),
+        element("h3", { text: item.title }),
+        element("p", { text: deadlineTiming(item) }),
+      ]),
+    ]);
+    if (tone === "completed") {
+      row.append(element("span", { className: "doneMark", text: "✓ Done" }));
+    } else if (item.status === "candidate") {
+      row.append(element("span", { className: "empty", text: "Review first" }));
+    } else {
+      row.append(
+        button("Handle this", () => void handleCommitment(item), "primary"),
+      );
+    }
+    panel.append(row);
+  }
+  return panel;
+}
+
+function todayPanel(today) {
+  const items = uniqueTodayItems(today)
+    .filter((item) => item.type !== "deadline")
+    .slice(0, 6);
+  const panel = element("section", { className: "panel" }, [
+    element("div", {}, [
+      element("p", { className: "eyebrow", text: "Today" }),
+      element("h2", { className: "panelTitle", text: "Other commitments" }),
+    ]),
+  ]);
+  if (!items.length) {
+    panel.append(element("p", { className: "empty", text: "No other active commitments are surfacing." }));
     return panel;
   }
   for (const item of items) {
     const row = element("article", { className: "item" }, [
       element("span", {
-        className: item.score >= 70 ? "badge attention" : "badge",
-        text: item.type,
+        className: "badge",
+        text: `${item.type} · ${priorityLabel(item.priority)}`,
       }),
       element("h3", { text: item.title }),
       element("p", { text: item.reasons?.join(" · ") || "Active NavoX commitment" }),
@@ -218,18 +291,19 @@ async function signalMutation(signal, mode) {
 }
 
 function proactivePanel(briefing) {
-  const signals = flattenSignals(briefing).slice(0, 5);
+  const signals = flattenSignals(briefing)
+    .filter((signal) => signal.signal_type !== "deadline_warning")
+    .slice(0, 5);
   const panel = element("section", { className: "panel" }, [
-    element("p", { className: "eyebrow", text: "Proactive briefing" }),
-    element("h2", { className: "panelTitle", text: "Before it becomes a problem" }),
-    element("p", { className: "headline", text: briefing?.headline ?? "No proactive briefing yet." }),
+    element("p", { className: "eyebrow", text: "Also on your radar" }),
+    element("h2", { className: "panelTitle", text: "Other signals" }),
   ]);
   for (const signal of signals) {
     panel.append(
       element("article", { className: "signal" }, [
         element("span", {
           className: signal.tier === "notify_now" ? "badge attention" : "badge",
-          text: `${signal.tier.replaceAll("_", " ")} · ${signal.attention_score}`,
+          text: signal.tier === "notify_now" ? "Important now" : "Briefing",
         }),
         element("h3", { text: signal.what_happening }),
         element("p", { text: signal.why_matters }),
@@ -241,7 +315,7 @@ function proactivePanel(briefing) {
     );
   }
   if (!signals.length) {
-    panel.append(element("p", { className: "empty", text: "Nothing proactive needs surfacing." }));
+    panel.append(element("p", { className: "empty", text: "No other proactive signals right now." }));
   }
   return panel;
 }
@@ -276,10 +350,48 @@ function queryPanel() {
     element("div", { className: "queryRow" }, [input, ask]),
   ]);
   if (state.queryResult) {
-    panel.append(element("p", { className: "headline", text: state.queryResult.answer }));
-    for (const detail of state.queryResult.details ?? []) {
-      panel.append(element("p", { className: "empty", text: detail }));
+    const result = state.queryResult;
+    const resultCard = element("div", { className: "queryResultCard" }, [
+      element("div", { className: "queryResultTopline" }, [
+        element("div", {}, [
+          element("span", { className: "eyebrow", text: "NavoX briefing" }),
+          element("strong", {
+            text:
+              result.intent === "today"
+                ? "Your day at a glance"
+                : result.intent === "forgetting"
+                  ? "Worth a second look"
+                  : "What matters now",
+          }),
+        ]),
+        element("b", {
+          text: result.items?.length ? `${result.items.length} item${result.items.length === 1 ? "" : "s"}` : "Clear",
+        }),
+      ]),
+      element("p", { className: "querySummary", text: result.answer }),
+    ]);
+    for (const item of result.items?.slice(0, 5) ?? []) {
+      resultCard.append(
+        element("article", { className: "queryResultItem" }, [
+          element("div", {}, [
+            element("strong", { text: item.title }),
+            element("span", {
+              text: item.due_at
+                ? new Date(item.due_at).toLocaleString()
+                : "No due date",
+            }),
+          ]),
+          element("span", {
+            className: `queryUrgency ${deadlineTone(item)}`,
+            text: item.type === "deadline" ? urgencyLabel(item) : priorityLabel(item.priority),
+          }),
+        ]),
+      );
     }
+    for (const detail of result.details ?? []) {
+      resultCard.append(element("p", { className: "queryDetail", text: detail }));
+    }
+    panel.append(resultCard);
   }
   return panel;
 }
@@ -377,11 +489,12 @@ function dashboardView() {
       ]),
       element("span", { className: data.agent.paused ? "badge attention" : "badge", text: data.agent.paused ? "paused" : "live" }),
     ]),
-    metrics(data.today, data.briefing),
+    metrics(data.today),
   ]);
   container.append(
     intro,
     queryPanel(),
+    deadlinePanel(data.today),
     proactivePanel(data.briefing),
     todayPanel(data.today),
     approvalPanel(data.approvals),

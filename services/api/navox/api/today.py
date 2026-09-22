@@ -224,11 +224,13 @@ def format_answer(intent: QueryIntent, items: list[TodayItem], projection: Today
     if intent == "handleable":
         return f"{len(items)} active commitment(s) can enter the bounded Handle this flow."
     if intent == "today":
-        return (
-            f"You have {projection.total} active commitments. "
-            f"{len(projection.needs_attention)} need attention now; "
-            f"{len(projection.coming_up)} are coming up."
-        )
+        attention = len(projection.needs_attention)
+        coming = len(projection.coming_up)
+        if attention == 0 and coming == 0:
+            return "Your saved operational state is clear right now."
+        if attention == 0:
+            return f"Nothing is urgent right now. {coming} item(s) are coming up."
+        return f"{attention} item(s) need attention now; {coming} more are coming up."
     labels: dict[QueryIntent, str] = {
         "attention": "need your attention",
         "this_week": "are due within the next 7 days",

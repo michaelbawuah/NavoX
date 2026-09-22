@@ -40,3 +40,37 @@ export function actionSummary(action) {
 export function terminalPlan(status) {
   return ["completed", "blocked", "failed", "dispatch_failed"].includes(status);
 }
+
+
+export function priorityLabel(priority) {
+  const labels = {
+    1: "Low",
+    2: "Moderate",
+    3: "Standard",
+    4: "Important",
+    5: "Critical",
+  };
+  return labels[priority] ?? "Standard";
+}
+
+export function deadlineTone(item, now = Date.now()) {
+  if (item.status === "completed") return "completed";
+  if (!item.due_at) return "upcoming";
+  const hours = (new Date(item.due_at).getTime() - now) / (60 * 60 * 1000);
+  return hours <= 48 ? "urgent" : "upcoming";
+}
+
+export function deadlineItems(today) {
+  const active = uniqueTodayItems(today).filter((item) => item.type === "deadline");
+  const completed = (today?.completed_recently ?? []).filter(
+    (item) => item.type === "deadline",
+  );
+  return [...active, ...completed];
+}
+
+export function urgencyLabel(item, now = Date.now()) {
+  const tone = deadlineTone(item, now);
+  if (tone === "urgent") return "Urgent";
+  if (tone === "completed") return "Completed";
+  return "Upcoming";
+}

@@ -8,8 +8,12 @@ import {
 import {
   actionSummary,
   flattenSignals,
+  deadlineItems,
+  deadlineTone,
+  priorityLabel,
   terminalPlan,
   uniqueTodayItems,
+  urgencyLabel,
 } from "../src/presentation.js";
 
 const template = JSON.stringify({
@@ -82,4 +86,50 @@ test("approval and plan presentation never changes server risk semantics", () =>
   );
   assert.equal(terminalPlan("completed"), true);
   assert.equal(terminalPlan("running"), false);
+});
+
+
+test("deadline presentation uses clear urgency language instead of scores", () => {
+  const now = Date.parse("2026-09-22T12:00:00Z");
+  const urgent = {
+    id: "urgent",
+    type: "deadline",
+    title: "Submit checkpoint",
+    status: "confirmed",
+    priority: 5,
+    due_at: "2026-09-23T12:00:00Z",
+  };
+  const upcoming = {
+    id: "upcoming",
+    type: "deadline",
+    title: "Submit report",
+    status: "confirmed",
+    priority: 3,
+    due_at: "2026-09-29T12:00:00Z",
+  };
+  const completed = {
+    id: "completed",
+    type: "deadline",
+    title: "Finish lab",
+    status: "completed",
+    priority: 4,
+    due_at: "2026-09-21T12:00:00Z",
+  };
+
+  assert.equal(deadlineTone(urgent, now), "urgent");
+  assert.equal(deadlineTone(upcoming, now), "upcoming");
+  assert.equal(deadlineTone(completed, now), "completed");
+  assert.equal(urgencyLabel(urgent, now), "Urgent");
+  assert.equal(priorityLabel(2), "Moderate");
+  assert.equal(priorityLabel(4), "Important");
+  assert.deepEqual(
+    deadlineItems({
+      needs_attention: [urgent],
+      coming_up: [upcoming],
+      renewals: [],
+      waiting_on: [],
+      completed_recently: [completed],
+    }).map((item) => item.id),
+    ["urgent", "upcoming", "completed"],
+  );
 });
