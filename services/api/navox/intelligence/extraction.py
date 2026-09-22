@@ -149,8 +149,14 @@ class OperationalExtraction(BaseModel):
 
     def _all_evidence(self) -> list[EvidenceSpan]:
         spans: list[EvidenceSpan] = []
-        for item in (*self.observations, *self.people, *self.temporals, *self.relationships):
-            spans.extend(item.evidence)
+        for observation in self.observations:
+            spans.extend(observation.evidence)
+        for person in self.people:
+            spans.extend(person.evidence)
+        for temporal in self.temporals:
+            spans.extend(temporal.evidence)
+        for relationship in self.relationships:
+            spans.extend(relationship.evidence)
         return spans
 
 
