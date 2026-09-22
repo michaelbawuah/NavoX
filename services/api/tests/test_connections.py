@@ -213,6 +213,7 @@ async def test_gmail_send_scope_is_incremental_and_bound_to_existing_connection(
             "expires_in": 3600,
             "scope": (
                 "openid https://www.googleapis.com/auth/userinfo.email "
+                "https://www.googleapis.com/auth/userinfo.profile "
                 "https://www.googleapis.com/auth/gmail.send"
             ),
         }
