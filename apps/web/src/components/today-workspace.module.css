@@ -10,7 +10,12 @@
     radial-gradient(circle at 12% 12%, rgb(64 124 211 / 15%), transparent 28rem),
     radial-gradient(circle at 90% 7%, rgb(55 221 192 / 11%), transparent 25rem),
     #060914;
-  background-size: 4rem 4rem, 4rem 4rem, auto, auto, auto;
+  background-size:
+    4rem 4rem,
+    4rem 4rem,
+    auto,
+    auto,
+    auto;
   color: #f5f7ff;
 }
 
@@ -149,7 +154,7 @@
   letter-spacing: -0.068em;
 }
 
-.hero h1 span {
+.heroAccent {
   display: block;
   color: #9db8e4;
 }
@@ -274,7 +279,7 @@
   text-transform: uppercase;
 }
 
-.sectionHeading span {
+.sectionCount {
   color: #61dfc4;
   font-size: 0.68rem;
   font-weight: 800;
@@ -343,7 +348,7 @@
   color: #ffd2a8;
 }
 
-.reasons span {
+.reasonPill {
   border: 1px solid rgb(97 223 196 / 18%);
   border-radius: 999px;
   background: rgb(51 146 127 / 12%);
@@ -353,8 +358,8 @@
 }
 
 .sourceLine {
-  color: #6f809d !important;
-  font-size: 0.64rem !important;
+  color: #6f809d;
+  font-size: 0.64rem;
 }
 
 .itemActions {
@@ -378,7 +383,7 @@
   padding: 1rem;
 }
 
-.controlHeading span {
+.controlMeta {
   color: #70819e;
   font-size: 0.61rem;
   font-weight: 750;
@@ -567,7 +572,7 @@
   .workspace *,
   .workspace *::before,
   .workspace *::after {
-    scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
+    scroll-behavior: auto;
+    transition-duration: 0.01ms;
   }
 }
