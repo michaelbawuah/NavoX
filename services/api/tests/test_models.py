@@ -13,6 +13,10 @@ def test_tenant_foundation_tables_are_registered() -> None:
         "oauth_authorization_attempts",
         "provider_event_subscriptions",
         "incoming_events",
+        "objectives",
+        "commitments",
+        "commitment_sources",
+        "commitment_relations",
     } <= set(Base.metadata.tables)
 
 
@@ -42,3 +46,23 @@ def test_incoming_event_is_scoped_to_its_authenticated_connection() -> None:
     foreign_keys = {foreign_key.target_fullname for foreign_key in event.foreign_keys}
 
     assert foreign_keys == {"connections.id", "users.id", "workspaces.id"}
+
+
+def test_commitment_graph_tables_preserve_tenant_scope_and_provenance() -> None:
+    commitment = Base.metadata.tables["commitments"]
+    source = Base.metadata.tables["commitment_sources"]
+    relation = Base.metadata.tables["commitment_relations"]
+
+    assert {foreign_key.target_fullname for foreign_key in commitment.foreign_keys} == {
+        "objectives.id",
+        "users.id",
+        "workspaces.id",
+    }
+    assert {foreign_key.target_fullname for foreign_key in source.foreign_keys} == {
+        "commitments.id",
+        "connections.id",
+        "incoming_events.id",
+    }
+    assert {foreign_key.target_fullname for foreign_key in relation.foreign_keys} == {
+        "commitments.id"
+    }

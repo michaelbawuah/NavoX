@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
@@ -32,6 +32,17 @@ class Settings(BaseSettings):
     google_pubsub_push_audience: str = ""
     google_pubsub_push_service_account: str = ""
     google_gmail_push_verification_token: SecretStr | None = None
+    commitment_moderate_confidence_threshold: float = Field(default=0.65, ge=0.0, lt=1.0)
+    commitment_high_confidence_threshold: float = Field(default=0.85, gt=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def validate_commitment_confidence_thresholds(self) -> "Settings":
+        if (
+            self.commitment_high_confidence_threshold
+            <= self.commitment_moderate_confidence_threshold
+        ):
+            raise ValueError("High commitment confidence threshold must exceed moderate threshold")
+        return self
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,

@@ -208,3 +208,117 @@ class IncomingEvent(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Objective(Base):
+    __tablename__ = "objectives"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(256))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="active")
+    priority: Mapped[int] = mapped_column(default=3)
+    target_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(32), default="user")
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class Commitment(Base):
+    __tablename__ = "commitments"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "dedupe_key", name="uq_commitments_workspace_dedupe_key"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    objective_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("objectives.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    commitment_type: Mapped[str] = mapped_column("type", String(32))
+    title: Mapped[str] = mapped_column(String(256))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="candidate", index=True)
+    priority: Mapped[int] = mapped_column(default=3)
+    due_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    remind_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    confidence: Mapped[float] = mapped_column(default=1.0)
+    created_by: Mapped[str] = mapped_column(String(32), default="ai")
+    dedupe_key: Mapped[str] = mapped_column(String(64))
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CommitmentSource(Base):
+    __tablename__ = "commitment_sources"
+    __table_args__ = (
+        UniqueConstraint(
+            "commitment_id",
+            "incoming_event_id",
+            name="uq_commitment_sources_commitment_incoming_event",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    commitment_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("commitments.id", ondelete="CASCADE"), index=True
+    )
+    connection_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("connections.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    incoming_event_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("incoming_events.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(32))
+    source_type: Mapped[str] = mapped_column(String(64))
+    external_resource_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    extracted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    source_metadata: Mapped[dict[str, str]] = mapped_column("metadata", JSON, default=dict)
+
+
+class CommitmentRelation(Base):
+    __tablename__ = "commitment_relations"
+    __table_args__ = (
+        UniqueConstraint(
+            "from_commitment_id",
+            "to_commitment_id",
+            "relation_type",
+            name="uq_commitment_relations_from_to_type",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    from_commitment_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("commitments.id", ondelete="CASCADE"), index=True
+    )
+    to_commitment_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("commitments.id", ondelete="CASCADE"), index=True
+    )
+    relation_type: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

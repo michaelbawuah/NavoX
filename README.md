@@ -2,7 +2,7 @@
 
 NavoX is an AI Operations Platform that helps people understand, prioritize, and safely handle work across their connected tools.
 
-The current implementation includes the **Engineering Foundation**, Milestone 1 identity, and Milestone 2's content-minimized event pipeline: email/password authentication, opaque server-side sessions, automatic creation of one personal workspace, an opt-in Google identity connection, authenticated provider-event receivers, normalized `incoming_events`, and durable deduplication. The Google flow still requests only OpenID profile and verified-email scopes; no Gmail, Calendar, or Drive data is requested or ingested. AI providers and external actions remain deliberately absent until their dedicated milestones described in [SPEC-001](docs/architecture/SPEC-001-navox.md).
+The current implementation includes the **Engineering Foundation**, Milestone 1 identity, Milestone 2's content-minimized event pipeline, and Milestone 3's Commitment Engine: email/password authentication, opaque server-side sessions, automatic creation of one personal workspace, an opt-in Google identity connection, authenticated provider-event receivers, normalized `incoming_events`, deterministic commitment confidence policy, workspace-scoped deduplication, source provenance, and commitment relations. The Google flow still requests only OpenID profile and verified-email scopes; no Gmail, Calendar, or Drive data is requested or ingested. External actions remain deliberately absent until their dedicated milestones described in [SPEC-001](docs/architecture/SPEC-001-navox.md).
 
 ## Repository layout
 
@@ -108,6 +108,25 @@ These public machine-to-machine endpoints never receive a user or workspace ID f
 - `POST /api/v1/events/gmail` requires both a configured Pub/Sub verification token and a signed Google Pub/Sub OIDC JWT, then records the Gmail history-change reference against exactly one active Google connection.
 
 The watch-creation and renewal worker that creates Calendar/Drive channels and Gmail mailbox watches is intentionally deferred until users explicitly opt into the appropriate Google content scopes. The event pipeline is ready to receive those authenticated notifications, but does not fetch or retain mail, calendar, or Drive content yet.
+
+## Commitment Engine
+
+Milestone 3 provides a provider-neutral internal boundary for structured AI extraction. Untrusted model output is accepted only as a strict JSON shape, rejects undeclared fields and instruction-like content, requires timezone-aware due dates, and cannot specify tools or external actions. The deterministic policy then applies these local thresholds:
+
+- Confidence at or above `COMMITMENT_HIGH_CONFIDENCE_THRESHOLD` (default `0.85`) creates a `confirmed` commitment.
+- Confidence at or above `COMMITMENT_MODERATE_CONFIDENCE_THRESHOLD` (default `0.65`) and below the high threshold creates a `candidate` for review.
+- Lower-confidence candidates are suppressed.
+
+Created commitments retain only normalized facts and source references. Provenance links each commitment to its incoming event; raw provider content is not copied into NavoX. The engine also stores safe `depends_on`, `blocks`, and `related_to` relation edges. Evaluation fixtures in `evals/commitments/` cover instruction-like output, undeclared execution fields, malformed relations, and false-positive candidates.
+
+Authenticated review endpoints are workspace- and user-scoped:
+
+- `GET /api/v1/commitments` lists the current user's commitments; pass `?status=candidate` to focus review.
+- `GET /api/v1/commitments/{commitment_id}` returns its normalized facts, provenance references, and outgoing relation edges.
+- `POST /api/v1/commitments/{commitment_id}/confirm` confirms a moderate-confidence candidate.
+- `POST /api/v1/commitments/{commitment_id}/reject` rejects a moderate-confidence candidate.
+
+There is intentionally no client-facing endpoint to submit extraction output, and these endpoints never trigger an external action.
 
 ## Local containers
 

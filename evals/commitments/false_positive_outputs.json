@@ -1,0 +1,38 @@
+[
+  {
+    "name": "polite-signoff-is-not-a-follow-up",
+    "model_output": {
+      "candidates": [
+        {
+          "type": "follow_up",
+          "title": "Thanks for your help",
+          "confidence": 0.22
+        }
+      ]
+    }
+  },
+  {
+    "name": "optional-suggestion-is-not-a-task",
+    "model_output": {
+      "candidates": [
+        {
+          "type": "task",
+          "title": "Consider reading the article",
+          "confidence": 0.38
+        }
+      ]
+    }
+  },
+  {
+    "name": "past-event-is-not-an-upcoming-meeting",
+    "model_output": {
+      "candidates": [
+        {
+          "type": "meeting",
+          "title": "Team sync last Tuesday",
+          "confidence": 0.41
+        }
+      ]
+    }
+  }
+]
