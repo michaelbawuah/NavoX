@@ -400,7 +400,9 @@ export function ApprovalPanel({
             <p>{activeAction.payload.body_text}</p>
           </div>
           <div className={styles.approvalHash}>
-            <span className={styles.approvalHashLabel}>Approved payload fingerprint</span>
+            <span className={styles.approvalHashLabel}>
+              Approved payload fingerprint
+            </span>
             <code>{activeAction.payload_hash}</code>
           </div>
 

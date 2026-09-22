@@ -1,5 +1,5 @@
 from datetime import UTC, datetime, timedelta
-from typing import cast
+from typing import cast, cast
 from uuid import UUID
 
 from sqlalchemy import select
