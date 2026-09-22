@@ -335,7 +335,9 @@ export function TodayWorkspace({
         <div className={styles.sectionHeading}>
           <div>
             <p>{label}</p>
-            <span className={styles.sectionCount}>{items.length.toString().padStart(2, "0")}</span>
+            <span className={styles.sectionCount}>
+              {items.length.toString().padStart(2, "0")}
+            </span>
           </div>
           <i aria-hidden="true" />
         </div>
@@ -359,7 +361,9 @@ export function TodayWorkspace({
                 {item.reasons.length > 0 && (
                   <div className={styles.reasons}>
                     {item.reasons.map((reason) => (
-                      <span className={styles.reasonPill} key={reason}>{reason}</span>
+                      <span className={styles.reasonPill} key={reason}>
+                        {reason}
+                      </span>
                     ))}
                   </div>
                 )}
@@ -415,7 +419,10 @@ export function TodayWorkspace({
         <div>
           <p className={styles.kicker}>Today · {generatedLabel}</p>
           <h1>
-            {greeting()}, {firstName}.<span className={styles.heroAccent}>Here&apos;s what matters now.</span>
+            {greeting()}, {firstName}.
+            <span className={styles.heroAccent}>
+              Here&apos;s what matters now.
+            </span>
           </h1>
           <p className={styles.heroCopy}>
             One operational view of the commitments NavoX actually has saved.
