@@ -4,6 +4,27 @@ NavoX is an AI Operations Platform that helps people understand, prioritize, and
 
 The current implementation includes the **Engineering Foundation through Milestone 9 Evaluation and Hardening**: identity and personal workspaces, authenticated content-minimized events, the Commitment Engine, Today, the bounded agent runtime, exact-action Gmail approval/execution, deterministic proactive intelligence, the Chrome side panel, and a measurable release-quality evaluation gate. NavoX now derives auditable deadline, meeting, renewal, promise, follow-up, and waiting-on-response signals from saved operational state, applies user-controlled quiet hours and fatigue policy, prepares dynamic daily briefings, and uses Temporal for durable lifecycle timers. Google sign-in remains identity-only by default; Gmail send authority is still separate and approval-bound. Milestone 7 adds no Gmail-read, Calendar-read, or Drive-read authority and performs no proactive provider writes.
 
+## SPEC-002 Operational Intelligence
+
+SPEC-002 extends the SPEC-001 platform with a provider-independent intelligence
+layer. Milestone 1 establishes the canonical input and persistence boundary
+without granting any new provider authority.
+
+- `SourceDocument` and `SourceIdentity` are strict, versioned, provider-neutral
+  contracts under `navox.intelligence`.
+- `people` and `person_identities` provide workspace-scoped identity anchors.
+- `operational_observations` stores evidence-backed proposed facts with
+  extractor/model provenance and calibrated confidence.
+- `observation_evidence` binds observations to authorized connections and
+  bounded source locators/hashes.
+- `intelligence_feedback` stores bounded user feedback and carries no action,
+  approval, or permission authority.
+- No Gmail-read, Calendar-read, extraction-model, resolution, or autonomous
+  execution capability is introduced by this milestone.
+
+The authoritative architecture is
+`docs/architecture/SPEC-002-navox-operational-intelligence.md`.
+
 ## Repository layout
 
 ```text

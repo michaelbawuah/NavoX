@@ -86,10 +86,12 @@ jobs:
         working-directory: services/api
       - name: Verify required schema tables
         run: |
-          for table in users workspaces workspace_memberships plans plan_steps actions approvals workflow_refs audit_events proactive_preferences proactive_signals briefing_snapshots; do
+          for table in users workspaces workspace_memberships plans plan_steps actions approvals workflow_refs audit_events proactive_preferences proactive_signals briefing_snapshots people person_identities operational_observations observation_evidence intelligence_feedback; do
             grep -F "CREATE TABLE $table" /tmp/navox-schema.sql
           done
           grep -F "client_type" /tmp/navox-schema.sql
+          grep -F "uq_person_identities_workspace_type_value" /tmp/navox-schema.sql
+          grep -F "uq_observation_evidence_observation_source_hash" /tmp/navox-schema.sql
 
   dependency-security:
     name: Dependency security
