@@ -2,7 +2,7 @@
 
 NavoX is an AI Operations Platform that helps people understand, prioritize, and safely handle work across their connected tools.
 
-The current implementation includes the **Engineering Foundation through Milestone 7 Proactive NavoX**: identity and personal workspaces, authenticated content-minimized events, the Commitment Engine, Today, the bounded agent runtime, exact-action Gmail approval/execution, and deterministic proactive intelligence. NavoX now derives auditable deadline, meeting, renewal, promise, follow-up, and waiting-on-response signals from saved operational state, applies user-controlled quiet hours and fatigue policy, prepares dynamic daily briefings, and uses Temporal for durable lifecycle timers. Google sign-in remains identity-only by default; Gmail send authority is still separate and approval-bound. Milestone 7 adds no Gmail-read, Calendar-read, or Drive-read authority and performs no proactive provider writes.
+The current implementation includes the **Engineering Foundation through Milestone 8 Chrome Extension**: identity and personal workspaces, authenticated content-minimized events, the Commitment Engine, Today, the bounded agent runtime, exact-action Gmail approval/execution, and deterministic proactive intelligence. NavoX now derives auditable deadline, meeting, renewal, promise, follow-up, and waiting-on-response signals from saved operational state, applies user-controlled quiet hours and fatigue policy, prepares dynamic daily briefings, and uses Temporal for durable lifecycle timers. Google sign-in remains identity-only by default; Gmail send authority is still separate and approval-bound. Milestone 7 adds no Gmail-read, Calendar-read, or Drive-read authority and performs no proactive provider writes.
 
 ## Repository layout
 
@@ -205,3 +205,59 @@ Today chat now also supports “What am I forgetting?”, “Prepare me for my n
 The current `notify_now` label is an **in-product attention tier**. Milestone 7 does not claim OS push, SMS, email-notification, or mobile background delivery. Scheduled workflows keep state and briefing readiness durable; a future delivery channel must be added explicitly and permissioned separately.
 
 See `docs/architecture/milestone-7-proactive-navox.md` for scoring, fatigue, persistence, workflow, and safety invariants.
+
+
+## Chrome extension
+
+Milestone 8 adds a Chrome Manifest V3 side panel under `apps/extension/`. It is
+a thin client of the same NavoX API and does not contain a second agent runtime.
+
+The side panel exposes:
+
+- Today and proactive briefing state;
+- operational queries such as “What am I forgetting?”;
+- Handle this for saved commitments;
+- recent bounded-plan progress;
+- exact persisted R3 approval review and explicit approve/reject gestures;
+- snooze and dismiss controls for proactive signals.
+
+The extension deliberately requests only `sidePanel`, `storage`, and one
+explicit NavoX API host permission. It has no content scripts and requests no
+`tabs`, `activeTab`, `scripting`, `cookies`, or `webRequest`
+permission. It does not read the page the user is viewing.
+
+Build the local extension:
+
+```bash
+npm ci
+npm run build --workspace=@navox/extension
+```
+
+Then open `chrome://extensions`, enable **Developer mode**, choose
+**Load unpacked**, and select:
+
+```text
+apps/extension/dist
+```
+
+The local build talks to `http://localhost:8000` and links to the web
+workspace at `http://localhost:3000`. For a deployed environment, build with
+one explicit HTTPS API and web origin:
+
+```bash
+NAVOX_EXTENSION_API_ORIGIN=https://your-api.example \
+NAVOX_EXTENSION_WEB_ORIGIN=https://your-web.example \
+npm run build --workspace=@navox/extension
+```
+
+The build rejects insecure non-local HTTP origins, forbidden browser
+permissions, content scripts, and remote/dynamic executable code.
+
+Extension authentication uses a separate opaque bearer session. The password is
+sent only during login and is never stored by the extension. Chrome stores the
+opaque session in extension-local storage; PostgreSQL stores only its hash.
+Extension logout revokes that extension session without revoking the user's web
+session.
+
+See `docs/architecture/milestone-8-chrome-extension.md` for the browser
+permission, authentication, and safety boundary.

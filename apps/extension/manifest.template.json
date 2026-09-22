@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "NavoX",
+  "short_name": "NavoX",
+  "version": "0.8.0",
+  "description": "Your NavoX operational briefing, bounded plans, and approvals in Chrome.",
+  "minimum_chrome_version": "116",
+  "permissions": ["sidePanel", "storage"],
+  "host_permissions": ["__NAVOX_API_HOST__/*"],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "Open NavoX"
+  }
+}

@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     web_origin: str = "http://localhost:3000"
     session_cookie_name: str = "navox_session"
     session_ttl_hours: int = Field(default=168, ge=1, le=720)
+    extension_session_ttl_hours: int = Field(default=72, ge=1, le=168)
     google_oauth_client_id: str = ""
     google_oauth_client_secret: SecretStr | None = None
     google_oauth_redirect_uri: str = "http://localhost:8000/api/v1/connections/google/callback"

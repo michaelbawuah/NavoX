@@ -25,6 +25,45 @@ jobs:
       - run: npm run test
       - run: npm run build
 
+  extension:
+    name: Chrome extension quality
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run lint --workspace=@navox/extension
+      - run: npm run typecheck --workspace=@navox/extension
+      - run: npm run test --workspace=@navox/extension
+      - run: npm run build --workspace=@navox/extension
+      - name: Verify Manifest V3 permission boundary
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+          const manifest = JSON.parse(
+            fs.readFileSync("apps/extension/dist/manifest.json", "utf8"),
+          );
+          const expected = ["sidePanel", "storage"];
+          if (manifest.manifest_version !== 3) throw new Error("Manifest V3 required");
+          if (JSON.stringify(manifest.permissions) !== JSON.stringify(expected)) {
+            throw new Error("Unexpected extension permissions");
+          }
+          if (!Array.isArray(manifest.host_permissions) || manifest.host_permissions.length !== 1) {
+            throw new Error("Exactly one API host permission is required");
+          }
+          if (manifest.content_scripts) throw new Error("Content scripts are forbidden");
+          NODE
+      - name: Package extension artifact
+        run: |
+          cd apps/extension/dist
+          zip -qr /tmp/navox-chrome-extension.zip .
+          unzip -l /tmp/navox-chrome-extension.zip | grep -F manifest.json
+          unzip -l /tmp/navox-chrome-extension.zip | grep -F service-worker.js
+          unzip -l /tmp/navox-chrome-extension.zip | grep -F sidepanel.html
+
   api:
     name: API quality
     runs-on: ubuntu-24.04
@@ -50,6 +89,7 @@ jobs:
           for table in users workspaces workspace_memberships plans plan_steps actions approvals workflow_refs audit_events proactive_preferences proactive_signals briefing_snapshots; do
             grep -F "CREATE TABLE $table" /tmp/navox-schema.sql
           done
+          grep -F "client_type" /tmp/navox-schema.sql
 
   dependency-security:
     name: Dependency security
@@ -72,7 +112,7 @@ jobs:
 
   compose-integration:
     name: Compose integration
-    needs: [web, api, dependency-security]
+    needs: [web, extension, api, dependency-security]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -120,6 +160,22 @@ jobs:
             'http://localhost:8000/api/v1/today?timezone=UTC' > /tmp/navox-today.json
           grep -F '"total":1' /tmp/navox-today.json
           grep -F '"title":"Verify Today loop"' /tmp/navox-today.json
+
+          curl --fail --silent --show-error \
+            --header "Content-Type: application/json" \
+            --data '{"email":"owner@example.com","password":"twelve-character-password"}' \
+            http://localhost:8000/api/v1/auth/extension/login > /tmp/navox-extension-login.json
+          EXTENSION_TOKEN="$(python -c 'import json; print(json.load(open("/tmp/navox-extension-login.json"))["access_token"])')"
+          grep -F '"token_type":"bearer"' /tmp/navox-extension-login.json
+          grep -F '"email":"owner@example.com"' /tmp/navox-extension-login.json
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer $EXTENSION_TOKEN" \
+            http://localhost:8000/api/v1/auth/me > /tmp/navox-extension-me.json
+          grep -F '"email":"owner@example.com"' /tmp/navox-extension-me.json
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer $EXTENSION_TOKEN" \
+            'http://localhost:8000/api/v1/today?timezone=UTC' > /tmp/navox-extension-today.json
+          grep -F '"title":"Verify Today loop"' /tmp/navox-extension-today.json
           curl --fail --silent --show-error \
             --cookie /tmp/navox-session.cookie \
             --header "Content-Type: application/json" \
@@ -270,6 +326,18 @@ jobs:
           test "$(curl --silent --output /dev/null --write-out "%{http_code}" \
             --cookie /tmp/navox-session.cookie \
             http://localhost:8000/api/v1/connections/google/start)" = "503"
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer $EXTENSION_TOKEN" \
+            --request POST \
+            http://localhost:8000/api/v1/auth/extension/logout > /tmp/navox-extension-logout.json
+          grep -F '"status":"signed_out"' /tmp/navox-extension-logout.json
+          test "$(curl --silent --output /dev/null --write-out "%{http_code}" \
+            --header "Authorization: Bearer $EXTENSION_TOKEN" \
+            http://localhost:8000/api/v1/auth/me)" = "401"
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            http://localhost:8000/api/v1/auth/me > /tmp/navox-web-session-still-valid.json
+          grep -F '"email":"owner@example.com"' /tmp/navox-web-session-still-valid.json
           curl --fail --silent --show-error \
             --cookie /tmp/navox-session.cookie \
             --request POST \
