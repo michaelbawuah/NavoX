@@ -232,6 +232,9 @@ class Objective(Base):
     target_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[str] = mapped_column(String(32), default="user")
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    waiting_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -506,5 +509,113 @@ class AuditEvent(Base):
     entity_id: Mapped[UUID] = mapped_column(Uuid, index=True)
     event_metadata: Mapped[dict[str, object]] = mapped_column("metadata", JSON, default=dict)
     occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
+
+class ProactivePreference(Base):
+    __tablename__ = "proactive_preferences"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "user_id",
+            name="uq_proactive_preferences_workspace_user",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    quiet_hours_start: Mapped[str] = mapped_column(String(5), default="22:00")
+    quiet_hours_end: Mapped[str] = mapped_column(String(5), default="07:00")
+    daily_briefing_hour: Mapped[int] = mapped_column(default=8)
+    notify_threshold: Mapped[int] = mapped_column(default=85)
+    briefing_threshold: Mapped[int] = mapped_column(default=65)
+    dashboard_threshold: Mapped[int] = mapped_column(default=40)
+    max_interruptions_per_day: Mapped[int] = mapped_column(default=3)
+    cooldown_minutes: Mapped[int] = mapped_column(default=240)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ProactiveSignal(Base):
+    __tablename__ = "proactive_signals"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "fingerprint",
+            name="uq_proactive_signals_workspace_fingerprint",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    commitment_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("commitments.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    signal_type: Mapped[str] = mapped_column(String(64), index=True)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    tier: Mapped[str] = mapped_column(String(32), default="dashboard", index=True)
+    attention_score: Mapped[int] = mapped_column(default=0, index=True)
+    score_components: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
+    what_happening: Mapped[str] = mapped_column(Text)
+    why_matters: Mapped[str] = mapped_column(Text)
+    suggested_capability: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_evaluated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_surfaced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    surface_count: Mapped[int] = mapped_column(default=0)
+    snoozed_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    dismissed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class BriefingSnapshot(Base):
+    __tablename__ = "briefing_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "request_id",
+            name="uq_briefing_snapshots_workspace_request",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    request_id: Mapped[UUID] = mapped_column(Uuid)
+    local_date: Mapped[str] = mapped_column(String(10), index=True)
+    timezone: Mapped[str] = mapped_column(String(64))
+    content_hash: Mapped[str] = mapped_column(String(64))
+    signal_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    item_count: Mapped[int] = mapped_column(default=0)
+    generated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )

@@ -23,6 +23,9 @@ def test_tenant_foundation_tables_are_registered() -> None:
         "workflow_refs",
         "audit_events",
         "approvals",
+        "proactive_preferences",
+        "proactive_signals",
+        "briefing_snapshots",
     } <= set(Base.metadata.tables)
 
 
@@ -106,6 +109,27 @@ def test_approvals_bind_exact_actions_to_user_and_workspace() -> None:
     approval = Base.metadata.tables["approvals"]
     assert {foreign_key.target_fullname for foreign_key in approval.foreign_keys} == {
         "actions.id",
+        "users.id",
+        "workspaces.id",
+    }
+
+
+
+def test_proactive_tables_are_tenant_scoped_and_commitment_bound() -> None:
+    preference = Base.metadata.tables["proactive_preferences"]
+    signal = Base.metadata.tables["proactive_signals"]
+    briefing = Base.metadata.tables["briefing_snapshots"]
+
+    assert {foreign_key.target_fullname for foreign_key in preference.foreign_keys} == {
+        "users.id",
+        "workspaces.id",
+    }
+    assert {foreign_key.target_fullname for foreign_key in signal.foreign_keys} == {
+        "commitments.id",
+        "users.id",
+        "workspaces.id",
+    }
+    assert {foreign_key.target_fullname for foreign_key in briefing.foreign_keys} == {
         "users.id",
         "workspaces.id",
     }
