@@ -110,7 +110,7 @@ async def _execute_internal(
     plan: Plan,
     step: PlanStep,
 ) -> dict[str, object]:
-    context = cast(dict[str, object], plan.context_snapshot)
+    context = plan.context_snapshot
     commitment_context = cast(dict[str, object], context.get("commitment", {}))
     expected_context_hash = step.input_payload.get("context_hash")
     if expected_context_hash != plan.context_hash:
