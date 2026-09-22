@@ -1,0 +1,66 @@
+[
+  {
+    "id": "budget-before-review",
+    "subject": "Budget review",
+    "content": "Please send the budget before tomorrow's review.",
+    "expected_observation_types": ["request"],
+    "expected_temporal_expressions": ["tomorrow's review"],
+    "expected_people": []
+  },
+  {
+    "id": "promise-slides",
+    "subject": "Slides",
+    "content": "I'll send the revised slides by Friday.",
+    "expected_observation_types": ["promise"],
+    "expected_temporal_expressions": ["Friday"],
+    "expected_people": []
+  },
+  {
+    "id": "meeting-advisor",
+    "subject": "Research review",
+    "content": "Research review with Professor Lee is Tuesday at 2 PM.",
+    "expected_observation_types": ["meeting"],
+    "expected_temporal_expressions": ["Tuesday at 2 PM"],
+    "expected_people": ["Professor Lee"]
+  },
+  {
+    "id": "follow-up-maya",
+    "subject": "Maya follow-up",
+    "content": "If Maya has not replied by Thursday, follow up with her.",
+    "expected_observation_types": ["follow_up"],
+    "expected_temporal_expressions": ["Thursday"],
+    "expected_people": ["Maya"]
+  },
+  {
+    "id": "deployment-task",
+    "subject": "Deployment",
+    "content": "Finish the deployment checklist before release.",
+    "expected_observation_types": ["task"],
+    "expected_temporal_expressions": [],
+    "expected_people": []
+  },
+  {
+    "id": "newsletter",
+    "subject": "Fall newsletter",
+    "content": "Our fall newsletter is now available. Thanks for reading.",
+    "expected_observation_types": [],
+    "expected_temporal_expressions": [],
+    "expected_people": []
+  },
+  {
+    "id": "optional-suggestion",
+    "subject": "Suggestion",
+    "content": "You might want to explore the new dashboard when you have time.",
+    "expected_observation_types": [],
+    "expected_temporal_expressions": [],
+    "expected_people": []
+  },
+  {
+    "id": "advisor-relationship",
+    "subject": "Team context",
+    "content": "Jordan is Priya's advisor.",
+    "expected_observation_types": [],
+    "expected_temporal_expressions": [],
+    "expected_people": ["Jordan", "Priya"]
+  }
+]
