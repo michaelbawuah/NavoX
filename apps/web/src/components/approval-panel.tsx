@@ -381,24 +381,24 @@ export function ApprovalPanel({
 
           <dl className={styles.actionPayload}>
             <div>
-              <dt>From</dt>
+              <dt className={styles.actionPayloadLabel}>From</dt>
               <dd>{activeAction.payload.sender}</dd>
             </div>
             <div>
-              <dt>To</dt>
+              <dt className={styles.actionPayloadLabel}>To</dt>
               <dd>{activeAction.payload.to}</dd>
             </div>
             <div>
-              <dt>Subject</dt>
+              <dt className={styles.actionPayloadLabel}>Subject</dt>
               <dd>{activeAction.payload.subject}</dd>
             </div>
           </dl>
           <div className={styles.emailBody}>
-            <span>Exact body</span>
+            <span className={styles.emailBodyLabel}>Exact body</span>
             <p>{activeAction.payload.body_text}</p>
           </div>
           <div className={styles.approvalHash}>
-            <span>Approved payload fingerprint</span>
+            <span className={styles.approvalHashLabel}>Approved payload fingerprint</span>
             <code>{activeAction.payload_hash}</code>
           </div>
 
