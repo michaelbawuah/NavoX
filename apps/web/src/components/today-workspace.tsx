@@ -24,6 +24,7 @@ interface Account {
 interface GoogleConnection {
   id: string;
   provider: "google";
+  external_email: string | null;
   status: string;
   granted_scopes: string[];
   last_checked_at: string | null;

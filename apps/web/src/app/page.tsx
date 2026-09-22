@@ -24,6 +24,7 @@ interface Account {
 interface GoogleConnection {
   id: string;
   provider: "google";
+  external_email: string | null;
   status: string;
   granted_scopes: string[];
   last_checked_at: string | null;
@@ -71,6 +72,8 @@ export default function Home() {
           "Google did not return a refresh credential. Please try connecting again.",
         scope_mismatch:
           "Google returned an unrequested permission. NavoX did not link the account.",
+        account_mismatch:
+          "Gmail permission was granted from a different Google account, so NavoX rejected it.",
         unverified: "Google did not confirm a verified email address.",
       };
       setMessage(

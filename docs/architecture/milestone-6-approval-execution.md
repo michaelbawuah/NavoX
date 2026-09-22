@@ -31,8 +31,11 @@ Google identity remains the default connection contract. NavoX requests
 connection-specific capability grant initiated from the signed-in workspace.
 
 The upgrade attempt is PKCE/state protected, tenant scoped, bound to the exact
-stored Google connection, and accepts only NavoX's allowlisted scopes. Refresh
-tokens remain encrypted in the existing credential vault.
+stored Google connection, and accepts only NavoX's allowlisted scopes. It
+requests only `openid`, verified-email identity, and `gmail.send`; the callback
+re-fetches Google identity and requires the same provider subject and verified
+email as the original connection before storing the capability. Refresh tokens
+remain encrypted in the existing credential vault.
 
 Permission is necessary but never sufficient. Gmail send is R3 and always
 requires exact-action approval.
