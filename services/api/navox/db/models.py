@@ -134,6 +134,11 @@ class OAuthAuthorizationAttempt(Base):
         Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
     )
     provider: Mapped[str] = mapped_column(String(32))
+    purpose: Mapped[str] = mapped_column(String(64), default="identity")
+    connection_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("connections.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    requested_scopes: Mapped[list[str]] = mapped_column(JSON, default=list)
     state_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     code_verifier: Mapped[str] = mapped_column(String(128))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -418,6 +423,40 @@ class Action(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Approval(Base):
+    __tablename__ = "approvals"
+    __table_args__ = (
+        UniqueConstraint("action_id", "version", name="uq_approvals_action_version"),
+        UniqueConstraint(
+            "workspace_id",
+            "decision_request_id",
+            name="uq_approvals_workspace_decision_request",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    action_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("actions.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    version: Mapped[int] = mapped_column(default=1)
+    action_payload_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    decision_request_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class WorkflowRef(Base):
