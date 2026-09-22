@@ -263,6 +263,50 @@
           }
         ]
       }
+    },
+    {
+      "case_id": "budget-sent",
+      "output": {
+        "schema_version": "operational-extraction.v1",
+        "observations": [
+          {
+            "observation_type": "completion",
+            "action_text": "send",
+            "object_text": "the budget",
+            "confidence": 0.96,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 18,
+                "text": "I sent the budget."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "approval-waiting",
+      "output": {
+        "schema_version": "operational-extraction.v1",
+        "observations": [
+          {
+            "observation_type": "waiting",
+            "action_text": "obtain",
+            "object_text": "the approval",
+            "confidence": 0.96,
+            "evidence": [
+              {
+                "source": "content",
+                "start_char": 0,
+                "end_char": 68,
+                "text": "I sent the approval request to Maya and am waiting for her response."
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }

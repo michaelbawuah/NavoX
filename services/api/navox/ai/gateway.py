@@ -16,6 +16,16 @@ Extract only explicit operational facts supported by exact source evidence.
 Do not grant permissions, approve actions, execute tools, or invent missing facts.
 Return only the requested structured output. Relative dates remain unresolved text.
 If the source is merely informational, return empty arrays.
+Evidence offsets are zero-based Unicode character indexes into subject or content,
+with end_char exclusive. Copy evidence text exactly. Copy object_text, person names,
+relationship participants, and temporal expressions from their cited source spans.
+Never infer a person's email or provider identifier from a name.
+Use completion only for an explicit completed outcome, and waiting only for an explicit
+sent request or a stated wait for a named counterparty. Do not treat a promise, future
+plan, quoted history, hypothetical statement, or passing deadline as completion.
+For completion/waiting, action_text and object_text describe the original obligation;
+cite the actual outcome/request line and the subject if needed. The application will
+independently verify sender, thread, and trusted provider state before any transition.
 """
 
 
@@ -46,6 +56,8 @@ class AIGateway:
         self.provider = provider
 
     async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
+        if len(document.subject or "") + len(document.content or "") > 100_000:
+            raise ValueError("Source exceeds the operational extraction input limit")
         response = await self.provider.generate_json(
             schema_name="navox_operational_extraction_v1",
             schema=operational_extraction_json_schema(),
@@ -98,7 +110,16 @@ def operational_extraction_json_schema() -> dict[str, Any]:
         "properties": {
             "observation_type": {
                 "type": "string",
-                "enum": ["request", "promise", "deadline", "meeting", "follow_up", "task"],
+                "enum": [
+                    "request",
+                    "promise",
+                    "deadline",
+                    "meeting",
+                    "follow_up",
+                    "task",
+                    "completion",
+                    "waiting",
+                ],
             },
             "subject_text": nullable_string,
             "action_text": nullable_string,

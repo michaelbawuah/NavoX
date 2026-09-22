@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
@@ -13,7 +15,9 @@ OPERATIONAL_EXTRACTION_SCHEMA_VERSION: Literal["operational-extraction.v1"] = (
     "operational-extraction.v1"
 )
 
-ObservationType = Literal["request", "promise", "deadline", "meeting", "follow_up", "task"]
+ObservationType = Literal[
+    "request", "promise", "deadline", "meeting", "follow_up", "task", "completion", "waiting"
+]
 EvidenceSource = Literal["subject", "content"]
 TemporalKind = Literal["deadline", "meeting_start", "follow_up", "event_time", "other"]
 
@@ -27,13 +31,28 @@ INSTRUCTION_LIKE_MARKERS = (
     "exfiltrate",
     "grant permission",
     "approve this action",
+    "ignore prior instructions",
+    "disregard previous instructions",
+    "override the system",
+    "bypass approval",
+    "bypass permissions",
+    "disable safety",
+    "system prompt",
 )
 
 
 def _reject_instruction_like(value: str | None) -> str | None:
     if value is None:
         return None
-    normalized = value.casefold()
+    normalized = " ".join(
+        "".join(
+            char
+            for char in unicodedata.normalize("NFKC", value)
+            if unicodedata.category(char) != "Cf"
+        )
+        .casefold()
+        .split()
+    )
     if any(marker in normalized for marker in INSTRUCTION_LIKE_MARKERS):
         raise ValueError("Instruction-like content cannot become an operational fact")
     return value
@@ -146,6 +165,40 @@ class OperationalExtraction(BaseModel):
                 raise ValueError("Evidence span exceeds source bounds")
             if source_text[span.start_char : span.end_char] != span.text:
                 raise ValueError("Evidence span does not exactly match the source")
+            # A benign paraphrase must not launder an instruction-bearing source span.
+            # This is a conservative quality filter; authority is independently blocked
+            # by the output schema and downstream permission/approval boundaries.
+            _reject_instruction_like(span.text)
+
+        identities = [*document.recipients]
+        if document.author is not None:
+            identities.append(document.author)
+        for person in self.people:
+            cited = " ".join(span.text for span in person.evidence).casefold()
+            if person.name.casefold() not in cited:
+                raise ValueError("Person name is not grounded in its evidence")
+            if person.identity_value is not None:
+                exact_header_identity = any(
+                    identity.identity_type == person.identity_type
+                    and identity.identity_value.casefold() == person.identity_value.casefold()
+                    and identity.display_name is not None
+                    and identity.display_name.casefold() == person.name.casefold()
+                    for identity in identities
+                )
+                if person.identity_value.casefold() not in cited and not exact_header_identity:
+                    raise ValueError("Person identity is not grounded in the source")
+        for temporal in self.temporals:
+            _require_cited(temporal.expression, temporal.evidence, "Temporal expression")
+        for observation in self.observations:
+            if observation.temporal_expression is not None:
+                _require_cited(
+                    observation.temporal_expression, observation.evidence, "Temporal expression"
+                )
+            if observation.object_text:
+                _require_cited(observation.object_text, observation.evidence, "Observation object")
+        for relationship in self.relationships:
+            _require_cited(relationship.subject_text, relationship.evidence, "Relationship subject")
+            _require_cited(relationship.object_text, relationship.evidence, "Relationship object")
 
     def _all_evidence(self) -> list[EvidenceSpan]:
         spans: list[EvidenceSpan] = []
@@ -158,6 +211,12 @@ class OperationalExtraction(BaseModel):
         for relationship in self.relationships:
             spans.extend(relationship.evidence)
         return spans
+
+
+def _require_cited(value: str, evidence: list[EvidenceSpan], label: str) -> None:
+    normalized = " ".join(value.casefold().split())
+    if not any(normalized in " ".join(span.text.casefold().split()) for span in evidence):
+        raise ValueError(f"{label} is not grounded in its evidence")
 
 
 @dataclass(frozen=True)
@@ -212,14 +271,10 @@ class OperationalExtractor:
 def source_document_hash(document: SourceDocument) -> str:
     """Stable hash for bounded provenance without persisting the complete source body."""
 
-    canonical = "\x00".join(
-        (
-            document.schema_version,
-            document.provider,
-            document.source_type,
-            document.external_id,
-            document.subject or "",
-            document.content or "",
-        )
+    canonical = json.dumps(
+        document.model_dump(mode="json", exclude={"id", "retrieved_at"}),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
     )
     return sha256(canonical.encode("utf-8")).hexdigest()

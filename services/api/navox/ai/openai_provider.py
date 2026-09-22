@@ -46,6 +46,7 @@ class OpenAIResponsesProvider:
             "instructions": instructions,
             "input": input_text,
             "store": False,
+            "max_output_tokens": 8_000,
             "text": {
                 "format": {
                     "type": "json_schema",
@@ -60,21 +61,26 @@ class OpenAIResponsesProvider:
             "Content-Type": "application/json",
         }
 
-        if self.client is not None:
-            response = await self.client.post(
-                OPENAI_RESPONSES_URL,
-                headers=headers,
-                json=payload,
-                timeout=self.timeout_seconds,
-            )
-        else:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
+        try:
+            if self.client is not None:
+                response = await self.client.post(
                     OPENAI_RESPONSES_URL,
                     headers=headers,
                     json=payload,
                     timeout=self.timeout_seconds,
                 )
+            else:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        OPENAI_RESPONSES_URL,
+                        headers=headers,
+                        json=payload,
+                        timeout=self.timeout_seconds,
+                    )
+        except httpx.RequestError:
+            # Do not put credentials, request content, or transport diagnostics into
+            # workflow failure history/logs through an exception chain.
+            raise AIProviderError("OpenAI Responses transport failed") from None
 
         if response.status_code >= 400:
             raise AIProviderError(
@@ -83,14 +89,19 @@ class OpenAIResponsesProvider:
 
         try:
             body = response.json()
-        except json.JSONDecodeError as exc:
-            raise AIProviderError("OpenAI Responses returned invalid JSON") from exc
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise AIProviderError("OpenAI Responses returned invalid JSON") from None
+
+        if not isinstance(body, dict) or body.get("status") != "completed":
+            raise AIProviderError("OpenAI Responses did not complete successfully")
+        if body.get("error") is not None or body.get("incomplete_details") is not None:
+            raise AIProviderError("OpenAI Responses contained an incomplete or failed result")
 
         output_text = _extract_output_text(body)
         try:
             parsed = json.loads(output_text)
-        except json.JSONDecodeError as exc:
-            raise AIProviderError("OpenAI structured output was not valid JSON") from exc
+        except json.JSONDecodeError:
+            raise AIProviderError("OpenAI structured output was not valid JSON") from None
         if not isinstance(parsed, dict):
             raise AIProviderError("OpenAI structured output must be a JSON object")
 
@@ -103,10 +114,19 @@ class OpenAIResponsesProvider:
 
 
 def _extract_output_text(body: dict[str, Any]) -> str:
-    for item in body.get("output", []):
+    output = body.get("output")
+    if not isinstance(output, list):
+        raise AIProviderError("OpenAI Responses contained invalid output")
+    texts: list[str] = []
+    for item in output:
         if not isinstance(item, dict) or item.get("type") != "message":
             continue
-        for part in item.get("content", []):
+        if item.get("status") not in (None, "completed"):
+            raise AIProviderError("OpenAI Responses contained an incomplete message")
+        content = item.get("content")
+        if not isinstance(content, list):
+            raise AIProviderError("OpenAI Responses contained invalid message content")
+        for part in content:
             if not isinstance(part, dict):
                 continue
             if part.get("type") == "refusal":
@@ -114,5 +134,7 @@ def _extract_output_text(body: dict[str, Any]) -> str:
             if part.get("type") == "output_text":
                 text = part.get("text")
                 if isinstance(text, str) and text:
-                    return text
+                    texts.append(text)
+    if len(texts) == 1:
+        return texts[0]
     raise AIProviderError("OpenAI Responses contained no structured output text")

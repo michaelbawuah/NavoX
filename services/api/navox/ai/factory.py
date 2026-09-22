@@ -14,7 +14,7 @@ def build_ai_gateway(settings: Settings) -> AIGateway:
 
     provider = settings.ai_provider.casefold().strip()
     if provider == "openai":
-        if settings.openai_api_key is None:
+        if settings.openai_api_key is None or not settings.openai_api_key.get_secret_value():
             raise AIProviderNotConfigured("OPENAI_API_KEY is required when AI_PROVIDER=openai")
         return AIGateway(
             OpenAIResponsesProvider(

@@ -21,7 +21,8 @@ class SourceIdentity(BaseModel):
 class SourceDocument(BaseModel):
     """Versioned canonical input contract for every SPEC-002 connector."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+    # Source text must retain its exact characters for stable evidence offsets.
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     schema_version: Literal["source-document.v1"] = SOURCE_DOCUMENT_SCHEMA_VERSION
     id: UUID
@@ -37,6 +38,11 @@ class SourceDocument(BaseModel):
     occurred_at: datetime
     retrieved_at: datetime
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @field_validator("provider", "source_type", "external_id", "external_parent_id", mode="before")
+    @classmethod
+    def normalize_identifiers(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
     @field_validator("occurred_at", "retrieved_at")
     @classmethod

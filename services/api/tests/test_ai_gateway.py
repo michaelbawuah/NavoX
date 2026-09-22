@@ -27,9 +27,7 @@ def document() -> SourceDocument:
             identity_value="maya@example.com",
             display_name="Maya",
         ),
-        recipients=[
-            SourceIdentity(identity_type="email", identity_value="owner@example.com")
-        ],
+        recipients=[SourceIdentity(identity_type="email", identity_value="owner@example.com")],
         subject="Budget review",
         content="Please send the budget.",
         occurred_at=datetime(2026, 9, 22, 13, 0, tzinfo=UTC),
