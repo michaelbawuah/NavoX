@@ -780,8 +780,8 @@ export function TodayWorkspace({
             </div>
             <p className={styles.mutedCopy}>
               Milestone 5 automatically executes only internal reads and
-              preparation. External provider actions remain unavailable, and
-              R2+ actions cannot run without the later approval system.
+              preparation. External provider actions remain unavailable, and R2+
+              actions cannot run without the later approval system.
             </p>
 
             {activePlan ? (
@@ -797,7 +797,9 @@ export function TodayWorkspace({
                 </div>
                 <div className={styles.planMeta}>
                   <span>{activePlan.planner_version}</span>
-                  <span>{activePlan.steps.length} / {activePlan.max_steps} steps</span>
+                  <span>
+                    {activePlan.steps.length} / {activePlan.max_steps} steps
+                  </span>
                   <span>Replans {activePlan.replan_count} / 2</span>
                 </div>
                 <ol className={styles.planSteps}>
@@ -841,8 +843,8 @@ export function TodayWorkspace({
               </div>
             ) : (
               <p className={styles.emptyAgent}>
-                Choose <strong>Handle this</strong> on a confirmed commitment
-                to create the first bounded plan.
+                Choose <strong>Handle this</strong> on a confirmed commitment to
+                create the first bounded plan.
               </p>
             )}
           </section>
