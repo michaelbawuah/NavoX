@@ -61,14 +61,14 @@ class BoundedAgentService:
                 raise AgentPlanConflictError(
                     "That request ID is already bound to another commitment"
                 )
-            steps = list(
+            existing_steps = list(
                 await database.scalars(
                     select(PlanStep)
                     .where(PlanStep.plan_id == existing.id)
                     .order_by(PlanStep.sequence_number)
                 )
             )
-            return existing, steps, False
+            return existing, existing_steps, False
 
         user = await database.scalar(select(User).where(User.id == user_id))
         if user is None:
