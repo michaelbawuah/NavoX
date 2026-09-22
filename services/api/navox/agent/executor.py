@@ -6,8 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.agent.audit import add_audit_event
-from navox.agent.hashing import payload_hash
 from navox.agent.contracts import ActionContract, get_action_contract
+from navox.agent.hashing import payload_hash
 from navox.agent.policy import ActionPolicy
 from navox.db.models import (
     Action,

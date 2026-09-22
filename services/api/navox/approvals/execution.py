@@ -10,7 +10,7 @@ from navox.agent.hashing import action_security_hash
 from navox.approvals.schemas import StoredGmailSendPayload
 from navox.approvals.service import ApprovalService, latest_approval, plan_for_action
 from navox.core.settings import Settings
-from navox.db.models import Action, Approval, Commitment, Connection, PlanStep, User, WorkflowRef
+from navox.db.models import Action, Approval, Commitment, Connection, User, WorkflowRef
 from navox.providers.google_gmail import (
     GmailGateway,
     GmailProviderError,
