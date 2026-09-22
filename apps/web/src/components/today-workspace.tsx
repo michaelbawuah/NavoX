@@ -846,11 +846,14 @@ export function TodayWorkspace({
                       <article className={styles.queryFocusItem} key={item.id}>
                         <div>
                           <strong>{item.title}</strong>
-                          <span>
+                          <span className={styles.queryDue}>
                             {item.due_at ? dueLabel(item.due_at) : "No due date"}
                           </span>
                         </div>
-                        <span data-urgency={itemUrgency(item)}>
+                        <span
+                          className={styles.queryUrgency}
+                          data-urgency={itemUrgency(item)}
+                        >
                           {urgencyLabel(item)}
                         </span>
                       </article>

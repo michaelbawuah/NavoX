@@ -369,7 +369,11 @@ export function ProactivePanel({
         </div>
       </div>
 
-      <div className={styles.legend} aria-label="Deadline status legend">
+      <div
+        aria-label="Deadline status legend"
+        className={styles.legend}
+        role="group"
+      >
         <span data-tone="urgent"><i />Urgent</span>
         <span data-tone="upcoming"><i />Upcoming</span>
         <span data-tone="completed"><i />Completed</span>
@@ -410,7 +414,7 @@ export function ProactivePanel({
                     </span>
                     <span>{priorityLabel(item.priority)} priority</span>
                   </div>
-                  <strong>{item.title}</strong>
+                  <strong className={styles.deadlineTitle}>{item.title}</strong>
                   <div className={styles.deadlineMeta}>
                     <span>{deadlineTiming(item)}</span>
                     {item.due_at && (
@@ -459,7 +463,9 @@ export function ProactivePanel({
             {otherSignals.slice(0, 4).map((signal) => (
               <article className={styles.radarItem} key={signal.id}>
                 <span>{signalLabel(signal)}</span>
-                <strong>{signal.what_happening}</strong>
+                <strong className={styles.radarTitle}>
+                  {signal.what_happening}
+                </strong>
                 <p>{signal.why_matters}</p>
                 <div>
                   <button

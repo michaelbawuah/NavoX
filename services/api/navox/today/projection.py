@@ -156,9 +156,7 @@ async def build_today_projection(
         and commitment.completed_at is not None
         and aware(commitment.completed_at) >= completed_cutoff
     ]
-    commitment_ids = [
-        commitment.id for commitment in [*active, *completed_recently]
-    ]
+    commitment_ids = [commitment.id for commitment in [*active, *completed_recently]]
 
     source_map: dict[UUID, list[TodaySource]] = {}
     if commitment_ids:

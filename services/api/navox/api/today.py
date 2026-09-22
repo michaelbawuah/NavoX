@@ -123,9 +123,7 @@ def projection_response(projection: TodayProjection) -> TodayResponse:
         coming_up=[item_response(item) for item in projection.coming_up],
         renewals=[item_response(item) for item in projection.renewals],
         waiting_on=[item_response(item) for item in projection.waiting_on],
-        completed_recently=[
-            item_response(item) for item in projection.completed_recently
-        ],
+        completed_recently=[item_response(item) for item in projection.completed_recently],
     )
 
 

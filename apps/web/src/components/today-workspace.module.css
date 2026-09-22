@@ -554,12 +554,12 @@
   white-space: nowrap;
 }
 
-.queryFocusItem > div > span {
+.queryDue {
   color: #71839f;
   font-size: 0.59rem;
 }
 
-.queryFocusItem > span {
+.queryUrgency {
   flex: 0 0 auto;
   border-radius: 999px;
   background: rgb(91 111 148 / 12%);
@@ -570,17 +570,17 @@
   text-transform: uppercase;
 }
 
-.queryFocusItem > span[data-urgency="urgent"] {
+.queryUrgency[data-urgency="urgent"] {
   background: rgb(150 50 63 / 16%);
   color: #ffabb4;
 }
 
-.queryFocusItem > span[data-urgency="upcoming"] {
+.queryUrgency[data-urgency="upcoming"] {
   background: rgb(148 106 33 / 16%);
   color: #f5cd81;
 }
 
-.queryFocusItem > span[data-urgency="completed"] {
+.queryUrgency[data-urgency="completed"] {
   background: rgb(43 129 99 / 16%);
   color: #8cdeb9;
 }
