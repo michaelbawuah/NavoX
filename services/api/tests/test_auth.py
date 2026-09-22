@@ -29,7 +29,6 @@ async def client() -> AsyncIterator[AsyncClient]:
     app.dependency_overrides.pop(get_database_session, None)
     await engine.dispose()
 
-
 @pytest.mark.asyncio
 async def test_registration_creates_a_personal_workspace_and_session(client: AsyncClient) -> None:
     response = await client.post(
@@ -57,7 +56,6 @@ async def test_registration_creates_a_personal_workspace_and_session(client: Asy
     assert current_account.status_code == 200
     assert current_account.json()["workspace"]["id"] == body["workspace"]["id"]
 
-
 @pytest.mark.asyncio
 async def test_registration_rejects_a_duplicate_email(client: AsyncClient) -> None:
     payload = {
@@ -71,7 +69,6 @@ async def test_registration_rejects_a_duplicate_email(client: AsyncClient) -> No
 
     assert duplicate.status_code == 409
     assert duplicate.json()["detail"] == "An account with that email already exists"
-
 
 @pytest.mark.asyncio
 async def test_login_and_logout_revoke_the_server_side_session(client: AsyncClient) -> None:
@@ -97,8 +94,6 @@ async def test_login_and_logout_revoke_the_server_side_session(client: AsyncClie
 
     assert valid_login.status_code == 200
     assert (await client.get("/api/v1/auth/me")).status_code == 200
-
-
 
 @pytest.mark.asyncio
 async def test_extension_session_is_bearer_scoped_revocable_and_not_cookie_backed(
@@ -133,7 +128,6 @@ async def test_extension_session_is_bearer_scoped_revocable_and_not_cookie_backe
     logout = await client.post("/api/v1/auth/extension/logout", headers=headers)
     assert logout.status_code == 200
     assert (await client.get("/api/v1/auth/me", headers=headers)).status_code == 401
-
 
 @pytest.mark.asyncio
 async def test_extension_login_rejects_invalid_credentials_and_malformed_bearer(
