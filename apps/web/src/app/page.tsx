@@ -6,6 +6,7 @@ import {
   LandingAtmosphere,
   MotionControl,
 } from "../components/landing-art";
+import { TodayWorkspace } from "../components/today-workspace";
 
 type AuthMode = "register" | "login";
 
@@ -197,89 +198,16 @@ export default function Home() {
 
   if (account !== null) {
     return (
-      <main className="shell">
-        <p className="eyebrow">NavoX · Personal workspace</p>
-        <section aria-labelledby="welcome-heading" className="welcome-card">
-          <p className="status">
-            <span className="status-dot" />
-            Account secured
-          </p>
-          <h1 id="welcome-heading">
-            Welcome, {account.display_name ?? account.email}.
-          </h1>
-          <p className="summary">
-            <strong>{account.workspace.name}</strong> is ready. You can link a
-            Google identity with no Gmail, Calendar, or Drive data access. AI
-            and external actions remain off.
-          </p>
-          <dl className="workspace-facts">
-            <div>
-              <dt>Workspace</dt>
-              <dd>{account.workspace.workspace_type}</dd>
-            </div>
-            <div>
-              <dt>Signed in as</dt>
-              <dd>{account.email}</dd>
-            </div>
-          </dl>
-          <section
-            aria-labelledby="google-heading"
-            className="connection-panel"
-          >
-            <div>
-              <h2 id="google-heading">Google connection</h2>
-              <p>
-                This link verifies your Google identity only. It does not read
-                Gmail, Calendar, or Drive data.
-              </p>
-            </div>
-            {connections.length === 0 ? (
-              <button
-                className="primary-button"
-                disabled={isConnectingGoogle}
-                onClick={() => void connectGoogle()}
-                type="button"
-              >
-                {isConnectingGoogle ? "Opening Google…" : "Connect Google"}
-              </button>
-            ) : (
-              <ul className="connection-list">
-                {connections.map((connection) => (
-                  <li key={connection.id}>
-                    <span>
-                      Google · {connection.status.replaceAll("_", " ")}
-                    </span>
-                    <button
-                      className="secondary-button"
-                      disabled={checkingConnectionId === connection.id}
-                      onClick={() => void checkGoogleConnection(connection.id)}
-                      type="button"
-                    >
-                      {checkingConnectionId === connection.id
-                        ? "Checking…"
-                        : "Check health"}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-          {message && (
-            <p className="form-message" role="status">
-              {message}
-            </p>
-          )}
-          <div className="account-actions">
-            <button
-              className="secondary-button"
-              type="button"
-              onClick={() => void signOut()}
-            >
-              Sign out
-            </button>
-          </div>
-        </section>
-      </main>
+      <TodayWorkspace
+        account={account}
+        checkingConnectionId={checkingConnectionId}
+        connections={connections}
+        isConnectingGoogle={isConnectingGoogle}
+        message={message}
+        onCheckGoogle={checkGoogleConnection}
+        onConnectGoogle={connectGoogle}
+        onSignOut={signOut}
+      />
     );
   }
 
