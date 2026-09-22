@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator
 
-SOURCE_DOCUMENT_SCHEMA_VERSION = "source-document.v1"
+SOURCE_DOCUMENT_SCHEMA_VERSION: Literal["source-document.v1"] = "source-document.v1"
 
 
 class SourceIdentity(BaseModel):
