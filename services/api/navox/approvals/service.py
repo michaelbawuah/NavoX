@@ -110,10 +110,10 @@ async def latest_approval(database: AsyncSession, action_id: UUID) -> Approval |
     return cast(
         Approval | None,
         await database.scalar(
-        select(Approval)
-        .where(Approval.action_id == action_id)
-        .order_by(Approval.version.desc())
-        .limit(1)
+            select(Approval)
+            .where(Approval.action_id == action_id)
+            .order_by(Approval.version.desc())
+            .limit(1)
         ),
     )
 
