@@ -166,8 +166,7 @@ class ModelExtractionResponse:
 class OperationalExtractionGateway(Protocol):
     """Narrow provider-neutral AI gateway surface used by operational extraction."""
 
-    async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
-        ...
+    async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse: ...
 
 
 @dataclass(frozen=True)
