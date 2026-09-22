@@ -7,6 +7,7 @@ from navox.agent.activities import execute_plan_step_activity, finalize_plan_act
 from navox.approvals.activities import (
     action_authorization_state_activity,
     execute_approved_action_activity,
+    mark_execution_uncertain_activity,
 )
 from navox.core.settings import get_settings
 from navox.workflows.approved_action import ApprovedActionWorkflow
@@ -30,6 +31,7 @@ async def main() -> None:
             finalize_plan_activity,
             action_authorization_state_activity,
             execute_approved_action_activity,
+            mark_execution_uncertain_activity,
         ],
     )
     await worker.run()

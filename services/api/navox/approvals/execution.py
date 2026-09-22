@@ -10,7 +10,7 @@ from navox.agent.hashing import action_security_hash
 from navox.approvals.schemas import StoredGmailSendPayload
 from navox.approvals.service import ApprovalService, latest_approval, plan_for_action
 from navox.core.settings import Settings
-from navox.db.models import Action, Approval, Commitment, Connection, User, WorkflowRef
+from navox.db.models import Action, Approval, Commitment, Connection, PlanStep, User, WorkflowRef
 from navox.providers.google_gmail import (
     GmailGateway,
     GmailProviderError,
@@ -20,6 +20,17 @@ from navox.providers.google_gmail import (
 from navox.providers.google_oauth import GoogleAccessTokenError, access_token_for_connection
 
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+APPROVAL_TTL = timedelta(minutes=15)
+
+
+async def _workflow_ref(database: AsyncSession, action_id: UUID) -> WorkflowRef | None:
+    return await database.scalar(
+        select(WorkflowRef).where(
+            WorkflowRef.entity_type == "action",
+            WorkflowRef.entity_id == action_id,
+            WorkflowRef.workflow_type == "approved_action",
+        )
+    )
 
 
 async def action_authorization_state(database: AsyncSession, action_id: UUID) -> str:
@@ -30,24 +41,42 @@ async def action_authorization_state(database: AsyncSession, action_id: UUID) ->
     if approval is None:
         return "missing_approval"
     if await ApprovalService().expire_if_needed(database, action, approval):
+        workflow_ref = await _workflow_ref(database, action.id)
+        if workflow_ref is not None:
+            workflow_ref.status = "expired"
+            await database.commit()
         return "expired"
-    if action.status in {
+
+    state = action.status
+    if state == "awaiting_approval":
+        return approval.status
+    if state == "approved":
+        return "approved"
+    if state == "executing":
+        return "executing"
+    if state in {
         "completed",
         "uncertain",
         "rejected",
         "expired",
+        "blocked",
         "failed",
     }:
-        return action.status
-    return approval.status
+        workflow_ref = await _workflow_ref(database, action.id)
+        desired = "manual_review" if state == "uncertain" else state
+        if workflow_ref is not None and workflow_ref.status != desired:
+            workflow_ref.status = desired
+            await database.commit()
+        return state
+    return state
 
 
-async def _invalidate_for_pause(
+async def _invalidate_locked_for_pause(
     database: AsyncSession,
     *,
     action: Action,
     approval: Approval,
-) -> str:
+) -> None:
     now = datetime.now(UTC)
     approval.status = "superseded"
     approval.superseded_at = now
@@ -58,7 +87,7 @@ async def _invalidate_for_pause(
         version=approval.version + 1,
         action_payload_hash=action.payload_hash,
         status="pending",
-        expires_at=now + timedelta(minutes=15),
+        expires_at=now + APPROVAL_TTL,
     )
     database.add(replacement)
     action.status = "awaiting_approval"
@@ -78,17 +107,54 @@ async def _invalidate_for_pause(
             "replacement_version": replacement.version,
         },
     )
-    await database.commit()
-    return "awaiting_approval"
 
 
-async def _mark_uncertain(
+async def _mark_blocked(
     database: AsyncSession,
     *,
     action: Action,
-    approval: Approval,
     reason: str,
 ) -> str:
+    now = datetime.now(UTC)
+    action.status = "blocked"
+    action.policy_reason = reason
+    plan, step = await plan_for_action(database, action)
+    plan.status = "blocked"
+    plan.error_code = reason[:64]
+    plan.completed_at = now
+    step.status = "blocked"
+    step.completed_at = now
+    workflow_ref = await _workflow_ref(database, action.id)
+    if workflow_ref is not None:
+        workflow_ref.status = "blocked"
+    add_audit_event(
+        database,
+        user_id=action.user_id,
+        workspace_id=action.workspace_id,
+        event_type="action.execution.blocked",
+        entity_type="action",
+        entity_id=action.id,
+        metadata={"reason": reason, "payload_hash": action.payload_hash},
+    )
+    await database.commit()
+    return "blocked"
+
+
+async def mark_execution_uncertain(
+    database: AsyncSession,
+    *,
+    action_id: UUID,
+    reason: str,
+) -> str:
+    action = await database.scalar(select(Action).where(Action.id == action_id))
+    if action is None:
+        return "missing"
+    if action.status == "completed":
+        return "completed"
+    if action.status != "executing":
+        return action.status
+
+    approval = await latest_approval(database, action.id)
     now = datetime.now(UTC)
     action.status = "uncertain"
     action.policy_reason = reason
@@ -98,13 +164,7 @@ async def _mark_uncertain(
     plan.error_code = reason[:64]
     step.status = "uncertain"
     step.completed_at = now
-    workflow_ref = await database.scalar(
-        select(WorkflowRef).where(
-            WorkflowRef.entity_type == "action",
-            WorkflowRef.entity_id == action.id,
-            WorkflowRef.workflow_type == "approved_action",
-        )
-    )
+    workflow_ref = await _workflow_ref(database, action.id)
     if workflow_ref is not None:
         workflow_ref.status = "manual_review"
     add_audit_event(
@@ -116,7 +176,7 @@ async def _mark_uncertain(
         entity_id=action.id,
         metadata={
             "reason": reason,
-            "approval_version": approval.version,
+            "approval_version": approval.version if approval is not None else None,
             "payload_hash": action.payload_hash,
         },
     )
@@ -136,22 +196,30 @@ async def execute_approved_gmail_send(
         return "missing"
     if action.status == "completed":
         return "completed"
+    if action.status == "executing":
+        return "executing"
     if action.action_type != "gmail.send" or action.provider != "google":
-        return "failed"
+        return await _mark_blocked(
+            database,
+            action=action,
+            reason="unsupported_approved_action",
+        )
 
     contract = get_action_contract(action.action_type)
     if contract is None or contract.risk_level != "R3":
-        return "failed"
+        return await _mark_blocked(
+            database,
+            action=action,
+            reason="risk_contract_mismatch",
+        )
 
     approval = await latest_approval(database, action.id)
     if approval is None:
-        return "missing_approval"
+        return await _mark_blocked(database, action=action, reason="approval_missing")
     if await ApprovalService().expire_if_needed(database, action, approval):
         return "expired"
     if approval.status != "approved":
         return approval.status
-    if approval.consumed_at is not None:
-        return "uncertain"
 
     current_hash = action_security_hash(
         provider=action.provider,
@@ -159,24 +227,20 @@ async def execute_approved_gmail_send(
         payload=action.payload,
     )
     if current_hash != action.payload_hash or approval.action_payload_hash != action.payload_hash:
-        action.status = "blocked"
-        action.policy_reason = "approval_payload_hash_mismatch"
-        await database.commit()
-        return "blocked"
-
-    user = await database.scalar(select(User).where(User.id == action.user_id))
-    if user is None:
-        return "failed"
-    if user.agent_paused:
-        return await _invalidate_for_pause(database, action=action, approval=approval)
+        return await _mark_blocked(
+            database,
+            action=action,
+            reason="approval_payload_hash_mismatch",
+        )
 
     try:
         payload = StoredGmailSendPayload.model_validate(action.payload)
     except ValueError:
-        action.status = "blocked"
-        action.policy_reason = "invalid_action_payload"
-        await database.commit()
-        return "blocked"
+        return await _mark_blocked(
+            database,
+            action=action,
+            reason="invalid_action_payload",
+        )
 
     connection = await database.scalar(
         select(Connection).where(
@@ -188,21 +252,26 @@ async def execute_approved_gmail_send(
         )
     )
     if connection is None:
-        action.status = "blocked"
-        action.policy_reason = "google_connection_unavailable"
-        await database.commit()
-        return "blocked"
+        return await _mark_blocked(
+            database,
+            action=action,
+            reason="google_connection_unavailable",
+        )
     if GMAIL_SEND_SCOPE not in connection.granted_scopes:
-        action.status = "blocked"
-        action.policy_reason = "gmail_send_scope_missing"
-        await database.commit()
-        return "blocked"
+        return await _mark_blocked(
+            database,
+            action=action,
+            reason="gmail_send_scope_missing",
+        )
     if connection.external_email != str(payload.sender).casefold():
-        action.status = "blocked"
-        action.policy_reason = "sender_connection_mismatch"
-        await database.commit()
-        return "blocked"
+        return await _mark_blocked(
+            database,
+            action=action,
+            reason="sender_connection_mismatch",
+        )
 
+    # Token refresh is side-effect free with respect to email sending and occurs
+    # before consuming the one-time approval.
     try:
         access_token = await access_token_for_connection(
             database,
@@ -212,35 +281,98 @@ async def execute_approved_gmail_send(
     except GoogleAccessTokenError:
         connection.status = "needs_reauthorization"
         connection.last_error = "refresh_failed"
-        action.status = "blocked"
-        action.policy_reason = "google_reauthorization_required"
-        await database.commit()
-        return "blocked"
-
-    now = datetime.now(UTC)
-    approval.consumed_at = now
-    approval.status = "consuming"
-    action.status = "executing"
-    action.started_at = action.started_at or now
-    plan, step = await plan_for_action(database, action)
-    plan.status = "executing"
-    plan.error_code = None
-    step.status = "executing"
-    step.started_at = step.started_at or now
-    add_audit_event(
-        database,
-        user_id=action.user_id,
-        workspace_id=action.workspace_id,
-        event_type="action.execution.started",
-        entity_type="action",
-        entity_id=action.id,
-        metadata={
-            "approval_version": approval.version,
-            "payload_hash": action.payload_hash,
-            "risk_level": action.risk_level,
-        },
-    )
+        return await _mark_blocked(
+            database,
+            action=action,
+            reason="google_reauthorization_required",
+        )
     await database.commit()
+
+    # Serialize the approval-consumption boundary. Only one concurrent caller can
+    # move this action from approved -> executing.
+    async with database.begin():
+        locked_action = await database.scalar(
+            select(Action).where(Action.id == action_id).with_for_update()
+        )
+        if locked_action is None:
+            return "missing"
+        if locked_action.status == "completed":
+            return "completed"
+        if locked_action.status == "executing":
+            return "executing"
+        if locked_action.status != "approved":
+            return locked_action.status
+
+        locked_approval = await database.scalar(
+            select(Approval)
+            .where(Approval.action_id == locked_action.id)
+            .order_by(Approval.version.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        if locked_approval is None:
+            return "missing_approval"
+        if locked_approval.status != "approved" or locked_approval.consumed_at is not None:
+            return locked_approval.status
+
+        locked_hash = action_security_hash(
+            provider=locked_action.provider,
+            action_type=locked_action.action_type,
+            payload=locked_action.payload,
+        )
+        if (
+            locked_hash != locked_action.payload_hash
+            or locked_approval.action_payload_hash != locked_action.payload_hash
+        ):
+            locked_action.status = "blocked"
+            locked_action.policy_reason = "approval_payload_hash_mismatch"
+            return "blocked"
+
+        user = await database.scalar(
+            select(User).where(User.id == locked_action.user_id).with_for_update()
+        )
+        if user is None:
+            locked_action.status = "blocked"
+            locked_action.policy_reason = "user_missing"
+            return "blocked"
+        if user.agent_paused:
+            await _invalidate_locked_for_pause(
+                database,
+                action=locked_action,
+                approval=locked_approval,
+            )
+            return "awaiting_approval"
+
+        now = datetime.now(UTC)
+        locked_approval.consumed_at = now
+        locked_approval.status = "consuming"
+        locked_action.status = "executing"
+        locked_action.started_at = locked_action.started_at or now
+        plan, step = await plan_for_action(database, locked_action)
+        plan.status = "executing"
+        plan.error_code = None
+        step.status = "executing"
+        step.started_at = step.started_at or now
+        add_audit_event(
+            database,
+            user_id=locked_action.user_id,
+            workspace_id=locked_action.workspace_id,
+            event_type="action.execution.started",
+            entity_type="action",
+            entity_id=locked_action.id,
+            metadata={
+                "approval_version": locked_approval.version,
+                "payload_hash": locked_action.payload_hash,
+                "risk_level": locked_action.risk_level,
+            },
+        )
+
+    # Re-read after the transaction so ORM state reflects the committed execution
+    # marker before the provider request.
+    action = await database.scalar(select(Action).where(Action.id == action_id))
+    approval = await latest_approval(database, action_id)
+    if action is None or approval is None:
+        return "missing"
 
     gmail = gateway or GoogleGmailGateway(timeout_seconds=float(contract.timeout_seconds))
     try:
@@ -254,10 +386,9 @@ async def execute_approved_gmail_send(
             idempotency_key=action.idempotency_key,
         )
     except GmailProviderError:
-        return await _mark_uncertain(
+        return await mark_execution_uncertain(
             database,
-            action=action,
-            approval=approval,
+            action_id=action.id,
             reason="gmail_send_outcome_uncertain",
         )
 
@@ -272,6 +403,7 @@ async def execute_approved_gmail_send(
         "verification": contract.verification_method,
     }
     approval.status = "consumed"
+    plan, step = await plan_for_action(database, action)
     step.status = "completed"
     step.output_payload = action.result
     step.completed_at = finished
@@ -295,13 +427,7 @@ async def execute_approved_gmail_send(
             commitment.status = "completed"
             commitment.completed_at = finished
 
-    workflow_ref = await database.scalar(
-        select(WorkflowRef).where(
-            WorkflowRef.entity_type == "action",
-            WorkflowRef.entity_id == action.id,
-            WorkflowRef.workflow_type == "approved_action",
-        )
-    )
+    workflow_ref = await _workflow_ref(database, action.id)
     if workflow_ref is not None:
         workflow_ref.status = "completed"
 
