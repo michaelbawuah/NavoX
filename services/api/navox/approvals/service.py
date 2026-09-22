@@ -23,6 +23,10 @@ APPROVAL_TTL = timedelta(minutes=15)
 PREPARABLE_COMMITMENT_STATUSES = {"confirmed", "waiting", "attention"}
 
 
+def aware(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
 class ApprovalServiceError(ValueError):
     pass
 
@@ -349,7 +353,7 @@ class ApprovalService:
             return action, approval
         if approval.status != "pending":
             raise ApprovalConflictError(f"Approval is {approval.status}")
-        if approval.expires_at <= now:
+        if aware(approval.expires_at) <= now:
             await self._expire(database, action, approval)
             raise ApprovalConflictError("Approval expired")
         if approval.action_payload_hash != action.payload_hash:
@@ -537,7 +541,7 @@ class ApprovalService:
         action: Action,
         approval: Approval,
     ) -> bool:
-        if approval.status == "pending" and approval.expires_at <= datetime.now(UTC):
+        if approval.status == "pending" and aware(approval.expires_at) <= datetime.now(UTC):
             await self._expire(database, action, approval)
             return True
         return False
