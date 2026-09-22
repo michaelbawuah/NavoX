@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { ApprovalPanel } from "./approval-panel";
+import { ProactivePanel } from "./proactive-panel";
 import styles from "./today-workspace.module.css";
 
 interface Account {
@@ -67,6 +68,7 @@ interface QueryPayload {
   answer: string;
   items: TodayItem[];
   supported_queries: string[];
+  details: string[];
 }
 
 interface PlanAction {
@@ -670,6 +672,7 @@ export function TodayWorkspace({
 
       <div className={styles.layout}>
         <div className={styles.primaryColumn}>
+          <ProactivePanel timezone={timezone} agentPaused={agentPaused} />
           {renderSection("Needs Attention", today?.needs_attention ?? [])}
           {renderSection("Coming Up", today?.coming_up ?? [])}
         </div>
@@ -766,10 +769,17 @@ export function TodayWorkspace({
                     ))}
                   </ul>
                 )}
+                {queryResult.details.length > 0 && (
+                  <ul>
+                    {queryResult.details.slice(0, 5).map((detail) => (
+                      <li key={detail}>{detail}</li>
+                    ))}
+                  </ul>
+                )}
                 {queryResult.intent === "unsupported" && (
                   <small>
-                    Try today, attention, this week, waiting, renewals, or
-                    promises.
+                    Try today, attention, this week, waiting, renewals, promises,
+                    forgetting, meeting prep, or what NavoX can handle.
                   </small>
                 )}
               </div>
