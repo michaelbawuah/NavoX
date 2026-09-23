@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   IntelligenceControls,
   IntelligenceFeedback,
+  SyncReadout,
   WorkspaceContext,
   WorkspaceReadout,
 } from "./intelligence-controls";
@@ -52,6 +53,7 @@ describe("connected understanding controls", () => {
     expect(markup).toMatch(
       /<button[^>]*disabled=""[^>]*>Sync Calendar<\/button>/,
     );
+    expect(markup).toContain("Reconnect read access");
   });
 
   it("honors agent pause for both sources", () => {
@@ -111,6 +113,45 @@ describe("connected understanding controls", () => {
     expect(markup).toContain("Loading local time");
     expect(markup).not.toContain("Weather unavailable");
     expect(markup).not.toContain("°");
+  });
+});
+
+describe("sync progress readout", () => {
+  const result = {
+    workflow_id: "intelligence:connection:gmail:request",
+    status: "failed" as const,
+    commitment_count: null,
+    error: { code: "google_scope_missing" },
+  };
+  const props = {
+    source: "gmail" as const,
+    progress: result,
+    pollingPaused: false,
+    onCheck: vi.fn(),
+    onReconnect: vi.fn(),
+    reconnectDisabled: false,
+  };
+
+  it("offers explicit reconnect for a failed Google read with saved permissions", () => {
+    const markup = renderToStaticMarkup(createElement(SyncReadout, props));
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain("Reconnect read access");
+    expect(markup).toContain("Sync failed");
+    expect(markup).not.toContain("Sync complete");
+  });
+
+  it("lets the owner recheck an unknown job without claiming it finished", () => {
+    const markup = renderToStaticMarkup(
+      createElement(SyncReadout, {
+        ...props,
+        progress: { ...result, status: "unavailable", error: null },
+        pollingPaused: true,
+      }),
+    );
+    expect(markup).toContain("Check sync status");
+    expect(markup).toContain("may still be running");
+    expect(markup).not.toContain("Sync failed");
+    expect(markup).not.toContain("Sync complete");
   });
 });
 
