@@ -123,9 +123,12 @@ commitments processed. The dashboard showed 84 active commitments and 459 eviden
 references. The processed count covers commitments handled by that sync; the
 active count covers workspace commitments in active states, so the two counts
 need not match. This records owner-observed completion, not a direct inspection of
-the Mac runtime or proof that every source produced a valid extraction. Evidence
-review and a repeat-sync duplicate check remain open. The earlier timeout category
-did not identify whether connect/read/write/pool timed out.
+the Mac runtime or proof that every source produced a valid extraction. The owner
+subsequently reported the requested repeat Gmail sync was done and looked good,
+with no issue reported. This is manual owner confirmation; repeat-run counters
+and item identities were not independently inspected. Evidence review remains
+open. The earlier timeout category did not identify whether connect/read/write/pool
+timed out.
 
 Gmail reads are spaced at least 250 ms apart within each source gateway. Temporary
 rate-limit and server errors retry the failed GET (at most three HTTP attempts)
@@ -288,6 +291,8 @@ quarantined sources must be separately scoped and verified.
   sanitized report and supplied delivery revision recorded above.
 - [x] Owner-reported Gmail sync completion after the timeout adjustment on
   2026-09-23: 87 commitments processed, 84 active, and 459 evidence references.
+- [x] Owner-reported repeat Gmail sync check: completed and looked good, with no
+  issue reported. This is a manual result, not a database-level duplicate audit.
 - [ ] In the owner's authorized workspace, verify Gmail and Calendar sync produce
   evidence-backed Today items, incremental replay creates no duplicate, feedback
   persists, and completion/waiting transitions match the source evidence.
