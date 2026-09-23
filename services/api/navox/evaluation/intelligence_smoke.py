@@ -81,6 +81,28 @@ CASES = (
     ),
 )
 
+PROVIDER_NEXT_STEPS = {
+    "authentication_failed": "Check that OPENAI_API_KEY is valid and loaded in the API container.",
+    "permission_denied": "Check that the key and project permit Responses API requests.",
+    "model_unavailable": (
+        "Check OPENAI_MODEL against the models available to the key's OpenAI project."
+    ),
+    "quota_exhausted": "Check the OpenAI project's quota and billing status.",
+    "rate_limited": "Wait for the provider rate limit to reset before retrying.",
+    "invalid_schema": (
+        "The provider rejected the extraction schema; report this diagnostic for a fix."
+    ),
+    "unsupported_parameter": (
+        "The configured model rejected a request parameter; report this diagnostic for a fix."
+    ),
+    "invalid_request": "The provider rejected the request; report this diagnostic for a fix.",
+    "provider_unavailable": "The provider is unavailable; retry later.",
+    "transport_error": "Check network access from the API container to the provider, then retry.",
+    "incomplete_response": "The provider did not finish its response; report this diagnostic.",
+    "invalid_response": "The provider returned an invalid response; report this diagnostic.",
+    "provider_error": "Report this sanitized diagnostic to investigate the provider failure.",
+}
+
 
 def source_for(case: SmokeCase, index: int) -> SourceDocument:
     instant = datetime(2030, 4, 3, 12, tzinfo=UTC)
@@ -143,18 +165,20 @@ class OfflineSmokeProvider:
         )
 
 
-def base_report(mode: str) -> dict[str, Any]:
+def base_report(mode: str, cases: tuple[SmokeCase, ...] = CASES) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "generated_at": datetime.now(UTC).isoformat(),
         "mode": mode,
         "dataset": "navox-intelligence-smoke-v1",
         "scope": "AIGateway and extraction validation on built-in synthetic sources only",
-        "planned_cases": len(CASES),
+        "planned_cases": len(cases),
         "executed_cases": 0,
         "passed_cases": 0,
         "failed_cases": 0,
         "failed_case_ids": [],
+        "skipped_cases": 0,
+        "skipped_case_ids": [],
         "cases": [],
         "passed": None,
         "live_google_chain_verified": False,
@@ -168,14 +192,18 @@ def base_report(mode: str) -> dict[str, Any]:
 
 
 async def run_smoke(
-    gateway: AIGateway, *, mode: Literal["offline_fixture", "live_model_smoke"]
+    gateway: AIGateway,
+    *,
+    mode: Literal["offline_fixture", "live_model_smoke"],
+    cases: tuple[SmokeCase, ...] = CASES,
 ) -> dict[str, Any]:
-    report = base_report(mode)
+    report = base_report(mode, cases)
     extractor = OperationalExtractor(gateway)
-    for index, case in enumerate(CASES):
+    for index, case in enumerate(cases):
         started = monotonic()
         reason = "validated_expected_observations"
         passed = False
+        provider_error: dict[str, Any] | None = None
         try:
             async with asyncio.timeout(45):
                 result = await extractor.extract(source_for(case, index))
@@ -194,8 +222,10 @@ async def run_smoke(
             reason = "untrusted_proposal_rejected" if passed else "extraction_validation_failed"
         except TimeoutError:
             reason = "provider_timeout"
-        except AIProviderError:
+            provider_error = {"code": "transport_error"}
+        except AIProviderError as error:
             reason = "provider_request_failed"
+            provider_error = error.diagnostic()
         except Exception:
             reason = "runtime_error"
         report["cases"].append(
@@ -208,10 +238,22 @@ async def run_smoke(
         )
         if not passed:
             report["failed_case_ids"].append(case.id)
+        if provider_error is not None:
+            report["cases"][-1]["provider_error"] = provider_error
+            report["skipped_case_ids"] = [remaining.id for remaining in cases[index + 1 :]]
+            report["skipped_cases"] = len(report["skipped_case_ids"])
+            report["next_step"] = (
+                PROVIDER_NEXT_STEPS.get(
+                    provider_error["code"], PROVIDER_NEXT_STEPS["provider_error"]
+                )
+                + " After resolving it, retry with --live --case explicit-request "
+                "before running the full smoke set."
+            )
+            break
     report["executed_cases"] = len(report["cases"])
     report["failed_cases"] = len(report["failed_case_ids"])
     report["passed_cases"] = report["executed_cases"] - report["failed_cases"]
-    report["passed"] = report["failed_cases"] == 0
+    report["passed"] = report["failed_cases"] == 0 and report["skipped_cases"] == 0
     return report
 
 
@@ -221,26 +263,36 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument(
         "--live",
         action="store_true",
-        help="Send nine synthetic cases to the configured provider; API charges can apply",
+        help="Send synthetic cases to the configured provider; API charges can apply",
     )
     mode.add_argument(
         "--offline", action="store_true", help="Exercise authored fixture responses without network"
     )
+    parser.add_argument(
+        "--case",
+        choices=[case.id for case in CASES],
+        help="Run only this synthetic case, useful for a single-request provider diagnosis",
+    )
     parser.add_argument("--output", type=Path, help="Write the sanitized JSON report")
     args = parser.parse_args(argv)
+    cases = tuple(case for case in CASES if args.case is None or case.id == args.case)
     if args.live:
         try:
             gateway = build_ai_gateway(Settings())
         except Exception:
-            report = base_report("live_model_smoke")
+            report = base_report("live_model_smoke", cases)
             report.update(passed=False, error="provider_configuration_unavailable")
+            report["skipped_case_ids"] = [case.id for case in cases]
+            report["skipped_cases"] = len(cases)
         else:
-            report = asyncio.run(run_smoke(gateway, mode="live_model_smoke"))
+            report = asyncio.run(run_smoke(gateway, mode="live_model_smoke", cases=cases))
     elif args.offline:
-        report = asyncio.run(run_smoke(AIGateway(OfflineSmokeProvider()), mode="offline_fixture"))
+        report = asyncio.run(
+            run_smoke(AIGateway(OfflineSmokeProvider()), mode="offline_fixture", cases=cases)
+        )
     else:
-        report = base_report("dry_run")
-        report["case_ids"] = [case.id for case in CASES]
+        report = base_report("dry_run", cases)
+        report["case_ids"] = [case.id for case in cases]
         report["next_step"] = "Use --offline to rehearse or --live to call the configured provider."
     serialized = json.dumps(report, indent=2) + "\n"
     if args.output:
