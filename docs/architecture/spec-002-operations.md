@@ -114,11 +114,18 @@ This does not increase retry counts, publish an unfinished Gmail cursor, or clea
 completed receipts/checkpoints. A timed-out response is never accepted as an
 empty extraction or quarantined as a completed message.
 
-The owner reported AI timeouts after the diagnostic update, while the dashboard
-showed 27 active commitments and 167 evidence references. Those counts establish
-partial saved state only. The timeout adjustment still needs an owner-side live
-sync result; it does not by itself verify full mailbox completion or extraction
-quality. The old message did not identify whether connect/read/write/pool timed out.
+The owner initially reported AI timeouts after the diagnostic update, with 27
+active commitments and 167 evidence references saved. On 2026-09-23, after the
+timeout adjustment was delivered as `bb576277b888da1041f3d1c51cd4d7c7adb071e9`,
+the owner supplied screenshots showing a successful API/worker rebuild, an active
+AI read timeout of 120.0 seconds, and Gmail reporting "Sync complete" with 87
+commitments processed. The dashboard showed 84 active commitments and 459 evidence
+references. The processed count covers commitments handled by that sync; the
+active count covers workspace commitments in active states, so the two counts
+need not match. This records owner-observed completion, not a direct inspection of
+the Mac runtime or proof that every source produced a valid extraction. Evidence
+review and a repeat-sync duplicate check remain open. The earlier timeout category
+did not identify whether connect/read/write/pool timed out.
 
 Gmail reads are spaced at least 250 ms apart within each source gateway. Temporary
 rate-limit and server errors retry the failed GET (at most three HTTP attempts)
@@ -279,6 +286,8 @@ quarantined sources must be separately scoped and verified.
 - [x] Explicit, offline-rehearsable model smoke command and sanitized results.
 - [x] Owner-side live model smoke: nine of nine cases passed on 2026-09-23;
   sanitized report and supplied delivery revision recorded above.
+- [x] Owner-reported Gmail sync completion after the timeout adjustment on
+  2026-09-23: 87 commitments processed, 84 active, and 459 evidence references.
 - [ ] In the owner's authorized workspace, verify Gmail and Calendar sync produce
   evidence-backed Today items, incremental replay creates no duplicate, feedback
   persists, and completion/waiting transitions match the source evidence.
