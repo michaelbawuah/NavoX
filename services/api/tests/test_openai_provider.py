@@ -4,6 +4,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
+from navox.ai.errors import AIProviderRejectedOutput
 from navox.ai.openai_provider import AIProviderError, OpenAIResponsesProvider
 
 
@@ -93,7 +94,7 @@ async def test_openai_provider_rejects_refusal_instead_of_treating_it_as_data() 
             model="gpt-5.6-luna",
             client=client,
         )
-        with pytest.raises(AIProviderError, match="refused"):
+        with pytest.raises(AIProviderRejectedOutput, match="refused"):
             await provider.generate_json(
                 schema_name="navox_test",
                 schema={"type": "object"},
