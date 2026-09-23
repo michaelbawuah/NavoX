@@ -507,6 +507,7 @@ async def test_invalid_proposal_is_quarantined_without_blocking_or_leaking_conte
     audits = list(await database.scalars(select(AuditEvent)))
     rejected = [row for row in audits if row.event_type == "intelligence.extraction.rejected"]
     assert len(rejected) == 1
+    assert rejected[0].event_metadata["validation_error"] == {"code": "schema_invalid"}
     metadata = str([row.event_metadata for row in audits])
     assert "PRIVATE" not in metadata and "private-access-token" not in metadata
 
