@@ -6,13 +6,10 @@ from typing import Any
 import httpx
 from pydantic import SecretStr
 
+from navox.ai.errors import AIProviderError, AIProviderRejectedOutput
 from navox.ai.gateway import StructuredOutputResponse
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
-
-
-class AIProviderError(RuntimeError):
-    """Raised when a configured AI provider cannot produce an accepted response."""
 
 
 class OpenAIResponsesProvider:
@@ -101,9 +98,9 @@ class OpenAIResponsesProvider:
         try:
             parsed = json.loads(output_text)
         except json.JSONDecodeError:
-            raise AIProviderError("OpenAI structured output was not valid JSON") from None
+            raise AIProviderRejectedOutput("OpenAI structured output was not valid JSON") from None
         if not isinstance(parsed, dict):
-            raise AIProviderError("OpenAI structured output must be a JSON object")
+            raise AIProviderRejectedOutput("OpenAI structured output must be a JSON object")
 
         response_model = body.get("model")
         return StructuredOutputResponse(
@@ -116,7 +113,7 @@ class OpenAIResponsesProvider:
 def _extract_output_text(body: dict[str, Any]) -> str:
     output = body.get("output")
     if not isinstance(output, list):
-        raise AIProviderError("OpenAI Responses contained invalid output")
+        raise AIProviderRejectedOutput("OpenAI Responses contained invalid output")
     texts: list[str] = []
     for item in output:
         if not isinstance(item, dict) or item.get("type") != "message":
@@ -125,16 +122,16 @@ def _extract_output_text(body: dict[str, Any]) -> str:
             raise AIProviderError("OpenAI Responses contained an incomplete message")
         content = item.get("content")
         if not isinstance(content, list):
-            raise AIProviderError("OpenAI Responses contained invalid message content")
+            raise AIProviderRejectedOutput("OpenAI Responses contained invalid message content")
         for part in content:
             if not isinstance(part, dict):
                 continue
             if part.get("type") == "refusal":
-                raise AIProviderError("OpenAI refused the operational extraction request")
+                raise AIProviderRejectedOutput("OpenAI refused the operational extraction request")
             if part.get("type") == "output_text":
                 text = part.get("text")
                 if isinstance(text, str) and text:
                     texts.append(text)
     if len(texts) == 1:
         return texts[0]
-    raise AIProviderError("OpenAI Responses contained no structured output text")
+    raise AIProviderRejectedOutput("OpenAI Responses contained no structured output text")
