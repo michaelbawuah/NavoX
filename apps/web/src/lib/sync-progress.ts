@@ -13,7 +13,11 @@ export interface SyncProgress {
   workflow_id: string;
   status: SyncState;
   commitment_count: number | null;
-  error: { code: string; http_status?: number } | null;
+  error: {
+    code: string;
+    http_status?: number;
+    retry_after_seconds?: number;
+  } | null;
 }
 
 const syncStates: SyncState[] = [
@@ -62,7 +66,14 @@ function validatedProgress(payload: unknown, workflowId: string): SyncProgress {
         : null,
     error:
       value.error && typeof value.error.code === "string"
-        ? { code: value.error.code }
+        ? {
+            code: value.error.code,
+            ...(typeof value.error.retry_after_seconds === "number" &&
+            Number.isSafeInteger(value.error.retry_after_seconds) &&
+            value.error.retry_after_seconds > 0
+              ? { retry_after_seconds: value.error.retry_after_seconds }
+              : {}),
+          }
         : null,
   };
 }
@@ -165,6 +176,16 @@ export function syncErrorHelp(
           "Google is limiting requests. Wait a little, then retry this sync.",
         reconnect: false,
       };
+    case "google_daily_limit_exceeded":
+      return {
+        message: `Google reported a daily limit for this request. Check the ${name} API quotas in NavoX's Google Cloud project, then retry after the limit resets or the configuration is corrected.`,
+        reconnect: false,
+      };
+    case "google_quota_exceeded":
+      return {
+        message: `Google reported an exhausted quota. Check which ${name} API quota metric and limit were reached in NavoX's Google Cloud project before retrying.`,
+        reconnect: false,
+      };
     case "google_provider_unavailable":
     case "google_transport_error":
       return {
@@ -205,6 +226,16 @@ export function syncProgressMessage(progress: SyncProgress): string {
     case "running":
       return "Processing · reading and reviewing this source.";
     case "retrying":
+      if (
+        progress.error?.retry_after_seconds &&
+        [
+          "google_rate_limited",
+          "google_daily_limit_exceeded",
+          "google_quota_exceeded",
+        ].includes(progress.error.code)
+      ) {
+        return "Retrying · waiting for the cooldown before the next attempt.";
+      }
       return "Retrying · the previous attempt did not finish.";
     case "completed":
       return progress.commitment_count === null
