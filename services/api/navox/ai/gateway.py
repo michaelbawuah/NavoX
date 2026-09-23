@@ -19,6 +19,15 @@ If the source is merely informational, return empty arrays.
 Evidence offsets are zero-based Unicode character indexes into subject or content,
 with end_char exclusive. Copy evidence text exactly. Copy object_text, person names,
 relationship participants, and temporal expressions from their cited source spans.
+Prefer a complete supporting sentence (at most 512 characters) with enough context
+to identify the occurrence. Never change its punctuation, capitalization, or spacing.
+Each non-null object_text and temporal_expression must occur within at least one of
+that observation's own evidence quotes; do not join separate phrases or paraphrase
+them. Each relationship participant must likewise occur in that relationship's quotes.
+Only include people whose names appear in subject or content evidence; header-only
+names and pronouns are not named-person evidence. Use null for BOTH identity fields
+unless the identity is explicitly supported by the quoted source or an exact matching
+named author/recipient header. Do not invent optional details to populate the schema.
 Never infer a person's email or provider identifier from a name.
 Use completion only for an explicit completed outcome, and waiting only for an explicit
 sent request or a stated wait for a named counterparty. Do not treat a promise, future
