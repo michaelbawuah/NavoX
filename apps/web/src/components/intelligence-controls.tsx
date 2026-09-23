@@ -419,6 +419,124 @@ function timezoneAbbreviation(timezone: string, now: Date | null): string {
   }
 }
 
+export function WorkspaceReadout({
+  now,
+  timezone,
+  preferences,
+  weather,
+}: {
+  now: Date | null;
+  timezone: string;
+  preferences: Preferences | null;
+  weather: Weather | null;
+}) {
+  const clockOptions = {
+    timeZone: timezone,
+    hour: "numeric",
+    minute: "2-digit",
+    hourCycle: preferences?.clock_format === "24h" ? "h23" : "h12",
+  } as const;
+
+  return (
+    <>
+      <div className={styles.contextHeading}>
+        <span className={styles.contextLabel}>Today</span>
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          aria-hidden="true"
+        >
+          <rect x="3" y="5" width="18" height="16" rx="3" />
+          <path d="M7 3v4m10-4v4M3 11h18m-14 4h3m4 0h3" />
+        </svg>
+      </div>
+      <p className={styles.contextDate}>
+        {now
+          ? new Intl.DateTimeFormat("en-US", {
+              timeZone: timezone,
+              weekday: "long",
+              month: "long",
+              day: "numeric",
+            }).format(now)
+          : "Your day at a glance"}
+      </p>
+      <div className={styles.timeReadout}>
+        <span className={styles.clockLabel}>Your local time</span>
+        <time dateTime={now?.toISOString()}>
+          {now
+            ? new Intl.DateTimeFormat("en-US", {
+                ...clockOptions,
+                second: "2-digit",
+              }).format(now)
+            : "Loading local time…"}
+        </time>
+        <span className={styles.timezone}>
+          {timezoneAbbreviation(timezone, now)} ·{" "}
+          {timezone.replaceAll("_", " ")}
+        </span>
+      </div>
+      {preferences?.weather_visible && (
+        <div className={styles.weather}>
+          <div className={styles.weatherMain}>
+            <span className={styles.weatherIcon} aria-hidden="true">
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d="M9 14.5V5a3 3 0 0 1 6 0v9.5a5 5 0 1 1-6 0Z" />
+                <path d="M12 8v9m6-12h2m-2 4h2" />
+                <circle cx="12" cy="18" r="1" />
+              </svg>
+            </span>
+            <div className={styles.weatherReading}>
+              <strong>
+                {weather === null
+                  ? "Loading weather…"
+                  : weather.status === "ready" && weather.temperature !== null
+                    ? `${Math.round(weather.temperature)}°${weather.unit === "fahrenheit" ? "F" : "C"}`
+                    : "Weather unavailable"}
+              </strong>
+              {weather?.description && <span>{weather.description}</span>}
+            </div>
+          </div>
+          <span className={styles.weatherLocation}>
+            {weather?.city ?? preferences.weather_city ?? "Weather"}
+          </span>
+          {weather?.status === "ready" && (
+            <div className={styles.weatherMeta}>
+              {weather.observed_at && (
+                <small>
+                  As of{" "}
+                  {new Intl.DateTimeFormat("en-US", clockOptions).format(
+                    new Date(weather.observed_at),
+                  )}
+                </small>
+              )}
+              <a
+                href="https://open-meteo.com/"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Weather by Open-Meteo
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 export function WorkspaceContext({
   timezone,
   onTimezoneChange,
@@ -519,66 +637,12 @@ export function WorkspaceContext({
   }
   return (
     <section className={styles.context} aria-label="Local time and weather">
-      <div className={styles.contextLine}>
-        <div className={styles.contextReadout}>
-          <div className={styles.timeReadout}>
-            <span className={styles.contextLabel}>Your local time</span>
-            <time dateTime={now?.toISOString()}>
-              {now
-                ? new Intl.DateTimeFormat(undefined, {
-                    timeZone: timezone,
-                    weekday: "short",
-                    month: "short",
-                    day: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                    second: "2-digit",
-                    hour12: preferences?.clock_format !== "24h",
-                  }).format(now)
-                : "Loading local time…"}
-            </time>
-            <span className={styles.timezone}>
-              {timezoneAbbreviation(timezone, now)} ·{" "}
-              {timezone.replaceAll("_", " ")}
-            </span>
-          </div>
-          {preferences?.weather_visible && (
-            <div className={styles.weather}>
-              <span className={styles.contextLabel}>
-                {weather?.city ?? preferences.weather_city ?? "Weather"}
-              </span>
-              <strong>
-                {weather === null
-                  ? "Loading weather…"
-                  : weather.status === "ready" && weather.temperature !== null
-                    ? `${Math.round(weather.temperature)}°${weather.unit === "fahrenheit" ? "F" : "C"}`
-                    : "Weather unavailable"}
-              </strong>
-              {weather?.description && <span>{weather.description}</span>}
-              {weather?.status === "ready" && (
-                <a
-                  href="https://open-meteo.com/"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Weather by Open-Meteo
-                </a>
-              )}
-              {weather?.observed_at && (
-                <small>
-                  As of{" "}
-                  {new Intl.DateTimeFormat(undefined, {
-                    timeZone: timezone,
-                    hour: "numeric",
-                    minute: "2-digit",
-                    hour12: preferences.clock_format !== "24h",
-                  }).format(new Date(weather.observed_at))}
-                </small>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+      <WorkspaceReadout
+        now={now}
+        timezone={timezone}
+        preferences={preferences}
+        weather={weather}
+      />
       <details className={styles.settings}>
         <summary>Time & weather preferences</summary>
         {draft && (
