@@ -193,3 +193,58 @@ async def test_provider_sanitizes_transport_failures() -> None:
             )
     assert "credentials" not in str(error.value)
     assert error.value.__suppress_context__
+    assert error.value.diagnostic() == {"code": "transport_error"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "provider_code", "provider_type", "expected"),
+    [
+        (401, "invalid_api_key", None, "authentication_failed"),
+        (403, None, None, "permission_denied"),
+        (404, "model_not_found", None, "model_unavailable"),
+        (429, "insufficient_quota", None, "quota_exhausted"),
+        (429, "credit_balance_exhausted", "insufficient_quota", "quota_exhausted"),
+        (429, "project_spend_limit_exceeded", None, "quota_exhausted"),
+        (429, None, "insufficient_quota", "quota_exhausted"),
+        (429, "rate_limit_exceeded", None, "rate_limited"),
+        (400, "invalid_json_schema", None, "invalid_schema"),
+        (400, "unsupported_parameter", None, "unsupported_parameter"),
+        (400, "sk-private-key", "private@example.com", "invalid_request"),
+        (400, ["untrusted", "array"], {"private": "value"}, "invalid_request"),
+        (503, "server_is_overloaded", None, "provider_unavailable"),
+    ],
+)
+async def test_provider_reports_only_allowlisted_failure_diagnostics(
+    status,
+    provider_code,
+    provider_type,
+    expected,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            status,
+            json={
+                "error": {
+                    "code": provider_code,
+                    "type": provider_type,
+                    "message": "sk-private-key private@example.com synthetic source text",
+                    "param": "sk-private-key",
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAIResponsesProvider(api_key=SecretStr("key"), model="test", client=client)
+        with pytest.raises(AIProviderError) as error:
+            await provider.generate_json(
+                schema_name="test", schema={}, instructions="Extract.", input_text="Private."
+            )
+    assert error.value.diagnostic() == {"code": expected, "http_status": status}
+    assert "private" not in json.dumps(error.value.diagnostic())
+    assert "private" not in str(error.value)
+
+
+def test_error_diagnostics_reject_arbitrary_codes_and_non_numeric_status() -> None:
+    error = AIProviderError("private text", code="private-code", http_status="private-status")
+    assert error.diagnostic() == {"code": "provider_error"}
