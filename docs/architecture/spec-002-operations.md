@@ -96,8 +96,29 @@ without an HTTP status. A missing HTTP status alone does not prove a timeout.
 Raw exception text, network addresses, provider payloads, and source content are
 excluded. Existing audit rows and completed workflow failures retain their older
 diagnostics; inspect a fresh failure after rebuilding both API and worker.
-This diagnostic change leaves request timeouts, retries, receipts, and Gmail
-checkpoints unchanged.
+AI response reads now default to 120 seconds, replacing the original 30-second
+limit. Set `OPENAI_READ_TIMEOUT_SECONDS` in the private environment to a finite
+value from 1 to 300 seconds; both API and worker receive it through their shared
+settings. Existing environments get 120 without adding a variable. Connection,
+write, and pool waits remain capped at 10, 30, and 5 seconds respectively (or the
+configured read limit when smaller). The whole HTTP exchange, including receiving
+the body, is bounded by the read limit plus 45 seconds: 165 seconds by default.
+HTTPX's phase limits measure inactivity, so the overall deadline also prevents
+a continuously trickling response from running indefinitely. Timeouts remain
+sanitized and retryable, and external task cancellation still propagates.
+
+The model smoke check uses a matching case deadline: read limit plus 60 seconds
+for live CLI runs, 180 seconds by default. Its previous 45-second outer limit
+would otherwise stop a valid slower response before the adapter's new deadline.
+This does not increase retry counts, publish an unfinished Gmail cursor, or clear
+completed receipts/checkpoints. A timed-out response is never accepted as an
+empty extraction or quarantined as a completed message.
+
+The owner reported AI timeouts after the diagnostic update, while the dashboard
+showed 27 active commitments and 167 evidence references. Those counts establish
+partial saved state only. The timeout adjustment still needs an owner-side live
+sync result; it does not by itself verify full mailbox completion or extraction
+quality. The old message did not identify whether connect/read/write/pool timed out.
 
 Gmail reads are spaced at least 250 ms apart within each source gateway. Temporary
 rate-limit and server errors retry the failed GET (at most three HTTP attempts)

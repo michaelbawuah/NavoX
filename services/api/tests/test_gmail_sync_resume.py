@@ -14,6 +14,7 @@ import pytest_asyncio
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from navox.ai.errors import AIProviderError
 from navox.core.settings import Settings
 from navox.db.base import Base
 from navox.db.models import (
@@ -191,15 +192,22 @@ class Mailbox:
 
 
 class Model:
-    def __init__(self, *, fail_id: str | None = None, observations: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail_id: str | None = None,
+        observations: bool = False,
+        failure: Exception | None = None,
+    ) -> None:
         self.calls: list[str] = []
         self.fail_id = fail_id
         self.observations = observations
+        self.failure = failure
 
     async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
         self.calls.append(document.external_id)
         if document.external_id == self.fail_id:
-            raise RuntimeError("temporary model failure")
+            raise self.failure or RuntimeError("temporary model failure")
         observations = []
         if self.observations:
             assert document.content is not None
@@ -460,18 +468,28 @@ async def test_pause_during_metadata_read_stops_before_next_provider_read(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        RuntimeError("temporary model failure"),
+        AIProviderError("temporary model failure", code="timeout"),
+    ],
+    ids=["runtime", "ai-timeout"],
+)
 async def test_model_failure_keeps_receipt_and_retries_only_unprocessed_body(
-    database: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    database: AsyncSession, monkeypatch: pytest.MonkeyPatch, failure: Exception
 ) -> None:
     connection_id = await account(database)
     mailbox = Mailbox()
     mailbox.install(monkeypatch)
-    model = Model(fail_id="second")
+    model = Model(fail_id="second", failure=failure)
     with pytest.raises(RuntimeError, match="temporary model failure"):
         await run(database, connection_id, model)
     await database.rollback()
     assert await current_cursor(database) == "old"
     assert await database.scalar(select(func.count()).select_from(IntelligenceSourceReceipt)) == 1
+    plan = await database.scalar(select(GmailSyncPlan))
+    assert plan is not None and plan.position == 1 and plan.rejected == 0
     mailbox.calls.clear()
     model.fail_id = None
     await run(database, connection_id, model)

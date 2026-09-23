@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -72,8 +73,12 @@ class OpenAIResponsesProvider:
         api_key: SecretStr,
         model: str,
         client: httpx.AsyncClient | None = None,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = 120.0,
     ) -> None:
+        if not 0 < timeout_seconds <= 300:
+            raise ValueError(
+                "OpenAI read timeout must be positive, finite, and at most 300 seconds"
+            )
         self.api_key = api_key
         self.model = model
         self.client = client
@@ -107,23 +112,32 @@ class OpenAIResponsesProvider:
             "Content-Type": "application/json",
         }
 
+        timeout = httpx.Timeout(
+            self.timeout_seconds,
+            connect=min(10.0, self.timeout_seconds),
+            write=min(30.0, self.timeout_seconds),
+            pool=min(5.0, self.timeout_seconds),
+        )
         try:
-            if self.client is not None:
-                response = await self.client.post(
-                    OPENAI_RESPONSES_URL,
-                    headers=headers,
-                    json=payload,
-                    timeout=self.timeout_seconds,
-                )
-            else:
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
+            # HTTPX limits inactivity in each network phase. Also bound the
+            # whole exchange so a trickling response cannot occupy a worker forever.
+            async with asyncio.timeout(self.timeout_seconds + 45.0):
+                if self.client is not None:
+                    response = await self.client.post(
                         OPENAI_RESPONSES_URL,
                         headers=headers,
                         json=payload,
-                        timeout=self.timeout_seconds,
+                        timeout=timeout,
                     )
-        except httpx.TimeoutException:
+                else:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.post(
+                            OPENAI_RESPONSES_URL,
+                            headers=headers,
+                            json=payload,
+                            timeout=timeout,
+                        )
+        except (httpx.TimeoutException, TimeoutError):
             raise AIProviderError("OpenAI Responses request timed out", code="timeout") from None
         except httpx.RequestError:
             # Do not put credentials, request content, or transport diagnostics into

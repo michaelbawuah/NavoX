@@ -1,11 +1,14 @@
+import asyncio
 import json
 
 import httpx
 import pytest
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from navox.ai.errors import AIProviderRejectedOutput
+from navox.ai.factory import build_ai_gateway
 from navox.ai.openai_provider import AIProviderError, OpenAIResponsesProvider
+from navox.core.settings import Settings
 
 
 @pytest.mark.asyncio
@@ -259,3 +262,126 @@ async def test_provider_reports_only_allowlisted_failure_diagnostics(
 def test_error_diagnostics_reject_arbitrary_codes_and_non_numeric_status() -> None:
     error = AIProviderError("private text", code="private-code", http_status="private-status")
     assert error.diagnostic() == {"code": "provider_error"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("configured_read", [None, "240"])
+@pytest.mark.parametrize("injected_client", [True, False])
+async def test_configured_timeout_reaches_both_http_client_paths(
+    monkeypatch, configured_read, injected_client
+) -> None:
+    monkeypatch.delenv("OPENAI_READ_TIMEOUT_SECONDS", raising=False)
+    if configured_read is not None:
+        monkeypatch.setenv("OPENAI_READ_TIMEOUT_SECONDS", configured_read)
+    settings = Settings(ai_provider="openai", openai_api_key="fixture", _env_file=None)
+    provider = build_ai_gateway(settings).provider
+    assert isinstance(provider, OpenAIResponsesProvider)
+    requests = []
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "status": "completed",
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": "{}"}]}],
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    try:
+        if injected_client:
+            provider.client = client
+        else:
+            monkeypatch.setattr("navox.ai.openai_provider.httpx.AsyncClient", lambda: client)
+        result = await provider.generate_json(
+            schema_name="test", schema={}, instructions="Extract.", input_text="Synthetic source"
+        )
+        assert result.data == {}
+        assert len(requests) == 1
+        assert requests[0].extensions["timeout"] == {
+            "read": 120.0 if configured_read is None else 240.0,
+            "connect": 10.0,
+            "write": 30.0,
+            "pool": 5.0,
+        }
+        assert json.loads(requests[0].content)["store"] is False
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "0.5", "301", "nan", "inf", "not-a-number"])
+def test_invalid_environment_cannot_disable_or_unbound_the_ai_timeout(monkeypatch, value):
+    monkeypatch.setenv("OPENAI_READ_TIMEOUT_SECONDS", value)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+    if value not in {"0.5", "not-a-number"}:
+        with pytest.raises(ValueError):
+            OpenAIResponsesProvider(
+                api_key=SecretStr("fixture"), model="test", timeout_seconds=float(value)
+            )
+
+
+@pytest.mark.asyncio
+async def test_overall_deadline_cancels_stalled_exchange_without_inline_retry(monkeypatch):
+    original_timeout = asyncio.timeout
+    deadlines = []
+    cancelled = asyncio.Event()
+    calls = 0
+
+    def accelerated_timeout(seconds):
+        deadlines.append(seconds)
+        return original_timeout(0.02)
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+        raise AssertionError("Stalled response must be cancelled")
+
+    monkeypatch.setattr("navox.ai.openai_provider.asyncio.timeout", accelerated_timeout)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    monkeypatch.setattr("navox.ai.openai_provider.httpx.AsyncClient", lambda: client)
+    provider = OpenAIResponsesProvider(api_key=SecretStr("private-key"), model="test")
+    with pytest.raises(AIProviderError) as caught:
+        await provider.generate_json(
+            schema_name="test", schema={}, instructions="Extract.", input_text="private mail"
+        )
+    assert deadlines == [165.0]
+    assert calls == 1
+    assert cancelled.is_set() and client.is_closed
+    assert caught.value.diagnostic() == {"code": "timeout"}
+    assert caught.value.__suppress_context__
+    assert "private" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_external_cancellation_is_not_converted_to_a_retryable_timeout():
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+        raise AssertionError("Stalled response must be cancelled")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        provider = OpenAIResponsesProvider(
+            api_key=SecretStr("fixture"), model="test", client=client
+        )
+        task = asyncio.create_task(
+            provider.generate_json(
+                schema_name="test", schema={}, instructions="Extract.", input_text="Synthetic"
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert cancelled.is_set()

@@ -200,7 +200,10 @@ async def run_smoke(
     mode: Literal["offline_fixture", "live_model_smoke"],
     cases: tuple[SmokeCase, ...] = CASES,
     progress: Callable[[str], None] | None = None,
+    case_timeout_seconds: float = 180.0,
 ) -> dict[str, Any]:
+    if not 0 < case_timeout_seconds <= 360:
+        raise ValueError("Smoke case timeout must be positive, finite, and at most 360 seconds")
     report = base_report(mode, cases)
     extractor = OperationalExtractor(gateway)
     for index, case in enumerate(cases):
@@ -213,7 +216,7 @@ async def run_smoke(
         provider_error: dict[str, Any] | None = None
         validation_error: dict[str, Any] | None = None
         try:
-            async with asyncio.timeout(45):
+            async with asyncio.timeout(case_timeout_seconds):
                 result = await extractor.extract(source_for(case, index))
             observed = {item.observation_type for item in result.extraction.observations}
             passed = (
@@ -306,7 +309,8 @@ def main(argv: list[str] | None = None) -> int:
     cases = tuple(case for case in CASES if args.case is None or case.id == args.case)
     if args.live:
         try:
-            gateway = build_ai_gateway(Settings())
+            settings = Settings()
+            gateway = build_ai_gateway(settings)
         except Exception:
             report = base_report("live_model_smoke", cases)
             report.update(passed=False, error="provider_configuration_unavailable")
@@ -314,7 +318,14 @@ def main(argv: list[str] | None = None) -> int:
             report["skipped_cases"] = len(cases)
         else:
             report = asyncio.run(
-                run_smoke(gateway, mode="live_model_smoke", cases=cases, progress=_stderr_progress)
+                run_smoke(
+                    gateway,
+                    mode="live_model_smoke",
+                    cases=cases,
+                    progress=_stderr_progress,
+                    # Cover the adapter's request limit plus extraction validation.
+                    case_timeout_seconds=settings.openai_read_timeout_seconds + 60.0,
+                )
             )
     elif args.offline:
         report = asyncio.run(

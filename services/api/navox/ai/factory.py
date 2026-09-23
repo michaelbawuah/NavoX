@@ -20,6 +20,7 @@ def build_ai_gateway(settings: Settings) -> AIGateway:
             OpenAIResponsesProvider(
                 api_key=settings.openai_api_key,
                 model=settings.openai_model,
+                timeout_seconds=settings.openai_read_timeout_seconds,
             )
         )
     raise AIProviderNotConfigured(f"Unsupported AI provider: {settings.ai_provider}")

@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     ai_provider: str = "disabled"
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-5.6-luna"
+    openai_read_timeout_seconds: float = Field(default=120.0, ge=1.0, le=300.0, allow_inf_nan=False)
     commitment_moderate_confidence_threshold: float = Field(default=0.65, ge=0.0, lt=1.0)
     commitment_high_confidence_threshold: float = Field(default=0.85, gt=0.0, le=1.0)
 

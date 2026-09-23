@@ -1,5 +1,7 @@
+import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
 
@@ -71,7 +73,10 @@ def test_case_option_executes_only_the_selected_source(
     monkeypatch.setattr(
         "navox.evaluation.intelligence_smoke.OfflineSmokeProvider", lambda: provider
     )
-    monkeypatch.setattr("navox.evaluation.intelligence_smoke.Settings", lambda: None)
+    monkeypatch.setattr(
+        "navox.evaluation.intelligence_smoke.Settings",
+        lambda: SimpleNamespace(openai_read_timeout_seconds=120.0),
+    )
     monkeypatch.setattr(
         "navox.evaluation.intelligence_smoke.build_ai_gateway", lambda _: AIGateway(provider)
     )
@@ -161,6 +166,53 @@ async def test_timeout_skips_remaining_cases() -> None:
     assert report["cases"][0]["reason"] == "provider_timeout"
     assert report["cases"][0]["provider_error"] == {"code": "timeout"}
     assert "private network details" not in json.dumps(report)
+
+
+def test_live_cli_uses_configured_read_budget_instead_of_the_old_45_second_limit(
+    monkeypatch, capsys
+):
+    observed = []
+    original_timeout = asyncio.timeout
+
+    def record_timeout(seconds):
+        observed.append(seconds)
+        return original_timeout(seconds)
+
+    monkeypatch.setattr(
+        "navox.evaluation.intelligence_smoke.Settings",
+        lambda: SimpleNamespace(openai_read_timeout_seconds=240.0),
+    )
+    monkeypatch.setattr(
+        "navox.evaluation.intelligence_smoke.build_ai_gateway",
+        lambda _: AIGateway(OfflineSmokeProvider()),
+    )
+    monkeypatch.setattr("navox.evaluation.intelligence_smoke.asyncio.timeout", record_timeout)
+    assert main(["--live", "--case", "explicit-request"]) == 0
+    assert observed == [300.0]
+    assert json.loads(capsys.readouterr().out)["passed"] is True
+
+
+@pytest.mark.asyncio
+async def test_smoke_case_deadline_stops_stalled_provider_and_skips_remaining_cases():
+    cancelled = asyncio.Event()
+    calls = 0
+
+    class StalledProvider:
+        async def generate_json(self, **kwargs):
+            nonlocal calls
+            calls += 1
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+    report = await run_smoke(
+        AIGateway(StalledProvider()), mode="live_model_smoke", case_timeout_seconds=0.02
+    )
+    assert cancelled.is_set()
+    assert calls == report["executed_cases"] == 1
+    assert report["skipped_cases"] == len(CASES) - 1
+    assert report["cases"][0]["reason"] == "provider_timeout"
 
 
 @pytest.mark.asyncio
