@@ -86,7 +86,7 @@ jobs:
         working-directory: services/api
       - name: Verify required schema tables
         run: |
-          for table in users workspaces workspace_memberships plans plan_steps actions approvals workflow_refs audit_events proactive_preferences proactive_signals briefing_snapshots people person_identities operational_observations observation_evidence intelligence_feedback; do
+          for table in users workspaces workspace_memberships plans plan_steps actions approvals workflow_refs audit_events proactive_preferences proactive_signals briefing_snapshots people person_identities operational_observations observation_evidence intelligence_feedback intelligence_source_receipts; do
             grep -F "CREATE TABLE $table" /tmp/navox-schema.sql
           done
           grep -F "client_type" /tmp/navox-schema.sql
@@ -388,5 +388,10 @@ jobs:
             --request POST \
             http://localhost:8000/api/v1/auth/logout
           test "$(curl --silent --output /dev/null --write-out "%{http_code}" --cookie /tmp/navox-session.cookie http://localhost:8000/api/v1/auth/me)" = "401"
+      - name: Verify SPEC-002 through Temporal and PostgreSQL with provider fixtures
+        run: |
+          docker compose run --rm --no-deps -T \
+            --volume "$PWD/services/api/integration:/app/integration:ro" \
+            api uv run --no-sync python -m integration.intelligence_temporal_smoke
       - if: always()
         run: docker compose down --volumes --remove-orphans
