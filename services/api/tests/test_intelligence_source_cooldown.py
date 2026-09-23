@@ -382,6 +382,53 @@ async def test_new_provider_failure_persists_a_bounded_retry_deadline(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "preserve_refresh"),
+    [
+        (GoogleSourceError(code="google_daily_limit_exceeded"), True),
+        (GoogleSourceError(code="google_provider_unavailable", retry_after_seconds=86_400), True),
+        (GoogleSourceError(code="google_source_error"), False),
+        (ValueError("private failure"), False),
+    ],
+    ids=["quota", "provider-unavailable", "other-provider-error", "general-error"],
+)
+async def test_backoff_commit_preserves_only_healthy_provider_transaction(
+    cooldown_env, monkeypatch, error, preserve_refresh
+):
+    factory, connections = cooldown_env
+    connection = connections[0]
+    refreshed_at = datetime.now(UTC)
+
+    async def fail_after_refresh(database, **kwargs):
+        current = await database.get(Connection, connection.id)
+        current.last_checked_at = refreshed_at
+        await database.flush()
+        raise error
+
+    monkeypatch.setattr(ingestion, "process_connection", fail_after_refresh)
+    monkeypatch.setattr(activities, "get_session_factory", lambda: factory)
+    monkeypatch.setattr(
+        activities, "get_settings", lambda: Settings(ai_provider="openai", openai_api_key="test")
+    )
+    payload = SourceWork(
+        str(connection.id), str(connection.user_id), str(connection.workspace_id), "gmail"
+    )
+    with pytest.raises(ApplicationError):
+        await activities.process_source_activity(payload)
+    async with factory() as database:
+        current = await database.get(Connection, connection.id)
+        assert (current.last_checked_at is not None) is preserve_refresh
+        audit = (await database.scalars(select(AuditEvent))).one()
+        if preserve_refresh:
+            occurred_at = audit.occurred_at.replace(tzinfo=UTC)
+            assert occurred_at >= refreshed_at
+            deadline = datetime.fromisoformat(audit.event_metadata["retry_not_before"])
+            delay = audit.event_metadata["error_diagnostic"]["retry_after_seconds"]
+            assert deadline == occurred_at + timedelta(seconds=delay)
+            assert await source_cooldown(database, connection.id, "gmail") is not None
+
+
+@pytest.mark.asyncio
 async def test_reconciliation_skips_cooled_inbox_and_watch_but_keeps_other_sources(
     cooldown_env, monkeypatch
 ):
