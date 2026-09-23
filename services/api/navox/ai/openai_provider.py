@@ -6,7 +6,8 @@ from typing import Any
 import httpx
 from pydantic import SecretStr
 
-from navox.ai.errors import AIProviderError, AIProviderRejectedOutput
+from navox.ai.errors import AIProviderError as AIProviderError
+from navox.ai.errors import AIProviderRejectedOutput
 from navox.ai.gateway import StructuredOutputResponse
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
