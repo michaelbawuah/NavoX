@@ -23,9 +23,31 @@ from navox.db.models import (
 from navox.db.session import get_session_factory
 from navox.intelligence.extraction import OperationalExtractor
 from navox.intelligence.jobs import SourceWork, WorkspaceWork
+from navox.intelligence.source_cooldown import (
+    HARD_QUOTA_CODES,
+    SOURCE_BACKOFF_CODES,
+    source_cooldown,
+)
 from navox.intelligence.sync_errors import processing_diagnostic
 
 HEARTBEAT_INTERVAL_SECONDS = 15
+
+
+def _source_failure(diagnostic: dict[str, str | int]) -> ApplicationError:
+    retry_after = diagnostic.get("retry_after_seconds")
+    delay = (
+        timedelta(seconds=retry_after)
+        if diagnostic["code"] in {"google_rate_limited", "google_provider_unavailable"}
+        and isinstance(retry_after, int)
+        else None
+    )
+    return ApplicationError(
+        "Source processing failed; cursor retained for retry",
+        diagnostic,
+        type="IntelligenceProcessingFailure",
+        non_retryable=diagnostic["code"] in HARD_QUOTA_CODES,
+        next_retry_delay=delay,
+    )
 
 
 @asynccontextmanager
@@ -99,6 +121,11 @@ async def _process_source(payload: SourceWork) -> int:
             )
             if event is None or event.intelligence_status == "completed":
                 return 0
+        cooldown = await source_cooldown(database, connection.id, payload.source)
+        if cooldown is not None:
+            # Queued jobs and Temporal retries obey the same durable deadline.
+            # Do not emit another failure audit: doing so would slide the cooldown.
+            raise _source_failure(cooldown)
         try:
             ids = await process_connection(
                 database,
@@ -137,6 +164,20 @@ async def _process_source(payload: SourceWork) -> int:
                 if failed_event is not None:
                     failed_event.intelligence_status = "failed"
                     failed_event.processed_at = datetime.now(UTC)
+            failure_metadata: dict[str, object] = {
+                "source": payload.source,
+                "error_type": type(error).__name__,
+                "duration_ms": round((monotonic() - started) * 1000),
+            }
+            if diagnostic["code"] in SOURCE_BACKOFF_CODES:
+                retry_after = diagnostic.get("retry_after_seconds")
+                if not isinstance(retry_after, int):
+                    retry_after = 300 if diagnostic["code"] in HARD_QUOTA_CODES else 60
+                diagnostic["retry_after_seconds"] = retry_after
+                failure_metadata["retry_not_before"] = (
+                    datetime.now(UTC) + timedelta(seconds=retry_after)
+                ).isoformat()
+            failure_metadata["error_diagnostic"] = diagnostic
             add_audit_event(
                 database,
                 user_id=UUID(payload.user_id),
@@ -144,19 +185,10 @@ async def _process_source(payload: SourceWork) -> int:
                 event_type="intelligence.source.failed",
                 entity_type="connection",
                 entity_id=UUID(payload.connection_id),
-                metadata={
-                    "source": payload.source,
-                    "error_type": type(error).__name__,
-                    "error_diagnostic": diagnostic,
-                    "duration_ms": round((monotonic() - started) * 1000),
-                },
+                metadata=failure_metadata,
             )
             await database.commit()
-            raise ApplicationError(
-                "Source processing failed; cursor retained for retry",
-                diagnostic,
-                type="IntelligenceProcessingFailure",
-            ) from None
+            raise _source_failure(diagnostic) from None
 
 
 @activity.defn
@@ -225,6 +257,16 @@ async def _pending_intelligence() -> list[SourceWork]:
     now = datetime.now(UTC)
     pending: list[SourceWork] = []
     async with get_session_factory()() as database:
+        cooldowns: dict[tuple[UUID, str], bool] = {}
+
+        async def cooling_down(connection_id: UUID, source: str) -> bool:
+            key = (connection_id, source)
+            if key not in cooldowns:
+                cooldowns[key] = (
+                    await source_cooldown(database, connection_id, source, now=now)
+                ) is not None
+            return cooldowns[key]
+
         events = list(
             await database.scalars(
                 select(IncomingEvent)
@@ -249,6 +291,8 @@ async def _pending_intelligence() -> list[SourceWork]:
             key = (event.connection_id, event.source)
             if key in seen:
                 # One delta read covers a burst; leave other inbox rows durable for recovery.
+                continue
+            if await cooling_down(event.connection_id, event.source):
                 continue
             pending.append(
                 SourceWork(
@@ -277,6 +321,9 @@ async def _pending_intelligence() -> list[SourceWork]:
                 ("calendar", "https://www.googleapis.com/auth/calendar.events.readonly"),
             ):
                 if scope not in connection.granted_scopes:
+                    continue
+                if await cooling_down(connection.id, source):
+                    # Suppress delta polling and watch renewal during provider backoff.
                     continue
                 cursor = await database.scalar(
                     select(IntelligenceCursor).where(
