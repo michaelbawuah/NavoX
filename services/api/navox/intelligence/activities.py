@@ -13,6 +13,7 @@ from navox.agent.audit import add_audit_event
 from navox.ai.factory import build_ai_gateway
 from navox.core.settings import get_settings
 from navox.db.models import (
+    AuditEvent,
     Commitment,
     Connection,
     IncomingEvent,
@@ -29,6 +30,7 @@ from navox.intelligence.source_cooldown import (
     source_cooldown,
 )
 from navox.intelligence.sync_errors import processing_diagnostic
+from navox.providers.google_sources import GoogleSourceError
 
 HEARTBEAT_INTERVAL_SECONDS = 15
 
@@ -96,12 +98,14 @@ async def _process_source(payload: SourceWork) -> int:
     settings = get_settings()
     async with get_session_factory()() as database:
         connection = await database.scalar(
-            select(Connection).where(
+            select(Connection)
+            .where(
                 Connection.id == UUID(payload.connection_id),
                 Connection.user_id == UUID(payload.user_id),
                 Connection.workspace_id == UUID(payload.workspace_id),
                 Connection.status == "active",
             )
+            .with_for_update()
         )
         user = await database.get(User, UUID(payload.user_id))
         if connection is None or user is None:
@@ -158,12 +162,23 @@ async def _process_source(payload: SourceWork) -> int:
         except Exception as error:
             # No source text, credential or provider response enters logs or workflow history.
             diagnostic = processing_diagnostic(error)
-            await database.rollback()
+            preserve_backoff_lock = (
+                isinstance(error, GoogleSourceError)
+                and diagnostic["code"] in SOURCE_BACKOFF_CODES
+                and database.is_active
+            )
+            if not preserve_backoff_lock:
+                await database.rollback()
+            # Google backoff errors occur while fetching/reconciling the source batch,
+            # before extraction checkpoints. Only valid token-refresh metadata can
+            # be pending. Keep the connection lock until its cooldown audit commits,
+            # so a waiting job cannot pass the cooldown check and contact Google.
+            failed_at = datetime.now(UTC)
             if payload.event_id:
                 failed_event = await database.get(IncomingEvent, UUID(payload.event_id))
                 if failed_event is not None:
                     failed_event.intelligence_status = "failed"
-                    failed_event.processed_at = datetime.now(UTC)
+                    failed_event.processed_at = failed_at
             failure_metadata: dict[str, object] = {
                 "source": payload.source,
                 "error_type": type(error).__name__,
@@ -175,17 +190,22 @@ async def _process_source(payload: SourceWork) -> int:
                     retry_after = 300 if diagnostic["code"] in HARD_QUOTA_CODES else 60
                 diagnostic["retry_after_seconds"] = retry_after
                 failure_metadata["retry_not_before"] = (
-                    datetime.now(UTC) + timedelta(seconds=retry_after)
+                    failed_at + timedelta(seconds=retry_after)
                 ).isoformat()
             failure_metadata["error_diagnostic"] = diagnostic
-            add_audit_event(
-                database,
-                user_id=UUID(payload.user_id),
-                workspace_id=UUID(payload.workspace_id),
-                event_type="intelligence.source.failed",
-                entity_type="connection",
-                entity_id=UUID(payload.connection_id),
-                metadata=failure_metadata,
+            database.add(
+                AuditEvent(
+                    user_id=UUID(payload.user_id),
+                    workspace_id=UUID(payload.workspace_id),
+                    event_type="intelligence.source.failed",
+                    actor_type="navox",
+                    entity_type="connection",
+                    entity_id=UUID(payload.connection_id),
+                    event_metadata=failure_metadata,
+                    # PostgreSQL now() is transaction-start time, which may precede
+                    # a slow provider request. The cooldown begins at this failure.
+                    occurred_at=failed_at,
+                )
             )
             await database.commit()
             raise _source_failure(diagnostic) from None
