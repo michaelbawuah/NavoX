@@ -7,15 +7,28 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  isSyncTerminal,
+  monitorSync,
+  type SyncProgress,
+  type SyncSource,
+  syncErrorHelp,
+  syncProgressMessage,
+} from "../lib/sync-progress";
 import styles from "./intelligence-controls.module.css";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
-async function request<T>(path: string, body?: unknown): Promise<T> {
+async function request<T>(
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     credentials: "include",
     cache: "no-store",
+    signal,
     ...(body === undefined
       ? {}
       : {
@@ -50,6 +63,204 @@ interface IntelligenceStatus {
   readiness_message?: string;
 }
 
+export function SyncReadout({
+  source,
+  progress,
+  pollingPaused,
+  onCheck,
+  onReconnect,
+  reconnectDisabled,
+}: {
+  source: SyncSource;
+  progress: SyncProgress;
+  pollingPaused: boolean;
+  onCheck: () => void;
+  onReconnect: () => void;
+  reconnectDisabled: boolean;
+}) {
+  const failed = ["failed", "cancelled", "timed_out"].includes(progress.status);
+  const help = syncErrorHelp(source, progress.error?.code);
+  const showHelp =
+    progress.status === "failed" || progress.status === "retrying";
+  return (
+    <div className={styles.syncReadout}>
+      <p
+        className={failed ? styles.error : styles.message}
+        role={failed ? "alert" : "status"}
+      >
+        {source === "gmail" ? "Gmail" : "Calendar"} ·{" "}
+        {syncProgressMessage(progress)}
+      </p>
+      {showHelp && <p className={styles.copy}>{help.message}</p>}
+      {pollingPaused && (
+        <>
+          <p className={styles.copy}>
+            Automatic status checks are paused. Check this job before starting
+            another sync.
+          </p>
+          <button type="button" className={styles.secondary} onClick={onCheck}>
+            Check sync status
+          </button>
+        </>
+      )}
+      {showHelp && help.reconnect && (
+        <button
+          type="button"
+          className={styles.secondary}
+          disabled={reconnectDisabled}
+          onClick={onReconnect}
+        >
+          Reconnect read access
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SourceSync({
+  connectionId,
+  source,
+  disabled,
+  reconnectDisabled,
+  onComplete,
+  onReconnect,
+}: {
+  connectionId: string;
+  source: SyncSource;
+  disabled: boolean;
+  reconnectDisabled: boolean;
+  onComplete: () => Promise<void>;
+  onReconnect: () => void;
+}) {
+  const [progress, setProgress] = useState<SyncProgress | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [pollingPaused, setPollingPaused] = useState(false);
+  const [monitorRequest, setMonitorRequest] = useState<{
+    workflowId: string;
+  } | null>(null);
+  const [error, setError] = useState("");
+  const mounted = useRef(false);
+  const startingRequest = useRef(false);
+  const requestId = useRef<string | null>(null);
+  const onCompleteRef = useRef(onComplete);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+  useEffect(() => {
+    if (!monitorRequest) return;
+    setPollingPaused(false);
+    return monitorSync({
+      workflowId: monitorRequest.workflowId,
+      read: (id, signal) =>
+        request(
+          `/intelligence/sync/status?workflow_id=${encodeURIComponent(id)}`,
+          undefined,
+          signal,
+        ),
+      onProgress: setProgress,
+      onPause: () => setPollingPaused(true),
+      onTerminal: (result) => {
+        if (result.status === "completed") {
+          void onCompleteRef.current().catch(() => {
+            if (mounted.current) {
+              setError(
+                "Sync finished. Use Refresh Today to reload your workspace.",
+              );
+            }
+          });
+        }
+      },
+    });
+  }, [monitorRequest]);
+
+  async function sync() {
+    if (
+      disabled ||
+      startingRequest.current ||
+      (progress && !isSyncTerminal(progress.status))
+    ) {
+      return;
+    }
+    startingRequest.current = true;
+    setStarting(true);
+    setError("");
+    requestId.current ??= crypto.randomUUID();
+    try {
+      const result = await request<{ workflow_id: string }>(
+        "/intelligence/sync",
+        {
+          connection_id: connectionId,
+          source,
+          request_id: requestId.current,
+        },
+      );
+      if (typeof result.workflow_id !== "string" || !result.workflow_id) {
+        throw new Error("Could not confirm this sync. Please try again.");
+      }
+      requestId.current = null;
+      if (mounted.current) {
+        setProgress({
+          workflow_id: result.workflow_id,
+          status: "queued",
+          commitment_count: null,
+          error: null,
+        });
+        setMonitorRequest({ workflowId: result.workflow_id });
+      }
+    } catch (cause) {
+      if (mounted.current) {
+        setError(
+          cause instanceof Error ? cause.message : "Could not start sync.",
+        );
+      }
+    } finally {
+      startingRequest.current = false;
+      if (mounted.current) setStarting(false);
+    }
+  }
+
+  return (
+    <div className={styles.syncSource}>
+      <button
+        type="button"
+        className={styles.secondary}
+        disabled={
+          disabled ||
+          starting ||
+          (progress !== null && !isSyncTerminal(progress.status))
+        }
+        onClick={() => void sync()}
+      >
+        {starting ? "Starting " : "Sync "}
+        {source === "gmail" ? "Gmail" : "Calendar"}
+      </button>
+      {progress && (
+        <SyncReadout
+          source={source}
+          progress={progress}
+          pollingPaused={pollingPaused}
+          reconnectDisabled={reconnectDisabled}
+          onCheck={() =>
+            setMonitorRequest({ workflowId: progress.workflow_id })
+          }
+          onReconnect={onReconnect}
+        />
+      )}
+      {error && (
+        <p className={styles.error} role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function IntelligenceControls({
   connections,
   paused,
@@ -61,7 +272,6 @@ export function IntelligenceControls({
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
   const [status, setStatus] = useState<IntelligenceStatus | null>(null);
   const refreshStatus = useCallback(async () => {
     try {
@@ -77,7 +287,6 @@ export function IntelligenceControls({
   async function enable(connectionId: string) {
     setBusy(connectionId);
     setError("");
-    setMessage("");
     try {
       const result = await request<{ authorization_url: string }>(
         `/connections/google/${connectionId}/intelligence/start`,
@@ -104,32 +313,13 @@ export function IntelligenceControls({
     }
   }
 
-  async function sync(connectionId: string, source: "gmail" | "calendar") {
-    setBusy(`${connectionId}:${source}`);
-    setError("");
-    setMessage("");
-    try {
-      await request<{ workflow_id: string; status: string }>(
-        "/intelligence/sync",
-        { connection_id: connectionId, source },
-      );
-      setMessage(
-        `${source === "gmail" ? "Gmail" : "Calendar"} sync queued. Refresh Today after processing finishes.`,
-      );
-      await refreshStatus();
-    } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : "Could not start sync.",
-      );
-    } finally {
-      setBusy(null);
-    }
-  }
-
   async function refresh() {
     setBusy("refresh");
+    setError("");
     try {
       await Promise.all([refreshStatus(), onRefresh()]);
+    } catch {
+      setError("Today could not refresh. Please try again.");
     } finally {
       setBusy(null);
     }
@@ -181,7 +371,9 @@ export function IntelligenceControls({
                   status is {connection.status.replaceAll("_", " ")}.
                 </p>
               )}
-              {(!gmail || !calendar) && (
+              {(!gmail ||
+                !calendar ||
+                connection.status === "reauthorization_required") && (
                 <>
                   <p className={styles.copy}>
                     This grants read access to email and calendar content for
@@ -197,28 +389,38 @@ export function IntelligenceControls({
                   >
                     {busy === connection.id
                       ? "Opening Google…"
-                      : "Enable Gmail & Calendar understanding"}
+                      : connection.status === "reauthorization_required"
+                        ? "Reconnect read access"
+                        : "Enable Gmail & Calendar understanding"}
                   </button>
                 </>
               )}
-              <div className={styles.actions}>
+              <div className={styles.syncSources}>
                 {gmail && (
-                  <button
-                    type="button"
+                  <SourceSync
+                    key={`${connection.id}:gmail`}
+                    connectionId={connection.id}
+                    source="gmail"
                     disabled={busy !== null || paused || !canSync}
-                    onClick={() => void sync(connection.id, "gmail")}
-                  >
-                    Sync Gmail
-                  </button>
+                    reconnectDisabled={busy !== null || paused}
+                    onComplete={async () => {
+                      await Promise.all([refreshStatus(), onRefresh()]);
+                    }}
+                    onReconnect={() => void enable(connection.id)}
+                  />
                 )}
                 {calendar && (
-                  <button
-                    type="button"
+                  <SourceSync
+                    key={`${connection.id}:calendar`}
+                    connectionId={connection.id}
+                    source="calendar"
                     disabled={busy !== null || paused || !canSync}
-                    onClick={() => void sync(connection.id, "calendar")}
-                  >
-                    Sync Calendar
-                  </button>
+                    reconnectDisabled={busy !== null || paused}
+                    onComplete={async () => {
+                      await Promise.all([refreshStatus(), onRefresh()]);
+                    }}
+                    onReconnect={() => void enable(connection.id)}
+                  />
                 )}
               </div>
             </div>
@@ -251,11 +453,6 @@ export function IntelligenceControls({
       >
         {busy === "refresh" ? "Refreshing…" : "Refresh Today"}
       </button>
-      {message && (
-        <p className={styles.message} role="status">
-          {message}
-        </p>
-      )}
       {error && (
         <p className={styles.error} role="alert">
           {error}
