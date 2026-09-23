@@ -27,6 +27,7 @@ from navox.intelligence.jobs import SourceWork, WorkspaceWork
 from navox.intelligence.source_cooldown import (
     HARD_QUOTA_CODES,
     SOURCE_BACKOFF_CODES,
+    GoogleSourceCooldownError,
     source_cooldown,
 )
 from navox.intelligence.sync_errors import processing_diagnostic
@@ -159,6 +160,11 @@ async def _process_source(payload: SourceWork) -> int:
             )
             await database.commit()
             return len(ids)
+        except GoogleSourceCooldownError as error:
+            # A concurrent sync can establish a cooldown between checkpoints.
+            # Reuse its deadline without recording another failure or extending it.
+            await database.rollback()
+            raise _source_failure(error.diagnostic()) from None
         except Exception as error:
             # No source text, credential or provider response enters logs or workflow history.
             diagnostic = processing_diagnostic(error)
@@ -169,9 +175,8 @@ async def _process_source(payload: SourceWork) -> int:
             )
             if not preserve_backoff_lock:
                 await database.rollback()
-            # Google backoff errors occur while fetching/reconciling the source batch,
-            # before extraction checkpoints. Only valid token-refresh metadata can
-            # be pending. Keep the connection lock until its cooldown audit commits,
+            # Each provider read holds the connection lock; previous source
+            # checkpoints have already committed. Keep that lock through the audit,
             # so a waiting job cannot pass the cooldown check and contact Google.
             failed_at = datetime.now(UTC)
             if payload.event_id:

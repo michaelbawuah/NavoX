@@ -320,7 +320,7 @@ async def test_ingestion_resolves_once_and_persists_no_raw_content(
             return await super().extract_operational(document)
 
     extractor = OperationalExtractor(CountingGateway())
-    first = await ingestion.process_connection(
+    first = await ingestion.process_batch_connection(
         database,
         connection_id=connection.id,
         source="gmail",
@@ -328,7 +328,7 @@ async def test_ingestion_resolves_once_and_persists_no_raw_content(
         extractor=extractor,
     )
     await database.commit()
-    second = await ingestion.process_connection(
+    second = await ingestion.process_batch_connection(
         database,
         connection_id=connection.id,
         source="gmail",
@@ -379,7 +379,7 @@ async def test_ingestion_checks_authority_before_provider_fetch(
 
     monkeypatch.setattr(ingestion, "access_token_for_connection", fail)
     with pytest.raises(GoogleSourceAuthorizationError):
-        await ingestion.process_connection(
+        await ingestion.process_batch_connection(
             database,
             connection_id=connection.id,
             source="gmail",
@@ -426,7 +426,7 @@ async def test_transient_model_failure_retains_cursor_and_checkpoints_prior_docu
     monkeypatch.setattr(ingestion, "access_token_for_connection", token)
     monkeypatch.setattr(GoogleSourceGateway, "fetch", batch)
     with pytest.raises(ValueError, match="malformed"):
-        await ingestion.process_connection(
+        await ingestion.process_batch_connection(
             database,
             connection_id=connection_id,
             source="gmail",
@@ -439,7 +439,7 @@ async def test_transient_model_failure_retains_cursor_and_checkpoints_prior_docu
     assert await database.scalar(select(func.count()).select_from(OperationalObservation)) == 1
     assert await database.scalar(select(func.count()).select_from(IntelligenceSourceReceipt)) == 1
     fail = False
-    await ingestion.process_connection(
+    await ingestion.process_batch_connection(
         database,
         connection_id=connection_id,
         source="gmail",
@@ -489,7 +489,7 @@ async def test_invalid_proposal_is_quarantined_without_blocking_or_leaking_conte
     monkeypatch.setattr(ingestion, "access_token_for_connection", token)
     monkeypatch.setattr(GoogleSourceGateway, "fetch", batch)
     for _ in range(2):
-        ids = await ingestion.process_connection(
+        ids = await ingestion.process_batch_connection(
             database,
             connection_id=connection.id,
             source="gmail",
@@ -550,7 +550,7 @@ async def test_empty_or_rejected_newer_revision_prevents_stale_fact_resurrection
     monkeypatch.setattr(ingestion, "access_token_for_connection", token)
     monkeypatch.setattr(GoogleSourceGateway, "fetch", batch)
     assert (
-        await ingestion.process_connection(
+        await ingestion.process_batch_connection(
             database,
             connection_id=connection.id,
             source="gmail",
@@ -584,7 +584,7 @@ async def test_older_batch_does_not_overwrite_a_concurrently_advanced_cursor(
 
     monkeypatch.setattr(ingestion, "access_token_for_connection", token)
     monkeypatch.setattr(GoogleSourceGateway, "fetch", batch)
-    await ingestion.process_connection(
+    await ingestion.process_batch_connection(
         database,
         connection_id=connection.id,
         source="gmail",
@@ -621,7 +621,7 @@ async def test_cancelled_event_bypasses_model(
     monkeypatch.setattr(ingestion, "access_token_for_connection", token)
     monkeypatch.setattr(GoogleSourceGateway, "fetch", batch)
     assert (
-        await ingestion.process_connection(
+        await ingestion.process_batch_connection(
             database,
             connection_id=connection.id,
             source="calendar",
@@ -649,7 +649,7 @@ async def test_refresh_scope_reduction_stops_before_source_fetch(
     monkeypatch.setattr(ingestion, "access_token_for_connection", narrowed_token)
     monkeypatch.setattr(GoogleSourceGateway, "fetch", forbidden)
     with pytest.raises(GoogleSourceAuthorizationError) as error:
-        await ingestion.process_connection(
+        await ingestion.process_batch_connection(
             database,
             connection_id=connection.id,
             source="gmail",
@@ -933,7 +933,7 @@ async def test_newest_first_batch_resolves_request_before_sent_completion(
 
     monkeypatch.setattr(ingestion, "access_token_for_connection", token)
     monkeypatch.setattr(GoogleSourceGateway, "fetch", batch)
-    ids = await ingestion.process_connection(
+    ids = await ingestion.process_batch_connection(
         database,
         connection_id=connection.id,
         source="gmail",

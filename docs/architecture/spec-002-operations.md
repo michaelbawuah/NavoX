@@ -4,7 +4,7 @@
 
 1. Pull the delivery branch, preserve your existing `.env`, then rebuild with
    `docker compose up --build -d`. Migrations run before API/worker startup,
-   including 0012 for bounded source-processing receipts.
+   including 0012 for source-processing receipts and 0013 for resumable Gmail plans.
 2. Configure `AI_PROVIDER=openai`, `OPENAI_API_KEY`, and `OPENAI_MODEL` in the
    private environment. Use a model your account supports for strict Responses
    JSON schema. Restart/recreate both API and worker after changes. Keys are never
@@ -44,6 +44,25 @@ permanently prevent later valid changes from processing. Receipts store bounded
 source identifiers and hashes, never full source content. Check audit events for
 failure class and latency; raw source text and provider error payloads are excluded.
 
+Gmail additionally checkpoints a bounded read plan in `gmail_sync_plans`. It saves
+the initial history cursor, a fixed bootstrap boundary, list-page progress, message
+IDs/deletion flags, chronology timestamps, and completed positions. First it reads
+only IDs and timestamps to establish chronological order; then each full message
+is downloaded, validated, resolved, and acknowledged with its receipt and plan
+position in one transaction. A late provider or model failure resumes at the
+unfinished message. Successfully completed message bodies and prior list/chronology
+pages are not downloaded again for that plan. Bodies, subjects, addresses, and
+credentials are never stored in the plan. It is removed atomically with successful
+cursor publication; an interrupted plan retains the original cursor.
+
+Chronology adds one body-free GET per live message on a new plan. This trades extra
+initial requests for causal ordering and durable recovery without caching private
+mail. It does not reduce the cost of the first uninterrupted bootstrap. Existing
+revision receipts still prevent repeated model extraction of unchanged revisions.
+Expired history includes known referenced resources before sorting; deletions are
+processed without a model call. Authorization and source cooldown are rechecked
+under the connection lock between checkpoints.
+
 The intelligence workflow contains identifiers only. PostgreSQL holds current
 facts; Temporal retries work and refreshes time-dependent state and attention.
 Pause and revoked scopes are checked again inside processing activities.
@@ -75,6 +94,9 @@ entire fetched batch. Valid `Retry-After` seconds or HTTP dates are honored with
 a one-day bound. Inline retries have a total backoff budget of 60 seconds per GET;
 longer delays are handed back to the durable workflow. Pacing is local to the
 gateway, not a global limiter across independent deployments or other Gmail apps.
+Resumable Gmail plans also persist a 500 ms read spacing under that connection
+lock, so overlapping NavoX jobs cannot multiply the plan's read rate. This spacing
+does not account for other apps or separate connections to the same Google account.
 
 Exhausted Google rate-limit, quota, and server errors record a source-specific
 `retry_not_before` in the failure audit. Manual sync, source activities, and
@@ -91,6 +113,10 @@ Calendar is not blocked by a Gmail-only cooldown.
 metric and configured limit in the owning Google Cloud project. The app does not
 raise quotas or enable billing. `google_rate_limited` remains the temporary rate
 category (including otherwise unspecified HTTP 429 responses).
+For a recognized legacy HTTP 403 rate error, `provider_reason` also retains exactly
+`userRateLimitExceeded` or `rateLimitExceeded`. Unknown, conflicting, or unspecified
+reasons are omitted. This preserves Google's reported reason without inferring
+which Cloud Console quota metric caused it; raw error prose remains excluded.
 
 Briefing requests and lifecycle activities serialize proactive evaluation within
 each workspace before loading preferences or signals. This prevents concurrent

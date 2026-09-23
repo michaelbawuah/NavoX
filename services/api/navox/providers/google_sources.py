@@ -57,6 +57,7 @@ class GoogleSourceError(RuntimeError):
         code: str = "google_source_error",
         http_status: int | None = None,
         retry_after_seconds: int | None = None,
+        provider_reason: str | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code if code in GOOGLE_SOURCE_DIAGNOSTIC_CODES else "google_source_error"
@@ -68,14 +69,23 @@ class GoogleSourceError(RuntimeError):
             if type(retry_after_seconds) is int and 1 <= retry_after_seconds <= 86_400
             else None
         )
+        self.provider_reason = (
+            provider_reason
+            if self.code == "google_rate_limited"
+            and self.http_status == 403
+            and provider_reason in ("userRateLimitExceeded", "rateLimitExceeded")
+            else None
+        )
 
     def diagnostic(self) -> dict[str, str | int]:
-        """Only fixed categories and HTTP status may enter logs or workflow history."""
+        """Only fixed categories and bounded values may enter logs or workflow history."""
         result: dict[str, str | int] = {"code": self.code}
         if self.http_status is not None:
             result["http_status"] = self.http_status
         if self.retry_after_seconds is not None:
             result["retry_after_seconds"] = self.retry_after_seconds
+        if self.provider_reason is not None:
+            result["provider_reason"] = self.provider_reason
         return result
 
 
@@ -143,6 +153,34 @@ def _google_error_code(response: httpx.Response) -> str:
     return fallback
 
 
+def _google_rate_limit_reason(response: httpx.Response, code: str) -> str | None:
+    """Retain one allowlisted legacy reason, without interpreting its quota scope.
+
+    These exact tokens aid diagnosis without retaining provider prose or IDs.
+    Generic 429, structured ErrorInfo, unknown and mixed reasons are omitted.
+    """
+    if response.status_code != 403 or code != "google_rate_limited":
+        return None
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    error = body.get("error") if isinstance(body, dict) else None
+    legacy = error.get("errors") if isinstance(error, dict) else None
+    if not isinstance(legacy, list):
+        return None
+    reasons: set[str] = {
+        entry["reason"]
+        for entry in legacy
+        if isinstance(entry, dict) and isinstance(entry.get("reason"), str)
+    }
+    if len(reasons) == 1:
+        reason = next(iter(reasons))
+        if reason in {"userRateLimitExceeded", "rateLimitExceeded"}:
+            return reason
+    return None
+
+
 def _retry_after(response: httpx.Response, now: datetime) -> int | None:
     """Keep only a bounded delay, never the provider's raw header value."""
     value = response.headers.get("Retry-After", "").strip()
@@ -166,6 +204,15 @@ class SourceBatch:
     documents: list[SourceDocument]
     cursor: str
     reset: bool = False
+
+
+@dataclass(frozen=True)
+class GmailPage:
+    """One bounded page of IDs; no message headers or bodies are retained."""
+
+    message_ids: dict[str, bool]
+    next_page_token: str | None
+    cursor: str | None
 
 
 def _text(value: Any, limit: int = 512) -> str | None:
@@ -487,6 +534,7 @@ class GoogleSourceGateway:
                 code=code,
                 http_status=response.status_code,
                 retry_after_seconds=retry_after,
+                provider_reason=_google_rate_limit_reason(response, code),
             )
         try:
             data = response.json()
@@ -503,6 +551,173 @@ class GoogleSourceGateway:
                 http_status=response.status_code,
             )
         return data
+
+    async def _gmail_get(
+        self,
+        access_token: str,
+        path: str,
+        params: dict[str, str],
+        *,
+        expired_status: int | None = None,
+    ) -> dict[str, Any]:
+        async with httpx.AsyncClient(
+            timeout=20.0,
+            transport=self.transport,
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+        ) as client:
+            return await self._get(
+                client, f"{GMAIL_ROOT}/{path}", params, expired_status=expired_status
+            )
+
+    async def gmail_profile(self, access_token: str) -> str:
+        """Read the history checkpoint before enumerating a full sync."""
+        profile = await self._gmail_get(access_token, "profile", {"fields": "historyId"})
+        cursor = profile.get("historyId")
+        if not isinstance(cursor, str) or not cursor or len(cursor) > 512:
+            raise GoogleSourceError(
+                "Gmail did not return a history cursor", code="google_invalid_response"
+            )
+        return cursor
+
+    async def gmail_page(
+        self,
+        access_token: str,
+        *,
+        cursor: str | None,
+        page_token: str | None,
+        query: str = "newer_than:30d",
+    ) -> GmailPage:
+        """Enumerate one page for a caller that durably checkpoints progress."""
+        if (
+            not isinstance(query, str)
+            or not query.strip()
+            or len(query) > 512
+            or (
+                cursor is not None
+                and (not isinstance(cursor, str) or not cursor or len(cursor) > 512)
+            )
+            or (
+                page_token is not None
+                and (not isinstance(page_token, str) or not page_token or len(page_token) > 4096)
+            )
+        ):
+            raise GoogleSourceError("Gmail page parameters are invalid")
+        params = {"maxResults": "100"}
+        if cursor is None:
+            path = "messages"
+            params.update({"q": query, "fields": "messages/id,nextPageToken"})
+        else:
+            path = "history"
+            params.update(
+                {
+                    "startHistoryId": cursor,
+                    "fields": "history(messagesAdded/message/id,messagesDeleted/message/id),"
+                    "nextPageToken,historyId",
+                }
+            )
+        if page_token is not None:
+            params["pageToken"] = page_token
+        page = await self._gmail_get(
+            access_token, path, params, expired_status=404 if cursor is not None else None
+        )
+        message_ids: dict[str, bool] = {}
+
+        def add_message(message: Any, deleted: bool) -> None:
+            identifier = message.get("id") if isinstance(message, dict) else None
+            if not isinstance(identifier, str) or not identifier or len(identifier) > 512:
+                raise GoogleSourceError(
+                    "Gmail message ID is invalid", code="google_invalid_response"
+                )
+            message_ids[identifier] = deleted
+
+        entries = page.get("messages" if cursor is None else "history", [])
+        if not isinstance(entries, list):
+            raise GoogleSourceError("Gmail page is invalid", code="google_invalid_response")
+        for entry in entries:
+            if cursor is None:
+                add_message(entry, False)
+                continue
+            if not isinstance(entry, dict):
+                raise GoogleSourceError("Gmail history is invalid", code="google_invalid_response")
+            for kind, deleted in (("messagesAdded", False), ("messagesDeleted", True)):
+                changes = entry.get(kind, [])
+                if not isinstance(changes, list):
+                    raise GoogleSourceError(
+                        "Gmail history is invalid", code="google_invalid_response"
+                    )
+                for change in changes:
+                    add_message(
+                        change.get("message") if isinstance(change, dict) else None, deleted
+                    )
+        token = page.get("nextPageToken")
+        next_cursor = page.get("historyId", cursor) if cursor is not None else None
+        if (
+            token is not None and (not isinstance(token, str) or not token or len(token) > 4096)
+        ) or (
+            cursor is not None
+            and (not isinstance(next_cursor, str) or not next_cursor or len(next_cursor) > 512)
+        ):
+            raise GoogleSourceError("Gmail page cursor is invalid", code="google_invalid_response")
+        return GmailPage(message_ids, token, next_cursor)
+
+    async def gmail_metadata(
+        self, access_token: str, *, external_id: str, now: datetime
+    ) -> tuple[datetime, bool]:
+        """Read only the timestamp needed to order a durable sync manifest."""
+        if not isinstance(external_id, str) or not external_id or len(external_id) > 512:
+            raise GoogleSourceError("Gmail message ID is invalid")
+        try:
+            data = await self._gmail_get(
+                access_token,
+                f"messages/{quote(external_id, safe='')}",
+                # MINIMAL is documented to return only IDs and labels. Select
+                # FULL with a strict field mask so chronology is available but
+                # headers, snippets, and bodies never enter this response.
+                {"format": "full", "fields": "id,internalDate"},
+                expired_status=404,
+            )
+        except ExpiredSourceCursor:
+            return now, True
+        if data.get("id") != external_id:
+            raise GoogleSourceError("Gmail message ID is invalid", code="google_invalid_response")
+        timestamp = data.get("internalDate")
+        try:
+            if isinstance(timestamp, bool) or not isinstance(timestamp, str | int):
+                raise ValueError
+            occurred = datetime.fromtimestamp(int(timestamp) / 1000, UTC)
+        except (ValueError, TypeError, OverflowError, OSError):
+            raise GoogleSourceError(
+                "Gmail timestamp is invalid", code="google_invalid_response"
+            ) from None
+        return occurred, False
+
+    async def gmail_message(
+        self,
+        access_token: str,
+        *,
+        workspace_id: UUID,
+        connection_id: UUID,
+        external_id: str,
+        now: datetime,
+        deleted: bool = False,
+    ) -> SourceDocument:
+        """Fetch one body for immediate processing, or normalize its deletion."""
+        if not isinstance(external_id, str) or not external_id or len(external_id) > 512:
+            raise GoogleSourceError("Gmail message ID is invalid")
+        data: dict[str, Any] = {"id": external_id, "deleted": True}
+        if not deleted:
+            try:
+                data = await self._gmail_get(
+                    access_token,
+                    f"messages/{quote(external_id, safe='')}",
+                    {"format": "full", "fields": "id,threadId,labelIds,internalDate,payload"},
+                    expired_status=404,
+                )
+            except ExpiredSourceCursor:
+                pass
+        if data.get("id") != external_id:
+            raise GoogleSourceError("Gmail message ID is invalid", code="google_invalid_response")
+        return gmail_document(data, workspace_id=workspace_id, connection_id=connection_id, now=now)
 
     async def fetch(
         self,

@@ -143,11 +143,14 @@ async def test_exhausted_transient_failure_has_bounded_safe_cooldown(
         with pytest.raises(GoogleSourceError) as caught:
             await clock.gateway()._get(client, GMAIL + "/messages/id")
     assert len(requests) == 3
-    assert caught.value.diagnostic() == {
+    diagnostic: dict[str, str | int] = {
         "code": "google_provider_unavailable" if status >= 500 else "google_rate_limited",
         "http_status": status,
         "retry_after_seconds": 60,
     }
+    if status == 403:
+        diagnostic["provider_reason"] = "rateLimitExceeded"
+    assert caught.value.diagnostic() == diagnostic
     assert isinstance(caught.value, GoogleSourceAuthorizationError) == (status == 403)
     assert PRIVATE not in repr(vars(caught.value))
 

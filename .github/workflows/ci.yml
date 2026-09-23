@@ -86,7 +86,7 @@ jobs:
         working-directory: services/api
       - name: Verify required schema tables
         run: |
-          for table in users workspaces workspace_memberships plans plan_steps actions approvals workflow_refs audit_events proactive_preferences proactive_signals briefing_snapshots people person_identities operational_observations observation_evidence intelligence_feedback intelligence_source_receipts; do
+          for table in users workspaces workspace_memberships plans plan_steps actions approvals workflow_refs audit_events proactive_preferences proactive_signals briefing_snapshots people person_identities operational_observations observation_evidence intelligence_feedback intelligence_source_receipts gmail_sync_plans; do
             grep -F "CREATE TABLE $table" /tmp/navox-schema.sql
           done
           grep -F "client_type" /tmp/navox-schema.sql

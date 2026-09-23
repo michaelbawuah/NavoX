@@ -13,7 +13,11 @@ from navox.db.base import Base
 from navox.db.models import AuditEvent, Connection, IncomingEvent, User, Workspace
 from navox.intelligence import activities, ingestion
 from navox.intelligence.jobs import SourceWork
-from navox.intelligence.source_cooldown import source_cooldown, source_retry_after
+from navox.intelligence.source_cooldown import (
+    GoogleSourceCooldownError,
+    source_cooldown,
+    source_retry_after,
+)
 from navox.providers.google_sources import GoogleSourceError
 
 NOW = datetime(2026, 9, 23, 14, 0, tzinfo=UTC)
@@ -467,3 +471,38 @@ async def test_reconciliation_skips_cooled_inbox_and_watch_but_keeps_other_sourc
         preserved = await database.get(IncomingEvent, event_id)
         assert preserved.intelligence_status == "pending"
         assert len(list(await database.scalars(select(AuditEvent)))) == 1
+
+
+@pytest.mark.asyncio
+async def test_cooldown_observed_between_checkpoints_does_not_create_new_failure(
+    cooldown_env, monkeypatch
+):
+    factory, connections = cooldown_env
+    connection = connections[0]
+    original_id = None
+
+    async def concurrent_cooldown(database, **kwargs):
+        nonlocal original_id
+        audit = failure_audit(connection, occurred_at=datetime.now(UTC))
+        database.add(audit)
+        await database.commit()
+        original_id = audit.id
+        diagnostic = await source_cooldown(database, connection.id, "gmail")
+        assert diagnostic is not None
+        raise GoogleSourceCooldownError(diagnostic)
+
+    monkeypatch.setattr(ingestion, "process_connection", concurrent_cooldown)
+    monkeypatch.setattr(activities, "get_session_factory", lambda: factory)
+    monkeypatch.setattr(
+        activities, "get_settings", lambda: Settings(ai_provider="openai", openai_api_key="test")
+    )
+    payload = SourceWork(
+        str(connection.id), str(connection.user_id), str(connection.workspace_id), "gmail"
+    )
+    with pytest.raises(ApplicationError) as raised:
+        await activities.process_source_activity(payload)
+    assert raised.value.next_retry_delay is not None
+    assert timedelta(seconds=1) <= raised.value.next_retry_delay <= timedelta(seconds=300)
+    async with factory() as database:
+        audits = list(await database.scalars(select(AuditEvent)))
+        assert [audit.id for audit in audits] == [original_id]

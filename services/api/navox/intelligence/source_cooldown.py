@@ -9,11 +9,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.db.models import AuditEvent, Connection
 from navox.intelligence.sync_errors import sanitize_diagnostic
+from navox.providers.google_sources import GoogleSourceError
 
 HARD_QUOTA_CODES = frozenset({"google_daily_limit_exceeded", "google_quota_exceeded"})
 SOURCE_QUOTA_CODES = HARD_QUOTA_CODES | {"google_rate_limited"}
 SOURCE_BACKOFF_CODES = SOURCE_QUOTA_CODES | {"google_provider_unavailable"}
 MAX_RETRY_SECONDS = 86_400
+
+
+class GoogleSourceCooldownError(GoogleSourceError):
+    """An existing cooldown was observed; this is not a new provider failure."""
+
+    def __init__(self, diagnostic: dict[str, str | int]) -> None:
+        status = diagnostic.get("http_status")
+        delay = diagnostic.get("retry_after_seconds")
+        provider_reason = diagnostic.get("provider_reason")
+        super().__init__(
+            "Source cooldown is still active",
+            code=str(diagnostic["code"]),
+            http_status=status if isinstance(status, int) else None,
+            retry_after_seconds=delay if isinstance(delay, int) else None,
+            provider_reason=provider_reason if isinstance(provider_reason, str) else None,
+        )
 
 
 async def source_cooldown(

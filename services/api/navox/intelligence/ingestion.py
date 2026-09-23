@@ -20,6 +20,7 @@ from navox.db.models import (
     User,
     WorkspaceMembership,
 )
+from navox.intelligence.contracts import SourceDocument
 from navox.intelligence.extraction import (
     InvalidOperationalExtraction,
     OperationalExtraction,
@@ -28,14 +29,16 @@ from navox.intelligence.extraction import (
     source_document_hash,
 )
 from navox.intelligence.resolution import resolve_extraction
-from navox.providers.google_oauth import access_token_for_connection
+from navox.providers.google_oauth import access_token_for_connection as access_token_for_connection
 from navox.providers.google_sources import (
     CALENDAR_ROOT,
     GMAIL_ROOT,
     SOURCE_SCOPES,
     GoogleSourceAuthorizationError,
     GoogleSourceError,
-    GoogleSourceGateway,
+)
+from navox.providers.google_sources import (
+    GoogleSourceGateway as GoogleSourceGateway,
 )
 
 
@@ -65,7 +68,138 @@ async def authorized_connection(
     return connection, user
 
 
+async def _process_document(
+    database: AsyncSession,
+    *,
+    connection: Connection,
+    user: User,
+    document: SourceDocument,
+    source: str,
+    extractor: OperationalExtractor,
+) -> tuple[set[UUID], str]:
+    """Validate and apply one revision; the caller commits it with source progress."""
+    connection_id = connection.id
+    if document.workspace_id != connection.workspace_id or document.provider != "google":
+        raise GoogleSourceAuthorizationError("Source does not belong to this workspace")
+    source_hash = source_document_hash(document)
+    tombstone = document.metadata.get("status") in {"cancelled", "deleted"}
+    extractor_version = "provider-tombstone.v1" if tombstone else extractor.extractor_version
+    latest_revision = await database.scalar(
+        select(func.max(IntelligenceSourceReceipt.source_occurred_at)).where(
+            IntelligenceSourceReceipt.connection_id == connection_id,
+            IntelligenceSourceReceipt.source == source,
+            IntelligenceSourceReceipt.external_id == document.external_id,
+        )
+    )
+    if latest_revision is not None:
+        if latest_revision.tzinfo is None:
+            latest_revision = latest_revision.replace(tzinfo=UTC)
+        if document.occurred_at < latest_revision:
+            # Empty/rejected/deleted revisions have no observation evidence,
+            # but still prevent an older overlapping batch resurrecting facts.
+            return set(), "skipped"
+    receipt = await database.scalar(
+        select(IntelligenceSourceReceipt).where(
+            IntelligenceSourceReceipt.connection_id == connection_id,
+            IntelligenceSourceReceipt.source == source,
+            IntelligenceSourceReceipt.external_id == document.external_id,
+            IntelligenceSourceReceipt.source_hash == source_hash,
+            IntelligenceSourceReceipt.extractor_version == extractor_version,
+        )
+    )
+    if receipt is not None:
+        return {UUID(identifier) for identifier in receipt.commitment_ids}, "skipped"
+    if tombstone:
+        result = OperationalExtractionResult(
+            extraction=OperationalExtraction(),
+            extractor_version="provider-tombstone.v1",
+            model_provider="deterministic",
+            model_name="provider-state",
+            source_hash=source_hash,
+        )
+    else:
+        try:
+            result = await extractor.extract(document)
+        except InvalidOperationalExtraction as error:
+            await authorized_connection(database, connection_id, source)
+            database.add(
+                IntelligenceSourceReceipt(
+                    connection_id=connection_id,
+                    source=source,
+                    external_id=document.external_id,
+                    source_hash=source_hash,
+                    extractor_version=extractor_version,
+                    outcome="rejected",
+                    source_occurred_at=document.occurred_at,
+                    commitment_ids=[],
+                )
+            )
+            database.add(
+                AuditEvent(
+                    user_id=connection.user_id,
+                    workspace_id=connection.workspace_id,
+                    event_type="intelligence.extraction.rejected",
+                    actor_type="system",
+                    entity_type="connection",
+                    entity_id=connection_id,
+                    event_metadata={
+                        "source": source,
+                        "source_hash": source_hash,
+                        "extractor_version": extractor_version,
+                        "reason": "invalid_model_proposal",
+                        "validation_error": error.diagnostic(),
+                    },
+                )
+            )
+            return set(), "rejected"
+    # Recheck after a slow provider/model call before applying any proposal.
+    connection, user = await authorized_connection(database, connection_id, source)
+    resolved_ids = await resolve_extraction(
+        database,
+        connection=connection,
+        document=document,
+        result=result,
+        timezone_name=user.timezone,
+    )
+    database.add(
+        IntelligenceSourceReceipt(
+            connection_id=connection_id,
+            source=source,
+            external_id=document.external_id,
+            source_hash=source_hash,
+            extractor_version=extractor_version,
+            outcome="processed",
+            source_occurred_at=document.occurred_at,
+            commitment_ids=[str(identifier) for identifier in resolved_ids],
+        )
+    )
+    return set(resolved_ids), "processed"
+
+
 async def process_connection(
+    database: AsyncSession,
+    *,
+    connection_id: UUID,
+    source: str,
+    settings: Settings,
+    extractor: OperationalExtractor,
+) -> list[UUID]:
+    if source == "gmail":
+        from navox.intelligence.gmail_sync import process_gmail_connection
+
+        return await process_gmail_connection(
+            database, connection_id=connection_id, settings=settings, extractor=extractor
+        )
+    return await process_batch_connection(
+        database,
+        connection_id=connection_id,
+        source=source,
+        settings=settings,
+        extractor=extractor,
+    )
+
+
+async def process_batch_connection(
     database: AsyncSession,
     *,
     connection_id: UUID,
@@ -138,109 +272,18 @@ async def process_connection(
     skipped = rejected = 0
     for document in documents:
         connection, user = await authorized_connection(database, connection_id, source)
-        if document.workspace_id != connection.workspace_id or document.provider != "google":
-            raise GoogleSourceAuthorizationError("Source does not belong to this workspace")
-        source_hash = source_document_hash(document)
-        tombstone = document.metadata.get("status") in {"cancelled", "deleted"}
-        extractor_version = "provider-tombstone.v1" if tombstone else extractor.extractor_version
-        latest_revision = await database.scalar(
-            select(func.max(IntelligenceSourceReceipt.source_occurred_at)).where(
-                IntelligenceSourceReceipt.connection_id == connection_id,
-                IntelligenceSourceReceipt.source == source,
-                IntelligenceSourceReceipt.external_id == document.external_id,
-            )
-        )
-        if latest_revision is not None:
-            if latest_revision.tzinfo is None:
-                latest_revision = latest_revision.replace(tzinfo=UTC)
-            if document.occurred_at < latest_revision:
-                # Empty/rejected/deleted revisions have no observation evidence,
-                # but still prevent an older overlapping batch resurrecting facts.
-                skipped += 1
-                await database.commit()
-                continue
-        receipt = await database.scalar(
-            select(IntelligenceSourceReceipt).where(
-                IntelligenceSourceReceipt.connection_id == connection_id,
-                IntelligenceSourceReceipt.source == source,
-                IntelligenceSourceReceipt.external_id == document.external_id,
-                IntelligenceSourceReceipt.source_hash == source_hash,
-                IntelligenceSourceReceipt.extractor_version == extractor_version,
-            )
-        )
-        if receipt is not None:
-            commitment_ids.update(UUID(identifier) for identifier in receipt.commitment_ids)
-            skipped += 1
-            await database.commit()
-            continue
-        if tombstone:
-            result = OperationalExtractionResult(
-                extraction=OperationalExtraction(),
-                extractor_version="provider-tombstone.v1",
-                model_provider="deterministic",
-                model_name="provider-state",
-                source_hash=source_hash,
-            )
-        else:
-            try:
-                result = await extractor.extract(document)
-            except InvalidOperationalExtraction as error:
-                await authorized_connection(database, connection_id, source)
-                database.add(
-                    IntelligenceSourceReceipt(
-                        connection_id=connection_id,
-                        source=source,
-                        external_id=document.external_id,
-                        source_hash=source_hash,
-                        extractor_version=extractor_version,
-                        outcome="rejected",
-                        source_occurred_at=document.occurred_at,
-                        commitment_ids=[],
-                    )
-                )
-                database.add(
-                    AuditEvent(
-                        user_id=connection.user_id,
-                        workspace_id=connection.workspace_id,
-                        event_type="intelligence.extraction.rejected",
-                        actor_type="system",
-                        entity_type="connection",
-                        entity_id=connection_id,
-                        event_metadata={
-                            "source": source,
-                            "source_hash": source_hash,
-                            "extractor_version": extractor_version,
-                            "reason": "invalid_model_proposal",
-                            "validation_error": error.diagnostic(),
-                        },
-                    )
-                )
-                await database.commit()
-                rejected += 1
-                continue
-        # Recheck after a slow provider/model call before applying any proposal.
-        connection, user = await authorized_connection(database, connection_id, source)
-        resolved_ids = await resolve_extraction(
+        resolved, outcome = await _process_document(
             database,
             connection=connection,
+            user=user,
             document=document,
-            result=result,
-            timezone_name=user.timezone,
+            source=source,
+            extractor=extractor,
         )
-        commitment_ids.update(resolved_ids)
-        database.add(
-            IntelligenceSourceReceipt(
-                connection_id=connection_id,
-                source=source,
-                external_id=document.external_id,
-                source_hash=source_hash,
-                extractor_version=extractor_version,
-                outcome="processed",
-                source_occurred_at=document.occurred_at,
-                commitment_ids=[str(identifier) for identifier in resolved_ids],
-            )
-        )
-        # The receipt and the evidence/state it acknowledges commit together.
+        commitment_ids.update(resolved)
+        skipped += outcome == "skipped"
+        rejected += outcome == "rejected"
+        # Evidence/state and its revision receipt are acknowledged together.
         await database.commit()
 
     connection, _ = await authorized_connection(database, connection_id, source)

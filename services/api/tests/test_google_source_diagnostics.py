@@ -76,6 +76,12 @@ async def test_google_failures_have_fixed_diagnostics_without_provider_details(
         diagnostic["retry_after_seconds"] = 60
     if expected in {"google_daily_limit_exceeded", "google_quota_exceeded"}:
         diagnostic["retry_after_seconds"] = 300
+    if (
+        status == 403
+        and not structured
+        and reason in {"userRateLimitExceeded", "rateLimitExceeded"}
+    ):
+        diagnostic["provider_reason"] = reason
     assert error.diagnostic() == diagnostic
     assert isinstance(error, GoogleSourceAuthorizationError) == (status in {401, 403})
     assert PRIVATE not in str(error)

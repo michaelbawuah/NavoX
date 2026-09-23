@@ -27,6 +27,13 @@ def sanitize_diagnostic(value: object) -> dict[str, str | int]:
     retry_after = value.get("retry_after_seconds")
     if type(retry_after) is int and 1 <= retry_after <= 86_400:
         result["retry_after_seconds"] = retry_after
+    provider_reason = value.get("provider_reason")
+    if (
+        result["code"] == "google_rate_limited"
+        and result.get("http_status") == 403
+        and provider_reason in ("userRateLimitExceeded", "rateLimitExceeded")
+    ):
+        result["provider_reason"] = provider_reason
     return result
 
 

@@ -812,6 +812,34 @@ class IntelligenceSourceReceipt(Base):
     )
 
 
+class GmailSyncPlan(Base):
+    """A resumable read plan containing identifiers and chronology, never mail bodies."""
+
+    __tablename__ = "gmail_sync_plans"
+    __table_args__ = (UniqueConstraint("connection_id", name="uq_gmail_sync_plan_connection"),)
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    connection_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("connections.id", ondelete="CASCADE"), index=True
+    )
+    initial_cursor: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cursor: Mapped[str | None] = mapped_column(Text, nullable=True)
+    phase: Mapped[str] = mapped_column(String(16), default="list")
+    page_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pages: Mapped[int] = mapped_column(default=0)
+    reset: Mapped[bool] = mapped_column(Boolean, default=False)
+    entries: Mapped[list[dict[str, object]]] = mapped_column(JSON, default=list)
+    position: Mapped[int] = mapped_column(default=0)
+    commitment_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    skipped: Mapped[int] = mapped_column(default=0)
+    rejected: Mapped[int] = mapped_column(default=0)
+    next_read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class IntelligencePreference(Base):
     __tablename__ = "intelligence_preferences"
 

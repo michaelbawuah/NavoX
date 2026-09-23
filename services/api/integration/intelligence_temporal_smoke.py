@@ -7,6 +7,7 @@ process; the task queue and database workspace are unique to each run.
 import asyncio
 import base64
 import json
+from collections import Counter
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -29,6 +30,7 @@ from navox.db.models import (
     AuditEvent,
     Commitment,
     Connection,
+    GmailSyncPlan,
     IncomingEvent,
     IntelligenceCursor,
     IntelligenceSourceReceipt,
@@ -73,10 +75,18 @@ class ProviderFixtures:
         self.google_quota_limited = False
         self.quota_started: asyncio.Event | None = None
         self.quota_release: asyncio.Event | None = None
+        self.resume_enabled = False
+        self.resume_quota_limited = False
+        self.resume_reads: Counter[str] = Counter()
+        self.resume_full_order: list[str] = []
+        self.resume_started: asyncio.Event | None = None
+        self.resume_release: asyncio.Event | None = None
 
     async def google(self, request: httpx.Request) -> httpx.Response:
         self.reads += 1
         assert request.headers["authorization"] == "Bearer synthetic-access-token"
+        if self.resume_enabled:
+            return await self.gmail_resume(request)
         if self.google_quota_limited:
             if self.quota_started is not None and self.quota_release is not None:
                 self.quota_started.set()
@@ -158,6 +168,64 @@ class ProviderFixtures:
                 },
             )
         raise AssertionError("Unexpected fixture HTTP request")
+
+    async def gmail_resume(self, request: httpx.Request) -> httpx.Response:
+        """Fail after the first processed message, then resume across workers."""
+        path = request.url.path
+        if path.endswith("/profile"):
+            self.resume_reads["profile"] += 1
+            return httpx.Response(200, json={"historyId": "201"})
+        if path.endswith("/messages"):
+            self.resume_reads["list"] += 1
+            return httpx.Response(
+                200,
+                json={"messages": [{"id": f"resume-{position}"} for position in (3, 2, 1)]},
+            )
+        if path.endswith("/history"):
+            self.resume_reads["history"] += 1
+            assert request.url.params["startHistoryId"] == "201"
+            return httpx.Response(200, json={"historyId": "201", "history": []})
+        message_id = path.rsplit("/", 1)[-1]
+        assert message_id in {"resume-1", "resume-2", "resume-3"}
+        position = int(message_id.rsplit("-", 1)[-1])
+        occurred_at = self.now + timedelta(seconds=position)
+        metadata = {
+            "id": message_id,
+            "internalDate": str(int(occurred_at.timestamp() * 1000)),
+        }
+        assert request.url.params["format"] == "full"
+        if request.url.params["fields"] == "id,internalDate":
+            self.resume_reads[f"metadata:{message_id}"] += 1
+            return httpx.Response(200, json=metadata)
+        assert "payload" in request.url.params["fields"]
+        self.resume_reads[f"full:{message_id}"] += 1
+        self.resume_full_order.append(message_id)
+        if message_id == "resume-2":
+            if self.resume_quota_limited:
+                return httpx.Response(
+                    403,
+                    json={"error": {"errors": [{"reason": "dailyLimitExceeded"}]}},
+                )
+            if self.resume_started is not None and self.resume_release is not None:
+                self.resume_started.set()
+                await asyncio.wait_for(self.resume_release.wait(), timeout=30)
+        return httpx.Response(
+            200,
+            json={
+                **metadata,
+                "threadId": f"resume-thread-{position}",
+                "labelIds": ["INBOX"],
+                "payload": {
+                    "mimeType": "text/plain",
+                    "headers": [
+                        {"name": "From", "value": "Maya <maya@example.test>"},
+                        {"name": "To", "value": "Owner <owner@example.test>"},
+                        {"name": "Subject", "value": f"Resume request {position}"},
+                    ],
+                    "body": {"data": base64.urlsafe_b64encode(b"Please send the budget.").decode()},
+                },
+            },
+        )
 
     async def generate_json(
         self, *, schema_name: str, schema: dict[str, Any], instructions: str, input_text: str
@@ -487,6 +555,160 @@ async def verify(
             )
 
 
+async def verify_gmail_resume(
+    sessions: async_sessionmaker[AsyncSession],
+    client: Client,
+    settings: Settings,
+    fixtures: ProviderFixtures,
+) -> None:
+    """A late quota failure preserves chronological progress across real jobs."""
+    user_id, workspace_id = uuid4(), uuid4()
+    connection_id, _ = await seed(sessions, user_id, workspace_id)
+    fixtures.resume_enabled = True
+    fixtures.resume_quota_limited = True
+    extractions_before = fixtures.extractions
+
+    async def dispatch() -> str:
+        return await dispatch_source(
+            SourceWork(str(connection_id), str(user_id), str(workspace_id), "gmail"),
+            settings=settings,
+            request_id=str(uuid4()),
+        )
+
+    try:
+        # Start a genuine bootstrap. Its captured history cursor must remain
+        # unpublished until every listed message has a durable outcome.
+        async with sessions() as database:
+            await database.execute(
+                delete(IntelligenceCursor).where(
+                    IntelligenceCursor.connection_id == connection_id,
+                    IntelligenceCursor.source == "gmail",
+                )
+            )
+            await database.commit()
+        failed_workflow = await dispatch()
+        try:
+            await asyncio.wait_for(client.get_workflow_handle(failed_workflow).result(), 60)
+        except WorkflowFailureError:
+            pass
+        else:
+            raise AssertionError("Partial Gmail quota fixture must stop before the last message")
+        status = await _describe_sync(failed_workflow, settings.temporal_target)
+        assert status.status == "failed"
+        assert status.error is not None
+        assert status.error["code"] == "google_daily_limit_exceeded"
+        assert fixtures.extractions == extractions_before + 1
+        async with sessions() as database:
+            plan = await database.scalar(
+                select(GmailSyncPlan).where(GmailSyncPlan.connection_id == connection_id)
+            )
+            assert plan is not None and plan.phase == "process" and plan.position == 1
+            assert plan.initial_cursor is None and plan.cursor == "201"
+            assert [entry["id"] for entry in plan.entries] == [
+                "resume-1",
+                "resume-2",
+                "resume-3",
+            ]
+            assert (
+                await database.scalar(
+                    select(IntelligenceCursor).where(
+                        IntelligenceCursor.connection_id == connection_id,
+                        IntelligenceCursor.source == "gmail",
+                    )
+                )
+                is None
+            )
+            receipts = list(
+                await database.scalars(
+                    select(IntelligenceSourceReceipt).where(
+                        IntelligenceSourceReceipt.connection_id == connection_id
+                    )
+                )
+            )
+            assert len(receipts) == 1 and receipts[0].external_id == "resume-1"
+            first_receipt_id = receipts[0].id
+            failures = list(
+                await database.scalars(
+                    select(AuditEvent).where(
+                        AuditEvent.workspace_id == workspace_id,
+                        AuditEvent.event_type == "intelligence.source.failed",
+                    )
+                )
+            )
+            assert len(failures) == 1
+            assert await source_cooldown(database, connection_id, "gmail") is not None
+            # Expire only this isolated synthetic cooldown to avoid a five-minute
+            # wall-clock wait; the separate quota gate verifies deadline durability.
+            failures[0].event_metadata = {
+                **failures[0].event_metadata,
+                "retry_not_before": (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+            }
+            await database.commit()
+        fixtures.resume_quota_limited = False
+        fixtures.resume_started = asyncio.Event()
+        fixtures.resume_release = asyncio.Event()
+        workflows = [await dispatch()]
+        try:
+            await asyncio.wait_for(fixtures.resume_started.wait(), timeout=15)
+            workflows.append(await dispatch())
+            await wait_for_source_lock(sessions)
+        finally:
+            fixtures.resume_release.set()
+        for workflow_id in workflows:
+            result = await asyncio.wait_for(client.get_workflow_handle(workflow_id).result(), 60)
+            assert isinstance(result, int)
+            status = await _describe_sync(workflow_id, settings.temporal_target)
+            assert status.status == "completed" and status.error is None
+        assert fixtures.extractions == extractions_before + 3
+        assert fixtures.resume_reads["profile"] == 1
+        assert fixtures.resume_reads["list"] == 1
+        assert fixtures.resume_reads["history"] <= 1
+        for position in (1, 2, 3):
+            assert fixtures.resume_reads[f"metadata:resume-{position}"] == 1
+            assert fixtures.resume_reads[f"full:resume-{position}"] == (2 if position == 2 else 1)
+        assert fixtures.resume_full_order == ["resume-1", "resume-2", "resume-2", "resume-3"]
+        async with sessions() as database:
+            assert (
+                await database.scalar(
+                    select(GmailSyncPlan).where(GmailSyncPlan.connection_id == connection_id)
+                )
+                is None
+            )
+            cursor = await database.scalar(
+                select(IntelligenceCursor).where(
+                    IntelligenceCursor.connection_id == connection_id,
+                    IntelligenceCursor.source == "gmail",
+                )
+            )
+            assert cursor is not None and cursor.cursor == "201"
+            receipts = list(
+                await database.scalars(
+                    select(IntelligenceSourceReceipt).where(
+                        IntelligenceSourceReceipt.connection_id == connection_id
+                    )
+                )
+            )
+            assert len(receipts) == 3
+            assert {receipt.external_id for receipt in receipts} == {
+                "resume-1",
+                "resume-2",
+                "resume-3",
+            }
+            assert next(
+                receipt for receipt in receipts if receipt.external_id == "resume-1"
+            ).id == (first_receipt_id)
+            assert all(receipt.outcome == "processed" for receipt in receipts)
+    finally:
+        if fixtures.resume_release is not None:
+            fixtures.resume_release.set()
+        fixtures.resume_enabled = fixtures.resume_quota_limited = False
+        fixtures.resume_started = fixtures.resume_release = None
+        async with sessions() as database:
+            await database.execute(delete(Workspace).where(Workspace.id == workspace_id))
+            await database.execute(delete(User).where(User.id == user_id))
+            await database.commit()
+
+
 async def verify_proactive_concurrency(sessions: async_sessionmaker[AsyncSession]) -> None:
     """Lifecycle activities and the briefing request may arrive simultaneously."""
     user_id, workspace_id = uuid4(), uuid4()
@@ -653,6 +875,7 @@ async def run() -> None:
                     connection_id,
                     events,
                 )
+                await verify_gmail_resume(sessions, client, settings, fixtures)
         print(
             json.dumps(
                 {
@@ -666,6 +889,8 @@ async def run() -> None:
                     "sync_failure_diagnostic_verified": True,
                     "quota_cooldown_verified": True,
                     "quota_concurrency_verified": True,
+                    "gmail_partial_resume_verified": True,
+                    "gmail_resume_concurrency_verified": True,
                     "proactive_concurrency_verified": True,
                     "live_provider_quality_measured": False,
                 }
