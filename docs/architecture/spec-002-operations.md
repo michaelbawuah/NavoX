@@ -97,7 +97,9 @@ After configuring the API container's `AI_PROVIDER`, `OPENAI_API_KEY`, and
 docker compose exec -T api uv run --no-sync python -m navox.evaluation.intelligence_smoke --live
 ```
 
-The live run makes nine model requests and API charges can apply. It returns exit
+The full live run makes up to nine model requests and API charges can apply. It stops
+on the first provider or transport failure and records the remaining cases as skipped.
+It returns exit
 code 0 only when every smoke case passes, 1 for failed cases, or 2 when private
 configuration/report output is unavailable. An omitted mode is a dry run that
 lists the planned case IDs and makes no requests. Add `--output /tmp/navox-smoke.json`
@@ -107,6 +109,21 @@ run the same module with `uv run python -m ...` from `services/api`.
 A successful live smoke verifies model connectivity and these bounded extraction
 checks. It does **not** establish the SPEC-002 precision/recall targets or verify
 Google sync, Temporal execution, or the full user workflow.
+
+### Diagnose a provider failure
+
+Run one synthetic case when every case reports `provider_request_failed`:
+
+```bash
+docker compose exec -T api uv run --no-sync python -m navox.evaluation.intelligence_smoke --live --case explicit-request
+```
+
+The case's `provider_error` reports only an HTTP status and a fixed category such
+as `authentication_failed`, `permission_denied`, `model_unavailable`, `quota_exhausted`,
+`rate_limited`, or `invalid_schema`. Unknown provider codes and all raw messages,
+keys, response bodies, and request content are excluded. Use this report to identify
+the actual cause before changing account settings or rerunning the full suite.
+See the [official API error reference](https://developers.openai.com/api/docs/guides/error-codes).
 
 ## Completion checklist
 
