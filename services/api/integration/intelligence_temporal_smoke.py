@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 import httpx
 from pydantic import SecretStr
 from pydantic_settings import SettingsConfigDict
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from temporalio.client import Client, WorkflowFailureError
 from temporalio.worker import Worker
@@ -71,11 +71,16 @@ class ProviderFixtures:
         self.extractions = 0
         self.google_disabled = False
         self.google_quota_limited = False
+        self.quota_started: asyncio.Event | None = None
+        self.quota_release: asyncio.Event | None = None
 
-    def google(self, request: httpx.Request) -> httpx.Response:
+    async def google(self, request: httpx.Request) -> httpx.Response:
         self.reads += 1
         assert request.headers["authorization"] == "Bearer synthetic-access-token"
         if self.google_quota_limited:
+            if self.quota_started is not None and self.quota_release is not None:
+                self.quota_started.set()
+                await asyncio.wait_for(self.quota_release.wait(), timeout=30)
             return httpx.Response(
                 403,
                 json={
@@ -234,6 +239,38 @@ async def seed(
     return connection_id, events
 
 
+async def wait_for_source_lock(sessions: async_sessionmaker[AsyncSession]) -> None:
+    """Observe real PostgreSQL contention before releasing the first Google response."""
+    query = text(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM pg_stat_activity AS waiter
+            JOIN pg_stat_activity AS blocker
+              ON blocker.pid = ANY(pg_blocking_pids(waiter.pid))
+            WHERE waiter.datname = current_database()
+              AND waiter.application_name = current_setting('application_name')
+              AND blocker.application_name = waiter.application_name
+              AND waiter.wait_event_type = 'Lock'
+              AND waiter.query ILIKE '%FROM connections%'
+              AND waiter.query ILIKE '%FOR UPDATE%'
+        )
+        """
+    )
+    try:
+        async with asyncio.timeout(15):
+            while True:
+                # End each transaction so PostgreSQL statistics snapshots refresh.
+                async with sessions() as database:
+                    if await database.scalar(query):
+                        return
+                await asyncio.sleep(0.05)
+    except TimeoutError:
+        raise AssertionError(
+            "Concurrent source activity did not wait on its connection lock"
+        ) from None
+
+
 async def verify(
     sessions: async_sessionmaker[AsyncSession],
     client: Client,
@@ -357,17 +394,31 @@ async def verify(
             )
     finally:
         fixtures.google_disabled = False
-    # A daily quota failure is not a transient retry loop. The durable source
-    # cooldown also prevents a second workflow from issuing another provider read.
+    # Hold the first provider response until a second real Temporal activity is
+    # blocked on the same PostgreSQL connection row. Both must observe one durable
+    # quota failure; a later third workflow must not slide the original deadline.
     reads_before_quota = fixtures.reads
     fixtures.google_quota_limited = True
+    fixtures.quota_started = asyncio.Event()
+    fixtures.quota_release = asyncio.Event()
+
+    async def dispatch_quota() -> str:
+        return await dispatch_source(
+            SourceWork(str(connection_id), str(user_id), str(workspace_id), "gmail"),
+            settings=settings,
+            request_id=str(uuid4()),
+        )
+
     try:
-        for attempt in range(2):
-            quota_workflow = await dispatch_source(
-                SourceWork(str(connection_id), str(user_id), str(workspace_id), "gmail"),
-                settings=settings,
-                request_id=str(uuid4()),
-            )
+        quota_workflows = [await dispatch_quota()]
+        try:
+            await asyncio.wait_for(fixtures.quota_started.wait(), timeout=15)
+            quota_workflows.append(await dispatch_quota())
+            await wait_for_source_lock(sessions)
+        finally:
+            fixtures.quota_release.set()
+        for attempt in range(3):
+            quota_workflow = quota_workflows[attempt] if attempt < 2 else await dispatch_quota()
             try:
                 await asyncio.wait_for(client.get_workflow_handle(quota_workflow).result(), 30)
             except WorkflowFailureError:
@@ -401,6 +452,8 @@ async def verify(
                 else:
                     assert quotas[0].event_metadata["retry_not_before"] == retry_not_before
     finally:
+        fixtures.quota_release.set()
+        fixtures.quota_started = fixtures.quota_release = None
         fixtures.google_quota_limited = False
     async with sessions() as database:
         item = await database.get(Commitment, target.id)
@@ -545,7 +598,10 @@ async def run() -> None:
         temporal_task_queue=f"navox-intelligence-ci-{uuid4()}",
     )
     assert settings.database_url.startswith("postgresql+asyncpg://")
-    engine = create_async_engine(settings.database_url)
+    engine = create_async_engine(
+        settings.database_url,
+        connect_args={"server_settings": {"application_name": f"navox-intelligence-ci-{uuid4()}"}},
+    )
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     fixtures = ProviderFixtures()
     user_id, workspace_id = uuid4(), uuid4()
@@ -609,6 +665,7 @@ async def run() -> None:
                     "sync_completion_status_verified": True,
                     "sync_failure_diagnostic_verified": True,
                     "quota_cooldown_verified": True,
+                    "quota_concurrency_verified": True,
                     "proactive_concurrency_verified": True,
                     "live_provider_quality_measured": False,
                 }
