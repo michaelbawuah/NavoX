@@ -23,6 +23,7 @@ from navox.db.models import (
 from navox.db.session import get_session_factory
 from navox.intelligence.extraction import OperationalExtractor
 from navox.intelligence.jobs import SourceWork, WorkspaceWork
+from navox.intelligence.sync_errors import processing_diagnostic
 
 HEARTBEAT_INTERVAL_SECONDS = 15
 
@@ -129,6 +130,7 @@ async def _process_source(payload: SourceWork) -> int:
             return len(ids)
         except Exception as error:
             # No source text, credential or provider response enters logs or workflow history.
+            diagnostic = processing_diagnostic(error)
             await database.rollback()
             if payload.event_id:
                 failed_event = await database.get(IncomingEvent, UUID(payload.event_id))
@@ -145,12 +147,14 @@ async def _process_source(payload: SourceWork) -> int:
                 metadata={
                     "source": payload.source,
                     "error_type": type(error).__name__,
+                    "error_diagnostic": diagnostic,
                     "duration_ms": round((monotonic() - started) * 1000),
                 },
             )
             await database.commit()
             raise ApplicationError(
                 "Source processing failed; cursor retained for retry",
+                diagnostic,
                 type="IntelligenceProcessingFailure",
             ) from None
 
