@@ -1,6 +1,7 @@
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import pytest_asyncio
@@ -14,7 +15,9 @@ from temporalio.exceptions import ApplicationError
 from test_intelligence_runtime import runtime_env  # noqa: F401
 
 from navox.api import intelligence_sync as sync
-from navox.db.models import Connection, User, WorkspaceMembership
+from navox.api.main import app
+from navox.core.settings import Settings, get_settings
+from navox.db.models import AuditEvent, Connection, User, WorkspaceMembership
 
 
 @pytest_asyncio.fixture
@@ -222,3 +225,61 @@ async def test_status_requires_login(owned_sync, monkeypatch):
     )
     assert response.status_code == 401
     connect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_cooldown_blocks_dispatch_but_not_other_sources(
+    owned_sync,
+    runtime_env,  # noqa: F811
+    monkeypatch,
+):
+    client, workflow_id = owned_sync
+    _, factory = runtime_env
+    connection_id = UUID(workflow_id.split(":")[1])
+    now = datetime.now(UTC)
+    async with factory() as database:
+        connection = await database.get(Connection, connection_id)
+        connection.granted_scopes = [
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/calendar.events.readonly",
+        ]
+        audit = AuditEvent(
+            user_id=connection.user_id,
+            workspace_id=connection.workspace_id,
+            event_type="intelligence.source.failed",
+            actor_type="system",
+            entity_type="connection",
+            entity_id=connection_id,
+            occurred_at=now,
+            event_metadata={
+                "source": "gmail",
+                "error_diagnostic": {"code": "google_daily_limit_exceeded", "http_status": 403},
+                "retry_not_before": (now + timedelta(seconds=300)).isoformat(),
+            },
+        )
+        database.add(audit)
+        await database.commit()
+        audit_id = audit.id
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        ai_provider="openai", openai_api_key="test-placeholder"
+    )
+    dispatch = AsyncMock(return_value=workflow_id)
+    monkeypatch.setattr(sync, "dispatch_source", dispatch)
+    payload = {"connection_id": str(connection_id), "source": "gmail"}
+    response = await client.post("/api/v1/intelligence/sync", json=payload)
+    assert response.status_code == 429
+    assert 290 <= int(response.headers["retry-after"]) <= 300
+    assert "Google Cloud" in response.json()["detail"]
+    dispatch.assert_not_awaited()
+    response = await client.post("/api/v1/intelligence/sync", json=dict(payload, source="calendar"))
+    assert response.status_code == 202
+    assert dispatch.await_count == 1
+    async with factory() as database:
+        audit = await database.get(AuditEvent, audit_id)
+        audit.event_metadata = dict(
+            audit.event_metadata, retry_not_before=(now - timedelta(seconds=1)).isoformat()
+        )
+        await database.commit()
+    response = await client.post("/api/v1/intelligence/sync", json=payload)
+    assert response.status_code == 202
+    assert dispatch.await_count == 2
