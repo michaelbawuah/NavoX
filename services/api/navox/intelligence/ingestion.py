@@ -185,7 +185,7 @@ async def process_connection(
         else:
             try:
                 result = await extractor.extract(document)
-            except InvalidOperationalExtraction:
+            except InvalidOperationalExtraction as error:
                 await authorized_connection(database, connection_id, source)
                 database.add(
                     IntelligenceSourceReceipt(
@@ -212,6 +212,7 @@ async def process_connection(
                             "source_hash": source_hash,
                             "extractor_version": extractor_version,
                             "reason": "invalid_model_proposal",
+                            "validation_error": error.diagnostic(),
                         },
                     )
                 )
