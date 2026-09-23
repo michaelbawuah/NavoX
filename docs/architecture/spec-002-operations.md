@@ -76,10 +76,11 @@ a one-day bound. Inline retries have a total backoff budget of 60 seconds per GE
 longer delays are handed back to the durable workflow. Pacing is local to the
 gateway, not a global limiter across independent deployments or other Gmail apps.
 
-Exhausted Google rate-limit, quota, and server errors record a source-specific `retry_not_before` in the
-failure audit. Manual sync, source activities, and background reconciliation
-check this persisted cooldown before another provider request. Transient limits and server errors
-use at least the supplied retry delay (60 seconds by default); explicit daily and
+Exhausted Google rate-limit, quota, and server errors record a source-specific
+`retry_not_before` in the failure audit. Manual sync, source activities, and
+background reconciliation check this persisted cooldown before another provider
+request. Transient limits and server errors use at least the supplied retry delay
+(60 seconds by default); explicit daily and
 general quota errors stop activity retries and use a five-minute cooldown when
 Google provides no retry delay. These defaults are backoff choices, not claims
 about when Google's quota resets. A blocked check does not extend the cooldown.
