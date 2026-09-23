@@ -38,3 +38,37 @@ success counts. CI retains the test evidence and report as artifacts. Mocked
 connector protocol tests also cover read-scope checks, delta handling, replay and
 error boundaries; successful synthetic tests do not prove live watch delivery,
 OAuth configuration, or real model quality.
+
+## Separate model smoke evidence
+
+`python -m navox.evaluation.intelligence_smoke` is a request-free dry run.
+`--offline` validates authored responses through the actual gateway/extractor;
+`--live` sends nine fixed synthetic cases to the configured provider. The command
+does not accept mailbox input. Reports distinguish `offline_fixture` from
+`live_model_smoke`, redact exception details, and retain only case IDs, outcome
+codes, durations, and counts. Invalid proposals on the adversarial case can count
+as safely blocked; transport/runtime errors always fail, and empty extractions do
+not pass positive obligation cases.
+
+This deliberately small smoke suite checks integration behavior. Its pass count
+must not be reported as precision, recall, or general model accuracy. It cannot
+prove source synchronization or durable workflow execution. The owner-facing
+commands and remaining live acceptance checklist are in
+`spec-002-operations.md`. The regression report and smoke report remain separate
+so one cannot silently substitute for the other.
+
+## Deployed workflow integration gate
+
+The Compose CI job mounts `services/api/integration` read-only into a temporary
+API container and runs `python -m integration.intelligence_temporal_smoke` after
+the existing lifecycle checks. It registers real workflows and activities on a
+unique Temporal queue and seeds an isolated PostgreSQL workspace. Synthetic
+Google HTTP responses pass through the real adapter and extraction pipeline.
+The harness verifies source-event completion, receipts, replay deduplication,
+Today provenance, idempotent feedback and reranking, pause and revocation, and
+absence of external actions. No fixture mode is added to production settings.
+It allows no real HTTP request; Temporal/PostgreSQL remain real services.
+
+Status: implemented; successful execution must be established by the GitHub
+Compose integration result for the delivered revision. A local unit/static check
+does not substitute for this gate or for the separate live owner demonstrations.
