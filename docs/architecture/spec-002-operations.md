@@ -112,6 +112,18 @@ A successful live smoke verifies model connectivity and these bounded extraction
 checks. It does **not** establish the SPEC-002 precision/recall targets or verify
 Google sync, Temporal execution, or the full user workflow.
 
+### Recorded owner-side live result
+
+The owner supplied a successful report generated at
+`2026-09-23T06:01:05.578298+00:00`: all nine cases executed and passed, with no
+failures or skips. The sanitized report is retained in
+[`evals/intelligence/reports/2026-09-23-live-smoke.json`](../../evals/intelligence/reports/2026-09-23-live-smoke.json).
+The delivery revision supplied for this run was
+`88f426350648e093b73ae29e32f5ab48251f1ca7`. The submitted report does not itself
+attest the container's Git revision. This is an owner-reported live result, not
+a live run performed by CI. `live_google_chain_verified` and
+`production_quality_measured` remain false.
+
 ### Diagnose a provider failure
 
 Run one synthetic case when every case reports `provider_request_failed`:
@@ -152,8 +164,8 @@ quarantined sources must be separately scoped and verified.
 
 - [x] M1–M7 implementation and synthetic application/security regression demos.
 - [x] Explicit, offline-rehearsable model smoke command and sanitized results.
-- [ ] Run the live model smoke using the intended deployment's configuration and
-  record its report and code revision.
+- [x] Owner-side live model smoke: nine of nine cases passed on 2026-09-23;
+  sanitized report and supplied delivery revision recorded above.
 - [ ] In the owner's authorized workspace, verify Gmail and Calendar sync produce
   evidence-backed Today items, incremental replay creates no duplicate, feedback
   persists, and completion/waiting transitions match the source evidence.
@@ -165,6 +177,27 @@ quarantined sources must be separately scoped and verified.
 Unrecorded live checks remain open; successful builds or fixture runs alone do not
 close these acceptance items. Do not include credentials or mailbox contents in
 the completion record.
+
+### Next owner-side check: connected sources
+
+1. Open `http://localhost:3000` and find **Connected understanding**. Confirm both
+   Gmail and Calendar show **Read access granted** and the agent is not paused.
+2. Use **Sync Gmail** and **Sync Calendar**, then **Refresh Today** after processing
+   finishes. Queue acceptance alone is not proof of completed processing.
+3. Open **Why this is here** on a resulting item and check the source, request or
+   meeting, and date against the original Google source. Relevant source content
+   is processed by the configured AI provider under the enabled read permission.
+4. Sync both sources again without changing them. Verify the same commitment is
+   retained without an extra copy. Apply feedback to a test item, reload, and
+   verify the feedback persists.
+5. Record only sanitized outcomes and any fixed error categories. Do not copy
+   private emails, credentials, or full source identifiers into this record.
+
+If a previously rejected source stays absent, its quarantine receipt may still
+apply. A fresh, non-sensitive source revision can exercise the repaired extractor;
+this check must not silently clear receipts or rescan historical rejected content.
+The three live demonstrations and representative quality evaluation remain
+separate checklist items even after this connected-source check passes.
 
 ## Verified upstream contracts
 
