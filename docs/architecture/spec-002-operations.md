@@ -87,6 +87,18 @@ audit retains the legacy error type and adds `metadata.error_diagnostic` with a
 fixed code and optional HTTP status. Older failures may only show the generic
 category; a new sync on the rebuilt API and worker will use the new diagnostics.
 
+For `provider_request_failed`, new diagnostics also preserve a fixed
+`provider_code`: for example `timeout`, `transport_error`, `rate_limited`,
+`quota_exhausted`, or `incomplete_response`. The same allowlisted category reaches
+the audit, Temporal failure details, authenticated status endpoint, and UI help.
+HTTPX timeouts are distinguished from other transport failures; either can occur
+without an HTTP status. A missing HTTP status alone does not prove a timeout.
+Raw exception text, network addresses, provider payloads, and source content are
+excluded. Existing audit rows and completed workflow failures retain their older
+diagnostics; inspect a fresh failure after rebuilding both API and worker.
+This diagnostic change leaves request timeouts, retries, receipts, and Gmail
+checkpoints unchanged.
+
 Gmail reads are spaced at least 250 ms apart within each source gateway. Temporary
 rate-limit and server errors retry the failed GET (at most three HTTP attempts)
 with bounded exponential backoff and jitter; they do not immediately restart the

@@ -117,14 +117,26 @@ async def test_scheduled_activity_is_queued_without_waiting_for_result(owned_syn
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        {"code": "google_api_disabled", "http_status": 403},
+        {"code": "provider_request_failed", "provider_code": "timeout"},
+        {
+            "code": "provider_request_failed",
+            "provider_code": "rate_limited",
+            "http_status": 429,
+        },
+    ],
+)
 async def test_retry_and_terminal_error_expose_only_allowlisted_diagnostics(
-    owned_sync, monkeypatch
+    owned_sync, monkeypatch, diagnostic
 ):
     client, workflow_id = owned_sync
     secret = "PRIVATE BODY TOKEN DO NOT RETURN"
     error = ApplicationError(
         secret,
-        {"code": "google_api_disabled", "http_status": 403, "message": secret},
+        {**diagnostic, "message": secret},
         type="IntelligenceProcessingFailure",
     )
     from temporalio.api.failure.v1 import Failure
@@ -140,7 +152,7 @@ async def test_retry_and_terminal_error_expose_only_allowlisted_diagnostics(
         "/api/v1/intelligence/sync/status", params={"workflow_id": workflow_id}
     )
     assert response.json()["status"] == "retrying"
-    assert response.json()["error"] == {"code": "google_api_disabled", "http_status": 403}
+    assert response.json()["error"] == diagnostic
     assert secret not in response.text
     handle.result.assert_not_awaited()
     description.status = WorkflowExecutionStatus.FAILED
@@ -149,7 +161,7 @@ async def test_retry_and_terminal_error_expose_only_allowlisted_diagnostics(
         "/api/v1/intelligence/sync/status", params={"workflow_id": workflow_id}
     )
     assert response.json()["status"] == "failed"
-    assert response.json()["error"] == {"code": "google_api_disabled", "http_status": 403}
+    assert response.json()["error"] == diagnostic
     assert secret not in response.text
 
 

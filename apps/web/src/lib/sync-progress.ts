@@ -15,6 +15,7 @@ export interface SyncProgress {
   commitment_count: number | null;
   error: {
     code: string;
+    provider_code?: string;
     http_status?: number;
     retry_after_seconds?: number;
   } | null;
@@ -30,6 +31,43 @@ const syncStates: SyncState[] = [
   "timed_out",
   "unavailable",
 ];
+
+const aiErrorMessages = {
+  authentication_failed:
+    "The AI service rejected NavoX's credentials. Check the configured AI key before retrying.",
+  permission_denied:
+    "The AI service denied this request. Check the configured AI project's permissions before retrying.",
+  model_unavailable:
+    "The configured AI model is unavailable to this project. Check the model setting before retrying.",
+  quota_exhausted:
+    "The AI service reported an exhausted quota. Check the AI project's usage limits before retrying.",
+  rate_limited:
+    "The AI service is limiting requests. Wait before retrying this sync.",
+  invalid_schema:
+    "The AI service rejected NavoX's extraction schema. Report this diagnostic for a fix.",
+  unsupported_parameter:
+    "The AI model rejected a request parameter. Check the model configuration and report this diagnostic.",
+  invalid_request:
+    "The AI service rejected the request. Report this diagnostic before retrying.",
+  provider_unavailable:
+    "The AI service is temporarily unavailable. Try this sync again later.",
+  timeout:
+    "The AI request timed out before a complete response was received. Check provider connectivity and response time before retrying.",
+  transport_error:
+    "The connection to the AI service failed. Check network access from NavoX's processing worker before retrying.",
+  incomplete_response:
+    "The AI service returned an unfinished response. Report this diagnostic if it persists.",
+  invalid_response:
+    "The AI service returned an unreadable response. Report this diagnostic if it persists.",
+  provider_error:
+    "The AI service could not process this source. Check the configured service, then retry.",
+} as const;
+
+function isAIProviderCode(
+  value: unknown,
+): value is keyof typeof aiErrorMessages {
+  return typeof value === "string" && Object.hasOwn(aiErrorMessages, value);
+}
 
 export function isSyncTerminal(status: SyncState): boolean {
   return ["completed", "failed", "cancelled", "timed_out"].includes(status);
@@ -68,6 +106,10 @@ function validatedProgress(payload: unknown, workflowId: string): SyncProgress {
       value.error && typeof value.error.code === "string"
         ? {
             code: value.error.code,
+            ...(value.error.code === "provider_request_failed" &&
+            isAIProviderCode(value.error.provider_code)
+              ? { provider_code: value.error.provider_code }
+              : {}),
             ...(typeof value.error.retry_after_seconds === "number" &&
             Number.isSafeInteger(value.error.retry_after_seconds) &&
             value.error.retry_after_seconds > 0
@@ -143,6 +185,7 @@ export function monitorSync({
 export function syncErrorHelp(
   source: SyncSource,
   code?: string,
+  providerCode?: string,
 ): { message: string; reconnect: boolean } {
   const name = source === "gmail" ? "Gmail" : "Google Calendar";
   switch (code) {
@@ -200,8 +243,9 @@ export function syncErrorHelp(
       };
     case "provider_request_failed":
       return {
-        message:
-          "The AI service could not process this source. Check the configured service, then retry.",
+        message: isAIProviderCode(providerCode)
+          ? aiErrorMessages[providerCode]
+          : aiErrorMessages.provider_error,
         reconnect: false,
       };
     case "extraction_validation_failed":

@@ -229,14 +229,36 @@ async def test_city_weather_recovers_from_an_unrecognized_region_suffix():
                 code="quota_exhausted",
                 http_status=429,
             ),
-            {"code": "provider_request_failed", "http_status": 429},
+            {
+                "code": "provider_request_failed",
+                "provider_code": "quota_exhausted",
+                "http_status": 429,
+            },
+        ),
+        (
+            AIProviderError("secret source body and credential must not escape", code="timeout"),
+            {"code": "provider_request_failed", "provider_code": "timeout"},
+        ),
+        (
+            AIProviderError(
+                "secret source body and credential must not escape", code="transport_error"
+            ),
+            {"code": "provider_request_failed", "provider_code": "transport_error"},
         ),
         (
             InvalidOperationalExtraction("secret source body and credential must not escape"),
             {"code": "extraction_validation_failed"},
         ),
     ],
-    ids=["unknown", "google-source", "google-token", "ai-provider", "extraction"],
+    ids=[
+        "unknown",
+        "google-source",
+        "google-token",
+        "ai-provider",
+        "ai-timeout",
+        "ai-transport",
+        "extraction",
+    ],
 )
 async def test_processing_failure_keeps_outbox_and_does_not_leak_source(
     runtime_env, monkeypatch, failure, diagnostic
@@ -386,3 +408,24 @@ def test_google_diagnostic_is_revalidated_at_the_activity_boundary():
     error.code = "private provider message"
     error.http_status = True
     assert processing_diagnostic(error) == {"code": "intelligence_processing_failed"}
+
+
+@pytest.mark.parametrize("provider_code", ["private provider text", ["timeout"], {}, True, None])
+def test_ai_diagnostics_drop_unknown_or_malformed_provider_codes(provider_code):
+    assert sanitize_diagnostic(
+        {
+            "code": "provider_request_failed",
+            "provider_code": provider_code,
+            "message": "private provider response",
+        }
+    ) == {"code": "provider_request_failed"}
+
+
+def test_ai_code_is_not_attached_to_google_failures_or_trusted_after_mutation():
+    assert sanitize_diagnostic({"code": "google_rate_limited", "provider_code": "timeout"}) == {
+        "code": "google_rate_limited"
+    }
+    error = AIProviderError("private credential", code="timeout")
+    error.code = "private provider message"
+    error.http_status = True
+    assert processing_diagnostic(error) == {"code": "provider_request_failed"}

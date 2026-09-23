@@ -123,6 +123,8 @@ class OpenAIResponsesProvider:
                         json=payload,
                         timeout=self.timeout_seconds,
                     )
+        except httpx.TimeoutException:
+            raise AIProviderError("OpenAI Responses request timed out", code="timeout") from None
         except httpx.RequestError:
             # Do not put credentials, request content, or transport diagnostics into
             # workflow failure history/logs through an exception chain.

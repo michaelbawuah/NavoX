@@ -179,21 +179,32 @@ async def test_provider_checks_late_refusal_before_accepting_text() -> None:
 
 
 @pytest.mark.asyncio
-async def test_provider_sanitizes_transport_failures() -> None:
+@pytest.mark.parametrize(
+    ("error_type", "code"),
+    [
+        (httpx.ReadTimeout, "timeout"),
+        (httpx.ConnectTimeout, "timeout"),
+        (httpx.WriteTimeout, "timeout"),
+        (httpx.PoolTimeout, "timeout"),
+        (httpx.ConnectError, "transport_error"),
+        (httpx.ReadError, "transport_error"),
+    ],
+)
+async def test_provider_sanitizes_transport_failures(error_type, code) -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ReadTimeout("private source and credentials", request=request)
+        raise error_type("private source and credentials", request=request)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         provider = OpenAIResponsesProvider(
             api_key=SecretStr("test-key"), model="test", client=client
         )
-        with pytest.raises(AIProviderError, match="transport failed") as error:
+        with pytest.raises(AIProviderError, match="timed out|transport failed") as error:
             await provider.generate_json(
                 schema_name="test", schema={}, instructions="Extract.", input_text="Private source"
             )
     assert "credentials" not in str(error.value)
     assert error.value.__suppress_context__
-    assert error.value.diagnostic() == {"code": "transport_error"}
+    assert error.value.diagnostic() == {"code": code}
 
 
 @pytest.mark.asyncio

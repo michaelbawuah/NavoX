@@ -140,6 +140,21 @@ describe("sync progress readout", () => {
     expect(markup).not.toContain("Sync complete");
   });
 
+  it("shows an AI timeout without offering a Google reconnect", () => {
+    const markup = renderToStaticMarkup(
+      createElement(SyncReadout, {
+        ...props,
+        progress: {
+          ...result,
+          error: { code: "provider_request_failed", provider_code: "timeout" },
+        },
+      }),
+    );
+    expect(markup).toContain("AI request timed out");
+    expect(markup).not.toContain("Reconnect read access");
+    expect(markup).not.toContain("Sync complete");
+  });
+
   it("lets the owner recheck an unknown job without claiming it finished", () => {
     const markup = renderToStaticMarkup(
       createElement(SyncReadout, {

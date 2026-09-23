@@ -159,7 +159,7 @@ async def test_timeout_skips_remaining_cases() -> None:
     assert report["executed_cases"] == report["failed_cases"] == 1
     assert report["skipped_cases"] == len(CASES) - 1
     assert report["cases"][0]["reason"] == "provider_timeout"
-    assert report["cases"][0]["provider_error"] == {"code": "transport_error"}
+    assert report["cases"][0]["provider_error"] == {"code": "timeout"}
     assert "private network details" not in json.dumps(report)
 
 

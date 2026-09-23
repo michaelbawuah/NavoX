@@ -79,7 +79,11 @@ export function SyncReadout({
   reconnectDisabled: boolean;
 }) {
   const failed = ["failed", "cancelled", "timed_out"].includes(progress.status);
-  const help = syncErrorHelp(source, progress.error?.code);
+  const help = syncErrorHelp(
+    source,
+    progress.error?.code,
+    progress.error?.provider_code,
+  );
   const showHelp =
     progress.status === "failed" || progress.status === "retrying";
   return (

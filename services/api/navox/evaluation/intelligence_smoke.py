@@ -99,6 +99,7 @@ PROVIDER_NEXT_STEPS = {
     ),
     "invalid_request": "The provider rejected the request; report this diagnostic for a fix.",
     "provider_unavailable": "The provider is unavailable; retry later.",
+    "timeout": "The AI request timed out; check provider connectivity and response latency.",
     "transport_error": "Check network access from the API container to the provider, then retry.",
     "incomplete_response": "The provider did not finish its response; report this diagnostic.",
     "invalid_response": "The provider returned an invalid response; report this diagnostic.",
@@ -234,7 +235,7 @@ async def run_smoke(
             validation_error = {"code": "validation_failed"}
         except TimeoutError:
             reason = "provider_timeout"
-            provider_error = {"code": "transport_error"}
+            provider_error = {"code": "timeout"}
         except AIProviderError as error:
             reason = "provider_request_failed"
             provider_error = error.diagnostic()

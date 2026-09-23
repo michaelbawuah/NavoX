@@ -25,6 +25,40 @@ describe("source sync monitoring", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
+  it.each([
+    ["provider_request_failed", "timeout", "timeout"],
+    ["provider_request_failed", "quota_exhausted", "quota_exhausted"],
+    ["provider_request_failed", "private provider text", undefined],
+    ["provider_request_failed", ["timeout"], undefined],
+    ["provider_request_failed", "constructor", undefined],
+    ["google_rate_limited", "timeout", undefined],
+  ])(
+    "validates the AI category for %s / %s",
+    async (code, providerCode, expected) => {
+      const onTerminal = vi.fn();
+      const stop = monitorSync({
+        workflowId,
+        read: vi.fn().mockResolvedValue({
+          ...progress("failed"),
+          error: {
+            code,
+            provider_code: providerCode,
+            message: "private source text",
+          },
+        }),
+        onProgress: vi.fn(),
+        onTerminal,
+        onPause: vi.fn(),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onTerminal.mock.calls[0][0].error).toEqual({
+        code,
+        ...(expected ? { provider_code: expected } : {}),
+      });
+      stop();
+    },
+  );
+
   it("reports running and retrying, then completes once even with zero commitments", async () => {
     const read = vi
       .fn()
@@ -244,6 +278,33 @@ describe("source sync monitoring", () => {
 });
 
 describe("safe sync messages", () => {
+  it("distinguishes AI timeouts, connection failures, and quotas without reconnecting Google", () => {
+    expect(
+      syncErrorHelp("gmail", "provider_request_failed", "timeout").message,
+    ).toContain("timed out");
+    expect(
+      syncErrorHelp("gmail", "provider_request_failed", "transport_error")
+        .message,
+    ).toContain("connection");
+    const quota = syncErrorHelp(
+      "gmail",
+      "provider_request_failed",
+      "quota_exhausted",
+    );
+    expect(quota.message).toContain("AI service");
+    expect(quota.message).toContain("quota");
+    expect(quota.reconnect).toBe(false);
+    const legacy = syncErrorHelp("gmail", "provider_request_failed");
+    for (const unknown of [
+      "private provider text",
+      "constructor",
+      "__proto__",
+    ]) {
+      expect(
+        syncErrorHelp("gmail", "provider_request_failed", unknown),
+      ).toEqual(legacy);
+    }
+  });
   it("distinguishes unavailable status from terminal failure", () => {
     expect(isSyncTerminal("unavailable")).toBe(false);
     expect(isSyncTerminal("retrying")).toBe(false);

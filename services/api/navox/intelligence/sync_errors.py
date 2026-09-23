@@ -1,6 +1,6 @@
 """Public sync diagnostics contain classifications, never provider or source prose."""
 
-from navox.ai.errors import AIProviderError
+from navox.ai.errors import AI_PROVIDER_DIAGNOSTIC_CODES, AIProviderError
 from navox.intelligence.extraction import InvalidOperationalExtraction
 from navox.providers.google_oauth import GoogleAccessTokenError
 from navox.providers.google_sources import GOOGLE_SOURCE_DIAGNOSTIC_CODES, GoogleSourceError
@@ -24,6 +24,13 @@ def sanitize_diagnostic(value: object) -> dict[str, str | int]:
     status = value.get("http_status")
     if type(status) is int and 100 <= status <= 599:
         result["http_status"] = status
+    provider_code = value.get("provider_code")
+    if (
+        result["code"] == "provider_request_failed"
+        and isinstance(provider_code, str)
+        and provider_code in AI_PROVIDER_DIAGNOSTIC_CODES
+    ):
+        result["provider_code"] = provider_code
     retry_after = value.get("retry_after_seconds")
     if type(retry_after) is int and 1 <= retry_after <= 86_400:
         result["retry_after_seconds"] = retry_after
@@ -45,7 +52,11 @@ def processing_diagnostic(error: Exception) -> dict[str, str | int]:
         return {"code": "google_token_unavailable"}
     if isinstance(error, AIProviderError):
         return sanitize_diagnostic(
-            {"code": "provider_request_failed", "http_status": error.http_status}
+            {
+                "code": "provider_request_failed",
+                "provider_code": error.code,
+                "http_status": error.http_status,
+            }
         )
     if isinstance(error, InvalidOperationalExtraction):
         return {"code": "extraction_validation_failed"}
