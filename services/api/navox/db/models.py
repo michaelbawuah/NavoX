@@ -781,6 +781,37 @@ class IntelligenceCursor(Base):
     )
 
 
+class IntelligenceSourceReceipt(Base):
+    """Durable per-revision progress, without storing raw source/model content."""
+
+    __tablename__ = "intelligence_source_receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "connection_id",
+            "source",
+            "external_id",
+            "source_hash",
+            "extractor_version",
+            name="uq_intelligence_source_receipt",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    connection_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("connections.id", ondelete="CASCADE"), index=True
+    )
+    source: Mapped[str] = mapped_column(String(32))
+    external_id: Mapped[str] = mapped_column(String(512))
+    source_hash: Mapped[str] = mapped_column(String(64))
+    extractor_version: Mapped[str] = mapped_column(String(64))
+    outcome: Mapped[str] = mapped_column(String(16))
+    source_occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    commitment_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    processed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class IntelligencePreference(Base):
     __tablename__ = "intelligence_preferences"
 
