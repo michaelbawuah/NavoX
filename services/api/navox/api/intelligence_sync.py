@@ -14,6 +14,7 @@ from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDe
 from navox.db.models import Connection
 from navox.intelligence.dispatcher import dispatch_source
 from navox.intelligence.jobs import SourceWork
+from navox.intelligence.source_cooldown import source_cooldown
 from navox.intelligence.sync_errors import sanitize_diagnostic
 
 router = APIRouter(prefix="/intelligence", tags=["intelligence"])
@@ -186,6 +187,13 @@ async def sync_source(
         settings.openai_api_key is None or not settings.openai_api_key.get_secret_value()
     ):
         raise HTTPException(503, "Intelligence provider is not configured")
+    cooldown = await source_cooldown(database, connection.id, payload.source)
+    if cooldown is not None:
+        seconds = int(cooldown["retry_after_seconds"])
+        detail = f"Google requests are paused for this source. Try again in {seconds} seconds."
+        if cooldown["code"] in {"google_daily_limit_exceeded", "google_quota_exceeded"}:
+            detail += " Check this API's quotas in the Google Cloud project used by NavoX."
+        raise HTTPException(429, detail, headers={"Retry-After": str(seconds)})
     try:
         workflow_id = await dispatch_source(
             SourceWork(
