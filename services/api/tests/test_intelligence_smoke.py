@@ -11,6 +11,7 @@ from navox.ai.errors import AIProviderError
 from navox.ai.gateway import AIGateway, StructuredOutputResponse
 from navox.ai.openai_provider import OpenAIResponsesProvider
 from navox.evaluation.intelligence_smoke import CASES, OfflineSmokeProvider, main, run_smoke
+from navox.intelligence.extraction import InvalidOperationalExtraction
 
 
 def test_dry_run_and_offline_modes_never_load_private_configuration(
@@ -75,7 +76,12 @@ def test_case_option_executes_only_the_selected_source(
         "navox.evaluation.intelligence_smoke.build_ai_gateway", lambda _: AIGateway(provider)
     )
     assert main([mode, "--case", "explicit-promise"]) == 0
-    report = json.loads(capsys.readouterr().out)
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assert captured.err.splitlines() == [
+        "[1/1] explicit-promise: running",
+        "[1/1] explicit-promise: passed (validated_expected_observations)",
+    ]
     assert calls == ["explicit-promise"]
     assert report["planned_cases"] == report["executed_cases"] == report["passed_cases"] == 1
     assert report["skipped_cases"] == report["failed_cases"] == 0
@@ -235,3 +241,54 @@ async def test_invalid_proposal_only_counts_as_safe_rejection_for_adversarial_in
     assert report["passed_cases"] == 1
     assert report["cases"][-1]["reason"] == "untrusted_proposal_rejected"
     assert "private-forged-value" not in json.dumps(report)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code,expected_code",
+    [("evidence_text_mismatch", "evidence_text_mismatch"), ("private-code", "validation_failed")],
+)
+async def test_validation_diagnostics_are_sanitized_and_do_not_abort_other_cases(
+    code: str, expected_code: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class InvalidOutputProvider:
+        async def generate_json(self, **kwargs: Any) -> StructuredOutputResponse:
+            raise InvalidOperationalExtraction("private model and source content", code=code)
+
+    report = await run_smoke(AIGateway(InvalidOutputProvider()), mode="live_model_smoke")
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ""
+    assert report["executed_cases"] == len(CASES)
+    assert report["skipped_cases"] == 0
+    assert report["failed_cases"] == len(CASES) - 1
+    assert report["cases"][-1]["reason"] == "untrusted_proposal_rejected"
+    assert all(case["validation_error"] == {"code": expected_code} for case in report["cases"])
+    assert "do not repeatedly rerun" in report["next_step"]
+    assert "private" not in json.dumps(report)
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_guidance_overrides_earlier_validation_guidance() -> None:
+    class MixedFailureProvider:
+        calls = 0
+
+        async def generate_json(self, **kwargs: Any) -> StructuredOutputResponse:
+            self.calls += 1
+            if self.calls == 1:
+                raise InvalidOperationalExtraction(
+                    "private response", code="evidence_text_mismatch"
+                )
+            raise AIProviderError(
+                "private provider response", code="quota_exhausted", http_status=429
+            )
+
+    progress: list[str] = []
+    report = await run_smoke(
+        AIGateway(MixedFailureProvider()), mode="live_model_smoke", progress=progress.append
+    )
+    assert report["executed_cases"] == report["failed_cases"] == 2
+    assert report["skipped_cases"] == len(CASES) - 2
+    assert "quota and billing" in report["next_step"]
+    assert len(progress) == 4
+    assert progress[-1] == "[2/9] explicit-promise: failed (provider_request_failed)"
+    assert "private" not in json.dumps(report) + " ".join(progress)
