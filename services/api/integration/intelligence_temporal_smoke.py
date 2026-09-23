@@ -17,10 +17,11 @@ from pydantic import SecretStr
 from pydantic_settings import SettingsConfigDict
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from temporalio.client import Client
+from temporalio.client import Client, WorkflowFailureError
 from temporalio.worker import Worker
 
 from navox.ai.gateway import AIGateway, StructuredOutputResponse
+from navox.api.intelligence_sync import _describe_sync
 from navox.core.settings import Settings
 from navox.db.models import (
     Action,
@@ -67,10 +68,28 @@ class ProviderFixtures:
         self.now = datetime.now(UTC).replace(microsecond=0)
         self.reads = 0
         self.extractions = 0
+        self.google_disabled = False
 
     def google(self, request: httpx.Request) -> httpx.Response:
         self.reads += 1
         assert request.headers["authorization"] == "Bearer synthetic-access-token"
+        if self.google_disabled:
+            return httpx.Response(
+                403,
+                json={
+                    "error": {
+                        "code": 403,
+                        "message": "synthetic-private-provider-message",
+                        "details": [
+                            {
+                                "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                                "reason": "SERVICE_DISABLED",
+                                "metadata": {"consumer": "projects/synthetic-private-project"},
+                            }
+                        ],
+                    }
+                },
+            )
         path = request.url.path
         if path.endswith("/history"):
             return httpx.Response(
@@ -227,6 +246,10 @@ async def verify(
         )
         result = await asyncio.wait_for(client.get_workflow_handle(workflow_id).result(), 120)
         assert isinstance(result, int)
+        status = await _describe_sync(workflow_id, settings.temporal_target)
+        assert status.status == "completed"
+        assert status.commitment_count == result
+        assert status.error is None
         return result
 
     for source, event_id in events.items():
@@ -282,6 +305,46 @@ async def verify(
         request_id=str(request_id),
     )
     await asyncio.wait_for(client.get_workflow_handle(feedback_workflow).result(), 120)
+    # Exercise failure serialization through the real worker and Temporal history.
+    # Provider I/O remains synthetic and the production retry policy is unchanged.
+    reads_before_failure, extractions_before_failure = fixtures.reads, fixtures.extractions
+    fixtures.google_disabled = True
+    try:
+        failed_workflow = await dispatch_source(
+            SourceWork(str(connection_id), str(user_id), str(workspace_id), "gmail"),
+            settings=settings,
+            request_id=str(uuid4()),
+        )
+        try:
+            await asyncio.wait_for(client.get_workflow_handle(failed_workflow).result(), 120)
+        except WorkflowFailureError:
+            pass
+        else:
+            raise AssertionError("Disabled fixture Google API must fail the source workflow")
+        status = await _describe_sync(failed_workflow, settings.temporal_target)
+        assert status.status == "failed"
+        assert status.commitment_count is None
+        assert status.error == {"code": "google_api_disabled", "http_status": 403}
+        assert "synthetic-private" not in status.model_dump_json()
+        assert fixtures.reads == reads_before_failure + 3
+        assert fixtures.extractions == extractions_before_failure
+        async with sessions() as database:
+            failures = list(
+                await database.scalars(
+                    select(AuditEvent).where(
+                        AuditEvent.workspace_id == workspace_id,
+                        AuditEvent.event_type == "intelligence.source.failed",
+                    )
+                )
+            )
+            assert len(failures) == 3
+            assert all(
+                failure.event_metadata["error_diagnostic"] == status.error
+                and "synthetic-private" not in json.dumps(failure.event_metadata)
+                for failure in failures
+            )
+    finally:
+        fixtures.google_disabled = False
     async with sessions() as database:
         item = await database.get(Commitment, target.id)
         assert item is not None and item.attention_score == target.score + 1
@@ -486,6 +549,8 @@ async def run() -> None:
                     "replay_verified": True,
                     "feedback_verified": True,
                     "pause_and_revocation_verified": True,
+                    "sync_completion_status_verified": True,
+                    "sync_failure_diagnostic_verified": True,
                     "proactive_concurrency_verified": True,
                     "live_provider_quality_measured": False,
                 }
