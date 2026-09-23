@@ -44,6 +44,7 @@ from navox.intelligence.activities import process_source_activity, refresh_intel
 from navox.intelligence.dispatcher import dispatch_feedback, dispatch_source
 from navox.intelligence.feedback import record_feedback
 from navox.intelligence.jobs import SourceWork, WorkspaceWork
+from navox.intelligence.source_cooldown import source_cooldown
 from navox.proactive.engine import aware, evaluate_workspace
 from navox.providers.google_sources import (
     CALENDAR_READ_SCOPE,
@@ -69,10 +70,21 @@ class ProviderFixtures:
         self.reads = 0
         self.extractions = 0
         self.google_disabled = False
+        self.google_quota_limited = False
 
     def google(self, request: httpx.Request) -> httpx.Response:
         self.reads += 1
         assert request.headers["authorization"] == "Bearer synthetic-access-token"
+        if self.google_quota_limited:
+            return httpx.Response(
+                403,
+                json={
+                    "error": {
+                        "errors": [{"reason": "dailyLimitExceeded"}],
+                        "message": "synthetic-private-quota-details",
+                    }
+                },
+            )
         if self.google_disabled:
             return httpx.Response(
                 403,
@@ -345,6 +357,51 @@ async def verify(
             )
     finally:
         fixtures.google_disabled = False
+    # A daily quota failure is not a transient retry loop. The durable source
+    # cooldown also prevents a second workflow from issuing another provider read.
+    reads_before_quota = fixtures.reads
+    fixtures.google_quota_limited = True
+    try:
+        for attempt in range(2):
+            quota_workflow = await dispatch_source(
+                SourceWork(str(connection_id), str(user_id), str(workspace_id), "gmail"),
+                settings=settings,
+                request_id=str(uuid4()),
+            )
+            try:
+                await asyncio.wait_for(client.get_workflow_handle(quota_workflow).result(), 30)
+            except WorkflowFailureError:
+                pass
+            else:
+                raise AssertionError("Quota fixture must fail without retrying Google")
+            status = await _describe_sync(quota_workflow, settings.temporal_target)
+            assert status.status == "failed"
+            assert status.error is not None
+            assert status.error["code"] == "google_daily_limit_exceeded"
+            assert 0 < int(status.error["retry_after_seconds"]) <= 300
+            assert fixtures.reads == reads_before_quota + 1
+            async with sessions() as database:
+                cooldown = await source_cooldown(database, connection_id, "gmail")
+                assert cooldown is not None
+                assert await source_cooldown(database, connection_id, "calendar") is None
+                quotas = list(
+                    await database.scalars(
+                        select(AuditEvent).where(
+                            AuditEvent.workspace_id == workspace_id,
+                            AuditEvent.event_type == "intelligence.source.failed",
+                            AuditEvent.event_metadata["error_diagnostic"]["code"].as_string()
+                            == "google_daily_limit_exceeded",
+                        )
+                    )
+                )
+                assert len(quotas) == 1
+                assert "synthetic-private" not in json.dumps(quotas[0].event_metadata)
+                if attempt == 0:
+                    retry_not_before = quotas[0].event_metadata["retry_not_before"]
+                else:
+                    assert quotas[0].event_metadata["retry_not_before"] == retry_not_before
+    finally:
+        fixtures.google_quota_limited = False
     async with sessions() as database:
         item = await database.get(Commitment, target.id)
         assert item is not None and item.attention_score == target.score + 1
@@ -551,6 +608,7 @@ async def run() -> None:
                     "pause_and_revocation_verified": True,
                     "sync_completion_status_verified": True,
                     "sync_failure_diagnostic_verified": True,
+                    "quota_cooldown_verified": True,
                     "proactive_concurrency_verified": True,
                     "live_provider_quality_measured": False,
                 }
