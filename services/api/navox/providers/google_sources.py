@@ -5,10 +5,15 @@ complete, validated batches produce a replacement cursor. Exhausting a bounded
 scan raises instead of silently dropping unprocessed changes.
 """
 
+import asyncio
 import base64
+import math
+import random
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from email.utils import getaddresses
+from email.utils import getaddresses, parsedate_to_datetime
 from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import quote
@@ -32,6 +37,8 @@ GOOGLE_SOURCE_DIAGNOSTIC_CODES = frozenset(
         "google_authentication_failed",
         "google_permission_denied",
         "google_rate_limited",
+        "google_daily_limit_exceeded",
+        "google_quota_exceeded",
         "google_provider_unavailable",
         "google_transport_error",
         "google_invalid_response",
@@ -49,11 +56,17 @@ class GoogleSourceError(RuntimeError):
         *,
         code: str = "google_source_error",
         http_status: int | None = None,
+        retry_after_seconds: int | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code if code in GOOGLE_SOURCE_DIAGNOSTIC_CODES else "google_source_error"
         self.http_status = (
             http_status if type(http_status) is int and 100 <= http_status <= 599 else None
+        )
+        self.retry_after_seconds = (
+            retry_after_seconds
+            if type(retry_after_seconds) is int and 1 <= retry_after_seconds <= 86_400
+            else None
         )
 
     def diagnostic(self) -> dict[str, str | int]:
@@ -61,6 +74,8 @@ class GoogleSourceError(RuntimeError):
         result: dict[str, str | int] = {"code": self.code}
         if self.http_status is not None:
             result["http_status"] = self.http_status
+        if self.retry_after_seconds is not None:
+            result["retry_after_seconds"] = self.retry_after_seconds
         return result
 
 
@@ -82,19 +97,18 @@ def _google_error_code(response: httpx.Response) -> str:
     status = response.status_code
     if status == 401:
         return "google_authentication_failed"
-    if status == 429:
-        return "google_rate_limited"
     if status >= 500:
         return "google_provider_unavailable"
-    if status != 403:
+    if status not in {403, 429}:
         return "google_source_error"
+    fallback = "google_rate_limited" if status == 429 else "google_permission_denied"
     try:
         body = response.json()
     except ValueError:
-        return "google_permission_denied"
+        return fallback
     error = body.get("error") if isinstance(body, dict) else None
     if not isinstance(error, dict):
-        return "google_permission_denied"
+        return fallback
     reasons: set[str] = set()
     legacy = error.get("errors")
     if isinstance(legacy, list):
@@ -116,16 +130,35 @@ def _google_error_code(response: httpx.Response) -> str:
         return "google_api_disabled"
     if reasons & {"insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"}:
         return "google_scope_missing"
+    if "dailyLimitExceeded" in reasons:
+        return "google_daily_limit_exceeded"
+    if reasons & {"quotaExceeded", "QUOTA_EXCEEDED", "RESOURCE_QUOTA_EXCEEDED"}:
+        return "google_quota_exceeded"
     if reasons & {
         "rateLimitExceeded",
         "userRateLimitExceeded",
-        "dailyLimitExceeded",
-        "quotaExceeded",
         "RATE_LIMIT_EXCEEDED",
-        "QUOTA_EXCEEDED",
     }:
         return "google_rate_limited"
-    return "google_permission_denied"
+    return fallback
+
+
+def _retry_after(response: httpx.Response, now: datetime) -> int | None:
+    """Keep only a bounded delay, never the provider's raw header value."""
+    value = response.headers.get("Retry-After", "").strip()
+    if not value or len(value) > 128:
+        return None
+    if value.isascii() and value.isdigit():
+        seconds = int(value)
+    else:
+        try:
+            retry_at = parsedate_to_datetime(value)
+            if retry_at.tzinfo is None:
+                return None
+            seconds = math.ceil((retry_at - now).total_seconds())
+        except (TypeError, ValueError, OverflowError):
+            return None
+    return min(seconds, 86_400) if seconds > 0 else None
 
 
 @dataclass(frozen=True)
@@ -377,8 +410,33 @@ def calendar_document(
 
 
 class GoogleSourceGateway:
-    def __init__(self, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        monotonic: Callable[[], float] = time.monotonic,
+        now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        jitter: Callable[[], float] = random.random,
+    ) -> None:
         self.transport = transport
+        self._sleep = sleep
+        self._monotonic = monotonic
+        self._now = now
+        self._jitter = jitter
+        self._gmail_start: float | None = None
+        self._gmail_pacing_lock = asyncio.Lock()
+
+    async def _pace_gmail(self, url: str) -> None:
+        # This limit belongs to one gateway, not a distributed account quota.
+        if httpx.URL(url).host != "gmail.googleapis.com":
+            return
+        async with self._gmail_pacing_lock:
+            if self._gmail_start is not None:
+                delay = 0.25 - (self._monotonic() - self._gmail_start)
+                if delay > 0:
+                    await self._sleep(delay)
+            self._gmail_start = self._monotonic()
 
     async def _get(
         self,
@@ -388,16 +446,37 @@ class GoogleSourceGateway:
         *,
         expired_status: int | tuple[int, ...] | None = None,
     ) -> dict[str, Any]:
-        try:
-            response = await client.get(url, params=params)
-        except httpx.HTTPError:
-            raise GoogleSourceError(
-                "Google source transport failed", code="google_transport_error"
-            ) from None
-        expired_codes = expired_status if isinstance(expired_status, tuple) else (expired_status,)
-        if response.status_code in expired_codes:
-            raise ExpiredSourceCursor("Google cursor expired")
-        if not response.is_success:
+        waited = 0.0
+        for attempt in range(3):
+            await self._pace_gmail(url)
+            try:
+                response = await client.get(url, params=params)
+            except httpx.HTTPError:
+                raise GoogleSourceError(
+                    "Google source transport failed", code="google_transport_error"
+                ) from None
+            expired_codes = (
+                expired_status if isinstance(expired_status, tuple) else (expired_status,)
+            )
+            if response.status_code in expired_codes:
+                raise ExpiredSourceCursor("Google cursor expired")
+            if response.is_success:
+                break
+            code = _google_error_code(response)
+            retry_after = _retry_after(response, self._now())
+            temporary = code in {"google_rate_limited", "google_provider_unavailable"}
+            if temporary and attempt < 2:
+                delay = max(2**attempt + self._jitter(), retry_after or 0)
+                # Long hints belong to the durable scheduler; do not hold the
+                # source transaction open while sleeping through a quota window.
+                if waited + delay <= 60:
+                    await self._sleep(delay)
+                    waited += delay
+                    continue
+            if temporary and retry_after is None:
+                retry_after = 60
+            if code in {"google_daily_limit_exceeded", "google_quota_exceeded"}:
+                retry_after = retry_after or 300
             error_type = (
                 GoogleSourceAuthorizationError
                 if response.status_code in {401, 403}
@@ -405,8 +484,9 @@ class GoogleSourceGateway:
             )
             raise error_type(
                 "Google source request failed",
-                code=_google_error_code(response),
+                code=code,
                 http_status=response.status_code,
+                retry_after_seconds=retry_after,
             )
         try:
             data = response.json()
