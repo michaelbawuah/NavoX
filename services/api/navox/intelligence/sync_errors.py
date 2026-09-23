@@ -24,6 +24,9 @@ def sanitize_diagnostic(value: object) -> dict[str, str | int]:
     status = value.get("http_status")
     if type(status) is int and 100 <= status <= 599:
         result["http_status"] = status
+    retry_after = value.get("retry_after_seconds")
+    if type(retry_after) is int and 1 <= retry_after <= 86_400:
+        result["retry_after_seconds"] = retry_after
     return result
 
 
