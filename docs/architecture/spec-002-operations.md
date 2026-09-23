@@ -72,8 +72,9 @@ normalization, extraction validation, Today projection, and feedback learning.
 Only token retrieval and external Google/model I/O are fixture substitutes; an
 additional HTTP guard forbids unmocked requests. The gate checks two source types,
 replay receipts, evidence, feedback, pause/revocation, and zero outbound actions,
-then deletes only its own seeded workspace/user. This new gate is provisional
-until its GitHub Compose run passes; it is not a live Google/model claim.
+then deletes only its own seeded workspace/user. This gate passed in GitHub CI
+at commit `5a55c19673d0001c929ab5bab6f126d2c16f9bf5` (run 35822900374);
+it is not a live Google/model claim.
 
 ## Repeatable model smoke check
 
@@ -99,6 +100,7 @@ docker compose exec -T api uv run --no-sync python -m navox.evaluation.intellige
 
 The full live run makes up to nine model requests and API charges can apply. It stops
 on the first provider or transport failure and records the remaining cases as skipped.
+The CLI prints case progress to stderr while keeping its final JSON report on stdout.
 It returns exit
 code 0 only when every smoke case passes, 1 for failed cases, or 2 when private
 configuration/report output is unavailable. An omitted mode is a dry run that
@@ -124,6 +126,27 @@ as `authentication_failed`, `permission_denied`, `model_unavailable`, `quota_exh
 keys, response bodies, and request content are excluded. Use this report to identify
 the actual cause before changing account settings or rerunning the full suite.
 See the [official API error reference](https://developers.openai.com/api/docs/guides/error-codes).
+
+### Diagnose an extraction validation failure
+
+`extraction_validation_failed` means a returned proposal did not pass the local
+schema or evidence checks. The case's `validation_error.code` distinguishes fixed
+categories such as `schema_invalid`, `evidence_text_mismatch`, `object_not_grounded`,
+or `temporal_not_grounded`. Reports never include raw validation messages, model
+output, source text, or Pydantic input/context values. Share the sanitized report
+to identify the violated contract instead of repeatedly retrying a failed suite.
+
+The extractor can correct a model's miscounted evidence offsets only when the
+unaltered quote occurs exactly once in its declared subject/content field. It
+computes Unicode character positions deterministically and reruns all evidence,
+grounding, and instruction checks. Correct supplied offsets remain valid for
+repeated quotes; incorrect offsets for ambiguous, absent, or paraphrased quotes
+are rejected. Quotes are never fuzzily matched, normalized, or replaced.
+
+This compatible validation repair retains the extraction/receipt version and does
+not trigger automatic mailbox replay. Existing rejected receipts stay quarantined;
+new source revisions use the repaired validation. Any reprocessing of historical
+quarantined sources must be separately scoped and verified.
 
 ## Completion checklist
 
