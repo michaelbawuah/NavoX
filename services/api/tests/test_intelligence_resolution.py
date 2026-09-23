@@ -168,6 +168,78 @@ def test_relative_date_preserves_local_day_window():
     assert result.end_at == datetime(2026, 9, 24, 4, tzinfo=UTC)
 
 
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        ("tomorrow at 5pm UTC", "2026-09-23T17:00:00+00:00"),
+        ("  tomorrow at 5pm utc  ", "2026-09-23T17:00:00+00:00"),
+        ("tomorrow at 5pm America/Los_Angeles", "2026-09-24T00:00:00+00:00"),
+    ],
+)
+def test_explicit_source_timezone_overrides_workspace_timezone(expression, expected):
+    result = resolve_temporal(expression, occurred_at=NOW, timezone_name="America/New_York")
+    assert result.resolved_at.isoformat() == expected
+
+
+def test_relative_day_uses_the_explicit_source_timezone_at_midnight():
+    result = resolve_temporal(
+        "tomorrow at 5pm UTC",
+        occurred_at=datetime(2026, 9, 23, 1, tzinfo=UTC),
+        timezone_name="America/New_York",
+    )
+    assert result.resolved_at == datetime(2026, 9, 24, 17, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "tomorrow at 5pm PST",
+        "tomorrow at 5pm CST",
+        "tomorrow at 5pm America/Not_a_zone",
+        "tomorrow at 5pm or Friday at 2pm",
+    ],
+)
+def test_unrecognized_qualifiers_cannot_be_silently_ignored(expression):
+    result = resolve_temporal(expression, occurred_at=NOW, timezone_name="America/New_York")
+    assert result.resolved_at is None
+    assert result.confidence < 0.9
+
+
+def test_bare_clock_retains_am_pm_uncertainty():
+    result = resolve_temporal("tomorrow at 5", occurred_at=NOW, timezone_name="America/New_York")
+    assert result.resolved_at is None
+    assert result.method == "ambiguous_clock"
+    assert result.start_at == datetime(2026, 9, 23, 9, tzinfo=UTC)
+    assert result.end_at == datetime(2026, 9, 23, 21, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "tomorrow PST",
+        "tomorrow if approved",
+        "2026-09-24 CST",
+        "if approved tomorrow at 5pm",
+    ],
+)
+def test_date_grammar_does_not_ignore_unsupported_qualifications(expression):
+    result = resolve_temporal(expression, occurred_at=NOW, timezone_name="America/New_York")
+    assert result.method == "unresolved"
+    assert result.start_at is None and result.end_at is None and result.resolved_at is None
+    assert result.confidence < 0.9
+
+
+@pytest.mark.parametrize(
+    "expression", ["by tomorrow", "before tomorrow's meeting", "tomorrow's review"]
+)
+def test_supported_date_only_expressions_keep_local_day_windows(expression):
+    result = resolve_temporal(expression, occurred_at=NOW, timezone_name="America/New_York")
+    assert result.method == "relative_day_window"
+    assert result.start_at == datetime(2026, 9, 23, 4, tzinfo=UTC)
+    assert result.end_at == datetime(2026, 9, 24, 4, tzinfo=UTC)
+    assert result.resolved_at is None
+
+
 @pytest.mark.parametrize("expression", ["soon", "03/04", "2026-02-30", "next Friday"])
 def test_unknown_or_ambiguous_dates_are_not_invented(expression):
     result = resolve_temporal(expression, occurred_at=NOW, timezone_name="UTC")
@@ -474,6 +546,105 @@ async def test_cancellation_withdraws_inferred_calendar_state(resolution_db):
         db, connection=connection, document=cancelled, result=extraction(cancelled, empty=True)
     )
     assert (await db.get(Commitment, ids[0])).status == "superseded"
+
+
+@pytest.mark.asyncio
+async def test_fresh_confirmed_calendar_revision_restores_only_source_withdrawal(resolution_db):
+    db, connection = resolution_db
+    initial = document(
+        connection,
+        "Budget review.",
+        source_type="calendar_event",
+        metadata={"status": "confirmed", "start_at": "2026-09-23T15:00:00Z"},
+    )
+    ids = await resolve_extraction(
+        db,
+        connection=connection,
+        document=initial,
+        result=extraction(initial, action="attend", obj="Budget review", kind="meeting"),
+    )
+    cancelled = document(
+        connection,
+        "Cancelled calendar event",
+        source_type="calendar_event",
+        metadata={"status": "cancelled"},
+        occurred_at=NOW + timedelta(hours=1),
+    )
+    await resolve_extraction(
+        db, connection=connection, document=cancelled, result=extraction(cancelled, empty=True)
+    )
+    commitment = await db.get(Commitment, ids[0])
+    assert commitment.status == "superseded"
+    assert commitment.valid_until is not None
+    restored = document(
+        connection,
+        "Budget review restored.",
+        source_type="calendar_event",
+        metadata={
+            "status": "confirmed",
+            "start_at": "2026-09-24T17:00:00Z",
+            "end_at": "2026-09-24T18:00:00Z",
+        },
+        occurred_at=NOW + timedelta(hours=2),
+    )
+    assert (
+        await resolve_extraction(
+            db,
+            connection=connection,
+            document=restored,
+            result=extraction(restored, action="attend", obj="Budget review", kind="meeting"),
+        )
+        == ids
+    )
+    assert commitment.status == "confirmed"
+    assert commitment.valid_until is None
+    assert commitment.due_at.replace(tzinfo=UTC) == datetime(2026, 9, 24, 17, tzinfo=UTC)
+    assert commitment.intelligence_metadata["resolution"] == "UPDATE_EXISTING"
+    assert "reason" not in commitment.intelligence_metadata
+    # An old cancellation or a replay cannot undo or duplicate the restored state.
+    await resolve_extraction(
+        db, connection=connection, document=cancelled, result=extraction(cancelled, empty=True)
+    )
+    await resolve_extraction(
+        db,
+        connection=connection,
+        document=restored,
+        result=extraction(restored, action="attend", obj="Budget review", kind="meeting"),
+    )
+    assert commitment.status == "confirmed"
+    assert await db.scalar(select(func.count()).select_from(Commitment)) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_status", ["completed", "rejected"])
+async def test_calendar_restoration_preserves_user_terminal_decisions(
+    resolution_db, terminal_status
+):
+    db, connection = resolution_db
+    initial = document(connection, "Budget review.", source_type="calendar_event")
+    ids = await resolve_extraction(
+        db,
+        connection=connection,
+        document=initial,
+        result=extraction(initial, action="attend", obj="Budget review", kind="meeting"),
+    )
+    commitment = await db.get(Commitment, ids[0])
+    commitment.status = terminal_status
+    restored = document(
+        connection,
+        "Budget review restored.",
+        source_type="calendar_event",
+        metadata={"status": "confirmed", "start_at": "2026-09-24T17:00:00Z"},
+        occurred_at=NOW + timedelta(hours=2),
+    )
+    await resolve_extraction(
+        db,
+        connection=connection,
+        document=restored,
+        result=extraction(restored, action="attend", obj="Budget review", kind="meeting"),
+    )
+    assert commitment.status == terminal_status
+    assert commitment.due_at is None
 
 
 @pytest.mark.asyncio
