@@ -357,6 +357,29 @@ def test_unknown_processing_error_cannot_supply_a_diagnostic():
     }
 
 
+@pytest.mark.parametrize("delay", [True, False, 0, -1, 86_401, "60", 60.5, None])
+def test_sync_diagnostics_discard_invalid_retry_delays(delay):
+    assert sanitize_diagnostic({"code": "google_rate_limited", "retry_after_seconds": delay}) == {
+        "code": "google_rate_limited"
+    }
+
+
+@pytest.mark.parametrize("delay", [1, 60, 300, 86_400])
+def test_sync_diagnostics_keep_bounded_retry_delays(delay):
+    assert sanitize_diagnostic(
+        {
+            "code": "google_daily_limit_exceeded",
+            "http_status": 403,
+            "retry_after_seconds": delay,
+            "message": "private provider response",
+        }
+    ) == {
+        "code": "google_daily_limit_exceeded",
+        "http_status": 403,
+        "retry_after_seconds": delay,
+    }
+
+
 def test_google_diagnostic_is_revalidated_at_the_activity_boundary():
     error = GoogleSourceAuthorizationError("private credential")
     # A mutated or future provider implementation cannot add unknown public fields.
