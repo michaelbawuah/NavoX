@@ -25,10 +25,43 @@ GMAIL_ROOT = "https://gmail.googleapis.com/gmail/v1/users/me"
 CALENDAR_ROOT = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
 MAX_CONTENT_CHARS = 32_000
 MAX_PAGES = 20
+GOOGLE_SOURCE_DIAGNOSTIC_CODES = frozenset(
+    {
+        "google_api_disabled",
+        "google_scope_missing",
+        "google_authentication_failed",
+        "google_permission_denied",
+        "google_rate_limited",
+        "google_provider_unavailable",
+        "google_transport_error",
+        "google_invalid_response",
+        "google_source_error",
+    }
+)
 
 
 class GoogleSourceError(RuntimeError):
     """A source batch could not be read completely and safely."""
+
+    def __init__(
+        self,
+        message: str = "Google source read failed",
+        *,
+        code: str = "google_source_error",
+        http_status: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code if code in GOOGLE_SOURCE_DIAGNOSTIC_CODES else "google_source_error"
+        self.http_status = (
+            http_status if type(http_status) is int and 100 <= http_status <= 599 else None
+        )
+
+    def diagnostic(self) -> dict[str, str | int]:
+        """Only fixed categories and HTTP status may enter logs or workflow history."""
+        result: dict[str, str | int] = {"code": self.code}
+        if self.http_status is not None:
+            result["http_status"] = self.http_status
+        return result
 
 
 class GoogleSourceAuthorizationError(GoogleSourceError):
@@ -37,6 +70,62 @@ class GoogleSourceAuthorizationError(GoogleSourceError):
 
 class ExpiredSourceCursor(GoogleSourceError):
     """The provider requires bounded full reconciliation."""
+
+
+def _google_error_code(response: httpx.Response) -> str:
+    """Classify documented Google errors without retaining their private details.
+
+    Provider prose, request URLs, project IDs and metadata are never diagnostics.
+    Only recognized reason tokens from legacy errors and google.rpc.ErrorInfo are
+    used for classification; unknown or malformed bodies keep a generic category.
+    """
+    status = response.status_code
+    if status == 401:
+        return "google_authentication_failed"
+    if status == 429:
+        return "google_rate_limited"
+    if status >= 500:
+        return "google_provider_unavailable"
+    if status != 403:
+        return "google_source_error"
+    try:
+        body = response.json()
+    except ValueError:
+        return "google_permission_denied"
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict):
+        return "google_permission_denied"
+    reasons: set[str] = set()
+    legacy = error.get("errors")
+    if isinstance(legacy, list):
+        reasons.update(
+            entry["reason"]
+            for entry in legacy
+            if isinstance(entry, dict) and isinstance(entry.get("reason"), str)
+        )
+    details = error.get("details")
+    if isinstance(details, list):
+        reasons.update(
+            entry["reason"]
+            for entry in details
+            if isinstance(entry, dict)
+            and entry.get("@type") == "type.googleapis.com/google.rpc.ErrorInfo"
+            and isinstance(entry.get("reason"), str)
+        )
+    if reasons & {"accessNotConfigured", "SERVICE_DISABLED"}:
+        return "google_api_disabled"
+    if reasons & {"insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"}:
+        return "google_scope_missing"
+    if reasons & {
+        "rateLimitExceeded",
+        "userRateLimitExceeded",
+        "dailyLimitExceeded",
+        "quotaExceeded",
+        "RATE_LIMIT_EXCEEDED",
+        "QUOTA_EXCEEDED",
+    }:
+        return "google_rate_limited"
+    return "google_permission_denied"
 
 
 @dataclass(frozen=True)
@@ -136,8 +225,10 @@ def _decode_body(encoded: str) -> str:
         return base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode(
             "utf-8", errors="replace"
         )
-    except ValueError as error:
-        raise GoogleSourceError("Invalid Gmail text encoding") from error
+    except ValueError:
+        raise GoogleSourceError(
+            "Invalid Gmail text encoding", code="google_invalid_response"
+        ) from None
 
 
 def _plain_text(part: dict[str, Any], *, depth: int = 0, allow_html: bool = True) -> str:
@@ -192,10 +283,10 @@ def gmail_document(
 ) -> SourceDocument:
     external_id = _text(data.get("id"))
     if external_id is None:
-        raise GoogleSourceError("Gmail message ID is missing")
+        raise GoogleSourceError("Gmail message ID is missing", code="google_invalid_response")
     payload = data.get("payload", {})
     if not isinstance(payload, dict):
-        raise GoogleSourceError("Gmail payload is invalid")
+        raise GoogleSourceError("Gmail payload is invalid", code="google_invalid_response")
     headers = {
         str(header.get("name", "")).casefold(): str(header.get("value", ""))
         for header in payload.get("headers", [])
@@ -212,8 +303,10 @@ def gmail_document(
     timestamp = data.get("internalDate")
     try:
         occurred = datetime.fromtimestamp(int(timestamp) / 1000, UTC) if timestamp else now
-    except (ValueError, TypeError, OverflowError) as error:
-        raise GoogleSourceError("Gmail timestamp is invalid") from error
+    except (ValueError, TypeError, OverflowError):
+        raise GoogleSourceError(
+            "Gmail timestamp is invalid", code="google_invalid_response"
+        ) from None
     labels = data.get("labelIds", [])
     labels = labels if isinstance(labels, list) else []
     content = _plain_text(payload)
@@ -243,7 +336,7 @@ def calendar_document(
 ) -> SourceDocument:
     external_id = _text(data.get("id"))
     if external_id is None:
-        raise GoogleSourceError("Calendar event ID is missing")
+        raise GoogleSourceError("Calendar event ID is missing", code="google_invalid_response")
     organizer = data.get("organizer", {})
     organizer = organizer if isinstance(organizer, dict) else {}
     attendees = data.get("attendees", [])
@@ -297,19 +390,38 @@ class GoogleSourceGateway:
     ) -> dict[str, Any]:
         try:
             response = await client.get(url, params=params)
-            expired_codes = (
-                expired_status if isinstance(expired_status, tuple) else (expired_status,)
+        except httpx.HTTPError:
+            raise GoogleSourceError(
+                "Google source transport failed", code="google_transport_error"
+            ) from None
+        expired_codes = expired_status if isinstance(expired_status, tuple) else (expired_status,)
+        if response.status_code in expired_codes:
+            raise ExpiredSourceCursor("Google cursor expired")
+        if not response.is_success:
+            error_type = (
+                GoogleSourceAuthorizationError
+                if response.status_code in {401, 403}
+                else GoogleSourceError
             )
-            if response.status_code in expired_codes:
-                raise ExpiredSourceCursor("Google cursor expired")
-            if response.status_code in {401, 403}:
-                raise GoogleSourceAuthorizationError("Google read permission unavailable")
-            response.raise_for_status()
+            raise error_type(
+                "Google source request failed",
+                code=_google_error_code(response),
+                http_status=response.status_code,
+            )
+        try:
             data = response.json()
-        except (httpx.HTTPError, ValueError) as error:
-            raise GoogleSourceError("Google source read failed") from error
+        except ValueError:
+            raise GoogleSourceError(
+                "Google source response is invalid",
+                code="google_invalid_response",
+                http_status=response.status_code,
+            ) from None
         if not isinstance(data, dict):
-            raise GoogleSourceError("Google source response is invalid")
+            raise GoogleSourceError(
+                "Google source response is invalid",
+                code="google_invalid_response",
+                http_status=response.status_code,
+            )
         return data
 
     async def fetch(
@@ -426,7 +538,9 @@ class GoogleSourceGateway:
         else:
             raise GoogleSourceError("Gmail reconciliation exceeded its bounded page budget")
         if not next_cursor:
-            raise GoogleSourceError("Gmail did not return a history cursor")
+            raise GoogleSourceError(
+                "Gmail did not return a history cursor", code="google_invalid_response"
+            )
         documents = []
         for identifier, deleted in message_ids.items():
             if deleted:
@@ -480,7 +594,9 @@ class GoogleSourceGateway:
             if not token:
                 next_cursor = _text(page.get("nextSyncToken"), 4096)
                 if not next_cursor:
-                    raise GoogleSourceError("Calendar did not return a sync token")
+                    raise GoogleSourceError(
+                        "Calendar did not return a sync token", code="google_invalid_response"
+                    )
                 return SourceBatch(list(documents.values()), next_cursor)
             params["pageToken"] = token
         raise GoogleSourceError("Calendar reconciliation exceeded its bounded page budget")
