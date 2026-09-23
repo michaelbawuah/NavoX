@@ -15,6 +15,7 @@ import {
   WorkspaceContext,
 } from "./intelligence-controls";
 import { ProactivePanel } from "./proactive-panel";
+import { SourceEvidence } from "./source-evidence";
 import styles from "./today-workspace.module.css";
 
 interface Account {
@@ -45,6 +46,7 @@ interface TodaySource {
   external_resource_id: string | null;
   evidence_locator?: Record<string, unknown> | null;
   observed_at?: string | null;
+  evidence_id?: string | null;
 }
 
 interface TodayItem {
@@ -688,7 +690,10 @@ export function TodayWorkspace({
                   {item.sources.map((source) => (
                     <div
                       className={styles.evidenceSource}
-                      key={`${source.provider}:${source.source_type}:${source.external_resource_id}`}
+                      key={
+                        source.evidence_id ??
+                        `${source.provider}:${source.source_type}:${source.external_resource_id}`
+                      }
                     >
                       <strong>
                         {source.provider} ·{" "}
@@ -704,15 +709,14 @@ export function TodayWorkspace({
                           Observed {dueLabel(source.observed_at, timezone)}
                         </small>
                       )}
-                      {source.evidence_locator &&
-                        Object.entries(source.evidence_locator)
-                          .filter(([, value]) => typeof value === "string")
-                          .map(([name, value]) => (
-                            <p key={name}>
-                              {name.replaceAll("_", " ")}:{" "}
-                              {String(value).slice(0, 500)}
-                            </p>
-                          ))}
+                      {source.provider === "google" &&
+                        source.source_type === "gmail_message" &&
+                        source.evidence_id && (
+                          <SourceEvidence
+                            evidenceId={source.evidence_id}
+                            paused={agentPaused}
+                          />
+                        )}
                     </div>
                   ))}
                 </details>

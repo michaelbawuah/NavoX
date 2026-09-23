@@ -33,6 +33,7 @@ from navox.intelligence.extraction import (
 from navox.intelligence.resolution import resolve_extraction, resolve_identity
 from navox.intelligence.state import reevaluate_commitment
 from navox.intelligence.temporal import resolve_temporal
+from navox.providers.google_sources import gmail_document
 
 NOW = datetime(2026, 9, 22, 15, tzinfo=UTC)
 
@@ -331,6 +332,36 @@ async def test_low_confidence_and_marketing_do_not_create_commitments(resolution
     )
     assert await db.scalar(select(func.count()).select_from(Commitment)) == 0
     assert await db.scalar(select(func.count()).select_from(OperationalObservation)) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("header", [None, "", "<https://example.test/unsubscribe?private=token>"])
+async def test_unlabelled_bulk_mail_header_reaches_marketing_suppression(resolution_db, header):
+    import base64
+
+    db, connection = resolution_db
+    headers = [{"name": "Subject", "value": "Budget"}]
+    if header is not None:
+        headers.append({"name": "lIsT-UnSuBsCrIbE", "value": header})
+    doc = gmail_document(
+        {
+            "id": "message-bulk-test",
+            "labelIds": ["INBOX"],
+            "payload": {
+                "mimeType": "text/plain",
+                "headers": headers,
+                "body": {"data": base64.urlsafe_b64encode(b"Please send budget.").decode()},
+            },
+        },
+        workspace_id=connection.workspace_id,
+        connection_id=connection.id,
+        now=NOW,
+    )
+    assert "unsubscribe?private" not in str(doc.metadata)
+    ids = await resolve_extraction(db, connection=connection, document=doc, result=extraction(doc))
+    assert len(ids) == (0 if header else 1)
+    observation = await db.scalar(select(OperationalObservation))
+    assert observation.status == ("SUPPRESSED" if header else "ACTIVE")
 
 
 @pytest.mark.asyncio

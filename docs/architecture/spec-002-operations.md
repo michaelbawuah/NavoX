@@ -130,6 +130,28 @@ and item identities were not independently inspected. Evidence review remains
 open. The earlier timeout category did not identify whether connect/read/write/pool
 timed out.
 
+The owner's subsequent Today review showed a promotional-looking candidate and
+only an opaque Gmail reference in **Why this is here**. The original message was
+not supplied, so its intent has not been independently classified. The source
+review gap is repaired with **View source text**: an explicit, authenticated
+`GET /api/v1/intelligence/evidence/{evidence_id}` retrieves that Gmail message and
+returns up to eight saved evidence spans, each at most 512 characters, only after
+checking the source hash. Source ownership, workspace membership, Gmail read
+permission, and agent pause are checked before and after provider I/O; narrowed
+refresh grants and existing source cooldowns are honored. The request has a
+30-second deadline and returns fixed error messages. Changed/deleted sources or
+invalid locators return no excerpt. One compatibility hash omits only the newly
+normalized unsubscribe flag for evidence saved before that change.
+
+Today itself still performs no Google reads and stores only locators. The source
+reader uses uncached responses, renders passages as escaped text, and retains no
+email body or quote in the database. Gmail normalization now passes the boolean
+presence of a nonempty `List-Unsubscribe` header into the existing marketing
+filter, without retaining the header's URL or token. Extraction instructions also
+exclude optional promotional calls to action while preserving explicit account
+obligations. This does not establish model accuracy or reclassify saved candidates;
+review existing items against their sources and reject unwanted suggestions.
+
 Gmail reads are spaced at least 250 ms apart within each source gateway. Temporary
 rate-limit and server errors retry the failed GET (at most three HTTP attempts)
 with bounded exponential backoff and jitter; they do not immediately restart the

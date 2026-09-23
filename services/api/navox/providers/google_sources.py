@@ -407,6 +407,8 @@ def gmail_document(
             "label_ids": [label for label in labels if isinstance(label, str)],
             "status": "deleted" if data.get("deleted") else "active",
             "content_truncated": len(content) >= MAX_CONTENT_CHARS,
+            # Preserve the existing resolver's bulk-mail signal, never its URL/token.
+            **({"list_unsubscribe": True} if headers.get("list-unsubscribe", "").strip() else {}),
         },
     )
 

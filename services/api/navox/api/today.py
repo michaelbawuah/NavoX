@@ -23,6 +23,7 @@ class TodaySourceResponse(BaseModel):
     external_resource_id: str | None
     evidence_locator: dict[str, object] | None = None
     observed_at: str | None = None
+    evidence_id: UUID | None = None
 
 
 class TodayItemResponse(BaseModel):
@@ -120,6 +121,7 @@ def item_response(item: TodayItem) -> TodayItemResponse:
                 external_resource_id=source.external_resource_id,
                 evidence_locator=source.evidence_locator,
                 observed_at=source.observed_at.isoformat() if source.observed_at else None,
+                evidence_id=source.evidence_id,
             )
             for source in item.sources
         ],

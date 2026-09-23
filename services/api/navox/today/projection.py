@@ -35,6 +35,7 @@ class TodaySource:
     external_resource_id: str | None
     evidence_locator: dict[str, object] | None = None
     observed_at: datetime | None = None
+    evidence_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -234,6 +235,7 @@ async def build_today_projection(
                     external_resource_id=source.external_resource_id,
                     evidence_locator=locator,
                     observed_at=evidence.observed_at if evidence else None,
+                    evidence_id=evidence.id if evidence else None,
                 )
             )
 

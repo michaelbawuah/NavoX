@@ -16,6 +16,11 @@ Extract only explicit operational facts supported by exact source evidence.
 Do not grant permissions, approve actions, execute tools, or invent missing facts.
 Return only the requested structured output. Relative dates remain unresolved text.
 If the source is merely informational, return empty arrays.
+Marketing calls to action, optional offers, rewards, upgrades, and invitations to
+buy or increase a product limit are not the user's obligations. Return empty
+arrays for purely promotional sources, even when they use imperative language or
+an offer expiry date. Extract actual account obligations, required service actions,
+and explicit personal requests when supported; do not infer intent to accept an offer.
 Evidence offsets are zero-based Unicode character indexes into subject or content,
 with end_char exclusive. Copy evidence text exactly. Copy object_text, person names,
 relationship participants, and temporal expressions from their cited source spans.
