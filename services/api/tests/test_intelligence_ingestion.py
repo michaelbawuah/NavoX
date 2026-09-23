@@ -648,7 +648,7 @@ async def test_refresh_scope_reduction_stops_before_source_fetch(
 
     monkeypatch.setattr(ingestion, "access_token_for_connection", narrowed_token)
     monkeypatch.setattr(GoogleSourceGateway, "fetch", forbidden)
-    with pytest.raises(GoogleSourceAuthorizationError):
+    with pytest.raises(GoogleSourceAuthorizationError) as error:
         await ingestion.process_connection(
             database,
             connection_id=connection.id,
@@ -656,6 +656,7 @@ async def test_refresh_scope_reduction_stops_before_source_fetch(
             settings=Settings(),
             extractor=OperationalExtractor(ExtractionGateway()),
         )
+    assert error.value.diagnostic() == {"code": "google_scope_missing"}
     assert await database.scalar(select(func.count()).select_from(IntelligenceCursor)) == 0
 
 
