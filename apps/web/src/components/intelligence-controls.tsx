@@ -357,6 +357,68 @@ interface Weather {
   observed_at: string | null;
 }
 
+const timezoneGroups = [
+  {
+    label: "North America",
+    options: [
+      ["America/New_York", "Eastern Time — New York (EST/EDT)"],
+      ["America/Chicago", "Central Time — Chicago (CST/CDT)"],
+      ["America/Denver", "Mountain Time — Denver (MST/MDT)"],
+      ["America/Phoenix", "Arizona — Phoenix (MST)"],
+      ["America/Los_Angeles", "Pacific Time — Los Angeles (PST/PDT)"],
+      ["America/Anchorage", "Alaska Time — Anchorage (AKST/AKDT)"],
+      ["Pacific/Honolulu", "Hawaii Time — Honolulu (HST)"],
+      ["America/Toronto", "Canada Eastern — Toronto (EST/EDT)"],
+      ["America/Mexico_City", "Mexico City"],
+    ],
+  },
+  {
+    label: "UTC, Europe & Africa",
+    options: [
+      ["UTC", "Coordinated Universal Time (UTC)"],
+      ["Europe/London", "United Kingdom — London (GMT/BST)"],
+      ["Europe/Paris", "Central Europe — Paris (CET/CEST)"],
+      ["Europe/Athens", "Eastern Europe — Athens (EET/EEST)"],
+      ["Africa/Accra", "Ghana — Accra (GMT)"],
+      ["Africa/Lagos", "West Africa — Lagos (WAT)"],
+      ["Africa/Johannesburg", "South Africa — Johannesburg (SAST)"],
+    ],
+  },
+  {
+    label: "Asia & Pacific",
+    options: [
+      ["Asia/Dubai", "United Arab Emirates — Dubai (GST)"],
+      ["Asia/Kolkata", "India — Kolkata (IST)"],
+      ["Asia/Singapore", "Singapore (SGT)"],
+      ["Asia/Shanghai", "China — Shanghai (CST)"],
+      ["Asia/Tokyo", "Japan — Tokyo (JST)"],
+      ["Asia/Seoul", "South Korea — Seoul (KST)"],
+      ["Australia/Sydney", "Australia — Sydney (AEST/AEDT)"],
+      ["Pacific/Auckland", "New Zealand — Auckland (NZST/NZDT)"],
+    ],
+  },
+] as const;
+
+const knownTimezones: ReadonlySet<string> = new Set<string>(
+  timezoneGroups.flatMap((group) => group.options.map(([value]) => value)),
+);
+
+function timezoneAbbreviation(timezone: string, now: Date | null): string {
+  if (!now) return timezone;
+  try {
+    return (
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: timezone,
+        timeZoneName: "short",
+      })
+        .formatToParts(now)
+        .find((part) => part.type === "timeZoneName")?.value ?? timezone
+    );
+  } catch {
+    return timezone;
+  }
+}
+
 export function WorkspaceContext({
   timezone,
   onTimezoneChange,
@@ -402,12 +464,22 @@ export function WorkspaceContext({
     }
     let active = true;
     const load = () => {
+      setWeather(null);
       void request<Weather>("/workspace/weather")
         .then((value) => {
           if (active) setWeather(value);
         })
         .catch(() => {
-          if (active) setWeather(null);
+          if (active) {
+            setWeather({
+              status: "unavailable",
+              temperature: null,
+              unit: preferences.temperature_unit,
+              description: "Weather lookup could not complete.",
+              city: preferences.weather_city,
+              observed_at: null,
+            });
+          }
         });
     };
     load();
@@ -448,59 +520,64 @@ export function WorkspaceContext({
   return (
     <section className={styles.context} aria-label="Local time and weather">
       <div className={styles.contextLine}>
-        <div>
-          <span className={styles.contextLabel}>Your local time</span>
-          <time dateTime={now?.toISOString()}>
-            {now
-              ? new Intl.DateTimeFormat(undefined, {
-                  timeZone: timezone,
-                  weekday: "short",
-                  month: "short",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                  second: "2-digit",
-                  hour12: preferences?.clock_format !== "24h",
-                }).format(now)
-              : "Loading local time…"}
-          </time>
-          <span className={styles.timezone}>
-            {timezone.replaceAll("_", " ")}
-          </span>
-        </div>
-        {preferences?.weather_visible && (
-          <div className={styles.weather}>
-            <span className={styles.contextLabel}>
-              {weather?.city ?? preferences.weather_city ?? "Weather"}
+        <div className={styles.contextReadout}>
+          <div className={styles.timeReadout}>
+            <span className={styles.contextLabel}>Your local time</span>
+            <time dateTime={now?.toISOString()}>
+              {now
+                ? new Intl.DateTimeFormat(undefined, {
+                    timeZone: timezone,
+                    weekday: "short",
+                    month: "short",
+                    day: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                    second: "2-digit",
+                    hour12: preferences?.clock_format !== "24h",
+                  }).format(now)
+                : "Loading local time…"}
+            </time>
+            <span className={styles.timezone}>
+              {timezoneAbbreviation(timezone, now)} ·{" "}
+              {timezone.replaceAll("_", " ")}
             </span>
-            <strong>
-              {weather?.status === "ready" && weather.temperature !== null
-                ? `${Math.round(weather.temperature)}°${weather.unit === "fahrenheit" ? "F" : "C"}`
-                : "Weather unavailable"}
-            </strong>
-            {weather?.description && <span>{weather.description}</span>}
-            {weather?.status === "ready" && (
-              <a
-                href="https://open-meteo.com/"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Weather by Open-Meteo
-              </a>
-            )}
-            {weather?.observed_at && (
-              <small>
-                As of{" "}
-                {new Intl.DateTimeFormat(undefined, {
-                  timeZone: timezone,
-                  hour: "numeric",
-                  minute: "2-digit",
-                  hour12: preferences.clock_format !== "24h",
-                }).format(new Date(weather.observed_at))}
-              </small>
-            )}
           </div>
-        )}
+          {preferences?.weather_visible && (
+            <div className={styles.weather}>
+              <span className={styles.contextLabel}>
+                {weather?.city ?? preferences.weather_city ?? "Weather"}
+              </span>
+              <strong>
+                {weather === null
+                  ? "Loading weather…"
+                  : weather.status === "ready" && weather.temperature !== null
+                    ? `${Math.round(weather.temperature)}°${weather.unit === "fahrenheit" ? "F" : "C"}`
+                    : "Weather unavailable"}
+              </strong>
+              {weather?.description && <span>{weather.description}</span>}
+              {weather?.status === "ready" && (
+                <a
+                  href="https://open-meteo.com/"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Weather by Open-Meteo
+                </a>
+              )}
+              {weather?.observed_at && (
+                <small>
+                  As of{" "}
+                  {new Intl.DateTimeFormat(undefined, {
+                    timeZone: timezone,
+                    hour: "numeric",
+                    minute: "2-digit",
+                    hour12: preferences.clock_format !== "24h",
+                  }).format(new Date(weather.observed_at))}
+                </small>
+              )}
+            </div>
+          )}
+        </div>
       </div>
       <details className={styles.settings}>
         <summary>Time & weather preferences</summary>
@@ -508,15 +585,32 @@ export function WorkspaceContext({
           <form onSubmit={save} className={styles.preferences}>
             <label>
               Timezone
-              <input
+              <select
                 required
-                maxLength={100}
                 value={draft.timezone}
-                placeholder="America/New_York"
                 onChange={(event) =>
                   setDraft({ ...draft, timezone: event.target.value })
                 }
-              />
+              >
+                {!knownTimezones.has(draft.timezone) && (
+                  <option value={draft.timezone}>
+                    Saved timezone — {draft.timezone}
+                  </option>
+                )}
+                {timezoneGroups.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.options.map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <small>
+                Choose your region. Eastern Time automatically changes between
+                EST and EDT.
+              </small>
             </label>
             <div className={styles.formRow}>
               <label>
