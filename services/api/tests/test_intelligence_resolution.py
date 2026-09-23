@@ -281,6 +281,67 @@ async def test_replay_has_one_commitment_and_bounded_evidence(resolution_db):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "source_type,subject_only,expected",
+    [
+        ("gmail_message", True, "candidate"),
+        ("gmail_message", False, "confirmed"),
+        ("calendar_event", True, "confirmed"),
+    ],
+)
+async def test_headline_only_gmail_requires_review_despite_high_model_confidence(
+    resolution_db, source_type, subject_only, expected
+):
+    db, connection = resolution_db
+    doc = document(connection, "Please send the budget.", source_type=source_type)
+    doc = doc.model_copy(update={"subject": "Please send the budget."})
+    result = extraction(doc, confidence=0.98)
+    candidate = result.extraction.observations[0]
+    if subject_only:
+        candidate = candidate.model_copy(update={"evidence": [candidate.evidence[1]]})
+        result = replace(result, extraction=OperationalExtraction(observations=[candidate]))
+    ids = await resolve_extraction(db, connection=connection, document=doc, result=result)
+    commitment = await db.get(Commitment, ids[0])
+    assert commitment.status == expected
+    if expected == "candidate":
+        assert commitment.confidence == 0.89
+        assert commitment.intelligence_metadata["evidence_review_reason"] == "subject_only"
+    else:
+        assert commitment.confidence == 0.98
+
+
+@pytest.mark.asyncio
+async def test_subject_only_rsvp_stays_reviewable_and_cannot_complete_a_task(resolution_db):
+    db, connection = resolution_db
+    doc = document(connection, "You're invited to an optional webinar.")
+    doc = doc.model_copy(update={"subject": "Webinar reminder: RSVP now for the systems seminar"})
+    result = extraction(doc, action="RSVP", obj="systems seminar", kind="task", confidence=0.98)
+    candidate = result.extraction.observations[0].model_copy(
+        update={"evidence": [result.extraction.observations[0].evidence[1]]}
+    )
+    result = replace(result, extraction=OperationalExtraction(observations=[candidate]))
+    ids = await resolve_extraction(db, connection=connection, document=doc, result=result)
+    commitment = await db.get(Commitment, ids[0])
+    assert commitment.status == "candidate"
+    # Even a later high-confidence subject-only completion cannot change its state.
+    followup = doc.model_copy(
+        update={"external_id": "mail-2", "subject": "RSVP systems seminar completed"}
+    )
+    completion = extraction(
+        followup, action="RSVP", obj="systems seminar", kind="completion", confidence=0.99
+    )
+    candidate = completion.extraction.observations[0].model_copy(
+        update={"evidence": [completion.extraction.observations[0].evidence[1]]}
+    )
+    completion = replace(completion, extraction=OperationalExtraction(observations=[candidate]))
+    assert (
+        await resolve_extraction(db, connection=connection, document=followup, result=completion)
+        == []
+    )
+    assert commitment.status == "candidate"
+
+
+@pytest.mark.asyncio
 async def test_identity_email_case_insensitive_and_display_name_not_identity(resolution_db):
     db, connection = resolution_db
     first = await resolve_identity(

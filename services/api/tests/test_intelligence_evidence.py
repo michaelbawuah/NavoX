@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -14,6 +15,7 @@ from navox.api import intelligence_evidence as api
 from navox.db.models import (
     AuditEvent,
     Commitment,
+    CommitmentSource,
     Connection,
     ObservationEvidence,
     User,
@@ -105,6 +107,7 @@ async def owned_evidence(runtime_env, monkeypatch):  # noqa: F811
             connection_id=connection.id,
             user_id=user.id,
             url=f"/api/v1/intelligence/evidence/{evidence.id}",
+            extraction=result,
         )
     state.token = AsyncMock(return_value="private-token")
     state.read = AsyncMock(return_value=document)
@@ -142,6 +145,114 @@ async def test_today_links_to_bounded_evidence_without_automatic_reads_or_body_s
         assert PRIVATE not in str(evidence.evidence_locator)
         assert await db.scalar(select(func.count()).select_from(AuditEvent)) == audits_before
         assert await db.scalar(select(func.count()).select_from(Commitment)) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("distinct_passage", [False, True])
+async def test_today_deduplicates_identical_citations_but_keeps_distinct_evidence(
+    owned_evidence, distinct_passage
+):
+    state = owned_evidence
+    candidate = state.extraction.extraction.observations[0].model_copy(update={"confidence": 0.88})
+    if distinct_passage:
+        candidate = candidate.model_copy(
+            update={
+                "object_text": "Budget",
+                "evidence": [
+                    EvidenceSpan(source="subject", start_char=0, end_char=6, text="Budget")
+                ],
+            }
+        )
+    result = replace(state.extraction, extraction=OperationalExtraction(observations=[candidate]))
+    async with state.factory() as db:
+        connection = await db.get(Connection, state.connection_id)
+        await resolve_extraction(db, connection=connection, document=state.document, result=result)
+        await db.commit()
+        assert await db.scalar(select(func.count()).select_from(CommitmentSource)) == 2
+        assert await db.scalar(select(func.count()).select_from(ObservationEvidence)) == 2
+    today = (await state.client.get("/api/v1/today")).json()
+    sources = today["needs_attention"][0]["sources"]
+    assert len(sources) == (2 if distinct_passage else 1)
+    assert all(source["connection_id"] == str(state.connection_id) for source in sources)
+    state.read.assert_not_awaited()
+    passages = []
+    for source in sources:
+        response = await state.client.get(f"/api/v1/intelligence/evidence/{source['evidence_id']}")
+        assert response.status_code == 200
+        passages.extend(excerpt["text"] for excerpt in response.json()["excerpts"])
+    assert QUOTE in passages
+    assert ("Budget" in passages) is distinct_passage
+
+
+@pytest.mark.asyncio
+async def test_owner_can_dismiss_saved_ai_task_and_replays_cannot_resurrect_it(owned_evidence):
+    state = owned_evidence
+    async with state.factory() as db:
+        commitment = await db.scalar(select(Commitment))
+        commitment.status = "confirmed"
+        commitment.confidence = 0.98
+        commitment_id = commitment.id
+        await db.commit()
+    url = f"/api/v1/commitments/{commitment_id}/dismiss"
+    first = await state.client.post(url)
+    assert first.status_code == 200 and first.json()["status"] == "rejected"
+    assert (await state.client.post(url)).json()["status"] == "rejected"
+    async with state.factory() as db:
+        connection = await db.get(Connection, state.connection_id)
+        # A fresh revision, even with a high-confidence body-backed proposal,
+        # must not undo the owner's rejection of the same obligation.
+        revised = state.document.model_copy(
+            update={"content": state.document.content + " Revised footer."}
+        )
+        candidate = state.extraction.extraction.observations[0].model_copy(
+            update={"confidence": 0.99}
+        )
+        result = replace(
+            state.extraction,
+            source_hash=source_document_hash(revised),
+            extraction=OperationalExtraction(observations=[candidate]),
+        )
+        await resolve_extraction(db, connection=connection, document=revised, result=result)
+        await db.commit()
+        assert (await db.get(Commitment, commitment_id)).status == "rejected"
+        assert await db.scalar(select(func.count()).select_from(Commitment)) == 1
+        audits = list(
+            await db.scalars(
+                select(AuditEvent).where(AuditEvent.event_type == "commitment.dismissed")
+            )
+        )
+        assert len(audits) == 1 and audits[0].event_metadata == {"reason": "not_a_task"}
+    assert (await state.client.get("/api/v1/today")).json()["total"] == 0
+    state.read.assert_not_awaited()
+    state.token.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["other_owner", "manual", "completed", "superseded"])
+async def test_dismiss_cannot_target_another_owner_manual_or_terminal_task(owned_evidence, mode):
+    state = owned_evidence
+    async with state.factory() as db:
+        commitment = await db.scalar(select(Commitment))
+        commitment_id = commitment.id
+        if mode == "manual":
+            commitment.created_by = "user"
+        elif mode in {"completed", "superseded"}:
+            commitment.status = mode
+        await db.commit()
+    if mode == "other_owner":
+        await state.client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "other@example.com",
+                "password": "twelve-character-password",
+                "display_name": "Other",
+            },
+        )
+    response = await state.client.post(f"/api/v1/commitments/{commitment_id}/dismiss")
+    assert response.status_code == (404 if mode == "other_owner" else 409)
+    async with state.factory() as db:
+        commitment = await db.get(Commitment, commitment_id)
+        assert commitment.status != "rejected"
 
 
 @pytest.mark.asyncio

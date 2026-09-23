@@ -8,14 +8,16 @@ import {
   useRef,
   useState,
 } from "react";
+import type { TodaySource } from "../lib/source-references";
 import { ApprovalPanel } from "./approval-panel";
+import { DismissCommitment } from "./dismiss-commitment";
 import {
   IntelligenceControls,
   IntelligenceFeedback,
   WorkspaceContext,
 } from "./intelligence-controls";
 import { ProactivePanel } from "./proactive-panel";
-import { SourceEvidence } from "./source-evidence";
+import { SourceReferences } from "./source-references";
 import styles from "./today-workspace.module.css";
 
 interface Account {
@@ -38,15 +40,6 @@ interface GoogleConnection {
   granted_scopes: string[];
   last_checked_at: string | null;
   last_error: string | null;
-}
-
-interface TodaySource {
-  provider: string;
-  source_type: string;
-  external_resource_id: string | null;
-  evidence_locator?: Record<string, unknown> | null;
-  observed_at?: string | null;
-  evidence_id?: string | null;
 }
 
 interface TodayItem {
@@ -454,7 +447,9 @@ export function TodayWorkspace({
       setWorkspaceMessage(
         action === "complete"
           ? "Commitment completed. Today is refreshed."
-          : "Commitment state updated.",
+          : action === "dismiss"
+            ? "Item marked as not a task and removed from Today."
+            : "Commitment state updated.",
       );
       await refreshToday();
     } catch {
@@ -589,6 +584,12 @@ export function TodayWorkspace({
           >
             Complete
           </button>
+          <DismissCommitment
+            createdBy={item.created_by}
+            status={item.status}
+            busy={mutatingId === item.id}
+            onDismiss={() => void mutateCommitment(item.id, "dismiss")}
+          />
           <button
             disabled={handlingId === item.id || agentPaused}
             onClick={() => void handleCommitment(item)}
@@ -615,6 +616,12 @@ export function TodayWorkspace({
         >
           Complete
         </button>
+        <DismissCommitment
+          createdBy={item.created_by}
+          status={item.status}
+          busy={mutatingId === item.id}
+          onDismiss={() => void mutateCommitment(item.id, "dismiss")}
+        />
         <button
           disabled={handlingId === item.id || agentPaused}
           onClick={() => void handleCommitment(item)}
@@ -687,38 +694,11 @@ export function TodayWorkspace({
                         ))}
                     </dl>
                   )}
-                  {item.sources.map((source) => (
-                    <div
-                      className={styles.evidenceSource}
-                      key={
-                        source.evidence_id ??
-                        `${source.provider}:${source.source_type}:${source.external_resource_id}`
-                      }
-                    >
-                      <strong>
-                        {source.provider} ·{" "}
-                        {source.source_type.replaceAll("_", " ")}
-                      </strong>
-                      {source.external_resource_id && (
-                        <small>
-                          Source reference: {source.external_resource_id}
-                        </small>
-                      )}
-                      {source.observed_at && (
-                        <small>
-                          Observed {dueLabel(source.observed_at, timezone)}
-                        </small>
-                      )}
-                      {source.provider === "google" &&
-                        source.source_type === "gmail_message" &&
-                        source.evidence_id && (
-                          <SourceEvidence
-                            evidenceId={source.evidence_id}
-                            paused={agentPaused}
-                          />
-                        )}
-                    </div>
-                  ))}
+                  <SourceReferences
+                    sources={item.sources}
+                    paused={agentPaused}
+                    formatDate={(value) => dueLabel(value, timezone)}
+                  />
                 </details>
                 {renderActions(item)}
                 <IntelligenceFeedback

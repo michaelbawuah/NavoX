@@ -115,6 +115,7 @@
 
 .topbarMeta button,
 .itemActions button,
+.sourceReader button,
 .connectionList button {
   border: 1px solid rgb(145 168 207 / 22%);
   border-radius: 0.55rem;
@@ -433,6 +434,11 @@
   margin: 0;
 }
 
+.evidenceReference {
+  display: grid;
+  gap: 0.25rem;
+}
+
 .sourceReader {
   display: grid;
   justify-items: start;
@@ -548,6 +554,7 @@
 .queryForm button:disabled,
 .controlCard > button:disabled,
 .itemActions button:disabled,
+.sourceReader button:disabled,
 .connectionList button:disabled {
   cursor: wait;
   opacity: 0.6;

@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -36,6 +37,7 @@ class TodaySource:
     evidence_locator: dict[str, object] | None = None
     observed_at: datetime | None = None
     evidence_id: UUID | None = None
+    connection_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -212,6 +214,7 @@ async def build_today_projection(
             if observation_ids
             else []
         )
+        seen_evidence: set[tuple[object, ...]] = set()
         for source in sources:
             evidence = next(
                 (
@@ -228,6 +231,20 @@ async def build_today_projection(
             locator = None
             if evidence and evidence.evidence_locator:
                 locator = bounded_locator(evidence.evidence_locator)
+            spans = locator.get("spans") if locator else None
+            if evidence and evidence.source_hash and isinstance(spans, list) and spans:
+                key = (
+                    source.commitment_id,
+                    source.connection_id,
+                    source.provider,
+                    source.source_type,
+                    source.external_resource_id,
+                    evidence.source_hash,
+                    tuple(sorted({json.dumps(span, sort_keys=True) for span in spans})),
+                )
+                if key in seen_evidence:
+                    continue
+                seen_evidence.add(key)
             source_map.setdefault(source.commitment_id, []).append(
                 TodaySource(
                     provider=source.provider,
@@ -236,6 +253,7 @@ async def build_today_projection(
                     evidence_locator=locator,
                     observed_at=evidence.observed_at if evidence else None,
                     evidence_id=evidence.id if evidence else None,
+                    connection_id=source.connection_id,
                 )
             )
 

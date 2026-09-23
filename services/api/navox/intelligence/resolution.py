@@ -624,6 +624,13 @@ async def resolve_extraction(
             1.0 if not subject or person_id or subject in {"i", "you", "me", "we"} else 0.89
         )
         confidence = min(candidate.confidence, entity_cap)
+        subject_only = document.source_type == "gmail_message" and all(
+            span.source == "subject" for span in candidate.evidence
+        )
+        if subject_only:
+            # A headline can name an action without establishing a personal
+            # obligation. It cannot bypass review or drive a state transition.
+            confidence = min(confidence, 0.89)
         if candidate.temporal_expression:
             confidence = min(confidence, max(0.75, temporal.confidence))
         if marketing or cancelled:
@@ -683,6 +690,7 @@ async def resolve_extraction(
                         "temporal": temporal.as_metadata(),
                         "resolution": "CREATE_NEW",
                         "source_updated_at": document.occurred_at.isoformat(),
+                        **({"evidence_review_reason": "subject_only"} if subject_only else {}),
                     },
                 )
                 database.add(existing)

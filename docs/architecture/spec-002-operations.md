@@ -152,6 +152,31 @@ exclude optional promotional calls to action while preserving explicit account
 obligations. This does not establish model accuracy or reclassify saved candidates;
 review existing items against their sources and reject unwanted suggestions.
 
+The next owner screenshot confirmed that the source reader displayed an email
+subject. It also exposed a high-confidence active RSVP task supported only by an
+invitation headline, with the same source header repeated. The excerpt establishes
+the invitation, not that the owner chose to attend. Gmail proposals supported only
+by subject-line spans now have confidence capped at 0.89, so new items require
+confirmation and subject-only completion/waiting proposals cannot automatically
+change task state. Body-backed requests and Calendar evidence retain their existing
+rules. This conservative review rule does not measure overall extraction accuracy.
+
+Today collapses identical citations from the same account and source revision;
+distinct passages remain available under one source heading. Different accounts
+and source revisions retain their evidence, and no evidence records are deleted.
+Source buttons use the existing application styling and still require a click
+before any Google read.
+
+Saved active AI-created items have an explicit **Not a task** action. The owner can
+dismiss an unwanted item through an authenticated, ownership-scoped state update
+to `rejected`; repeated dismissal is idempotent and records one bounded audit event.
+Matching subsequent evidence does not reactivate the rejected commitment. This
+action sends no message and makes no Google or model request. Existing candidates
+retain **Reject**. Previously saved active items are not silently demoted, because
+their state may reflect an earlier user confirmation. After rebuilding API, worker,
+and web, dismiss one unwanted active item and reload to verify it stays absent.
+The owner-side check of these new controls remains open.
+
 Gmail reads are spaced at least 250 ms apart within each source gateway. Temporary
 rate-limit and server errors retry the failed GET (at most three HTTP attempts)
 with bounded exponential backoff and jitter; they do not immediately restart the

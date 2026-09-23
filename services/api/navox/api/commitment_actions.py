@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
+from navox.agent.audit import add_audit_event
 from navox.api.auth import CurrentAccountDependency, DatabaseSession
 from navox.api.commitments import (
     CommitmentResponse,
@@ -153,6 +154,55 @@ async def transition_commitment(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Commitment must be in one of these states: {allowed}",
         )
+    await database.commit()
+    return response_from_commitment(commitment)
+
+
+@router.post("/{commitment_id}/dismiss", response_model=CommitmentResponse)
+async def dismiss_ai_commitment(
+    commitment_id: UUID,
+    current_account: CurrentAccountDependency,
+    database: DatabaseSession,
+) -> CommitmentResponse:
+    """The owner can explicitly reject an unwanted active AI-created item."""
+    result = await database.execute(
+        update(Commitment)
+        .where(
+            Commitment.id == commitment_id,
+            Commitment.workspace_id == current_account.workspace.id,
+            Commitment.user_id == current_account.user.id,
+            Commitment.created_by == "ai",
+            Commitment.status.in_(
+                (
+                    "candidate",
+                    "confirmed",
+                    "attention",
+                    "upcoming",
+                    "waiting",
+                    "waiting_on_external",
+                )
+            ),
+        )
+        .values(status="rejected")
+        .returning(Commitment)
+    )
+    commitment = result.scalar_one_or_none()
+    if commitment is None:
+        existing = await current_workspace_commitment(commitment_id, current_account, database)
+        if existing.created_by == "ai" and existing.status == "rejected":
+            return response_from_commitment(existing)
+        raise HTTPException(409, "Only active AI-created items can be marked as not a task")
+    add_audit_event(
+        database,
+        user_id=current_account.user.id,
+        workspace_id=current_account.workspace.id,
+        event_type="commitment.dismissed",
+        entity_type="commitment",
+        entity_id=commitment.id,
+        actor_type="user",
+        actor_id=str(current_account.user.id),
+        metadata={"reason": "not_a_task"},
+    )
     await database.commit()
     return response_from_commitment(commitment)
 
