@@ -135,12 +135,23 @@
   margin-bottom: 1rem;
 }
 .contextLine {
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem;
 }
-.contextLine > div {
+.contextReadout {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: clamp(1rem, 3vw, 2.25rem);
+  margin-left: auto;
+  text-align: right;
+}
+.contextReadout > div {
   display: grid;
   gap: 0.25rem;
+}
+.timeReadout {
+  min-width: min(100%, 16rem);
 }
 .contextLabel {
   color: #78d8c3;
@@ -161,6 +172,10 @@
 }
 .weather strong {
   font-size: 1.1rem;
+}
+
+.weather {
+  min-width: min(100%, 13rem);
 }
 
 .weather a {
@@ -226,5 +241,10 @@
   }
   .heading {
     align-items: start;
+  }
+  .contextReadout {
+    width: 100%;
+    justify-content: flex-start;
+    text-align: left;
   }
 }
