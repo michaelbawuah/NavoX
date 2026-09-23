@@ -52,13 +52,12 @@ async def authorized_connection(
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    if (
-        connection is None
-        or connection.provider != "google"
-        or connection.status != "active"
-        or SOURCE_SCOPES[source] not in connection.granted_scopes
-    ):
+    if connection is None or connection.provider != "google" or connection.status != "active":
         raise GoogleSourceAuthorizationError("Google read permission is required")
+    if SOURCE_SCOPES[source] not in connection.granted_scopes:
+        raise GoogleSourceAuthorizationError(
+            "Google read permission is required", code="google_scope_missing"
+        )
     user = await database.get(User, connection.user_id, populate_existing=True)
     member = await database.get(WorkspaceMembership, (connection.workspace_id, connection.user_id))
     if user is None or user.agent_paused or member is None:
