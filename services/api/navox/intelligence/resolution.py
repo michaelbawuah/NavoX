@@ -708,6 +708,31 @@ async def resolve_extraction(
             continue
         outcome = "CREATE_NEW" if created else "MERGE_EVIDENCE"
         metadata = dict(existing.intelligence_metadata or {})
+        if (
+            existing.status == "superseded"
+            and existing.created_by == "ai"
+            and metadata.get("reason") in {"source_cancelled", "source_corrected"}
+            and document.source_type == "calendar_event"
+            and candidate.observation_type == "meeting"
+            and document.metadata.get("status") == "confirmed"
+            and confidence >= 0.9
+            and temporal.start_at is not None
+            and existing.valid_until is not None
+            and document.occurred_at > _utc(existing.valid_until)
+        ):
+            # A newer authoritative calendar revision can restore its own withdrawn
+            # meeting. User completion/rejection and stale revisions stay terminal.
+            existing.status = "confirmed"
+            existing.valid_until = None
+            existing.due_at = temporal.resolved_at
+            existing.confidence = confidence
+            metadata.pop("reason", None)
+            metadata.pop("conflicting_temporal", None)
+            metadata.pop("calendar_end_at", None)
+            metadata.pop("completion_condition", None)
+            metadata["temporal"] = temporal.as_metadata()
+            metadata["lifecycle_state"] = "CONFIRMED"
+            outcome = "UPDATE_EXISTING"
         if document.source_type == "calendar_event" and candidate.observation_type == "meeting":
             end_at = document.metadata.get("end_at")
             if isinstance(end_at, str):
