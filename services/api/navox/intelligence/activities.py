@@ -1,3 +1,6 @@
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
 from time import monotonic
 from uuid import UUID
@@ -21,9 +24,48 @@ from navox.db.session import get_session_factory
 from navox.intelligence.extraction import OperationalExtractor
 from navox.intelligence.jobs import SourceWork, WorkspaceWork
 
+HEARTBEAT_INTERVAL_SECONDS = 15
+
+
+@asynccontextmanager
+async def _heartbeat_activity(**identifiers: str) -> AsyncIterator[None]:
+    """Keep slow I/O cancellable; committed database receipts carry retry progress."""
+    if not activity.in_activity():
+        # Direct invocation is useful for application-level tests and local diagnostics.
+        yield
+        return
+
+    started = monotonic()
+
+    def heartbeat() -> None:
+        activity.heartbeat({**identifiers, "elapsed_seconds": int(monotonic() - started)})
+
+    async def keep_alive() -> None:
+        while True:
+            await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+            heartbeat()
+
+    heartbeat()
+    task = asyncio.create_task(keep_alive())
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
 
 @activity.defn
 async def process_source_activity(payload: SourceWork) -> int:
+    async with _heartbeat_activity(
+        connection_id=payload.connection_id,
+        user_id=payload.user_id,
+        workspace_id=payload.workspace_id,
+    ):
+        return await _process_source(payload)
+
+
+async def _process_source(payload: SourceWork) -> int:
     from navox.intelligence.attention import evaluate_workspace_attention
     from navox.intelligence.ingestion import process_connection
 
@@ -115,6 +157,11 @@ async def process_source_activity(payload: SourceWork) -> int:
 
 @activity.defn
 async def refresh_intelligence_activity(payload: WorkspaceWork) -> int:
+    async with _heartbeat_activity(user_id=payload.user_id, workspace_id=payload.workspace_id):
+        return await _refresh_intelligence(payload)
+
+
+async def _refresh_intelligence(payload: WorkspaceWork) -> int:
     from navox.intelligence.attention import evaluate_workspace_attention
     from navox.intelligence.state import reevaluate_commitment
 
@@ -161,6 +208,11 @@ async def intelligence_workspaces_activity() -> list[WorkspaceWork]:
 @activity.defn
 async def pending_intelligence_activity() -> list[SourceWork]:
     """Recover webhook dispatch gaps and repair missed notifications with delta reads."""
+    async with _heartbeat_activity():
+        return await _pending_intelligence()
+
+
+async def _pending_intelligence() -> list[SourceWork]:
     from navox.intelligence.ingestion import renew_source_watch
 
     settings = get_settings()
@@ -190,6 +242,10 @@ async def pending_intelligence_activity() -> list[SourceWork]:
         )
         seen: set[tuple[UUID, str]] = set()
         for event in events:
+            key = (event.connection_id, event.source)
+            if key in seen:
+                # One delta read covers a burst; leave other inbox rows durable for recovery.
+                continue
             pending.append(
                 SourceWork(
                     str(event.connection_id),
@@ -199,7 +255,7 @@ async def pending_intelligence_activity() -> list[SourceWork]:
                     str(event.id),
                 )
             )
-            seen.add((event.connection_id, event.source))
+            seen.add(key)
         connections = list(
             await database.scalars(
                 select(Connection)
