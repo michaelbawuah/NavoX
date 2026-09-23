@@ -45,6 +45,13 @@ The intelligence workflow contains identifiers only. PostgreSQL holds current
 facts; Temporal retries work and refreshes time-dependent state and attention.
 Pause and revoked scopes are checked again inside processing activities.
 
+Briefing requests and lifecycle activities serialize proactive evaluation within
+each workspace before loading preferences or signals. This prevents concurrent
+first use from creating duplicate preferences or colliding on a signal's unique
+fingerprint. The PostgreSQL integration gate exercises eight concurrent callers,
+stable signal IDs, one creation audit per signal, and retained dismissal/snooze
+state. CI captures API, worker, and database logs before cleanup if a gate fails.
+
 ## Display context
 
 Workspace settings persist IANA timezone, 12/24-hour clock, temperature unit and
