@@ -18,6 +18,10 @@ from navox.providers.google_sources import (
 PRIVATE = "private-mailbox-token-project-and-message"
 
 
+async def no_wait(_: float) -> None:
+    pass
+
+
 def provider_error(reason: str, *, structured: bool = False) -> dict[str, Any]:
     entry: dict[str, Any] = {
         "reason": reason,
@@ -45,8 +49,11 @@ def provider_error(reason: str, *, structured: bool = False) -> dict[str, Any]:
         (403, "ACCESS_TOKEN_SCOPE_INSUFFICIENT", True, "google_scope_missing"),
         (403, "rateLimitExceeded", False, "google_rate_limited"),
         (403, "userRateLimitExceeded", False, "google_rate_limited"),
-        (403, "dailyLimitExceeded", False, "google_rate_limited"),
-        (403, "quotaExceeded", False, "google_rate_limited"),
+        (403, "dailyLimitExceeded", False, "google_daily_limit_exceeded"),
+        (403, "quotaExceeded", False, "google_quota_exceeded"),
+        (403, "QUOTA_EXCEEDED", True, "google_quota_exceeded"),
+        (403, "RESOURCE_QUOTA_EXCEEDED", True, "google_quota_exceeded"),
+        (429, "QUOTA_EXCEEDED", True, "google_quota_exceeded"),
         (403, "RATE_LIMIT_EXCEEDED", True, "google_rate_limited"),
         (403, "forbidden", False, "google_permission_denied"),
         (403, PRIVATE, False, "google_permission_denied"),
@@ -58,13 +65,18 @@ def provider_error(reason: str, *, structured: bool = False) -> dict[str, Any]:
 async def test_google_failures_have_fixed_diagnostics_without_provider_details(
     status: int, reason: str, structured: bool, expected: str
 ) -> None:
-    gateway = GoogleSourceGateway()
+    gateway = GoogleSourceGateway(sleep=no_wait)
     response = httpx.Response(status, json=provider_error(reason, structured=structured))
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: response)) as client:
         with pytest.raises(GoogleSourceError) as caught:
             await gateway._get(client, "https://gmail.googleapis.com/" + PRIVATE)
     error = caught.value
-    assert error.diagnostic() == {"code": expected, "http_status": status}
+    diagnostic: dict[str, str | int] = {"code": expected, "http_status": status}
+    if expected in {"google_rate_limited", "google_provider_unavailable"}:
+        diagnostic["retry_after_seconds"] = 60
+    if expected in {"google_daily_limit_exceeded", "google_quota_exceeded"}:
+        diagnostic["retry_after_seconds"] = 300
+    assert error.diagnostic() == diagnostic
     assert isinstance(error, GoogleSourceAuthorizationError) == (status in {401, 403})
     assert PRIVATE not in str(error)
     assert PRIVATE not in json.dumps(error.diagnostic())
