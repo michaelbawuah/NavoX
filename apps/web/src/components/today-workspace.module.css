@@ -125,14 +125,15 @@
 }
 
 .hero {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 2rem;
-  padding-block: clamp(3rem, 8vh, 6rem) 2.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(19rem, 23rem);
+  align-items: start;
+  gap: clamp(2rem, 5vw, 5rem);
+  padding-block: clamp(2.5rem, 6vh, 4.5rem) 2.5rem;
 }
 
-.hero > div:first-child {
+.heroIntro {
+  min-width: 0;
   max-width: 51rem;
 }
 
@@ -168,10 +169,11 @@
 }
 
 .posture {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.7rem;
   min-width: 11rem;
+  margin-top: 1.25rem;
   padding: 0.85rem 1rem;
   border: 1px solid rgb(119 166 255 / 22%);
   border-radius: 0.85rem;
@@ -695,8 +697,8 @@
 
 @media (max-width: 980px) {
   .hero {
-    align-items: start;
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
   }
 
   .topWorkspace {
