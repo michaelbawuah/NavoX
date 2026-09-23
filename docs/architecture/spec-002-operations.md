@@ -16,6 +16,9 @@
 4. Use **Sync Gmail** and **Sync Calendar**. Initial Gmail processing covers the
    last 30 days; Calendar covers primary-calendar events from 30 days ago through
    90 days ahead. Source changes subsequently use provider history/sync cursors.
+   Each source reports queued, running/retrying, completed, or failed independently.
+   Today and the evidence counts refresh after completion. A completed sync with
+   no new commitments is valid; it does not establish that extraction quality is sufficient.
 5. Today shows evidence references, reasons, uncertainty and feedback controls.
    A sent request can become waiting; only evidence of the intended outcome
    completes it. An expired deadline alone never completes a task.
@@ -44,6 +47,26 @@ failure class and latency; raw source text and provider error payloads are exclu
 The intelligence workflow contains identifiers only. PostgreSQL holds current
 facts; Temporal retries work and refreshes time-dependent state and attention.
 Pause and revoked scopes are checked again inside processing activities.
+
+Manual sync status is read from the exact Temporal run through the authenticated
+`GET /api/v1/intelligence/sync/status?workflow_id=...` endpoint. Connection ownership
+is checked before contacting Temporal. Only state, a completed commitment count,
+and allowlisted failure categories are returned; provider prose and workflow
+payloads are never exposed. Polling does not initiate another source read. The UI
+tracks jobs while the page stays open; it does not recover manual job IDs after a
+full reload. Repeated status-service failures pause polling and offer **Check sync
+status**, which checks the same job rather than submitting another one.
+
+For `google_api_disabled`, enable the Gmail API or Google Calendar API in the
+Google Cloud project that owns the OAuth client. For `google_scope_missing` or
+`google_authentication_failed`, reconnect read access. A generic
+`google_permission_denied` can also reflect Google Workspace policy and does not
+prove that reconnecting will resolve it. `google_token_unavailable` can reflect
+missing credential configuration or an unusable refresh token. Rate limits,
+transport failures, and provider outages have separate categories. The failure
+audit retains the legacy error type and adds `metadata.error_diagnostic` with a
+fixed code and optional HTTP status. Older failures may only show the generic
+category; a new sync on the rebuilt API and worker will use the new diagnostics.
 
 Briefing requests and lifecycle activities serialize proactive evaluation within
 each workspace before loading preferences or signals. This prevents concurrent
@@ -189,8 +212,10 @@ the completion record.
 
 1. Open `http://localhost:3000` and find **Connected understanding**. Confirm both
    Gmail and Calendar show **Read access granted** and the agent is not paused.
-2. Use **Sync Gmail** and **Sync Calendar**, then **Refresh Today** after processing
-   finishes. Queue acceptance alone is not proof of completed processing.
+2. Use **Sync Gmail** and **Sync Calendar**, keeping the page open until each source
+   reports completion or a specific failure. Today refreshes after completion;
+   **Refresh Today** remains available. Queue acceptance alone is not proof of
+   completed processing.
 3. Open **Why this is here** on a resulting item and check the source, request or
    meeting, and date against the original Google source. Relevant source content
    is processed by the configured AI provider under the enabled read permission.
@@ -210,6 +235,8 @@ separate checklist items even after this connected-source check passes.
 
 - [Gmail incremental synchronization](https://developers.google.com/workspace/gmail/api/guides/sync)
 - [Calendar incremental synchronization](https://developers.google.com/workspace/calendar/api/guides/sync)
+- [Gmail error reasons](https://developers.google.com/workspace/gmail/api/guides/handle-errors)
+- [Google service error categories](https://docs.cloud.google.com/java/docs/reference/proto-google-common-protos/latest/com.google.api.ErrorReason)
 - [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
 - [Temporal retries](https://docs.temporal.io/develop/python/best-practices/error-handling)
 - [Temporal history rollover](https://docs.temporal.io/develop/python/workflows/continue-as-new)
