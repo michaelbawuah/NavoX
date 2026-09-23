@@ -3,6 +3,8 @@
 import argparse
 import asyncio
 import json
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,7 +19,7 @@ from navox.ai.gateway import AIGateway, StructuredOutputResponse
 from navox.ai.openai_provider import AIProviderError
 from navox.core.settings import Settings
 from navox.intelligence.contracts import SourceDocument
-from navox.intelligence.extraction import OperationalExtractor
+from navox.intelligence.extraction import InvalidOperationalExtraction, OperationalExtractor
 
 
 @dataclass(frozen=True)
@@ -196,14 +198,19 @@ async def run_smoke(
     *,
     mode: Literal["offline_fixture", "live_model_smoke"],
     cases: tuple[SmokeCase, ...] = CASES,
+    progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     report = base_report(mode, cases)
     extractor = OperationalExtractor(gateway)
     for index, case in enumerate(cases):
+        progress_label = f"[{index + 1}/{len(cases)}] {case.id}"
+        if progress is not None:
+            progress(f"{progress_label}: running")
         started = monotonic()
         reason = "validated_expected_observations"
         passed = False
         provider_error: dict[str, Any] | None = None
+        validation_error: dict[str, Any] | None = None
         try:
             async with asyncio.timeout(45):
                 result = await extractor.extract(source_for(case, index))
@@ -215,11 +222,16 @@ async def run_smoke(
             )
             if not passed:
                 reason = "unexpected_observation_types"
+        except InvalidOperationalExtraction as error:
+            passed = case.allow_validation_rejection
+            reason = "untrusted_proposal_rejected" if passed else "extraction_validation_failed"
+            validation_error = error.diagnostic()
         except (ValidationError, ValueError):
             # Rejecting an instruction-bearing proposal is an acceptable safe outcome.
             # Never include validation messages: they may contain source/model text.
             passed = case.allow_validation_rejection
             reason = "untrusted_proposal_rejected" if passed else "extraction_validation_failed"
+            validation_error = {"code": "validation_failed"}
         except TimeoutError:
             reason = "provider_timeout"
             provider_error = {"code": "transport_error"}
@@ -238,6 +250,17 @@ async def run_smoke(
         )
         if not passed:
             report["failed_case_ids"].append(case.id)
+        if validation_error is not None:
+            report["cases"][-1]["validation_error"] = validation_error
+            if not passed:
+                report["next_step"] = (
+                    "Share this sanitized report so the extraction validation failure can be "
+                    "investigated. Keep evidence validation enabled; do not repeatedly rerun "
+                    "the live smoke set without addressing the reported failure."
+                )
+        if progress is not None:
+            outcome = "passed" if passed else "failed"
+            progress(f"{progress_label}: {outcome} ({reason})")
         if provider_error is not None:
             report["cases"][-1]["provider_error"] = provider_error
             report["skipped_case_ids"] = [remaining.id for remaining in cases[index + 1 :]]
@@ -255,6 +278,10 @@ async def run_smoke(
     report["passed_cases"] = report["executed_cases"] - report["failed_cases"]
     report["passed"] = report["failed_cases"] == 0 and report["skipped_cases"] == 0
     return report
+
+
+def _stderr_progress(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -285,10 +312,17 @@ def main(argv: list[str] | None = None) -> int:
             report["skipped_case_ids"] = [case.id for case in cases]
             report["skipped_cases"] = len(cases)
         else:
-            report = asyncio.run(run_smoke(gateway, mode="live_model_smoke", cases=cases))
+            report = asyncio.run(
+                run_smoke(gateway, mode="live_model_smoke", cases=cases, progress=_stderr_progress)
+            )
     elif args.offline:
         report = asyncio.run(
-            run_smoke(AIGateway(OfflineSmokeProvider()), mode="offline_fixture", cases=cases)
+            run_smoke(
+                AIGateway(OfflineSmokeProvider()),
+                mode="offline_fixture",
+                cases=cases,
+                progress=_stderr_progress,
+            )
         )
     else:
         report = base_report("dry_run", cases)
