@@ -25,6 +25,7 @@ from navox.core.settings import Settings
 from navox.db.models import (
     Action,
     Approval,
+    AuditEvent,
     Commitment,
     Connection,
     IncomingEvent,
@@ -32,6 +33,8 @@ from navox.db.models import (
     IntelligenceSourceReceipt,
     ObservationEvidence,
     OperationalObservation,
+    ProactivePreference,
+    ProactiveSignal,
     User,
     Workspace,
     WorkspaceMembership,
@@ -40,6 +43,7 @@ from navox.intelligence.activities import process_source_activity, refresh_intel
 from navox.intelligence.dispatcher import dispatch_feedback, dispatch_source
 from navox.intelligence.feedback import record_feedback
 from navox.intelligence.jobs import SourceWork, WorkspaceWork
+from navox.proactive.engine import aware, evaluate_workspace
 from navox.providers.google_sources import (
     CALENDAR_READ_SCOPE,
     GMAIL_READ_SCOPE,
@@ -310,6 +314,110 @@ async def verify(
             )
 
 
+async def verify_proactive_concurrency(sessions: async_sessionmaker[AsyncSession]) -> None:
+    """Lifecycle activities and the briefing request may arrive simultaneously."""
+    user_id, workspace_id = uuid4(), uuid4()
+    now = datetime.now(UTC)
+    try:
+        async with sessions() as database:
+            database.add_all(
+                [
+                    User(id=user_id, email=f"proactive-ci-{user_id}@example.test"),
+                    Workspace(id=workspace_id, name="Isolated proactive concurrency fixture"),
+                ]
+            )
+            await database.flush()
+            for kind in ("deadline", "meeting", "promise"):
+                database.add(
+                    Commitment(
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        commitment_type=kind,
+                        title=f"Synthetic {kind}",
+                        dedupe_key=f"proactive-concurrency-{kind}",
+                        status="confirmed",
+                        priority=5,
+                        due_at=now + timedelta(hours=1),
+                    )
+                )
+            await database.commit()
+
+        async def concurrently_evaluate() -> list[list[ProactiveSignal]]:
+            start = asyncio.Event()
+
+            async def evaluate() -> list[ProactiveSignal]:
+                async with sessions() as database:
+                    await start.wait()
+                    return await evaluate_workspace(
+                        database,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        timezone_name="UTC",
+                        now=now,
+                    )
+
+            tasks = [asyncio.create_task(evaluate()) for _ in range(8)]
+            start.set()
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True), timeout=30
+            )
+            errors = [result for result in results if isinstance(result, BaseException)]
+            assert not errors, f"Concurrent proactive evaluation failed: {errors!r}"
+            return [result for result in results if isinstance(result, list)]
+
+        # Starting without preferences also exercises concurrent first use.
+        results = await concurrently_evaluate()
+        signal_ids = {signal.id for signal in results[0]}
+        assert len(signal_ids) == 3
+        assert all({signal.id for signal in result} == signal_ids for result in results)
+        dismissed_id, snoozed_id = sorted(signal_ids)[:2]
+        snoozed_until = now + timedelta(hours=4)
+        async with sessions() as database:
+            dismissed = await database.get(ProactiveSignal, dismissed_id)
+            snoozed = await database.get(ProactiveSignal, snoozed_id)
+            assert dismissed is not None and snoozed is not None
+            dismissed.status = "dismissed"
+            dismissed.dismissed_at = now
+            dismissed.tier = "suppressed"
+            snoozed.snoozed_until = snoozed_until
+            snoozed.tier = "suppressed"
+            await database.commit()
+        results = await concurrently_evaluate()
+        for result in results:
+            by_id = {signal.id: signal for signal in result}
+            assert by_id[dismissed_id].status == "dismissed"
+            assert by_id[dismissed_id].tier == "suppressed"
+            saved_until = by_id[snoozed_id].snoozed_until
+            assert saved_until is not None and aware(saved_until) == snoozed_until
+            assert by_id[snoozed_id].tier == "suppressed"
+        async with sessions() as database:
+            for model, expected in ((ProactiveSignal, 3), (ProactivePreference, 1)):
+                assert (
+                    await database.scalar(
+                        select(func.count())
+                        .select_from(model)
+                        .where(model.workspace_id == workspace_id)
+                    )
+                    == expected
+                )
+            assert (
+                await database.scalar(
+                    select(func.count())
+                    .select_from(AuditEvent)
+                    .where(
+                        AuditEvent.workspace_id == workspace_id,
+                        AuditEvent.event_type == "proactive.signal.created",
+                    )
+                )
+                == 3
+            )
+    finally:
+        async with sessions() as database:
+            await database.execute(delete(Workspace).where(Workspace.id == workspace_id))
+            await database.execute(delete(User).where(User.id == user_id))
+            await database.commit()
+
+
 async def run() -> None:
     settings = IntegrationSettings(
         ai_provider="openai",
@@ -322,6 +430,7 @@ async def run() -> None:
     fixtures = ProviderFixtures()
     user_id, workspace_id = uuid4(), uuid4()
     try:
+        await verify_proactive_concurrency(sessions)
         connection_id, events = await seed(sessions, user_id, workspace_id)
         client = await Client.connect(settings.temporal_target)
         with (
@@ -377,6 +486,7 @@ async def run() -> None:
                     "replay_verified": True,
                     "feedback_verified": True,
                     "pause_and_revocation_verified": True,
+                    "proactive_concurrency_verified": True,
                     "live_provider_quality_measured": False,
                 }
             )
