@@ -7,6 +7,7 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
+from navox.ai.errors import AIProviderError
 from navox.ai.gateway import AIGateway, StructuredOutputResponse
 from navox.ai.openai_provider import OpenAIResponsesProvider
 from navox.evaluation.intelligence_smoke import CASES, OfflineSmokeProvider, main, run_smoke
@@ -50,6 +51,110 @@ def test_invalid_live_configuration_is_sanitized_and_fails(
     report = json.loads(text)
     assert report["error"] == "provider_configuration_unavailable"
     assert report["passed"] is False and report["executed_cases"] == 0
+    assert report["skipped_cases"] == len(CASES)
+
+
+@pytest.mark.parametrize("mode", ["--live", "--offline"])
+def test_case_option_executes_only_the_selected_source(
+    mode: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    provider = OfflineSmokeProvider()
+    calls: list[str] = []
+    original_generate = provider.generate_json
+
+    async def generate(**kwargs: Any) -> StructuredOutputResponse:
+        calls.append(json.loads(kwargs["input_text"])["external_id"])
+        return await original_generate(**kwargs)
+
+    monkeypatch.setattr(provider, "generate_json", generate)
+    monkeypatch.setattr(
+        "navox.evaluation.intelligence_smoke.OfflineSmokeProvider", lambda: provider
+    )
+    monkeypatch.setattr("navox.evaluation.intelligence_smoke.Settings", lambda: None)
+    monkeypatch.setattr(
+        "navox.evaluation.intelligence_smoke.build_ai_gateway", lambda _: AIGateway(provider)
+    )
+    assert main([mode, "--case", "explicit-promise"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert calls == ["explicit-promise"]
+    assert report["planned_cases"] == report["executed_cases"] == report["passed_cases"] == 1
+    assert report["skipped_cases"] == report["failed_cases"] == 0
+    assert report["cases"][0]["id"] == "explicit-promise"
+
+
+def test_case_option_rejects_unknown_sources(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["--offline", "--case", "user-supplied-source"])
+    assert error.value.code == 2
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_reports_safe_category_and_skips_remaining_requests() -> None:
+    requests: list[httpx.Request] = []
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            401,
+            json={
+                "error": {
+                    "code": "invalid_api_key",
+                    "message": "private-provider-body secret-key https://private.example/source",
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+        gateway = AIGateway(
+            OpenAIResponsesProvider(api_key=SecretStr("secret-key"), model="fixture", client=client)
+        )
+        report = await run_smoke(gateway, mode="live_model_smoke")
+    assert len(requests) == report["executed_cases"] == report["failed_cases"] == 1
+    assert report["planned_cases"] == len(CASES)
+    assert report["passed_cases"] == 0
+    assert report["passed"] is False
+    assert report["failed_case_ids"] == [CASES[0].id]
+    assert report["skipped_cases"] == len(CASES) - 1
+    assert report["skipped_case_ids"] == [case.id for case in CASES[1:]]
+    assert report["cases"][0]["provider_error"] == {
+        "code": "authentication_failed",
+        "http_status": 401,
+    }
+    assert "OPENAI_API_KEY" in report["next_step"]
+    serialized = json.dumps(report)
+    for sensitive in ("private-provider-body", "secret-key", "private.example", "invalid_api_key"):
+        assert sensitive not in serialized
+
+
+@pytest.mark.asyncio
+async def test_unknown_provider_diagnostic_cannot_expose_untrusted_text() -> None:
+    class UnsafeErrorProvider:
+        async def generate_json(self, **kwargs: Any) -> StructuredOutputResponse:
+            raise AIProviderError(
+                "private exception content",
+                code="private provider code",
+                http_status=999,
+            )
+
+    report = await run_smoke(AIGateway(UnsafeErrorProvider()), mode="live_model_smoke")
+    assert report["executed_cases"] == 1
+    assert report["cases"][0]["provider_error"] == {"code": "provider_error"}
+    assert "private" not in json.dumps(report)
+
+
+@pytest.mark.asyncio
+async def test_timeout_skips_remaining_cases() -> None:
+    class TimeoutProvider:
+        async def generate_json(self, **kwargs: Any) -> StructuredOutputResponse:
+            raise TimeoutError("private network details")
+
+    report = await run_smoke(AIGateway(TimeoutProvider()), mode="live_model_smoke")
+    assert report["executed_cases"] == report["failed_cases"] == 1
+    assert report["skipped_cases"] == len(CASES) - 1
+    assert report["cases"][0]["reason"] == "provider_timeout"
+    assert report["cases"][0]["provider_error"] == {"code": "transport_error"}
+    assert "private network details" not in json.dumps(report)
 
 
 @pytest.mark.asyncio
