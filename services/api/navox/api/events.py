@@ -151,6 +151,15 @@ async def authenticated_google_channel_subscription(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid Google notification channel",
         )
+    expires_at = subscription.expires_at
+    if expires_at is not None:
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if expires_at <= datetime.now(UTC):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Expired Google notification channel",
+            )
     if subscription.resource_id is not None and not hmac.compare_digest(
         subscription.resource_id, resource_id
     ):
