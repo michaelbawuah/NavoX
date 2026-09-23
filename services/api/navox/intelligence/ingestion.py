@@ -6,7 +6,7 @@ from secrets import token_urlsafe
 from uuid import UUID, uuid4
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.core.settings import Settings
@@ -15,11 +15,13 @@ from navox.db.models import (
     CommitmentSource,
     Connection,
     IntelligenceCursor,
+    IntelligenceSourceReceipt,
     ProviderEventSubscription,
     User,
     WorkspaceMembership,
 )
 from navox.intelligence.extraction import (
+    InvalidOperationalExtraction,
     OperationalExtraction,
     OperationalExtractionResult,
     OperationalExtractor,
@@ -72,10 +74,12 @@ async def process_connection(
     settings: Settings,
     extractor: OperationalExtractor,
 ) -> list[UUID]:
-    """Process one complete batch atomically; the caller commits or rolls back.
+    """Checkpoint each source revision; the caller commits the final cursor.
 
-    A locked connection serializes ingestion and permission revocation. Any read,
-    extraction, or resolution failure leaves the old cursor intact on rollback.
+    Connection locks serialize each checkpoint with ingestion and revocation.
+    Transient failures retain the old cursor, but accepted revisions survive and
+    are skipped on retry. Invalid proposals are recorded without their content
+    and cannot indefinitely block unrelated mail. Use a dedicated session.
     """
     connection, user = await authorized_connection(database, connection_id, source)
     token = await access_token_for_connection(database, connection=connection, settings=settings)
@@ -88,13 +92,14 @@ async def process_connection(
             IntelligenceCursor.source == source,
         )
     )
+    initial_cursor = cursor.cursor if cursor else None
     gateway = GoogleSourceGateway()
     batch = await gateway.fetch(
         source=source,
         access_token=token,
         workspace_id=connection.workspace_id,
         connection_id=connection_id,
-        cursor=cursor.cursor if cursor else None,
+        cursor=initial_cursor,
     )
     documents = list(batch.documents)
     if batch.reset:
@@ -131,34 +136,131 @@ async def process_connection(
     # recovered outside the bootstrap window during expired-cursor reconciliation.
     documents.sort(key=lambda document: (document.occurred_at, str(document.id)))
     commitment_ids: set[UUID] = set()
+    skipped = rejected = 0
     for document in documents:
         connection, user = await authorized_connection(database, connection_id, source)
-        if document.metadata.get("status") in {"cancelled", "deleted"}:
+        if document.workspace_id != connection.workspace_id or document.provider != "google":
+            raise GoogleSourceAuthorizationError("Source does not belong to this workspace")
+        source_hash = source_document_hash(document)
+        tombstone = document.metadata.get("status") in {"cancelled", "deleted"}
+        extractor_version = "provider-tombstone.v1" if tombstone else extractor.extractor_version
+        latest_revision = await database.scalar(
+            select(func.max(IntelligenceSourceReceipt.source_occurred_at)).where(
+                IntelligenceSourceReceipt.connection_id == connection_id,
+                IntelligenceSourceReceipt.source == source,
+                IntelligenceSourceReceipt.external_id == document.external_id,
+            )
+        )
+        if latest_revision is not None:
+            if latest_revision.tzinfo is None:
+                latest_revision = latest_revision.replace(tzinfo=UTC)
+            if document.occurred_at < latest_revision:
+                # Empty/rejected/deleted revisions have no observation evidence,
+                # but still prevent an older overlapping batch resurrecting facts.
+                skipped += 1
+                await database.commit()
+                continue
+        receipt = await database.scalar(
+            select(IntelligenceSourceReceipt).where(
+                IntelligenceSourceReceipt.connection_id == connection_id,
+                IntelligenceSourceReceipt.source == source,
+                IntelligenceSourceReceipt.external_id == document.external_id,
+                IntelligenceSourceReceipt.source_hash == source_hash,
+                IntelligenceSourceReceipt.extractor_version == extractor_version,
+            )
+        )
+        if receipt is not None:
+            commitment_ids.update(UUID(identifier) for identifier in receipt.commitment_ids)
+            skipped += 1
+            await database.commit()
+            continue
+        if tombstone:
             result = OperationalExtractionResult(
                 extraction=OperationalExtraction(),
                 extractor_version="provider-tombstone.v1",
                 model_provider="deterministic",
                 model_name="provider-state",
-                source_hash=source_document_hash(document),
+                source_hash=source_hash,
             )
         else:
-            result = await extractor.extract(document)
+            try:
+                result = await extractor.extract(document)
+            except InvalidOperationalExtraction:
+                await authorized_connection(database, connection_id, source)
+                database.add(
+                    IntelligenceSourceReceipt(
+                        connection_id=connection_id,
+                        source=source,
+                        external_id=document.external_id,
+                        source_hash=source_hash,
+                        extractor_version=extractor_version,
+                        outcome="rejected",
+                        source_occurred_at=document.occurred_at,
+                        commitment_ids=[],
+                    )
+                )
+                database.add(
+                    AuditEvent(
+                        user_id=connection.user_id,
+                        workspace_id=connection.workspace_id,
+                        event_type="intelligence.extraction.rejected",
+                        actor_type="system",
+                        entity_type="connection",
+                        entity_id=connection_id,
+                        event_metadata={
+                            "source": source,
+                            "source_hash": source_hash,
+                            "extractor_version": extractor_version,
+                            "reason": "invalid_model_proposal",
+                        },
+                    )
+                )
+                await database.commit()
+                rejected += 1
+                continue
         # Recheck after a slow provider/model call before applying any proposal.
         connection, user = await authorized_connection(database, connection_id, source)
-        commitment_ids.update(
-            await resolve_extraction(
-                database,
-                connection=connection,
-                document=document,
-                result=result,
-                timezone_name=user.timezone,
+        resolved_ids = await resolve_extraction(
+            database,
+            connection=connection,
+            document=document,
+            result=result,
+            timezone_name=user.timezone,
+        )
+        commitment_ids.update(resolved_ids)
+        database.add(
+            IntelligenceSourceReceipt(
+                connection_id=connection_id,
+                source=source,
+                external_id=document.external_id,
+                source_hash=source_hash,
+                extractor_version=extractor_version,
+                outcome="processed",
+                source_occurred_at=document.occurred_at,
+                commitment_ids=[str(identifier) for identifier in resolved_ids],
             )
         )
+        # The receipt and the evidence/state it acknowledges commit together.
+        await database.commit()
+
+    connection, _ = await authorized_connection(database, connection_id, source)
+    cursor = await database.scalar(
+        select(IntelligenceCursor)
+        .where(
+            IntelligenceCursor.connection_id == connection_id,
+            IntelligenceCursor.source == source,
+        )
+        .execution_options(populate_existing=True)
+    )
+    # Another sync may have advanced the opaque cursor between checkpoints.
+    # Never overwrite its progress with the older snapshot's replacement token.
+    cursor_advanced = (cursor.cursor if cursor else None) == initial_cursor
     if cursor is None:
         cursor = IntelligenceCursor(connection_id=connection_id, source=source)
         database.add(cursor)
-    cursor.cursor = batch.cursor
-    cursor.updated_at = datetime.now(UTC)
+    if cursor_advanced:
+        cursor.cursor = batch.cursor
+        cursor.updated_at = datetime.now(UTC)
     database.add(
         AuditEvent(
             user_id=connection.user_id,
@@ -172,6 +274,9 @@ async def process_connection(
                 "documents": len(documents),
                 "commitments": len(commitment_ids),
                 "cursor_reset": batch.reset,
+                "cursor_advanced": cursor_advanced,
+                "skipped_revisions": skipped,
+                "rejected_revisions": rejected,
             },
         )
     )
