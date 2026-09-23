@@ -729,15 +729,6 @@ export function TodayWorkspace({
     );
   }
 
-  const generatedLabel = today
-    ? new Intl.DateTimeFormat(undefined, {
-        weekday: "long",
-        month: "short",
-        day: "numeric",
-        timeZone: timezone,
-      }).format(new Date(today.generated_at))
-    : "Today";
-
   return (
     <main className={styles.workspace}>
       <div className={styles.glowOne} />
@@ -754,7 +745,6 @@ export function TodayWorkspace({
         </a>
         <div className={styles.topbarMeta}>
           <span>{account.workspace.name}</span>
-          <span>{timezone}</span>
           <button onClick={() => void onSignOut()} type="button">
             Sign out
           </button>
@@ -762,8 +752,8 @@ export function TodayWorkspace({
       </header>
 
       <section className={styles.hero}>
-        <div>
-          <p className={styles.kicker}>Today · {generatedLabel}</p>
+        <div className={styles.heroIntro}>
+          <p className={styles.kicker}>Your day, in focus</p>
           <h1>
             {greeting(timezone)}, {firstName}.
             <span className={styles.heroAccent}>
@@ -775,19 +765,20 @@ export function TodayWorkspace({
             workspace. Stay informed, review the evidence, and decide what
             happens next.
           </p>
-        </div>
-        <div className={styles.posture}>
-          <span className={styles.liveDot} />
-          <div>
-            <small>Operational state</small>
-            <strong>
-              {loadingToday ? "Syncing" : `${String(today?.total ?? 0)} active`}
-            </strong>
+          <div className={styles.posture}>
+            <span className={styles.liveDot} aria-hidden="true" />
+            <div>
+              <small>Operational state</small>
+              <strong>
+                {loadingToday
+                  ? "Syncing"
+                  : `${String(today?.total ?? 0)} active`}
+              </strong>
+            </div>
           </div>
         </div>
+        <WorkspaceContext timezone={timezone} onTimezoneChange={setTimezone} />
       </section>
-
-      <WorkspaceContext timezone={timezone} onTimezoneChange={setTimezone} />
 
       {(workspaceError || workspaceMessage || message) && (
         <div
