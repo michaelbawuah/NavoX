@@ -68,6 +68,29 @@ audit retains the legacy error type and adds `metadata.error_diagnostic` with a
 fixed code and optional HTTP status. Older failures may only show the generic
 category; a new sync on the rebuilt API and worker will use the new diagnostics.
 
+Gmail reads are spaced at least 250 ms apart within each source gateway. Temporary
+rate-limit and server errors retry the failed GET (at most three HTTP attempts)
+with bounded exponential backoff and jitter; they do not immediately restart the
+entire fetched batch. Valid `Retry-After` seconds or HTTP dates are honored within
+a one-day bound. Inline retries have a total backoff budget of 60 seconds per GET;
+longer delays are handed back to the durable workflow. Pacing is local to the
+gateway, not a global limiter across independent deployments or other Gmail apps.
+
+Exhausted Google rate-limit, quota, and server errors record a source-specific `retry_not_before` in the
+failure audit. Manual sync, source activities, and background reconciliation
+check this persisted cooldown before another provider request. Transient limits and server errors
+use at least the supplied retry delay (60 seconds by default); explicit daily and
+general quota errors stop activity retries and use a five-minute cooldown when
+Google provides no retry delay. These defaults are backoff choices, not claims
+about when Google's quota resets. A blocked check does not extend the cooldown.
+Calendar is not blocked by a Gmail-only cooldown.
+
+`google_daily_limit_exceeded` identifies an explicit daily project limit;
+`google_quota_exceeded` identifies another quota cap. Check the Gmail API's quota
+metric and configured limit in the owning Google Cloud project. The app does not
+raise quotas or enable billing. `google_rate_limited` remains the temporary rate
+category (including otherwise unspecified HTTP 429 responses).
+
 Briefing requests and lifecycle activities serialize proactive evaluation within
 each workspace before loading preferences or signals. This prevents concurrent
 first use from creating duplicate preferences or colliding on a signal's unique
@@ -236,6 +259,7 @@ separate checklist items even after this connected-source check passes.
 - [Gmail incremental synchronization](https://developers.google.com/workspace/gmail/api/guides/sync)
 - [Calendar incremental synchronization](https://developers.google.com/workspace/calendar/api/guides/sync)
 - [Gmail error reasons](https://developers.google.com/workspace/gmail/api/guides/handle-errors)
+- [Gmail per-method costs and quotas](https://developers.google.com/workspace/gmail/api/reference/quota)
 - [Google service error categories](https://docs.cloud.google.com/java/docs/reference/proto-google-common-protos/latest/com.google.api.ErrorReason)
 - [OpenAI structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
 - [Temporal retries](https://docs.temporal.io/develop/python/best-practices/error-handling)
