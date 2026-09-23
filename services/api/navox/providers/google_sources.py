@@ -9,6 +9,7 @@ import base64
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from email.utils import getaddresses
+from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import quote
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -72,24 +73,117 @@ def _identity(email: Any, name: Any = None) -> SourceIdentity | None:
     )
 
 
-def _plain_text(part: dict[str, Any], *, depth: int = 0) -> str:
-    if depth > 12 or part.get("filename"):
+class _HTMLText(HTMLParser):
+    """Extract inert, bounded visible text without loading remote resources."""
+
+    _ignored = {"head", "script", "style", "template", "noscript", "svg", "iframe", "object"}
+    _blocks = {
+        "address",
+        "article",
+        "blockquote",
+        "br",
+        "div",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "li",
+        "p",
+        "pre",
+        "section",
+        "table",
+        "td",
+        "th",
+        "tr",
+    }
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self.length = 0
+        self.ignored_depth = 0
+
+    def _append(self, text: str) -> None:
+        text = text[: MAX_CONTENT_CHARS - self.length]
+        self.parts.append(text)
+        self.length += len(text)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self._ignored:
+            self.ignored_depth += 1
+        elif not self.ignored_depth and tag in self._blocks:
+            self._append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._ignored:
+            self.ignored_depth = max(0, self.ignored_depth - 1)
+        elif not self.ignored_depth and tag in self._blocks:
+            self._append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self.ignored_depth:
+            self._append(data)
+
+
+def _decode_body(encoded: str) -> str:
+    # Bound decoding before allocating the decoded body. The allowance covers
+    # HTML markup and multibyte UTF-8; final canonical content remains 32k chars.
+    encoded = encoded[: 4 * ((MAX_CONTENT_CHARS * 4 + 2) // 3)]
+    try:
+        return base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode(
+            "utf-8", errors="replace"
+        )
+    except ValueError as error:
+        raise GoogleSourceError("Invalid Gmail text encoding") from error
+
+
+def _plain_text(part: dict[str, Any], *, depth: int = 0, allow_html: bool = True) -> str:
+    headers = part.get("headers", [])
+    attached = isinstance(headers, list) and any(
+        isinstance(header, dict)
+        and str(header.get("name", "")).casefold() == "content-disposition"
+        and str(header.get("value", "")).casefold().split(";", 1)[0].strip() == "attachment"
+        for header in headers
+    )
+    if depth > 12 or part.get("filename") or attached:
         return ""
     body = part.get("body", {})
-    if part.get("mimeType") == "text/plain" and isinstance(body, dict):
+    mime_type = str(part.get("mimeType", "")).casefold()
+    if mime_type in {"text/plain", "text/html"} and isinstance(body, dict):
         encoded = body.get("data")
         if isinstance(encoded, str):
-            try:
-                return base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode(
-                    "utf-8", errors="replace"
+            if mime_type == "text/plain":
+                return _decode_body(encoded)[:MAX_CONTENT_CHARS]
+            if allow_html:
+                parser = _HTMLText()
+                parser.feed(_decode_body(encoded))
+                parser.close()
+                return "\n".join(
+                    line
+                    for part in "".join(parser.parts).splitlines()
+                    if (line := " ".join(part.split()))
                 )[:MAX_CONTENT_CHARS]
-            except ValueError as error:
-                raise GoogleSourceError("Invalid Gmail text encoding") from error
+            return ""
     parts = part.get("parts", [])
     if not isinstance(parts, list):
         return ""
+    if mime_type == "multipart/alternative":
+        # Represent alternative bodies only once; prefer original plaintext even
+        # when a rich HTML alternative appears earlier in the provider payload.
+        for html_allowed in (False, True) if allow_html else (False,):
+            for child in parts:
+                if isinstance(child, dict):
+                    text = _plain_text(child, depth=depth + 1, allow_html=html_allowed)
+                    if text.strip():
+                        return text
+        return ""
     return "\n".join(
-        _plain_text(child, depth=depth + 1) for child in parts if isinstance(child, dict)
+        _plain_text(child, depth=depth + 1, allow_html=allow_html)
+        for child in parts
+        if isinstance(child, dict)
     )[:MAX_CONTENT_CHARS]
 
 
