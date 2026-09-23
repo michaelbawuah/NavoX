@@ -202,6 +202,45 @@ describe("source sync monitoring", () => {
     expect(onTerminal).not.toHaveBeenCalled();
     stop();
   });
+
+  it("retains a numeric cooldown but ignores invalid provider fields", async () => {
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce(
+        progress("retrying", {
+          error: { code: "google_rate_limited", retry_after_seconds: 60 },
+        }),
+      )
+      .mockResolvedValueOnce({
+        ...progress("retrying"),
+        error: {
+          code: "google_rate_limited",
+          retry_after_seconds: "private text",
+        },
+      })
+      .mockResolvedValue(
+        progress("failed", {
+          error: { code: "google_quota_exceeded", retry_after_seconds: -10 },
+        }),
+      );
+    const onProgress = vi.fn();
+    const stop = monitorSync({
+      workflowId,
+      read,
+      onProgress,
+      onTerminal: vi.fn(),
+      onPause: vi.fn(),
+    });
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(onProgress.mock.calls[0][0].error.retry_after_seconds).toBe(60);
+    expect(onProgress.mock.calls[1][0].error).toEqual({
+      code: "google_rate_limited",
+    });
+    expect(onProgress.mock.calls[2][0].error).toEqual({
+      code: "google_quota_exceeded",
+    });
+    stop();
+  });
 });
 
 describe("safe sync messages", () => {
@@ -241,5 +280,43 @@ describe("safe sync messages", () => {
     expect(syncErrorHelp("gmail", "google_scope_missing").message).toContain(
       "Reconnect read access",
     );
+  });
+
+  it("distinguishes daily limits from generic quota and temporary rate limits", () => {
+    const daily = syncErrorHelp("gmail", "google_daily_limit_exceeded");
+    const quota = syncErrorHelp("calendar", "google_quota_exceeded");
+    expect(daily.message).toContain("Gmail API quotas");
+    expect(daily.message).toContain(
+      "limit resets or the configuration is corrected",
+    );
+    expect(quota.message).toContain(
+      "Google Calendar API quota metric and limit",
+    );
+    expect(quota.message).not.toContain("Wait a little");
+    expect(`${daily.message} ${quota.message}`).not.toMatch(
+      /pay|billing|raise/i,
+    );
+    expect(daily.reconnect).toBe(false);
+    expect(quota.reconnect).toBe(false);
+    expect(syncErrorHelp("gmail", "google_rate_limited").message).toContain(
+      "Wait a little",
+    );
+  });
+
+  it("describes a scheduled cooldown only while the job is retrying", () => {
+    const error = { code: "google_rate_limited", retry_after_seconds: 60 };
+    expect(syncProgressMessage(progress("retrying", { error }))).toContain(
+      "cooldown before the next attempt",
+    );
+    expect(syncProgressMessage(progress("failed", { error }))).toBe(
+      "Sync failed.",
+    );
+    expect(
+      syncProgressMessage(
+        progress("retrying", {
+          error: { code: "google_rate_limited" },
+        }),
+      ),
+    ).not.toContain("cooldown");
   });
 });
