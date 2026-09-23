@@ -155,6 +155,50 @@ async def test_city_weather_uses_only_fixed_hosts_and_requested_units():
 
 
 @pytest.mark.asyncio
+async def test_city_weather_recovers_from_an_unrecognized_region_suffix():
+    geocode_queries: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "geocoding-api.open-meteo.com":
+            query = str(request.url.params["name"])
+            geocode_queries.append(query)
+            if query == "Ithaca, Newyork":
+                return httpx.Response(200, json={"results": []})
+            assert query == "Ithaca"
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {
+                            "name": "Ithaca",
+                            "admin1": "New York",
+                            "country": "United States",
+                            "latitude": 42.44,
+                            "longitude": -76.5,
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "current": {
+                    "time": "2026-09-22T12:00",
+                    "temperature_2m": 18.0,
+                    "weather_code": 0,
+                }
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await city_weather("Ithaca,Newyork", "celsius", client)
+
+    assert geocode_queries == ["Ithaca, Newyork", "Ithaca"]
+    assert result.status == "ready"
+    assert result.city == "Ithaca, New York, United States"
+
+
+@pytest.mark.asyncio
 async def test_processing_failure_keeps_outbox_and_does_not_leak_source(runtime_env, monkeypatch):
     import navox.intelligence.ingestion as ingestion
 
