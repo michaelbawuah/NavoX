@@ -5,9 +5,11 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
+from navox.ai.errors import AIProviderError, AIProviderRejectedOutput
 from navox.intelligence.contracts import SourceDocument
 from navox.intelligence.extraction import (
     OPERATIONAL_EXTRACTION_SCHEMA_VERSION,
+    InvalidOperationalExtraction,
     ModelExtractionResponse,
     OperationalExtraction,
     OperationalExtractor,
@@ -164,6 +166,23 @@ async def test_operational_extractor_validates_gateway_output_and_attaches_prove
     assert result.extractor_version == OPERATIONAL_EXTRACTION_SCHEMA_VERSION
     assert len(result.source_hash) == 64
     assert result.extraction.observations[0].object_text == "the budget"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("permanent", [False, True])
+async def test_provider_rejection_is_quarantined_but_transport_failure_remains_retryable(
+    permanent: bool,
+) -> None:
+    class RejectedGateway:
+        async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
+            error_type = AIProviderRejectedOutput if permanent else AIProviderError
+            raise error_type("private provider diagnostic")
+
+    error_type = InvalidOperationalExtraction if permanent else AIProviderError
+    with pytest.raises(error_type) as caught:
+        await OperationalExtractor(RejectedGateway()).extract(source_document())
+    if permanent:
+        assert "private provider diagnostic" not in str(caught.value)
 
 
 def test_source_hash_changes_for_temporal_or_identity_context_but_not_retrieval() -> None:
