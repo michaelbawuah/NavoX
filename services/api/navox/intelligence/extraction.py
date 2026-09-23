@@ -256,9 +256,19 @@ class OperationalExtractor:
         self.extractor_version = extractor_version
 
     async def extract(self, document: SourceDocument) -> OperationalExtractionResult:
-        response = await self.gateway.extract_operational(document)
-        extraction = OperationalExtraction.model_validate(response.output)
-        extraction.validate_evidence(document)
+        from navox.ai.errors import AIProviderRejectedOutput
+
+        try:
+            response = await self.gateway.extract_operational(document)
+        except AIProviderRejectedOutput:
+            raise InvalidOperationalExtraction("Model proposal failed validation") from None
+        try:
+            extraction = OperationalExtraction.model_validate(response.output)
+            extraction.validate_evidence(document)
+        except ValueError:
+            # Keep untrusted model/source content out of durable failure records.
+            # Provider/network failures remain retryable instead of quarantined.
+            raise InvalidOperationalExtraction("Model proposal failed validation") from None
         return OperationalExtractionResult(
             extraction=extraction,
             extractor_version=self.extractor_version,
@@ -266,6 +276,10 @@ class OperationalExtractor:
             model_name=response.model,
             source_hash=source_document_hash(document),
         )
+
+
+class InvalidOperationalExtraction(ValueError):
+    """A returned model proposal failed the schema or evidence boundary."""
 
 
 def source_document_hash(document: SourceDocument) -> str:
