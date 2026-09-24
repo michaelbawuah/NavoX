@@ -180,6 +180,14 @@ async def ensure_google_connector_connection(
 
     if mirror.workspace_id != legacy.workspace_id or mirror.user_id != legacy.user_id:
         raise ValueError("Legacy Google connection mirror changed workspace ownership")
+    # Keep a paused connection's auth failure distinct from an explicit pause.
+    # A successful OAuth exchange may clear the auth failure, but not the pause.
+    error_code = _legacy_error_code(legacy)
+    if mirror.paused_at is not None and legacy.status not in {"disconnected", "revoked"}:
+        if legacy.status == "paused" and error_code is None:
+            error_code = mirror.last_error_code
+        legacy.status = "paused"
+        health = "PAUSED"
     mirror.connector_definition_id = definition.id
     mirror.external_account_id = legacy.external_account_id
     mirror.display_name = legacy.external_email
@@ -188,7 +196,7 @@ async def ensure_google_connector_connection(
     mirror.authorized_capabilities = capabilities
     mirror.provider_capabilities = capabilities
     mirror.credential_reference = legacy.credential_reference
-    mirror.last_error_code = _legacy_error_code(legacy)
+    mirror.last_error_code = error_code
     if health == "CONNECTED":
         mirror.last_healthy_at = datetime.now(UTC)
     await database.flush()

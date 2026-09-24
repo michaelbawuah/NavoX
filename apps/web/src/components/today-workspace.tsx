@@ -15,6 +15,7 @@ import {
   todaySections,
 } from "../lib/today-sections";
 import { ApprovalPanel } from "./approval-panel";
+import { ConnectionsPanel } from "./connections-panel";
 import { DismissCommitment } from "./dismiss-commitment";
 import {
   IntelligenceControls,
@@ -139,10 +140,7 @@ interface TodayWorkspaceProps {
   account: Account;
   connections: GoogleConnection[];
   message: string;
-  isConnectingGoogle: boolean;
-  checkingConnectionId: string | null;
-  onConnectGoogle: () => Promise<void>;
-  onCheckGoogle: (connectionId: string) => Promise<void>;
+  onConnectionsChanged: () => Promise<void>;
   onSignOut: () => Promise<void>;
 }
 
@@ -263,10 +261,7 @@ export function TodayWorkspace({
   account,
   connections,
   message,
-  isConnectingGoogle,
-  checkingConnectionId,
-  onConnectGoogle,
-  onCheckGoogle,
+  onConnectionsChanged,
   onSignOut,
 }: TodayWorkspaceProps) {
   const [selectedFilter, setFilter] = useState<TodayFilter>("Needs Attention");
@@ -1132,53 +1127,19 @@ export function TodayWorkspace({
             </details>
           </aside>
         </div>
+        <ConnectionsPanel
+          agentPaused={agentPaused}
+          onConnectionsChanged={onConnectionsChanged}
+        />
         <details className={styles.toolDisclosure}>
-          <summary>Connections & sync</summary>
-          <div className={styles.dashboardGrid}>
-            <IntelligenceControls
-              connections={connections}
-              paused={agentPaused}
-              onRefresh={refreshToday}
-            />
-            <section className={styles.controlCard}>
-              <div className={styles.controlHeading}>
-                <p>Connections</p>
-                <span className={styles.controlMeta}>Least privilege</span>
-              </div>
-              <h2>Google</h2>
-              <p className={styles.mutedCopy}>
-                Manage your Google connection here. Choose read access in
-                Connected understanding; email sending requires its own
-                permission and approval.
-              </p>
-              {connections.length === 0 ? (
-                <button
-                  disabled={isConnectingGoogle}
-                  onClick={() => void onConnectGoogle()}
-                  type="button"
-                >
-                  {isConnectingGoogle ? "Opening Google…" : "Connect Google"}
-                </button>
-              ) : (
-                <div className={styles.connectionList}>
-                  {connections.map((connection) => (
-                    <div key={connection.id}>
-                      <span>{connection.status.replaceAll("_", " ")}</span>
-                      <button
-                        disabled={checkingConnectionId === connection.id}
-                        onClick={() => void onCheckGoogle(connection.id)}
-                        type="button"
-                      >
-                        {checkingConnectionId === connection.id
-                          ? "Checking…"
-                          : "Check"}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          </div>
+          <summary>
+            Connected understanding · read access and advanced sync
+          </summary>
+          <IntelligenceControls
+            connections={connections}
+            paused={agentPaused}
+            onRefresh={refreshToday}
+          />
         </details>
       </div>
     </main>

@@ -376,7 +376,7 @@ async def complete_google_authorization(
     except GoogleOAuthProviderError:
         return connection_redirect(settings, "failed")
 
-    if attempt.purpose in {"gmail_send", "intelligence_read"}:
+    if attempt.purpose in {"gmail_send", "intelligence_read", "reconnect"}:
         connection = await database.scalar(
             select(Connection).where(
                 Connection.id == attempt.connection_id,
@@ -393,8 +393,14 @@ async def complete_google_authorization(
         required_scopes = (
             {GOOGLE_GMAIL_SEND_SCOPE}
             if attempt.purpose == "gmail_send"
+            else set(attempt.requested_scopes)
+            if attempt.purpose == "reconnect"
             else {GMAIL_READ_SCOPE, CALENDAR_READ_SCOPE}
         )
+        if attempt.purpose == "reconnect" and set(returned_scopes) != required_scopes:
+            return connection_redirect(settings, "scope_mismatch")
+        if connection.status in {"disconnected", "revoked"}:
+            return connection_redirect(settings, "failed")
         if not required_scopes.issubset(returned_scopes):
             return connection_redirect(settings, "scope_mismatch")
         if not set(returned_scopes).issubset(GOOGLE_ALLOWED_SCOPES):
@@ -467,7 +473,11 @@ async def complete_google_authorization(
 
         await database.commit()
         outcome = (
-            "gmail_send_enabled" if attempt.purpose == "gmail_send" else "intelligence_enabled"
+            "gmail_send_enabled"
+            if attempt.purpose == "gmail_send"
+            else "reconnected"
+            if attempt.purpose == "reconnect"
+            else "intelligence_enabled"
         )
         return connection_redirect(settings, outcome)
 
@@ -617,10 +627,15 @@ async def check_google_connection_health(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Google connection not found",
         )
+    if connection.status in {"paused", "disconnected", "revoked"}:
+        return ConnectionHealthResponse(
+            **response_from_connection(connection).model_dump(), healthy=False
+        )
     if connection.credential_reference is None:
         connection.status = "needs_reauthorization"
         connection.last_error = "credential_unavailable"
         connection.last_checked_at = datetime.now(UTC)
+        await ensure_google_connector_connection(database, connection)
         await database.commit()
         return ConnectionHealthResponse(
             **response_from_connection(connection).model_dump(),
@@ -632,6 +647,7 @@ async def check_google_connection_health(
         connection.status = "needs_reauthorization"
         connection.last_error = "credential_unavailable"
         connection.last_checked_at = datetime.now(UTC)
+        await ensure_google_connector_connection(database, connection)
         await database.commit()
         return ConnectionHealthResponse(
             **response_from_connection(connection).model_dump(),
@@ -652,15 +668,17 @@ async def check_google_connection_health(
         connection.status = "active"
         connection.last_error = None
         connection.last_checked_at = datetime.now(UTC)
+        await ensure_google_connector_connection(database, connection)
         await database.commit()
         return ConnectionHealthResponse(
             **response_from_connection(connection).model_dump(),
-            healthy=True,
+            healthy=connection.status == "active",
         )
     except (CredentialVaultError, GoogleOAuthProviderError):
         connection.status = "needs_reauthorization"
         connection.last_error = "refresh_failed"
         connection.last_checked_at = datetime.now(UTC)
+        await ensure_google_connector_connection(database, connection)
         await database.commit()
         return ConnectionHealthResponse(
             **response_from_connection(connection).model_dump(),

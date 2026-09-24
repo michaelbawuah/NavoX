@@ -761,3 +761,61 @@ async def test_competing_source_activity_defers_without_provider_cooldown(
         event = await db.get(IncomingEvent, event_id)
         assert event.intelligence_status == "completed"
         assert await db.scalar(select(func.count()).select_from(IntelligenceSourceReceipt)) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("during", ["provider", "model"])
+@pytest.mark.parametrize("resume_immediately", [False, True])
+async def test_management_pause_fences_inflight_source_even_after_immediate_resume(
+    system, during, resume_immediately
+):
+    from navox.connectors.management import transition_connection
+
+    # The legacy fixture mocks token access and has no credential row. Management
+    # must see an existing credential before resume is allowed to restore active.
+    async with system.factory() as db:
+        credential = ConnectionCredential(encrypted_refresh_token="synthetic-sealed-token")
+        db.add(credential)
+        await db.flush()
+        account_row = await db.get(Connection, system.connection_id)
+        account_row.credential_reference = credential.id
+        await db.commit()
+
+    changed = False
+
+    async def pause_once(_):
+        nonlocal changed
+        if changed:
+            return
+        changed = True
+        for operation in ["pause", "resume"] if resume_immediately else ["pause"]:
+            async with system.factory() as db:
+                await transition_connection(
+                    db,
+                    workspace_id=system.workspace_id,
+                    user_id=system.user_id,
+                    connection_id=system.connection_id,
+                    operation=operation,
+                    request_id=uuid4(),
+                )
+
+    setattr(system, f"{during}_hook", pause_once)
+    with pytest.raises(GoogleSourceError):
+        await system.sync()
+    async with system.factory() as db:
+        row = await db.get(ConnectorConnection, system.connector_id)
+        assert row.sync_lease_token is None
+        assert row.sync_generation >= 2
+        assert (await db.get(Connection, system.connection_id)).status == (
+            "active" if resume_immediately else "paused"
+        )
+        assert await db.scalar(select(func.count()).select_from(IntelligenceSourceReceipt)) == 0
+        assert await db.scalar(select(func.count()).select_from(ConnectorResource)) == 0
+        assert await db.scalar(select(IntelligenceCursor.cursor)) == "old"
+    # A new explicit sync after resume can continue safely; old attempts cannot.
+    if resume_immediately:
+        setattr(system, f"{during}_hook", None)
+        await system.expire_backoff()
+        await system.sync()
+        async with system.factory() as db:
+            assert await db.scalar(select(func.count()).select_from(IntelligenceSourceReceipt)) == 2
