@@ -58,8 +58,9 @@ quarantined v1 receipts are honored for unchanged source revisions, so this upgr
 does not trigger a mailbox replay or retry already completed work. Ignored new
 revisions receive normal completion receipts and are skipped on retry. Existing
 saved cards are not bulk-deleted or silently reclassified by a rebuild; the owner
-can use **Not a task** on unwanted active AI-created items. Model-backed relevance
-on fresh Gmail processing and cleanup of legacy cards remain owner-side checks.
+can use **Not a task** on unwanted active AI-created items. The owner supplied a
+passing 24/24 live-model relevance smoke report on 2026-09-24, recorded below.
+Relevance on fresh real Gmail messages and cleanup of legacy cards remain open.
 
 ## Provider delivery and recovery
 
@@ -346,12 +347,39 @@ The live suite makes up to 24 billable model requests and stops on the first
 provider failure. It reads no mailbox and writes no application state. Use
 `--suite email-triage --case reply-needed` for one case. Reports include only fixed
 case IDs, outcomes, counts and sanitized errors, never source/model text. A passing
-offline run verifies authored fixtures, not model classification accuracy. The new
-live suite has not yet been executed in the owner's environment; the earlier 9/9
-report below does not verify this schema or relevance policy. A representative,
-independently labeled mailbox evaluation remains necessary for quality targets.
+offline run verifies authored fixtures, not model classification accuracy. The
+owner's live run passed all 24 cases on 2026-09-24. The earlier 9/9 report below
+predates this schema and relevance policy. A representative, independently labeled
+mailbox evaluation remains necessary for quality targets.
 
-### Recorded owner-side live result
+### Recorded owner-side email relevance result
+
+The owner supplied the complete live-model report generated at
+`2026-09-24T00:38:18.384427+00:00`: all 24 cases executed and passed, with zero
+failures or skips. All ten positive cases retained the expected eligible
+observations, and all fourteen no-action cases produced no eligible observations
+after the relevance filter. This includes promotions, optional webinar invitations,
+routine receipts and updates, answered quoted requests, and cancelled requests.
+The sanitized report is retained in
+[`evals/intelligence/reports/2026-09-24-email-triage-live-smoke.json`](../../evals/intelligence/reports/2026-09-24-email-triage-live-smoke.json).
+
+The supplied delivery revision was
+`3ddac2e518c0e2a580b3c88d7a26503c129e313d`; the report itself does not attest the
+container's Git revision or model identity. This is an owner-reported live run of
+the gateway, extraction validator and email surfacing policy on synthetic sources.
+It is not a CI live-provider run or a measurement of mailbox precision/recall.
+`live_google_chain_verified` and `production_quality_measured` remain false.
+No repeat of the full paid smoke suite is needed to record this result.
+
+This check does not re-evaluate saved cards. The next cleanup step needs a bounded,
+source-backed preview of older Gmail-derived cards before any selected state
+changes. Existing `confirmed` states do not reliably distinguish automatic model
+acceptance from earlier user confirmation. Preserve those choices, manual items,
+terminal states, source receipts and Gmail cursors; do not reset the mailbox to
+force a replay. The current release provides individual **Not a task**/**Reject**
+controls, not a batch reclassification tool.
+
+### Recorded owner-side core extraction result
 
 The owner supplied a successful report generated at
 `2026-09-23T06:01:05.578298+00:00`: all nine cases executed and passed, with no
@@ -405,10 +433,16 @@ quarantined sources must be separately scoped and verified.
 - [x] Explicit, offline-rehearsable model smoke command and sanitized results.
 - [x] Owner-side live model smoke: nine of nine cases passed on 2026-09-23;
   sanitized report and supplied delivery revision recorded above.
+- [x] Owner-side email relevance live-model smoke: all 24 cases passed on
+  2026-09-24, including ten positive and fourteen no-action cases; sanitized
+  report and supplied delivery revision recorded above.
 - [x] Owner-reported Gmail sync completion after the timeout adjustment on
   2026-09-23: 87 commitments processed, 84 active, and 459 evidence references.
 - [x] Owner-reported repeat Gmail sync check: completed and looked good, with no
   issue reported. This is a manual result, not a database-level duplicate audit.
+- [ ] Recheck older Gmail-derived cards with a bounded source-backed preview,
+  preserving user decisions and source-processing receipts; no automatic legacy
+  cleanup is provided by the relevance smoke run or a repeated sync.
 - [ ] In the owner's authorized workspace, verify Gmail and Calendar sync produce
   evidence-backed Today items, incremental replay creates no duplicate, feedback
   persists, and completion/waiting transitions match the source evidence.

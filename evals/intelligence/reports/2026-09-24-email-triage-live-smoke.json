@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-24T00:38:18.384427+00:00",
+  "mode": "live_model_smoke",
+  "dataset": "navox-email-triage-smoke-v1",
+  "scope": "AIGateway, extraction validation and email surfacing policy on synthetic sources",
+  "planned_cases": 24,
+  "executed_cases": 24,
+  "passed_cases": 24,
+  "failed_cases": 0,
+  "failed_case_ids": [],
+  "skipped_cases": 0,
+  "skipped_case_ids": [],
+  "cases": [
+    {
+      "id": "reply-needed",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 7219
+    },
+    {
+      "id": "assigned-task",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 5943
+    },
+    {
+      "id": "group-course-deadline",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 7459
+    },
+    {
+      "id": "personal-confirmation",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 8867
+    },
+    {
+      "id": "security-problem",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 6555
+    },
+    {
+      "id": "failed-payment",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 5261
+    },
+    {
+      "id": "service-outage",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 6964
+    },
+    {
+      "id": "booked-flight-change",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 6170
+    },
+    {
+      "id": "owner-promise",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 6127
+    },
+    {
+      "id": "sent-request-waiting",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 5736
+    },
+    {
+      "id": "promotional-upgrade",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 2550
+    },
+    {
+      "id": "optional-webinar",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 1085
+    },
+    {
+      "id": "newsletter-dates",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 1486
+    },
+    {
+      "id": "paid-receipt",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 2118
+    },
+    {
+      "id": "delivery-update",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 1204
+    },
+    {
+      "id": "fyi-report",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 1559
+    },
+    {
+      "id": "optional-feature",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 1510
+    },
+    {
+      "id": "optional-survey",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 1123
+    },
+    {
+      "id": "security-news",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 1488
+    },
+    {
+      "id": "someone-elses-task",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 1326
+    },
+    {
+      "id": "answered-history",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 2104
+    },
+    {
+      "id": "routine-sign-in",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 1280
+    },
+    {
+      "id": "promotional-urgency",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 1194
+    },
+    {
+      "id": "cancelled-request",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 1676
+    }
+  ],
+  "passed": true,
+  "live_google_chain_verified": false,
+  "production_quality_measured": false,
+  "limitations": [
+    "This small smoke set does not measure precision, recall, or production quality.",
+    "No Google account, database, Temporal workflow, or external action is accessed.",
+    "A passing offline run uses authored responses and does not validate a live model."
+  ]
+}

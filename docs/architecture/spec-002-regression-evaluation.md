@@ -46,9 +46,14 @@ OAuth configuration, or real model quality.
 `--live` sends nine fixed synthetic cases to the configured provider. The optional
 `--suite email-triage` instead evaluates 24 synthetic Gmail cases through the v2
 schema, owner-context extraction and relevance filter (ten positive, fourteen
-negative). Offline fixtures cover the wiring; the owner's earlier nine-case live
-report does not verify this new suite or establish classification accuracy. The command
-does not accept mailbox input. Reports distinguish `offline_fixture` from
+negative). Offline fixtures cover the wiring. The owner supplied a complete live
+email-triage report on 2026-09-24: 24 executed, 24 passed, zero failed or skipped.
+It is retained in
+[`evals/intelligence/reports/2026-09-24-email-triage-live-smoke.json`](../../evals/intelligence/reports/2026-09-24-email-triage-live-smoke.json).
+This verifies those synthetic examples through the configured live model; it
+does not establish classification accuracy on a representative mailbox or clean
+up existing saved cards. The earlier nine-case live report predates this policy.
+The command does not accept mailbox input. Reports distinguish `offline_fixture` from
 `live_model_smoke`, redact exception details, and retain only case IDs, outcome
 codes, durations, and counts. Invalid proposals on the adversarial case can count
 as safely blocked; transport/runtime errors always fail, and empty extractions do
