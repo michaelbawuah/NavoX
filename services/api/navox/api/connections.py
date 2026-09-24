@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
+from navox.connectors.builtin.google import ensure_google_connector_connection
 from navox.core.credential_vault import CredentialVault, CredentialVaultError
 from navox.core.settings import Settings
 from navox.db.models import Connection, ConnectionCredential, OAuthAuthorizationAttempt
@@ -451,6 +452,7 @@ async def complete_google_authorization(
         connection.access_token_expires_at = expires_at
         connection.last_checked_at = datetime.now(UTC)
         connection.last_error = None
+        await ensure_google_connector_connection(database, connection)
 
         if (
             previous_credential_reference is not None
@@ -536,20 +538,20 @@ async def complete_google_authorization(
             raise AssertionError("Validated Google credential reference is required")
 
         if existing is None:
-            database.add(
-                Connection(
-                    user_id=current_account.user.id,
-                    workspace_id=current_account.workspace.id,
-                    provider="google",
-                    external_account_id=external_account_id,
-                    external_email=normalized_external_email,
-                    status="active",
-                    granted_scopes=granted_scopes,
-                    credential_reference=credential_reference,
-                    access_token_expires_at=expires_at,
-                    last_checked_at=datetime.now(UTC),
-                )
+            existing = Connection(
+                user_id=current_account.user.id,
+                workspace_id=current_account.workspace.id,
+                provider="google",
+                external_account_id=external_account_id,
+                external_email=normalized_external_email,
+                status="active",
+                granted_scopes=granted_scopes,
+                credential_reference=credential_reference,
+                access_token_expires_at=expires_at,
+                last_checked_at=datetime.now(UTC),
             )
+            database.add(existing)
+            await database.flush()
         else:
             existing.status = "active"
             existing.external_email = normalized_external_email
@@ -558,6 +560,8 @@ async def complete_google_authorization(
             existing.access_token_expires_at = expires_at
             existing.last_checked_at = datetime.now(UTC)
             existing.last_error = None
+
+        await ensure_google_connector_connection(database, existing)
 
         if (
             previous_credential_reference is not None
