@@ -66,6 +66,24 @@ commands and remaining live acceptance checklist are in
 `spec-002-operations.md`. The regression report and smoke report remain separate
 so one cannot silently substitute for the other.
 
+## Older Gmail cleanup regressions
+
+`test_intelligence_gmail_recheck.py` verifies that listing/previewing does not
+change cards or ingestion state, ignored mail yields only a selectable suggestion,
+any relevant supporting email keeps the card, and malformed/changed/missing
+evidence cannot authorize removal. It exercises the three-message limit,
+deduplicated reads, paused/revoked/narrowed access, cache and timeout recovery,
+Google cooldowns, expired claims, obsolete preview IDs, state changes during model
+I/O, ownership, batch bounds, keep decisions, and idempotent selected removal.
+The frontend tests cover explicit selection, sequential ten-item batches, stopping
+on failure or pause, escaped titles, and no automatic source reads/removal.
+
+The Compose gate also runs `integration/gmail_recheck.py` against PostgreSQL.
+It checks competing preview claims, four simultaneous applications of the same
+selection with one dismissal audit, and an owner state change during model I/O.
+Its `gmail_recheck_concurrency_verified` flag uses synthetic provider responses;
+the real owner cleanup flow remains a separate acceptance check.
+
 ## Deployed workflow integration gate
 
 The Compose CI job mounts `services/api/integration` read-only into a temporary

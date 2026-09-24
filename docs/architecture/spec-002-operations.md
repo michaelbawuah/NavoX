@@ -4,7 +4,8 @@
 
 1. Pull the delivery branch, preserve your existing `.env`, then rebuild with
    `docker compose up --build -d`. Migrations run before API/worker startup,
-   including 0012 for source-processing receipts and 0013 for resumable Gmail plans.
+   including 0012 for source-processing receipts, 0013 for resumable Gmail plans,
+   and 0014 for saved Gmail cleanup previews.
 2. Configure `AI_PROVIDER=openai`, `OPENAI_API_KEY`, and `OPENAI_MODEL` in the
    private environment. Use a model your account supports for strict Responses
    JSON schema. Restart/recreate both API and worker after changes. Keys are never
@@ -61,6 +62,61 @@ saved cards are not bulk-deleted or silently reclassified by a rebuild; the owne
 can use **Not a task** on unwanted active AI-created items. The owner supplied a
 passing 24/24 live-model relevance smoke report on 2026-09-24, recorded below.
 Relevance on fresh real Gmail messages and cleanup of legacy cards remain open.
+
+### Recheck older Gmail cards
+
+The Google connection in **Connected understanding** now offers **Review older
+Gmail items**. Opening it lists saved older cards without reading Google or calling
+the model. It uses stable pages of 25 items and provides **Load more older items**.
+
+1. Choose **Recheck up to 10 items** to process the next unchecked cards. Each card
+   can read at most three distinct supporting Gmail messages and make at most
+   three model requests. A batch therefore makes at most 30 billable model calls.
+   Duplicate references to the same message are read and classified once per card.
+2. Review the results and optionally choose **View source text**. A removal is
+   suggested only when every current supporting email passes the saved hash/span
+   checks and produces no eligible observations through the existing v2 extractor
+   and relevance filter. Any eligible observation preserves the card, even when it
+   may concern a different action in the same email. Recheck does not match loosely
+   similar actions, create new commitments, or infer completion/waiting changes.
+3. Choose **Select suggested removals**, or select individual cards, then
+   **Remove selected**. Up to 25 selected suggestions are applied together. Nothing
+   is selected or removed automatically. **Keep this item** records an explicit
+   decision and prevents future cleanup of that card.
+4. Use the next batch or page as needed. **Stop after current check** leaves the
+   completed preview saved and stops the remaining browser batch. **Refresh
+   results** reloads saved previews without model calls. After a reload, completed
+   previews are reused while valid; a failed item requires an explicit retry.
+
+This targets older active AI-created Gmail items. Manual items, terminal/waiting
+states, current-policy items, and items with recorded user reviews or feedback are
+protected. New confirmations and explicit state changes record user audit events;
+they do not alter intelligence metadata or the manual reminder path. Historical
+automatic acceptance and user confirmation cannot always be distinguished, so
+older `confirmed` cards still require explicit selection before removal. Mixed
+provider/account support, more than three emails, missing or changed evidence,
+invalid model proposals and untrusted source instructions produce no removal
+authority. A relevant email preserves the card conservatively; this is not a new
+production-precision claim.
+
+The authenticated endpoints are `GET /intelligence/gmail-recheck?connection_id=...`,
+`POST /intelligence/gmail-recheck/preview` and
+`POST /intelligence/gmail-recheck/apply`. They recheck owner/workspace membership,
+pause and Gmail grants around provider I/O and when applying choices, honor scope
+narrowing and source cooldowns, and record new Google backoff when required. A
+source read is bounded to 30 seconds, and the full preview I/O budget is the AI
+read setting plus 90 seconds. A per-connection claim prevents competing cleanup
+model calls; expired claims can be resumed and stale attempts cannot replace a
+newer preview. PostgreSQL locks serialize selection with other recorded choices.
+
+`gmail_rechecks` stores only item/account identifiers, a state/evidence fingerprint,
+policy version, fixed outcome/reason, and timestamps. Previews expire after 30
+minutes. Applying a selection revalidates its preview ID, fingerprint, permissions,
+expiry and outcome; changed/expired items are skipped. Retry after a lost response
+is idempotent, including the audit event. Removal sets `rejected`, retains evidence,
+and uses the existing terminal-state replay protection. It never deletes Gmail
+messages, source receipts, saved sync plans or cursors, and does not replay the
+mailbox. No source text or raw model/provider output is stored in the preview.
 
 ## Provider delivery and recovery
 
@@ -371,13 +427,10 @@ It is not a CI live-provider run or a measurement of mailbox precision/recall.
 `live_google_chain_verified` and `production_quality_measured` remain false.
 No repeat of the full paid smoke suite is needed to record this result.
 
-This check does not re-evaluate saved cards. The next cleanup step needs a bounded,
-source-backed preview of older Gmail-derived cards before any selected state
-changes. Existing `confirmed` states do not reliably distinguish automatic model
-acceptance from earlier user confirmation. Preserve those choices, manual items,
-terminal states, source receipts and Gmail cursors; do not reset the mailbox to
-force a replay. The current release provides individual **Not a task**/**Reject**
-controls, not a batch reclassification tool.
+This smoke check does not re-evaluate saved cards. Use the separate **Review older
+Gmail items** workflow above for a bounded source-backed preview and selected
+cleanup. It preserves processing receipts and cursors. The owner's use of that
+cleanup workflow remains an open acceptance check.
 
 ### Recorded owner-side core extraction result
 
@@ -440,9 +493,10 @@ quarantined sources must be separately scoped and verified.
   2026-09-23: 87 commitments processed, 84 active, and 459 evidence references.
 - [x] Owner-reported repeat Gmail sync check: completed and looked good, with no
   issue reported. This is a manual result, not a database-level duplicate audit.
-- [ ] Recheck older Gmail-derived cards with a bounded source-backed preview,
-  preserving user decisions and source-processing receipts; no automatic legacy
-  cleanup is provided by the relevance smoke run or a repeated sync.
+- [x] Bounded legacy Gmail preview and selected cleanup implemented with durable
+  progress, user-choice protection and synthetic regression coverage.
+- [ ] Owner-side legacy cleanup: review a preview, retain a wanted item, remove
+  selected irrelevant suggestions, and reload Today to verify the saved choices.
 - [ ] In the owner's authorized workspace, verify Gmail and Calendar sync produce
   evidence-backed Today items, incremental replay creates no duplicate, feedback
   persists, and completion/waiting transitions match the source evidence.

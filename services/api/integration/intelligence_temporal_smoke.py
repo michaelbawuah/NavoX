@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from temporalio.client import Client, WorkflowFailureError
 from temporalio.worker import Worker
 
+from integration.gmail_recheck import verify_gmail_recheck_concurrency
 from navox.ai.gateway import AIGateway, StructuredOutputResponse
 from navox.api.intelligence_sync import _describe_sync
 from navox.core.settings import Settings
@@ -884,6 +885,7 @@ async def run() -> None:
                     events,
                 )
                 await verify_gmail_resume(sessions, client, settings, fixtures)
+                await verify_gmail_recheck_concurrency(sessions, settings)
         print(
             json.dumps(
                 {
@@ -900,6 +902,7 @@ async def run() -> None:
                     "gmail_partial_resume_verified": True,
                     "gmail_resume_concurrency_verified": True,
                     "proactive_concurrency_verified": True,
+                    "gmail_recheck_concurrency_verified": True,
                     "live_provider_quality_measured": False,
                 }
             )

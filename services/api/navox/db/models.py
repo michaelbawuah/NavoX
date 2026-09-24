@@ -456,6 +456,26 @@ class CommitmentSource(Base):
     source_metadata: Mapped[dict[str, str]] = mapped_column("metadata", JSON, default=dict)
 
 
+class GmailRecheck(Base):
+    """A resumable cleanup preview; no email text or model response is retained."""
+
+    __tablename__ = "gmail_rechecks"
+
+    commitment_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("commitments.id", ondelete="CASCADE"), primary_key=True
+    )
+    connection_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("connections.id", ondelete="CASCADE"), index=True
+    )
+    preview_id: Mapped[UUID] = mapped_column(Uuid, default=uuid4)
+    snapshot_hash: Mapped[str] = mapped_column(String(64))
+    policy_version: Mapped[str] = mapped_column(String(64))
+    outcome: Mapped[str] = mapped_column(String(32))
+    reason: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class CommitmentRelation(Base):
     __tablename__ = "commitment_relations"
     __table_args__ = (

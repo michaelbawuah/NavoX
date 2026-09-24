@@ -15,7 +15,7 @@ from navox.api.commitments import (
     current_workspace_commitment,
     response_from_commitment,
 )
-from navox.db.models import Commitment, CommitmentSource
+from navox.db.models import Commitment, CommitmentSource, Workspace
 
 router = APIRouter(prefix="/commitments", tags=["commitments"])
 CommitmentType = Literal["deadline", "meeting", "follow_up", "promise", "renewal", "task"]
@@ -129,6 +129,11 @@ async def transition_commitment(
     completed_at: datetime | None = None,
     waiting_since: datetime | None = None,
 ) -> CommitmentResponse:
+    await database.scalar(
+        select(Workspace)
+        .where(Workspace.id == current_account.workspace.id)
+        .with_for_update(key_share=True)
+    )
     result = await database.execute(
         update(Commitment)
         .where(
@@ -154,6 +159,17 @@ async def transition_commitment(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Commitment must be in one of these states: {allowed}",
         )
+    add_audit_event(
+        database,
+        user_id=current_account.user.id,
+        workspace_id=current_account.workspace.id,
+        event_type="commitment.state_changed",
+        entity_type="commitment",
+        entity_id=commitment.id,
+        actor_type="user",
+        actor_id=str(current_account.user.id),
+        metadata={"status": target_status},
+    )
     await database.commit()
     return response_from_commitment(commitment)
 

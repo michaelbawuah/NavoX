@@ -15,6 +15,7 @@ import {
   syncErrorHelp,
   syncProgressMessage,
 } from "../lib/sync-progress";
+import { GmailRecheck } from "./gmail-recheck";
 import styles from "./intelligence-controls.module.css";
 
 const apiBaseUrl =
@@ -427,6 +428,15 @@ export function IntelligenceControls({
                   />
                 )}
               </div>
+              {gmail && (
+                <GmailRecheck
+                  connectionId={connection.id}
+                  disabled={busy !== null || paused || !canSync}
+                  onRefresh={async () => {
+                    await Promise.all([refreshStatus(), onRefresh()]);
+                  }}
+                />
+              )}
             </div>
           );
         })

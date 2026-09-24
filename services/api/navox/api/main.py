@@ -8,6 +8,7 @@ from navox.api.commitment_actions import router as commitment_actions_router
 from navox.api.commitments import router as commitments_router
 from navox.api.connections import router as connections_router
 from navox.api.events import router as events_router
+from navox.api.gmail_recheck import router as gmail_recheck_router
 from navox.api.health import router as health_router
 from navox.api.intelligence import router as intelligence_router
 from navox.api.intelligence_evidence import router as intelligence_evidence_router
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(RequestHardeningMiddleware)
     app.include_router(health_router, prefix="/api/v1")
+    app.include_router(gmail_recheck_router, prefix="/api/v1")
     app.include_router(intelligence_router, prefix="/api/v1")
     app.include_router(intelligence_evidence_router, prefix="/api/v1")
     app.include_router(intelligence_sync_router, prefix="/api/v1")

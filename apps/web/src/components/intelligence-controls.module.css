@@ -80,6 +80,40 @@
   gap: 0.5rem;
   min-width: 0;
 }
+.recheck {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgb(145 168 207 / 14%);
+}
+.recheckList {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  max-height: 28rem;
+  overflow-y: auto;
+}
+.recheckItem {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.7rem;
+  border: 1px solid rgb(145 168 207 / 14%);
+  border-radius: 0.5rem;
+  min-width: 0;
+}
+.recheckTitle {
+  display: flex;
+  align-items: start;
+  gap: 0.5rem;
+  overflow-wrap: anywhere;
+}
+.recheckTitle input {
+  flex: 0 0 auto;
+  accent-color: #61dfc4;
+}
 .syncReadout {
   border-left: 2px solid rgb(97 223 196 / 28%);
   padding-left: 0.6rem;
