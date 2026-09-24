@@ -21,6 +21,7 @@ from navox.connectors.runtime import ConnectorRuntime
 from navox.core.settings import get_settings
 from navox.db.models import (
     ConnectorConnection,
+    ConnectorDefinition,
     ConnectorResource,
     ConnectorSubscription,
     ConnectorSyncRun,
@@ -180,7 +181,7 @@ async def connector_health_activity(payload: ConnectorHealthWork) -> str:
         try:
             registry = build_connector_registry(settings)
             definition = await database.get(
-                __import__("navox.db.models", fromlist=["ConnectorDefinition"]).ConnectorDefinition,
+                ConnectorDefinition,
                 connection.connector_definition_id,
             )
             if definition is None:
