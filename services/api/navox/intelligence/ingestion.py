@@ -9,6 +9,7 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from navox.connectors.builtin.google import mirror_google_document
 from navox.core.settings import Settings
 from navox.db.models import (
     AuditEvent,
@@ -111,6 +112,16 @@ async def _process_document(
     )
     if receipt is not None:
         return {UUID(identifier) for identifier in receipt.commitment_ids}, "skipped"
+
+    # SPEC-003 compatibility bridge: register the accepted provider revision in
+    # the universal resource layer before SPEC-002 resolves it. The mirror is
+    # content-minimized and shares the caller's transaction/cursor checkpoint.
+    await mirror_google_document(
+        database,
+        legacy_connection=connection,
+        document=document,
+    )
+
     if tombstone:
         result = OperationalExtractionResult(
             extraction=OperationalExtraction(),
