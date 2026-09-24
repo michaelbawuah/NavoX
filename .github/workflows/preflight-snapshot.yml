@@ -1,4 +1,4 @@
-name: SPEC-003 source snapshot
+name: Connector recovery preflight candidate
 
 on:
   push:
@@ -6,32 +6,96 @@ on:
     paths: [.github/workflows/preflight-snapshot.yml]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  snapshot:
-    name: Prepare immutable current source
+  preflight:
+    name: Verify exact sync recovery checkpoint
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17.5-alpine
+        env:
+          POSTGRES_USER: navox
+          POSTGRES_PASSWORD: navox
+          POSTGRES_DB: navox_recovery
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U navox -d navox_recovery"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
         with:
           ref: d99c59bd9ea39070c30c9fb29f130ea147c64fb7
-          persist-credentials: false
-      - name: Archive tracked source only
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.15"
+      - name: Apply the locally verified patch
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "d99c59bd9ea39070c30c9fb29f130ea147c64fb7"
-          git archive --format=tar.gz --output="$RUNNER_TEMP/navox-source-d99c59b.tar.gz" HEAD
-          git rev-parse HEAD > "$RUNNER_TEMP/source-commit.txt"
-          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/source-tree.txt"
+          archive="$RUNNER_TEMP/sync-recovery.patch.gz"
+          : > "$archive"
+          for blob in 947532f56dcfea1361fd5b5d6435f904ab40f757 ecbf33d48f7a6fb7e70eb54e95c8d15d39d5d6b3 239af6f08684e29494741fed0ddfed8f7e340894 2fef9b69f64a49ccf4ba1058c7d0c8f75fa6ba80 edbf28cbed503d35e9f8e943f0f01427499863d1 b802a972acd67ebc075a6e57e2eb2231aaa895fb 701b55d9c8c26d15987323936ba54f12835ce716 5188c5ca880099683464ebc3681392e7ebefba57 d5af7ab75ae47d7f4753875a40d622b9ccae2168 33de7465f822e398bb631f2a1ebb1ed36a4b0e55 030a209bf96cc31a346cf6e70831dcbc4ac8ff83 0687d8b1ddd2e61ec027dd949b40d7fe35536527 4f4878bc64fcb9905096d9a87b180339849edc7d af66f96626e6989c0dce044109171a4d79d7bf36; do
+            gh api "repos/michaelbawuah/NavoX/git/blobs/$blob" --jq .content | base64 --decode > "$RUNNER_TEMP/patch-part"
+            test "$(git hash-object "$RUNNER_TEMP/patch-part")" = "$blob"
+            cat "$RUNNER_TEMP/patch-part" >> "$archive"
+          done
+          test "$(git hash-object "$archive")" = "08d60e8caa42f223d9f9fd85fe44b7d664b458bd"
+          gzip -dc "$archive" > "$RUNNER_TEMP/sync-recovery.patch"
+          git apply --check "$RUNNER_TEMP/sync-recovery.patch"
+          git apply --index "$RUNNER_TEMP/sync-recovery.patch"
+          test "$(git write-tree)" = "06f43af11f46535f2690f1b620ad1f18e7c9eeef"
+          test "$(git diff --cached --name-only | wc -l)" -eq 19
+          test -z "$(git diff --cached --name-only -- services/api/pyproject.toml services/api/uv.lock package-lock.json evals/gates.json)"
+          git diff --cached --stat
+      - name: Run every API preflight gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/check-api.sh | tee "$RUNNER_TEMP/sync-preflight.log"
+          git diff --exit-code
+          test "$(git write-tree)" = "06f43af11f46535f2690f1b620ad1f18e7c9eeef"
+      - name: Verify PostgreSQL migration round trip
+        working-directory: services/api
+        env:
+          DATABASE_URL: postgresql+asyncpg://navox:navox@localhost:5432/navox_recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run alembic upgrade head
+          uv run alembic downgrade 0015_spec_003_connectors
+          uv run alembic upgrade head
+      - name: Execute recovery regressions on PostgreSQL
+        working-directory: services/api
+        env:
+          NAVOX_CONNECTOR_TEST_DSN: postgresql+asyncpg://navox:navox@localhost:5432/navox_recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run pytest tests/test_connector_sync_recovery.py --junitxml="$RUNNER_TEMP/recovery-pg.xml"
+      - name: Publish only the validated isolated candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test "$(git write-tree)" = "06f43af11f46535f2690f1b620ad1f18e7c9eeef"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(connectors): fence sync attempts and persist recovery checkpoints'
+          git push origin HEAD:refs/heads/chore/spec003-validated-sync-recovery
+          git rev-parse HEAD > "$RUNNER_TEMP/validated-candidate.txt"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: navox-source-d99c59b
+          name: navox-sync-recovery-preflight
           path: |
-            ${{ runner.temp }}/navox-source-d99c59b.tar.gz
-            ${{ runner.temp }}/source-commit.txt
-            ${{ runner.temp }}/source-tree.txt
-          if-no-files-found: error
-          retention-days: 1
+            ${{ runner.temp }}/sync-preflight.log
+            ${{ runner.temp }}/recovery-pg.xml
+            ${{ runner.temp }}/validated-candidate.txt
+          if-no-files-found: warn
+          retention-days: 7
