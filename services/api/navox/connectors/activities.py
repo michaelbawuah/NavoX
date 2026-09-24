@@ -18,6 +18,7 @@ from navox.connectors.jobs import (
 )
 from navox.connectors.provenance import ensure_provenance_connection
 from navox.connectors.runtime import ConnectorRuntime
+from navox.connectors.secrets import SecretBroker, SecretBrokerError
 from navox.core.settings import get_settings
 from navox.db.models import (
     ConnectorConnection,
@@ -110,7 +111,11 @@ async def connector_sync_activity(payload: ConnectorSyncWork) -> int:
             return 0
 
         registry = build_connector_registry(settings)
-        runtime = ConnectorRuntime(registry)
+        try:
+            secret_broker = SecretBroker(settings)
+        except SecretBrokerError:
+            secret_broker = None
+        runtime = ConnectorRuntime(registry, secret_broker=secret_broker)
         extractor = OperationalExtractor(gateway)
         affected: set[UUID] = set()
 
@@ -186,7 +191,27 @@ async def connector_health_activity(payload: ConnectorHealthWork) -> str:
             )
             if definition is None:
                 raise ConnectorRuntimeError("PERMANENT_FAILURE")
-            connector = registry.build(definition.connector_key, connection.config)
+            registered = registry.get(definition.connector_key)
+            secret_lease = None
+            if registered.manifest.required_secrets:
+                try:
+                    secret_broker = SecretBroker(settings)
+                    secret_lease = await secret_broker.lease(
+                        database,
+                        connection_id=connection.id,
+                        purpose="health.read",
+                        names=frozenset(registered.manifest.required_secrets),
+                    )
+                except SecretBrokerError:
+                    connection.health_state = "AUTH_EXPIRED"
+                    connection.last_error_code = "AUTH_EXPIRED"
+                    await database.commit()
+                    return "AUTH_EXPIRED"
+            connector = registry.build(
+                definition.connector_key,
+                connection.config,
+                secret_lease,
+            )
             result = await connector.health(
                 ConnectorConnectionContext(
                     id=connection.id,
