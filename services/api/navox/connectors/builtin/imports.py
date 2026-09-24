@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from datetime import UTC, date, datetime, time
 from hashlib import sha256
 from urllib.parse import urlsplit
+from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import JsonValue
@@ -414,4 +415,4 @@ def _digest(value: str) -> str:
     return sha256(value.encode("utf-8")).hexdigest()[:32]
 
 
-UUID_ZERO = __import__("uuid").UUID(int=0)
+UUID_ZERO = UUID(int=0)
