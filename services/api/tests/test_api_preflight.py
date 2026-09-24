@@ -12,7 +12,7 @@ SCRIPT = ROOT / "scripts/check-api.sh"
 
 @pytest.mark.parametrize(
     "failed_stage",
-    ["", "sync", "lint", "format", "mypy", "pytest", "alembic", "evaluation", "schema"],
+    ["", "sync", "lint", "format", "mypy", "revision", "pytest", "alembic", "evaluation", "schema"],
 )
 def test_api_preflight_blocks_failures_and_runs_remaining_gates(
     tmp_path: Path, failed_stage: str
@@ -30,6 +30,7 @@ case "$*" in
   *'ruff check '*) stage=lint ;;
   *'ruff format '*) stage=format ;;
   *'mypy '*) stage=mypy ;;
+  *'ScriptDirectory.from_config'*) stage=revision ;;
   *'pytest'*) stage=pytest ;;
   *'alembic '*) stage=alembic ;;
   *'navox.evaluation '*) stage=evaluation ;;
@@ -84,7 +85,8 @@ fi
     if failed_stage == "sync":
         assert commands.splitlines() == ["sync --locked --all-groups"]
     else:
-        assert len(commands.splitlines()) == 7
+        assert len(commands.splitlines()) == 8
+        assert "ScriptDirectory.from_config" in commands
         assert "python -m pytest" in commands
         assert "python -m navox.evaluation --fail-on-gate" in commands
         assert "python -m mypy navox" in commands

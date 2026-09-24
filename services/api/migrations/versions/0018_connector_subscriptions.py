@@ -1,13 +1,13 @@
 """Fence event subscription registration, renewal and cleanup.
 
-Revision ID: 0018_connector_subscription_lifecycle
+Revision ID: 0018_connector_subscriptions
 Revises: 0017_import_snapshots
 """
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0018_connector_subscription_lifecycle"
+revision = "0018_connector_subscriptions"
 down_revision = "0017_import_snapshots"
 branch_labels = None
 depends_on = None
