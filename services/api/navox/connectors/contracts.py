@@ -306,10 +306,19 @@ class NavoXConnector(Protocol):
 
 class ConnectorRuntimeError(RuntimeError):
     def __init__(
-        self, code: ConnectorErrorCode, message: str = "Connector operation failed"
+        self,
+        code: ConnectorErrorCode,
+        message: str = "Connector operation failed",
+        *,
+        retry_after_seconds: int | None = None,
     ) -> None:
         super().__init__(message)
         self.code = code
+        self.retry_after_seconds = (
+            retry_after_seconds
+            if type(retry_after_seconds) is int and 1 <= retry_after_seconds <= 86_400
+            else None
+        )
 
 
 def stable_resource_id(

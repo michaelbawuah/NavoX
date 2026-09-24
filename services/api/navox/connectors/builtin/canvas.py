@@ -28,6 +28,7 @@ from navox.connectors.contracts import (
     SyncRequest,
     stable_resource_id,
 )
+from navox.connectors.errors import retry_after_seconds
 
 CANVAS_MANIFEST = ConnectorManifest.model_validate(
     {
@@ -183,6 +184,7 @@ class CanvasConnector:
                 state=state,
                 checked_at=datetime.now(UTC),
                 reason_code=error.code,
+                retry_after_seconds=error.retry_after_seconds,
             )
 
     async def sync(self, request: SyncRequest) -> SyncPage:
@@ -360,9 +362,17 @@ class CanvasConnector:
         if response.status_code == 404:
             raise ConnectorRuntimeError("RESOURCE_NOT_FOUND", "Canvas resource not found")
         if response.status_code == 429:
-            raise ConnectorRuntimeError("RATE_LIMITED", "Canvas rate limit reached")
+            raise ConnectorRuntimeError(
+                "RATE_LIMITED",
+                "Canvas rate limit reached",
+                retry_after_seconds=retry_after_seconds(response.headers.get("Retry-After")),
+            )
         if response.status_code >= 500:
-            raise ConnectorRuntimeError("PROVIDER_UNAVAILABLE", "Canvas is unavailable")
+            raise ConnectorRuntimeError(
+                "PROVIDER_UNAVAILABLE",
+                "Canvas is unavailable",
+                retry_after_seconds=retry_after_seconds(response.headers.get("Retry-After")),
+            )
         if response.status_code >= 400:
             raise ConnectorRuntimeError(
                 "INVALID_PROVIDER_RESPONSE",

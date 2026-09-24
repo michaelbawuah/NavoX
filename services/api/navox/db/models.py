@@ -956,6 +956,15 @@ class ConnectorConnection(Base):
         nullable=True,
     )
     sync_cursor: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sync_generation: Mapped[int] = mapped_column(default=0, server_default="0")
+    sync_run_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    sync_lease_token: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    sync_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    retry_not_before: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_healthy_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -1048,6 +1057,9 @@ class ConnectorSyncRun(Base):
     connector_connection_id: Mapped[UUID] = mapped_column(
         Uuid, ForeignKey("connector_connections.id", ondelete="CASCADE"), index=True
     )
+    consumer_version: Mapped[str] = mapped_column(
+        String(128), default="canonical-consumer.v1", server_default="canonical-consumer.v1"
+    )
     workspace_id: Mapped[UUID] = mapped_column(
         Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
     )
@@ -1060,5 +1072,43 @@ class ConnectorSyncRun(Base):
     processed_count: Mapped[int] = mapped_column(default=0)
     duplicate_count: Mapped[int] = mapped_column(default=0)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    generation: Mapped[int] = mapped_column(default=0, server_default="0")
+    authorization_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    checkpoint_cursor: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pages_completed: Mapped[int] = mapped_column(default=0, server_default="0")
+    fetch_complete: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    attempt_count: Mapped[int] = mapped_column(default=0, server_default="0")
+    stale_count: Mapped[int] = mapped_column(default=0, server_default="0")
+    result_ids: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+    cursor_hashes: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ConnectorSyncReceipt(Base):
+    """A revision and downstream acceptance commit together; no raw body here."""
+
+    __tablename__ = "connector_sync_receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "sync_run_id", "resource_id", "content_hash", name="uq_connector_sync_receipt"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    sync_run_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("connector_sync_runs.id", ondelete="CASCADE"), index=True
+    )
+    consumer_version: Mapped[str] = mapped_column(
+        String(128), default="canonical-consumer.v1", server_default="canonical-consumer.v1"
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    resource_id: Mapped[UUID] = mapped_column(Uuid)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    result_ids: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
+    outcome: Mapped[str] = mapped_column(String(16))
+    accepted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

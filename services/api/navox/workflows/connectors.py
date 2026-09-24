@@ -24,7 +24,9 @@ async def _sync(payload: ConnectorSyncWork) -> int:
         connector_sync_activity,
         payload,
         start_to_close_timeout=timedelta(hours=2),
-        heartbeat_timeout=None,
+        heartbeat_timeout=(
+            timedelta(seconds=60) if workflow.patched("connector-sync-heartbeats-v1") else None
+        ),
         retry_policy=RetryPolicy(
             initial_interval=timedelta(seconds=10),
             maximum_interval=timedelta(minutes=10),
@@ -90,7 +92,11 @@ async def _run_one(payload: ConnectorSyncWork, semaphore: asyncio.Semaphore) -> 
             await workflow.execute_child_workflow(
                 ConnectorIncrementalSyncWorkflow.run,
                 payload,
-                id=f"connector-reconcile:{payload.connection_id}:{payload.request_id}",
+                id=(
+                    f"connector-reconcile:{payload.connection_id}:{workflow.uuid4()}"
+                    if workflow.patched("connector-recovery-reconcile-v1")
+                    else f"connector-reconcile:{payload.connection_id}:{payload.request_id}"
+                ),
             )
         except Exception as error:
             if is_cancelled_exception(error):

@@ -21,7 +21,8 @@ async def ensure_provenance_connection(
         if existing is None:
             raise ValueError("Connector provenance connection is missing")
         _validate_ownership(existing, connector_connection)
-        _refresh(existing, connector_connection)
+        if existing.provider != "google" and not connector_connection.config.get("legacy_bridge"):
+            _refresh(existing, connector_connection)
         await database.flush()
         return existing
 

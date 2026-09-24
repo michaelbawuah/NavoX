@@ -67,6 +67,18 @@ jobs:
   api:
     name: API quality
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17.5-alpine
+        env:
+          POSTGRES_USER: navox
+          POSTGRES_PASSWORD: navox
+          POSTGRES_DB: navox_recovery
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U navox -d navox_recovery"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -86,12 +98,26 @@ jobs:
         working-directory: services/api
       - name: Verify required schema tables
         run: |
-          for table in users workspaces workspace_memberships plans plan_steps actions approvals workflow_refs audit_events proactive_preferences proactive_signals briefing_snapshots people person_identities operational_observations observation_evidence intelligence_feedback intelligence_source_receipts gmail_sync_plans connector_definitions connector_connections connector_resources connector_subscriptions connector_sync_runs; do
+          for table in users workspaces workspace_memberships plans plan_steps actions approvals workflow_refs audit_events proactive_preferences proactive_signals briefing_snapshots people person_identities operational_observations observation_evidence intelligence_feedback intelligence_source_receipts gmail_sync_plans connector_definitions connector_connections connector_resources connector_subscriptions connector_sync_runs connector_sync_receipts; do
             grep -F "CREATE TABLE $table" /tmp/navox-schema.sql
           done
           grep -F "client_type" /tmp/navox-schema.sql
           grep -F "uq_person_identities_workspace_type_value" /tmp/navox-schema.sql
           grep -F "uq_observation_evidence_observation_source_hash" /tmp/navox-schema.sql
+
+      - name: Verify connector checkpoint migrations on disposable PostgreSQL
+        working-directory: services/api
+        env:
+          DATABASE_URL: postgresql+asyncpg://navox:navox@localhost:5432/navox_recovery
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade 0015_spec_003_connectors
+          uv run alembic upgrade head
+      - name: Verify connector recovery and revocation with real PostgreSQL sessions
+        working-directory: services/api
+        env:
+          NAVOX_CONNECTOR_TEST_DSN: postgresql+asyncpg://navox:navox@localhost:5432/navox_recovery
+        run: uv run pytest tests/test_connector_sync_recovery.py
 
   dependency-security:
     name: Dependency security

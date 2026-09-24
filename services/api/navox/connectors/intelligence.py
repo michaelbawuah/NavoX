@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from navox.connectors.authorization import owned_connector
 from navox.connectors.contracts import CanonicalResource
 from navox.connectors.normalization import (
     canonical_resource_to_source_document,
@@ -16,8 +17,6 @@ from navox.db.models import (
     AuditEvent,
     ConnectorConnection,
     IntelligenceSourceReceipt,
-    User,
-    WorkspaceMembership,
 )
 from navox.intelligence.extraction import (
     InvalidOperationalExtraction,
@@ -46,18 +45,24 @@ async def ingest_connector_resource(
     ):
         raise PermissionError("Connector resource does not belong to this connection")
 
-    membership = await database.get(
-        WorkspaceMembership,
-        (connector_connection.workspace_id, connector_connection.user_id),
+    connection_id, workspace_id, user_id = (
+        connector_connection.id,
+        connector_connection.workspace_id,
+        connector_connection.user_id,
     )
-    user = await database.get(User, connector_connection.user_id)
-    if membership is None or user is None or user.agent_paused:
-        raise PermissionError("Connector intelligence processing is paused or unauthorized")
-
-    provenance = await ensure_provenance_connection(database, connector_connection)
+    # Read current authorization without locking it over the slow model call.
+    connector_connection = await owned_connector(
+        database,
+        connection_id=connection_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        require_active=True,
+        lock_connection=False,
+    )
+    provenance_id = connector_connection.legacy_connection_id
     document = canonical_resource_to_source_document(
         resource,
-        provenance_connection_id=provenance.id,
+        provenance_connection_id=provenance_id or connection_id,
     )
     source = connector_receipt_source(resource.resource_type)
     source_hash = source_document_hash(document)
@@ -66,7 +71,7 @@ async def ingest_connector_resource(
 
     latest_revision = await database.scalar(
         select(func.max(IntelligenceSourceReceipt.source_occurred_at)).where(
-            IntelligenceSourceReceipt.connection_id == provenance.id,
+            IntelligenceSourceReceipt.connection_id == provenance_id,
             IntelligenceSourceReceipt.source == source,
             IntelligenceSourceReceipt.external_id == document.external_id,
         )
@@ -79,7 +84,7 @@ async def ingest_connector_resource(
 
     receipt = await database.scalar(
         select(IntelligenceSourceReceipt).where(
-            IntelligenceSourceReceipt.connection_id == provenance.id,
+            IntelligenceSourceReceipt.connection_id == provenance_id,
             IntelligenceSourceReceipt.source == source,
             IntelligenceSourceReceipt.external_id == document.external_id,
             IntelligenceSourceReceipt.source_hash == source_hash,
@@ -91,6 +96,8 @@ async def ingest_connector_resource(
     if receipt is not None:
         return [UUID(identifier) for identifier in receipt.commitment_ids]
 
+    rejection: InvalidOperationalExtraction | None = None
+    result: OperationalExtractionResult | None = None
     if tombstone:
         result = OperationalExtractionResult(
             extraction=OperationalExtraction(),
@@ -103,34 +110,50 @@ async def ingest_connector_resource(
         try:
             result = await extractor.extract(document)
         except InvalidOperationalExtraction as error:
-            database.add(
-                IntelligenceSourceReceipt(
-                    connection_id=provenance.id,
-                    source=source,
-                    external_id=document.external_id,
-                    source_hash=source_hash,
-                    extractor_version=extractor_version,
-                    outcome="rejected",
-                    source_occurred_at=document.occurred_at,
-                    commitment_ids=[],
-                )
+            rejection = error
+
+    # The runtime performs its own generation/lease check before committing this
+    # transaction. Neither accepted facts nor quarantined output bypass revocation.
+    connector_connection = await owned_connector(
+        database,
+        connection_id=connection_id,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        require_active=True,
+        lock_authority=True,
+    )
+    provenance = await ensure_provenance_connection(database, connector_connection)
+    if rejection is not None:
+        database.add(
+            IntelligenceSourceReceipt(
+                connection_id=provenance.id,
+                source=source,
+                external_id=document.external_id,
+                source_hash=source_hash,
+                extractor_version=extractor_version,
+                outcome="rejected",
+                source_occurred_at=document.occurred_at,
+                commitment_ids=[],
             )
-            database.add(
-                AuditEvent(
-                    user_id=connector_connection.user_id,
-                    workspace_id=connector_connection.workspace_id,
-                    event_type="connector.intelligence.rejected",
-                    actor_type="system",
-                    entity_type="connector_connection",
-                    entity_id=connector_connection.id,
-                    event_metadata={
-                        "resource_type": resource.resource_type,
-                        "source_hash": source_hash,
-                        "validation_error": error.diagnostic(),
-                    },
-                )
+        )
+        database.add(
+            AuditEvent(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                event_type="connector.intelligence.rejected",
+                actor_type="system",
+                entity_type="connector_connection",
+                entity_id=connection_id,
+                event_metadata={
+                    "resource_type": resource.resource_type,
+                    "source_hash": source_hash,
+                    "validation_error": rejection.diagnostic(),
+                },
             )
-            return []
+        )
+        return []
+    if result is None:
+        raise RuntimeError("Connector extraction did not produce a result")
 
     affected = await resolve_extraction(
         database,

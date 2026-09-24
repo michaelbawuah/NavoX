@@ -44,7 +44,7 @@ render_schema() {
     audit_events proactive_preferences proactive_signals briefing_snapshots
     people person_identities operational_observations observation_evidence
     intelligence_feedback intelligence_source_receipts gmail_sync_plans connector_definitions
-    connector_connections connector_resources connector_subscriptions connector_sync_runs
+    connector_connections connector_resources connector_subscriptions connector_sync_runs connector_sync_receipts
   )
   for table in "${tables[@]}"; do
     grep -F "CREATE TABLE $table (" "$reports/schema.sql" >/dev/null || {
