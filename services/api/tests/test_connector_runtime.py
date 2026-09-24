@@ -14,6 +14,7 @@ from navox.connectors.contracts import (
     ConnectorConnectionContext,
     ConnectorHealth,
     ConnectorManifest,
+    ConnectorRuntimeError,
     FetchResourceRequest,
     SyncPage,
     SyncRequest,
@@ -22,7 +23,13 @@ from navox.connectors.contracts import (
 from navox.connectors.registry import ConnectorRegistry
 from navox.connectors.runtime import ConnectorRuntime
 from navox.db.base import Base
-from navox.db.models import ConnectorConnection, ConnectorDefinition, ConnectorResource, User, Workspace
+from navox.db.models import (
+    ConnectorConnection,
+    ConnectorDefinition,
+    ConnectorResource,
+    User,
+    Workspace,
+)
 
 
 class FixtureConnector:
@@ -225,7 +232,7 @@ async def test_runtime_rejects_cross_workspace_resource_before_cursor_advance(
     async def consume(_resource: CanonicalResource) -> None:
         return None
 
-    with pytest.raises(Exception):
+    with pytest.raises(ConnectorRuntimeError, match="Cross-workspace"):
         await runtime.sync(
             database,
             connection_id=connection.id,
