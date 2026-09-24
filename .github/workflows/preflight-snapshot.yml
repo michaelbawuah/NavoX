@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: efea222a140dc79d5807004b545eb8176b41518e
+          ref: 15708633fc669482329977d6732b63e803fbdc0e
           fetch-depth: 2
       - uses: astral-sh/setup-uv@v6
         with:
@@ -37,18 +37,19 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD^)" = bf973b20cf7e62b3f4f91850ddd235fb3d9f4baa
           python3 scripts/apply-import-candidate.py
+          python3 scripts/refine-import-candidate.py
           (cd services/api && uv sync --locked --all-groups --quiet && uv run --no-sync ruff check --select I,F401 --fix . && uv run --no-sync ruff format .)
           npm ci --silent
-          (cd apps/web && npm exec -- biome check --write src/components/file-import-panel.tsx src/components/file-import-panel.module.css src/components/connections-panel.tsx src/lib/file-import.ts src/lib/file-import.test.ts src/lib/connection-management.ts)
+          (cd apps/web && npm exec -- biome format --write src/components/file-import-panel.tsx src/components/file-import-panel.module.css src/components/connections-panel.tsx src/lib/file-import.ts src/lib/file-import.test.ts src/lib/connection-management.ts)
       - name: Fast boundary checks before the full gate
         run: |
           set -uo pipefail
-          cd services/api
           result=0
-          uv run --no-sync ruff check . > "$RUNNER_TEMP/import-lint.log" 2>&1 || result=1
-          uv run --no-sync mypy navox > "$RUNNER_TEMP/import-types.log" 2>&1 || result=1
-          uv run --no-sync pytest tests/test_managed_imports.py tests/test_connection_management.py -q --tb=short > "$RUNNER_TEMP/import-focused.log" 2>&1 || result=1
-          for log in lint types focused; do tail -130 "$RUNNER_TEMP/import-$log.log"; done
+          (cd services/api && uv run --no-sync ruff check .) > "$RUNNER_TEMP/import-lint.log" 2>&1 || result=1
+          (cd services/api && uv run --no-sync mypy navox) > "$RUNNER_TEMP/import-types.log" 2>&1 || result=1
+          (cd services/api && uv run --no-sync pytest tests/test_managed_imports.py tests/test_connection_management.py -q --tb=short) > "$RUNNER_TEMP/import-focused.log" 2>&1 || result=1
+          (cd apps/web && npm exec -- biome check --write src/components/file-import-panel.tsx src/components/file-import-panel.module.css src/components/connections-panel.tsx src/lib/file-import.ts src/lib/file-import.test.ts src/lib/connection-management.ts) > "$RUNNER_TEMP/import-web-lint.log" 2>&1 || result=1
+          for log in lint types focused web-lint; do tail -140 "$RUNNER_TEMP/import-$log.log"; done
           exit "$result"
       - name: Full API preflight on final candidate
         run: |
@@ -78,12 +79,13 @@ jobs:
           set -euo pipefail
           uv run --no-sync pytest tests/test_managed_imports.py --junitxml="$RUNNER_TEMP/import-pg.xml" > "$RUNNER_TEMP/import-pg.log" 2>&1 || { tail -120 "$RUNNER_TEMP/import-pg.log"; exit 1; }
           tail -8 "$RUNNER_TEMP/import-pg.log"
-          python3 -c 'import sys,xml.etree.ElementTree as E; a=list(E.parse(sys.argv[1]).getroot().iter("testsuite")); assert sum(int(x.get("tests",0)) for x in a)>=30; assert all(int(x.get(k,0))==0 for x in a for k in ("failures","errors","skipped"))' "$RUNNER_TEMP/import-pg.xml"
+          python3 -c 'import sys,xml.etree.ElementTree as E; a=list(E.parse(sys.argv[1]).getroot().iter("testsuite")); assert sum(int(x.get("tests",0)) for x in a)>=35; assert all(int(x.get(k,0))==0 for x in a for k in ("failures","errors","skipped"))' "$RUNNER_TEMP/import-pg.xml"
       - name: Publish only the validated isolated candidate
         run: |
           set -euo pipefail
           git diff --exit-code -- .github/workflows package-lock.json services/api/uv.lock services/api/pyproject.toml evals/gates.json
           test ! -f scripts/apply-import-candidate.py
+          test ! -f scripts/refine-import-candidate.py
           git reset --soft bf973b20cf7e62b3f4f91850ddd235fb3d9f4baa
           git add -A
           git diff --cached --check
