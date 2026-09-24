@@ -1,12 +1,10 @@
-from collections.abc import Mapping
 from uuid import UUID
 
 import httpx
 import pytest
-from pydantic import JsonValue
 
 from navox.connectors.builtin.canvas import CanvasConnector, validate_canvas_base_url
-from navox.connectors.contracts import SyncRequest
+from navox.connectors.contracts import ConnectorRuntimeError, SyncRequest
 
 
 class Secrets:
@@ -139,7 +137,7 @@ async def test_canvas_pagination_cannot_escape_configured_origin() -> None:
         Secrets(),
         transport=httpx.MockTransport(handler),
     )
-    with pytest.raises(Exception, match="configured origin"):
+    with pytest.raises(ConnectorRuntimeError, match="configured origin"):
         await connector.sync(
             SyncRequest(
                 connection_id=UUID("11111111-1111-4111-8111-111111111111"),
