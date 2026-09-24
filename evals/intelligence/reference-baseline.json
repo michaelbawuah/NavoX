@@ -1,12 +1,12 @@
 {
   "provider": "navox-reference",
-  "model": "synthetic-operational-reference-v1",
+  "model": "synthetic-operational-reference-v2",
   "snapshot_kind": "synthetic_reference",
   "cases": [
     {
       "case_id": "budget-before-review",
       "output": {
-        "schema_version": "operational-extraction.v1",
+        "schema_version": "operational-extraction.v2",
         "observations": [
           {
             "observation_type": "request",
@@ -21,7 +21,8 @@
                 "end_char": 48,
                 "text": "Please send the budget before tomorrow's review."
               }
-            ]
+            ],
+            "email_relevance": null
           }
         ],
         "temporals": [
@@ -44,7 +45,7 @@
     {
       "case_id": "promise-slides",
       "output": {
-        "schema_version": "operational-extraction.v1",
+        "schema_version": "operational-extraction.v2",
         "observations": [
           {
             "observation_type": "promise",
@@ -59,7 +60,8 @@
                 "end_char": 39,
                 "text": "I'll send the revised slides by Friday."
               }
-            ]
+            ],
+            "email_relevance": null
           }
         ],
         "temporals": [
@@ -82,7 +84,7 @@
     {
       "case_id": "meeting-advisor",
       "output": {
-        "schema_version": "operational-extraction.v1",
+        "schema_version": "operational-extraction.v2",
         "observations": [
           {
             "observation_type": "meeting",
@@ -96,7 +98,8 @@
                 "end_char": 54,
                 "text": "Research review with Professor Lee is Tuesday at 2 PM."
               }
-            ]
+            ],
+            "email_relevance": null
           }
         ],
         "people": [
@@ -133,7 +136,7 @@
     {
       "case_id": "follow-up-maya",
       "output": {
-        "schema_version": "operational-extraction.v1",
+        "schema_version": "operational-extraction.v2",
         "observations": [
           {
             "observation_type": "follow_up",
@@ -148,7 +151,8 @@
                 "end_char": 56,
                 "text": "If Maya has not replied by Thursday, follow up with her."
               }
-            ]
+            ],
+            "email_relevance": null
           }
         ],
         "people": [
@@ -185,7 +189,7 @@
     {
       "case_id": "deployment-task",
       "output": {
-        "schema_version": "operational-extraction.v1",
+        "schema_version": "operational-extraction.v2",
         "observations": [
           {
             "observation_type": "task",
@@ -199,7 +203,8 @@
                 "end_char": 47,
                 "text": "Finish the deployment checklist before release."
               }
-            ]
+            ],
+            "email_relevance": null
           }
         ]
       }
@@ -207,19 +212,19 @@
     {
       "case_id": "newsletter",
       "output": {
-        "schema_version": "operational-extraction.v1"
+        "schema_version": "operational-extraction.v2"
       }
     },
     {
       "case_id": "optional-suggestion",
       "output": {
-        "schema_version": "operational-extraction.v1"
+        "schema_version": "operational-extraction.v2"
       }
     },
     {
       "case_id": "advisor-relationship",
       "output": {
-        "schema_version": "operational-extraction.v1",
+        "schema_version": "operational-extraction.v2",
         "people": [
           {
             "name": "Jordan",
@@ -267,7 +272,7 @@
     {
       "case_id": "budget-sent",
       "output": {
-        "schema_version": "operational-extraction.v1",
+        "schema_version": "operational-extraction.v2",
         "observations": [
           {
             "observation_type": "completion",
@@ -281,7 +286,8 @@
                 "end_char": 18,
                 "text": "I sent the budget."
               }
-            ]
+            ],
+            "email_relevance": null
           }
         ]
       }
@@ -289,7 +295,7 @@
     {
       "case_id": "approval-waiting",
       "output": {
-        "schema_version": "operational-extraction.v1",
+        "schema_version": "operational-extraction.v2",
         "observations": [
           {
             "observation_type": "waiting",
@@ -303,7 +309,8 @@
                 "end_char": 68,
                 "text": "I sent the approval request to Maya and am waiting for her response."
               }
-            ]
+            ],
+            "email_relevance": null
           }
         ]
       }

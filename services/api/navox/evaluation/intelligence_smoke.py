@@ -18,7 +18,8 @@ from navox.ai.factory import build_ai_gateway
 from navox.ai.gateway import AIGateway, StructuredOutputResponse
 from navox.ai.openai_provider import AIProviderError
 from navox.core.settings import Settings
-from navox.intelligence.contracts import SourceDocument
+from navox.intelligence.contracts import SourceDocument, SourceIdentity
+from navox.intelligence.email_relevance import filter_email_extraction
 from navox.intelligence.extraction import InvalidOperationalExtraction, OperationalExtractor
 
 
@@ -29,6 +30,12 @@ class SmokeCase:
     reference_type: str | None
     accepted_types: frozenset[str] = frozenset()
     allow_validation_rejection: bool = False
+    gmail: bool = False
+    email_intent: str | None = None
+    email_basis: str | None = None
+    bulk_mail: bool = False
+    sent: bool = False
+    subject: str = "Synthetic NavoX smoke case"
 
 
 CASES = (
@@ -83,6 +90,179 @@ CASES = (
     ),
 )
 
+
+def email_case(
+    identifier: str,
+    content: str,
+    *,
+    intent: str | None = None,
+    basis: str | None = None,
+    kind: str = "task",
+    bulk_mail: bool = False,
+    sent: bool = False,
+    subject: str = "Synthetic email relevance case",
+) -> SmokeCase:
+    accepted = (
+        frozenset({"request", "task", "deadline", "follow_up"})
+        if kind == "task"
+        else frozenset({kind})
+    )
+    return SmokeCase(
+        identifier,
+        content,
+        kind if intent else None,
+        accepted if intent else frozenset(),
+        gmail=True,
+        email_intent=intent,
+        email_basis=basis,
+        bulk_mail=bulk_mail,
+        sent=sent,
+        subject=subject,
+    )
+
+
+EMAIL_TRIAGE_CASES = (
+    email_case(
+        "reply-needed",
+        "Could you confirm which time works for our project review? "
+        "I need your answer by tomorrow.",
+        intent="reply_required",
+        basis="direct_request",
+    ),
+    email_case(
+        "assigned-task",
+        "Please upload your completed lab report to the course portal by Friday.",
+        intent="action_required",
+        basis="assigned_obligation",
+    ),
+    email_case(
+        "group-course-deadline",
+        "All students in your lab section must submit the safety form before the next lab. "
+        "This requirement applies to you.",
+        intent="action_required",
+        basis="assigned_obligation",
+        bulk_mail=True,
+    ),
+    email_case(
+        "personal-confirmation",
+        "You agreed to present at our team review. "
+        "Please reply to confirm that you can still present on Tuesday.",
+        intent="reply_required",
+        basis="direct_request",
+    ),
+    email_case(
+        "security-problem",
+        "Your account password was exposed in a confirmed breach. "
+        "Reset your password in account settings.",
+        intent="important_alert",
+        basis="security_risk",
+        kind="alert",
+    ),
+    email_case(
+        "failed-payment",
+        "Your subscription payment failed. "
+        "Update your payment method in account settings to prevent service suspension.",
+        intent="important_alert",
+        basis="payment_problem",
+        kind="alert",
+        bulk_mail=True,
+    ),
+    email_case(
+        "service-outage",
+        "Your home internet service is unavailable due to an outage affecting your address. "
+        "Restoration is expected tomorrow.",
+        intent="important_alert",
+        basis="service_disruption",
+        kind="alert",
+    ),
+    email_case(
+        "booked-flight-change",
+        "Your booked flight has been cancelled. "
+        "Review the replacement flight options in your existing reservation.",
+        intent="important_alert",
+        basis="schedule_change",
+        kind="alert",
+        bulk_mail=True,
+    ),
+    email_case(
+        "owner-promise",
+        "I promise to send you the revised budget by Friday.",
+        intent="action_required",
+        basis="assigned_obligation",
+        kind="promise",
+        sent=True,
+    ),
+    email_case(
+        "sent-request-waiting",
+        "I sent the approval request to Maya and am waiting for her response.",
+        intent="commitment_update",
+        basis="commitment_progress",
+        kind="waiting",
+        sent=True,
+    ),
+    email_case(
+        "promotional-upgrade",
+        "Increase your account limit today! Unlock premium rewards. "
+        "This optional offer expires Friday.",
+    ),
+    email_case(
+        "optional-webinar",
+        "Join our free systems webinar. RSVP now to reserve a seat!",
+        subject="Webinar reminder: RSVP now",
+    ),
+    email_case(
+        "newsletter-dates",
+        "This week's newsletter: three upcoming conferences and Friday's product launch. "
+        "Read more and subscribe.",
+        bulk_mail=True,
+    ),
+    email_case(
+        "paid-receipt", "Your payment was successful. This is your receipt. No action is required."
+    ),
+    email_case(
+        "delivery-update", "Your package is on the way. Track its progress in your account."
+    ),
+    email_case(
+        "fyi-report", "FYI, the weekly report is attached for your records. No response needed."
+    ),
+    email_case(
+        "optional-feature", "You might like our new dashboard. Try it whenever you have time."
+    ),
+    email_case(
+        "optional-survey",
+        "Would you recommend us to a friend? Reply to our optional survey for a chance to win.",
+    ),
+    email_case(
+        "security-news",
+        "Security newsletter: how companies respond to password breaches. "
+        "Read our article to learn more.",
+    ),
+    email_case(
+        "someone-elses-task",
+        "Maya, please send the budget by Friday. "
+        "Owner is copied for visibility only; no action is needed from Owner.",
+    ),
+    email_case(
+        "answered-history",
+        "Thanks, I received your budget. Nothing else is needed.\n\n"
+        "On Monday Maya wrote:\n> Please send the budget.",
+    ),
+    email_case(
+        "routine-sign-in",
+        "You signed in from your usual device. This is a routine confirmation; "
+        "no unusual activity was detected.",
+    ),
+    email_case(
+        "promotional-urgency",
+        "ACTION REQUIRED: last chance to save 30%! Buy today before this optional sale ends.",
+        bulk_mail=True,
+    ),
+    email_case(
+        "cancelled-request",
+        "Please disregard my earlier request for the budget. You do not need to send anything.",
+    ),
+)
+
 PROVIDER_NEXT_STEPS = {
     "authentication_failed": "Check that OPENAI_API_KEY is valid and loaded in the API container.",
     "permission_denied": "Check that the key and project permit Responses API requests.",
@@ -112,13 +292,33 @@ def source_for(case: SmokeCase, index: int) -> SourceDocument:
     return SourceDocument(
         id=UUID(int=10_000 + index),
         workspace_id=UUID(int=20_000),
-        provider="evaluation",
-        source_type="synthetic_case",
+        provider="google" if case.gmail else "evaluation",
+        source_type="gmail_message" if case.gmail else "synthetic_case",
         external_id=case.id,
-        subject="Synthetic NavoX smoke case",
+        subject=case.subject,
         content=case.content,
         occurred_at=instant,
         retrieved_at=instant,
+        author=SourceIdentity(
+            identity_type="email",
+            identity_value="owner@example.com" if case.sent else "maya@example.com",
+        )
+        if case.gmail
+        else None,
+        recipients=[
+            SourceIdentity(
+                identity_type="email",
+                identity_value="maya@example.com" if case.sent else "owner@example.com",
+            )
+        ]
+        if case.gmail
+        else [],
+        metadata={
+            "label_ids": ["SENT"] if case.sent else ["INBOX"],
+            "list_unsubscribe": case.bulk_mail,
+        }
+        if case.gmail
+        else {},
     )
 
 
@@ -134,17 +334,25 @@ class OfflineSmokeProvider:
         input_text: str,
     ) -> StructuredOutputResponse:
         case_id = json.loads(input_text)["external_id"]
-        case = next(case for case in CASES if case.id == case_id)
+        case = next(case for case in (*CASES, *EMAIL_TRIAGE_CASES) if case.id == case_id)
         observations = []
         if case.reference_type:
             observations.append(
                 {
                     "observation_type": case.reference_type,
                     "subject_text": None,
-                    "action_text": None,
-                    "object_text": None,
+                    "action_text": "Review" if case.gmail else None,
+                    "object_text": case.content if case.gmail else None,
                     "temporal_expression": None,
                     "confidence": 0.97,
+                    "email_relevance": {
+                        "intent": case.email_intent,
+                        "basis": case.email_basis,
+                        "applies_to_user": True,
+                        "confidence": 0.99,
+                    }
+                    if case.gmail
+                    else None,
                     "evidence": [
                         {
                             "source": "content",
@@ -157,7 +365,7 @@ class OfflineSmokeProvider:
             )
         return StructuredOutputResponse(
             data={
-                "schema_version": "operational-extraction.v1",
+                "schema_version": "operational-extraction.v2",
                 "observations": observations,
                 "people": [],
                 "temporals": [],
@@ -173,8 +381,10 @@ def base_report(mode: str, cases: tuple[SmokeCase, ...] = CASES) -> dict[str, An
         "schema_version": 1,
         "generated_at": datetime.now(UTC).isoformat(),
         "mode": mode,
-        "dataset": "navox-intelligence-smoke-v1",
-        "scope": "AIGateway and extraction validation on built-in synthetic sources only",
+        "dataset": "navox-email-triage-smoke-v1"
+        if any(case.gmail for case in cases)
+        else "navox-intelligence-smoke-v1",
+        "scope": "AIGateway, extraction validation and email surfacing policy on synthetic sources",
         "planned_cases": len(cases),
         "executed_cases": 0,
         "passed_cases": 0,
@@ -217,13 +427,24 @@ async def run_smoke(
         validation_error: dict[str, Any] | None = None
         try:
             async with asyncio.timeout(case_timeout_seconds):
-                result = await extractor.extract(source_for(case, index))
-            observed = {item.observation_type for item in result.extraction.observations}
+                source = source_for(case, index)
+                result = await extractor.extract(
+                    source, owner_email="owner@example.com" if case.gmail else None
+                )
+            filtered = filter_email_extraction(result.extraction, source)
+            observed = {item.observation_type for item in filtered.observations}
             passed = (
                 bool(observed) and observed <= case.accepted_types
                 if case.accepted_types
                 else not observed
             )
+            if case.email_intent:
+                passed = passed and all(
+                    bool(item.action_text and item.object_text)
+                    and item.email_relevance is not None
+                    and item.email_relevance.intent == case.email_intent
+                    for item in filtered.observations
+                )
             if not passed:
                 reason = "unexpected_observation_types"
         except InvalidOperationalExtraction as error:
@@ -300,13 +521,22 @@ def main(argv: list[str] | None = None) -> int:
         "--offline", action="store_true", help="Exercise authored fixture responses without network"
     )
     parser.add_argument(
+        "--suite",
+        choices=["core", "email-triage"],
+        default="core",
+        help="Choose the original nine-case smoke set or the email relevance cases",
+    )
+    parser.add_argument(
         "--case",
-        choices=[case.id for case in CASES],
+        choices=[case.id for case in (*CASES, *EMAIL_TRIAGE_CASES)],
         help="Run only this synthetic case, useful for a single-request provider diagnosis",
     )
     parser.add_argument("--output", type=Path, help="Write the sanitized JSON report")
     args = parser.parse_args(argv)
-    cases = tuple(case for case in CASES if args.case is None or case.id == args.case)
+    suite = EMAIL_TRIAGE_CASES if args.suite == "email-triage" else CASES
+    cases = tuple(case for case in suite if args.case is None or case.id == args.case)
+    if not cases:
+        parser.error("The selected case is not part of the selected suite")
     if args.live:
         try:
             settings = Settings()

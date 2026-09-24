@@ -57,6 +57,12 @@ def band_for(score: int) -> str:
     return "SUPPRESS"
 
 
+def email_intent(commitment: Commitment) -> str | None:
+    relevance = (commitment.intelligence_metadata or {}).get("email_relevance")
+    intent = relevance.get("intent") if isinstance(relevance, dict) else None
+    return intent if isinstance(intent, str) else None
+
+
 @dataclass(frozen=True)
 class AttentionResult:
     score: int
@@ -147,6 +153,13 @@ def score_commitment(
     adjustment = max(-0.05, min(0.05, float(learned))) if isinstance(learned, (int, float)) else 0.0
     score = max(0, min(100, raw_score + round(adjustment * 100)))
     capability: str | None = "commitment.handle"
+    intent = email_intent(commitment)
+    if intent == "reply_required":
+        reasons.append("Reply requested in email")
+    elif intent == "important_alert":
+        reasons.append("Important email alert")
+        if confidence >= 0.9 and commitment.status != "candidate":
+            score = max(score, 70)
     if commitment.priority >= 4:
         reasons.append(
             "You marked this as high priority"

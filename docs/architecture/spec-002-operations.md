@@ -23,6 +23,44 @@
    A sent request can become waiting; only evidence of the intended outcome
    completes it. An expired deadline alone never completes a task.
 
+## Email relevance in Today
+
+Gmail extraction now makes a separate, evidence-backed relevance assessment for
+each proposed item before it can enter Today. A high extraction confidence score
+alone does not establish a personal obligation. The same model request receives
+the connected mailbox address, sender/recipients, and bounded sent/bulk-mail hints;
+this adds no second model call or raw connector metadata.
+
+| Email content | Result |
+| --- | --- |
+| A genuine question or decision the owner needs to answer | Reply-required item |
+| Assigned work, a required course/team deadline, or the owner's explicit promise | Action-required item |
+| A specific security issue, failed payment, service outage, or change to an existing booking | Important alert in Needs attention |
+| An explicit outcome or pending response for existing work | Existing commitment state check |
+| Promotions, newsletters, optional offers/RSVPs, receipts, routine updates, FYI, or unclear relevance | No Today item or review card |
+
+Relevance must apply to the owner, use a compatible intent/basis, and have at least
+0.90 model confidence. This is a conservative decision threshold, not a calibrated
+probability or a measured precision claim. Exact evidence validation still applies.
+Spam, trash, drafts, outgoing questions misclassified as replies the owner owes,
+and quoted old requests cannot become new tasks. Subject-only proposals that
+otherwise qualify still require confirmation. Ordinary messages that need no
+action do not accumulate incidental people, date, or relationship records.
+
+An unsubscribe header or Promotions label increases caution, while body-backed
+assigned obligations and consequential account/service alerts can still qualify.
+Alerts are labeled separately in Today and need no invented reply or deadline.
+No classification grants execution permission, sends a message, follows a source
+link, or bypasses an existing approval requirement.
+
+The model output contract is `operational-extraction.v2`. Previously processed or
+quarantined v1 receipts are honored for unchanged source revisions, so this upgrade
+does not trigger a mailbox replay or retry already completed work. Ignored new
+revisions receive normal completion receipts and are skipped on retry. Existing
+saved cards are not bulk-deleted or silently reclassified by a rebuild; the owner
+can use **Not a task** on unwanted active AI-created items. Model-backed relevance
+on fresh Gmail processing and cleanup of legacy cards remain owner-side checks.
+
 ## Provider delivery and recovery
 
 Gmail push requires `GOOGLE_GMAIL_WATCH_TOPIC` plus existing Pub/Sub subscription,
@@ -146,7 +184,7 @@ normalized unsubscribe flag for evidence saved before that change.
 Today itself still performs no Google reads and stores only locators. The source
 reader uses uncached responses, renders passages as escaped text, and retains no
 email body or quote in the database. Gmail normalization now passes the boolean
-presence of a nonempty `List-Unsubscribe` header into the existing marketing
+presence of a nonempty `List-Unsubscribe` header into the email relevance
 filter, without retaining the header's URL or token. Extraction instructions also
 exclude optional promotional calls to action while preserving explicit account
 obligations. This does not establish model accuracy or reclassify saved candidates;
@@ -281,6 +319,37 @@ run the same module with `uv run python -m ...` from `services/api`.
 A successful live smoke verifies model connectivity and these bounded extraction
 checks. It does **not** establish the SPEC-002 precision/recall targets or verify
 Google sync, Temporal execution, or the full user workflow.
+
+### Email relevance smoke check
+
+The separate `email-triage` suite contains 24 synthetic Gmail cases: ten required
+replies/actions, consequential alerts or commitment updates, and fourteen sources
+that should create no item. Cases include optional webinar invitations, offer
+deadlines, receipts, ordinary sign-ins, copied requests assigned to others, quoted
+answered requests, genuine course deadlines, and failed payments with unsubscribe
+footers. It uses the same owner context, schema/evidence validator and surfacing
+policy as Gmail processing. The original default nine-case suite is unchanged.
+
+Rehearse the fixture wiring without private configuration or network:
+
+```bash
+docker compose exec -T api uv run --no-sync python -m navox.evaluation.intelligence_smoke --offline --suite email-triage
+```
+
+After rebuilding API and worker, evaluate the configured model on these examples:
+
+```bash
+docker compose exec -T api uv run --no-sync python -m navox.evaluation.intelligence_smoke --live --suite email-triage
+```
+
+The live suite makes up to 24 billable model requests and stops on the first
+provider failure. It reads no mailbox and writes no application state. Use
+`--suite email-triage --case reply-needed` for one case. Reports include only fixed
+case IDs, outcomes, counts and sanitized errors, never source/model text. A passing
+offline run verifies authored fixtures, not model classification accuracy. The new
+live suite has not yet been executed in the owner's environment; the earlier 9/9
+report below does not verify this schema or relevance policy. A representative,
+independently labeled mailbox evaluation remains necessary for quality targets.
 
 ### Recorded owner-side live result
 

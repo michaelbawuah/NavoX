@@ -56,7 +56,7 @@ class StubProvider:
         }
         return StructuredOutputResponse(
             data={
-                "schema_version": "operational-extraction.v1",
+                "schema_version": "operational-extraction.v2",
                 "observations": [],
                 "people": [],
                 "temporals": [],
@@ -76,7 +76,7 @@ async def test_ai_gateway_is_provider_neutral_and_uses_strict_extraction_contrac
     assert response.provider == "stub"
     assert response.model == "stub-v1"
     assert provider.request is not None
-    assert provider.request["schema_name"] == "navox_operational_extraction_v1"
+    assert provider.request["schema_name"] == "navox_operational_extraction_v2"
     schema = provider.request["schema"]
     assert schema["additionalProperties"] is False
     assert set(schema["required"]) == {

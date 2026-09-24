@@ -42,6 +42,12 @@ def valid_output() -> dict[str, Any]:
                 "object_text": "the budget",
                 "temporal_expression": "before tomorrow's review",
                 "confidence": 0.97,
+                "email_relevance": {
+                    "intent": "action_required",
+                    "basis": "direct_request",
+                    "applies_to_user": True,
+                    "confidence": 0.98,
+                },
                 "evidence": [
                     {
                         "source": "content",
@@ -148,7 +154,9 @@ def test_person_identity_fields_must_be_paired() -> None:
 
 
 class FakeGateway:
-    async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
+    async def extract_operational(
+        self, document: SourceDocument, *, owner_email: str | None = None
+    ) -> ModelExtractionResponse:
         assert document.external_id == "message-123"
         return ModelExtractionResponse(
             output=valid_output(),
@@ -161,7 +169,9 @@ class ProposalGateway:
     def __init__(self, output: dict[str, Any]) -> None:
         self.output = output
 
-    async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
+    async def extract_operational(
+        self, document: SourceDocument, *, owner_email: str | None = None
+    ) -> ModelExtractionResponse:
         return ModelExtractionResponse(output=self.output, provider="fixture", model="fixture")
 
 
@@ -317,7 +327,9 @@ async def test_provider_rejection_is_quarantined_but_transport_failure_remains_r
     permanent: bool,
 ) -> None:
     class RejectedGateway:
-        async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
+        async def extract_operational(
+            self, document: SourceDocument, *, owner_email: str | None = None
+        ) -> ModelExtractionResponse:
             error_type = AIProviderRejectedOutput if permanent else AIProviderError
             raise error_type("private provider diagnostic")
 

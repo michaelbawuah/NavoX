@@ -119,6 +119,16 @@ def extraction(
                     "action_text": action,
                     "object_text": obj,
                     "confidence": confidence,
+                    "email_relevance": {
+                        "intent": "commitment_update"
+                        if kind in {"completion", "waiting"}
+                        else "action_required",
+                        "basis": "commitment_progress"
+                        if kind in {"completion", "waiting"}
+                        else "direct_request",
+                        "applies_to_user": True,
+                        "confidence": 0.99,
+                    },
                     "temporal_expression": temporal,
                     "evidence": [
                         EvidenceSpan(
@@ -392,7 +402,7 @@ async def test_low_confidence_and_marketing_do_not_create_commitments(resolution
         == []
     )
     assert await db.scalar(select(func.count()).select_from(Commitment)) == 0
-    assert await db.scalar(select(func.count()).select_from(OperationalObservation)) == 2
+    assert await db.scalar(select(func.count()).select_from(OperationalObservation)) == 1
 
 
 @pytest.mark.asyncio
@@ -422,7 +432,7 @@ async def test_unlabelled_bulk_mail_header_reaches_marketing_suppression(resolut
     ids = await resolve_extraction(db, connection=connection, document=doc, result=extraction(doc))
     assert len(ids) == (0 if header else 1)
     observation = await db.scalar(select(OperationalObservation))
-    assert observation.status == ("SUPPRESSED" if header else "ACTIVE")
+    assert observation is None if header else observation.status == "ACTIVE"
 
 
 @pytest.mark.asyncio

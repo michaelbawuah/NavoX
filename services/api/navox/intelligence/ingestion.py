@@ -104,7 +104,9 @@ async def _process_document(
             IntelligenceSourceReceipt.source == source,
             IntelligenceSourceReceipt.external_id == document.external_id,
             IntelligenceSourceReceipt.source_hash == source_hash,
-            IntelligenceSourceReceipt.extractor_version == extractor_version,
+            IntelligenceSourceReceipt.extractor_version.in_(
+                (extractor_version,) if tombstone else extractor.receipt_versions
+            ),
         )
     )
     if receipt is not None:
@@ -119,7 +121,7 @@ async def _process_document(
         )
     else:
         try:
-            result = await extractor.extract(document)
+            result = await extractor.extract(document, owner_email=connection.external_email)
         except InvalidOperationalExtraction as error:
             await authorized_connection(database, connection_id, source)
             database.add(

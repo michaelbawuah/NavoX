@@ -13,7 +13,12 @@ from navox.db.models import (
     ObservationEvidence,
     OperationalObservation,
 )
-from navox.intelligence.attention import AttentionResult, score_commitment, workspace_attention
+from navox.intelligence.attention import (
+    AttentionResult,
+    email_intent,
+    score_commitment,
+    workspace_attention,
+)
 
 ACTIVE_STATUSES = {
     "candidate",
@@ -265,7 +270,9 @@ async def build_today_projection(
                 commitment,
                 TodayItem(
                     id=commitment.id,
-                    type=commitment.commitment_type,
+                    type="alert"
+                    if email_intent(commitment) == "important_alert"
+                    else commitment.commitment_type,
                     title=commitment.title,
                     description=commitment.description,
                     status=commitment.status,

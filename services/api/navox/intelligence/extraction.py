@@ -11,12 +11,37 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from navox.intelligence.contracts import SourceDocument
 
-OPERATIONAL_EXTRACTION_SCHEMA_VERSION: Literal["operational-extraction.v1"] = (
-    "operational-extraction.v1"
+OPERATIONAL_EXTRACTION_SCHEMA_VERSION: Literal["operational-extraction.v2"] = (
+    "operational-extraction.v2"
 )
 
 ObservationType = Literal[
-    "request", "promise", "deadline", "meeting", "follow_up", "task", "completion", "waiting"
+    "request",
+    "promise",
+    "deadline",
+    "meeting",
+    "follow_up",
+    "task",
+    "completion",
+    "waiting",
+    "alert",
+]
+EmailIntent = Literal[
+    "reply_required", "action_required", "important_alert", "commitment_update", "no_action"
+]
+EmailBasis = Literal[
+    "direct_request",
+    "assigned_obligation",
+    "security_risk",
+    "payment_problem",
+    "service_disruption",
+    "schedule_change",
+    "commitment_progress",
+    "promotion",
+    "newsletter",
+    "optional_invitation",
+    "routine_update",
+    "unclear",
 ]
 EvidenceSource = Literal["subject", "content"]
 TemporalKind = Literal["deadline", "meeting_start", "follow_up", "event_time", "other"]
@@ -33,6 +58,7 @@ _VALIDATION_MESSAGES = {
     "object_not_grounded": "Observation object is not grounded in its evidence",
     "relationship_not_grounded": "Relationship participant is not grounded in its evidence",
     "instruction_rejected": "Instruction-like content cannot become an operational fact",
+    "email_relevance_missing": "Gmail proposals require an explicit relevance assessment",
     "validation_failed": "Model proposal failed validation",
 }
 
@@ -99,6 +125,17 @@ class EvidenceSpan(BaseModel):
         return self
 
 
+class EmailRelevance(BaseModel):
+    """Untrusted classification of who needs to act, grounded in the candidate's evidence."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    intent: EmailIntent
+    basis: EmailBasis
+    applies_to_user: bool
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
 class OperationalObservationCandidate(BaseModel):
     """Action-free operational fact proposed by a model."""
 
@@ -111,6 +148,7 @@ class OperationalObservationCandidate(BaseModel):
     temporal_expression: str | None = Field(default=None, max_length=256)
     confidence: float = Field(ge=0.0, le=1.0)
     evidence: list[EvidenceSpan] = Field(min_length=1, max_length=8)
+    email_relevance: EmailRelevance | None = None
 
     @field_validator("subject_text", "action_text", "object_text", "temporal_expression")
     @classmethod
@@ -172,7 +210,7 @@ class OperationalExtraction(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal["operational-extraction.v1"] = OPERATIONAL_EXTRACTION_SCHEMA_VERSION
+    schema_version: Literal["operational-extraction.v2"] = OPERATIONAL_EXTRACTION_SCHEMA_VERSION
     observations: list[OperationalObservationCandidate] = Field(default_factory=list, max_length=64)
     people: list[PersonMention] = Field(default_factory=list, max_length=64)
     temporals: list[TemporalMention] = Field(default_factory=list, max_length=64)
@@ -293,7 +331,9 @@ class ModelExtractionResponse:
 class OperationalExtractionGateway(Protocol):
     """Narrow provider-neutral AI gateway surface used by operational extraction."""
 
-    async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse: ...
+    async def extract_operational(
+        self, document: SourceDocument, *, owner_email: str | None = None
+    ) -> ModelExtractionResponse: ...
 
 
 @dataclass(frozen=True)
@@ -312,22 +352,34 @@ class OperationalExtractor:
         self,
         gateway: OperationalExtractionGateway,
         *,
-        extractor_version: str = "operational-extraction.v1",
+        extractor_version: str = OPERATIONAL_EXTRACTION_SCHEMA_VERSION,
     ) -> None:
         self.gateway = gateway
         self.extractor_version = extractor_version
+        # A schema upgrade must not silently replay already processed private mail.
+        self.receipt_versions = (
+            (extractor_version, "operational-extraction.v1")
+            if extractor_version == OPERATIONAL_EXTRACTION_SCHEMA_VERSION
+            else (extractor_version,)
+        )
 
-    async def extract(self, document: SourceDocument) -> OperationalExtractionResult:
+    async def extract(
+        self, document: SourceDocument, *, owner_email: str | None = None
+    ) -> OperationalExtractionResult:
         from navox.ai.errors import AIProviderRejectedOutput
 
         try:
-            response = await self.gateway.extract_operational(document)
+            response = await self.gateway.extract_operational(document, owner_email=owner_email)
         except AIProviderRejectedOutput:
             raise InvalidOperationalExtraction(code="model_output_rejected") from None
         try:
             extraction = OperationalExtraction.model_validate(response.output)
             extraction = extraction.reanchor_unique_evidence(document)
             extraction.validate_evidence(document)
+            if document.source_type == "gmail_message" and any(
+                item.email_relevance is None for item in extraction.observations
+            ):
+                raise EvidenceValidationError("email_relevance_missing")
         except ValidationError as error:
             # Pydantic wraps typed field-validator failures; inspect only the error
             # objects to retain an allowlisted code without returning their input.

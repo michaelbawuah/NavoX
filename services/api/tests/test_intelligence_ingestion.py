@@ -268,7 +268,9 @@ async def connection_fixture(database: AsyncSession) -> Connection:
 
 
 class ExtractionGateway:
-    async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
+    async def extract_operational(
+        self, document: SourceDocument, *, owner_email: str | None = None
+    ) -> ModelExtractionResponse:
         return ModelExtractionResponse(
             provider="test",
             model="fixture",
@@ -279,6 +281,12 @@ class ExtractionGateway:
                         "action_text": "send",
                         "object_text": "the budget",
                         "confidence": 0.99,
+                        "email_relevance": {
+                            "intent": "action_required",
+                            "basis": "direct_request",
+                            "applies_to_user": True,
+                            "confidence": 0.99,
+                        },
                         "evidence": [
                             {
                                 "source": "content",
@@ -314,10 +322,12 @@ async def test_ingestion_resolves_once_and_persists_no_raw_content(
     model_calls = 0
 
     class CountingGateway(ExtractionGateway):
-        async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
+        async def extract_operational(
+            self, document: SourceDocument, *, owner_email: str | None = None
+        ) -> ModelExtractionResponse:
             nonlocal model_calls
             model_calls += 1
-            return await super().extract_operational(document)
+            return await super().extract_operational(document, owner_email=owner_email)
 
     extractor = OperationalExtractor(CountingGateway())
     first = await ingestion.process_batch_connection(
@@ -417,11 +427,13 @@ async def test_transient_model_failure_retains_cursor_and_checkpoints_prior_docu
     fail = True
 
     class BrokenGateway(ExtractionGateway):
-        async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
+        async def extract_operational(
+            self, document: SourceDocument, *, owner_email: str | None = None
+        ) -> ModelExtractionResponse:
             calls.append(document.external_id)
             if document.external_id == "m2" and fail:
                 raise ValueError("model malformed")
-            return await super().extract_operational(document)
+            return await super().extract_operational(document, owner_email=owner_email)
 
     monkeypatch.setattr(ingestion, "access_token_for_connection", token)
     monkeypatch.setattr(GoogleSourceGateway, "fetch", batch)
@@ -470,7 +482,9 @@ async def test_invalid_proposal_is_quarantined_without_blocking_or_leaking_conte
     calls: list[str] = []
 
     class InvalidGateway(ExtractionGateway):
-        async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
+        async def extract_operational(
+            self, document: SourceDocument, *, owner_email: str | None = None
+        ) -> ModelExtractionResponse:
             calls.append(document.external_id)
             if document.external_id == "invalid":
                 return ModelExtractionResponse(
@@ -478,7 +492,7 @@ async def test_invalid_proposal_is_quarantined_without_blocking_or_leaking_conte
                     model="fixture",
                     output={"execute_action": "PRIVATE MALICIOUS PAYLOAD"},
                 )
-            return await super().extract_operational(document)
+            return await super().extract_operational(document, owner_email=owner_email)
 
     async def token(*_: Any, **__: Any) -> str:
         return "private-access-token"
@@ -544,7 +558,9 @@ async def test_empty_or_rejected_newer_revision_prevents_stale_fact_resurrection
         return SourceBatch([document], "new")
 
     class NoModel(ExtractionGateway):
-        async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
+        async def extract_operational(
+            self, document: SourceDocument, *, owner_email: str | None = None
+        ) -> ModelExtractionResponse:
             raise AssertionError("Stale source must be skipped before the model")
 
     monkeypatch.setattr(ingestion, "access_token_for_connection", token)
@@ -615,7 +631,9 @@ async def test_cancelled_event_bypasses_model(
         return SourceBatch([document], "new")
 
     class NoModel(ExtractionGateway):
-        async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
+        async def extract_operational(
+            self, document: SourceDocument, *, owner_email: str | None = None
+        ) -> ModelExtractionResponse:
             raise AssertionError("Provider tombstones must not call model")
 
     monkeypatch.setattr(ingestion, "access_token_for_connection", token)
@@ -897,7 +915,9 @@ async def test_newest_first_batch_resolves_request_before_sent_completion(
     processed: list[str] = []
 
     class ChronologicalGateway:
-        async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
+        async def extract_operational(
+            self, document: SourceDocument, *, owner_email: str | None = None
+        ) -> ModelExtractionResponse:
             processed.append(document.external_id)
             assert document.content is not None
             return ModelExtractionResponse(
@@ -912,6 +932,16 @@ async def test_newest_first_batch_resolves_request_before_sent_completion(
                             "action_text": "send",
                             "object_text": "budget",
                             "confidence": 0.99,
+                            "email_relevance": {
+                                "intent": "action_required"
+                                if document.external_id == "request"
+                                else "commitment_update",
+                                "basis": "direct_request"
+                                if document.external_id == "request"
+                                else "commitment_progress",
+                                "applies_to_user": True,
+                                "confidence": 0.99,
+                            },
                             "evidence": [
                                 {
                                     "source": "content",

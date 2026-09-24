@@ -236,13 +236,21 @@ class ProviderFixtures:
         meeting = data["source_type"] == "calendar_event"
         return StructuredOutputResponse(
             data={
-                "schema_version": "operational-extraction.v1",
+                "schema_version": "operational-extraction.v2",
                 "observations": [
                     {
                         "observation_type": "meeting" if meeting else "request",
                         "action_text": "attend" if meeting else "send",
                         "object_text": "the research review" if meeting else "the budget",
                         "confidence": 0.97,
+                        "email_relevance": None
+                        if meeting
+                        else {
+                            "intent": "action_required",
+                            "basis": "direct_request",
+                            "applies_to_user": True,
+                            "confidence": 0.99,
+                        },
                         "evidence": [
                             {
                                 "source": "content",

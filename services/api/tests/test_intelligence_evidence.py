@@ -22,6 +22,7 @@ from navox.db.models import (
     WorkspaceMembership,
 )
 from navox.intelligence.extraction import (
+    EmailRelevance,
     EvidenceSpan,
     OperationalExtraction,
     OperationalExtractionResult,
@@ -83,6 +84,12 @@ async def owned_evidence(runtime_env, monkeypatch):  # noqa: F811
                         action_text="send",
                         object_text="the budget",
                         confidence=0.86,
+                        email_relevance=EmailRelevance(
+                            intent="action_required",
+                            basis="direct_request",
+                            applies_to_user=True,
+                            confidence=0.99,
+                        ),
                         evidence=[
                             EvidenceSpan(
                                 source="content", start_char=0, end_char=len(QUOTE), text=QUOTE

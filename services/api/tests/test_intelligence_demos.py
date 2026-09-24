@@ -125,7 +125,7 @@ def proposal(
 ) -> dict[str, Any]:
     assert source.content
     return {
-        "schema_version": "operational-extraction.v1",
+        "schema_version": "operational-extraction.v2",
         "observations": [
             {
                 "observation_type": kind,
@@ -133,6 +133,16 @@ def proposal(
                 "object_text": obj,
                 "temporal_expression": temporal,
                 "confidence": confidence,
+                "email_relevance": {
+                    "intent": "commitment_update"
+                    if kind in {"completion", "waiting"}
+                    else "action_required",
+                    "basis": "commitment_progress"
+                    if kind in {"completion", "waiting"}
+                    else "direct_request",
+                    "applies_to_user": True,
+                    "confidence": 0.99,
+                },
                 "evidence": [
                     {
                         "source": "content",
@@ -150,7 +160,9 @@ class RecordedGateway:
     def __init__(self, output: dict[str, Any]) -> None:
         self.output = output
 
-    async def extract_operational(self, source: SourceDocument) -> ModelExtractionResponse:
+    async def extract_operational(
+        self, source: SourceDocument, *, owner_email: str | None = None
+    ) -> ModelExtractionResponse:
         return ModelExtractionResponse(self.output, "synthetic-recording", "acceptance-v1")
 
 

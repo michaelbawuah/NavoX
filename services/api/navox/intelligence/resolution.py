@@ -5,6 +5,7 @@ updates, while stable IDs make replays safe without retaining source bodies.
 """
 
 import re
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from hashlib import sha256
@@ -27,6 +28,7 @@ from navox.db.models import (
     WorkspaceMembership,
 )
 from navox.intelligence.contracts import SourceDocument, SourceIdentity
+from navox.intelligence.email_relevance import filter_email_extraction
 from navox.intelligence.extraction import (
     INSTRUCTION_LIKE_MARKERS,
     EvidenceSpan,
@@ -523,7 +525,10 @@ async def resolve_extraction(
     source_text = f"{document.subject or ''}\n{document.content or ''}".casefold()
     if any(marker in source_text for marker in INSTRUCTION_LIKE_MARKERS):
         return []
+    result = replace(result, extraction=filter_email_extraction(result.extraction, document))
     identities = ([document.author] if document.author else []) + list(document.recipients)
+    if document.source_type == "gmail_message" and not result.extraction.observations:
+        identities = []
     resolved_people: dict[str, UUID] = {}
     ambiguous_names: set[str] = set()
     for identity in identities:
@@ -594,9 +599,6 @@ async def resolve_extraction(
     cancelled = (
         document.source_type == "calendar_event" and document.metadata.get("status") == "cancelled"
     )
-    labels = document.metadata.get("label_ids", [])
-    marketing = isinstance(labels, list) and "CATEGORY_PROMOTIONS" in labels
-    marketing = marketing or document.metadata.get("list_unsubscribe") is True
     for candidate in result.extraction.observations:
         temporal = resolve_temporal(
             candidate.temporal_expression,
@@ -624,6 +626,8 @@ async def resolve_extraction(
             1.0 if not subject or person_id or subject in {"i", "you", "me", "we"} else 0.89
         )
         confidence = min(candidate.confidence, entity_cap)
+        if document.source_type == "gmail_message" and candidate.email_relevance:
+            confidence = min(confidence, candidate.email_relevance.confidence)
         subject_only = document.source_type == "gmail_message" and all(
             span.source == "subject" for span in candidate.evidence
         )
@@ -633,7 +637,7 @@ async def resolve_extraction(
             confidence = min(confidence, 0.89)
         if candidate.temporal_expression:
             confidence = min(confidence, max(0.75, temporal.confidence))
-        if marketing or cancelled:
+        if cancelled:
             confidence = min(confidence, 0.5)
         observation = await _record_observation(
             database,
@@ -675,7 +679,7 @@ async def resolve_extraction(
                     id=_stable_id("commitment", connection.workspace_id, dedupe),
                     workspace_id=connection.workspace_id,
                     user_id=connection.user_id,
-                    commitment_type={"request": "task"}.get(
+                    commitment_type={"request": "task", "alert": "task"}.get(
                         candidate.observation_type, candidate.observation_type
                     ),
                     title=title[:256],
@@ -691,6 +695,11 @@ async def resolve_extraction(
                         "resolution": "CREATE_NEW",
                         "source_updated_at": document.occurred_at.isoformat(),
                         **({"evidence_review_reason": "subject_only"} if subject_only else {}),
+                        **(
+                            {"email_relevance": candidate.email_relevance.model_dump()}
+                            if document.source_type == "gmail_message" and candidate.email_relevance
+                            else {}
+                        ),
                     },
                 )
                 database.add(existing)
@@ -856,7 +865,7 @@ async def resolve_extraction(
             temporal=temporal,
         )
     for relationship in result.extraction.relationships:
-        relationship_confidence = min(relationship.confidence, 0.5 if marketing else 1.0)
+        relationship_confidence = relationship.confidence
         observation_id = await _record_auxiliary_fact(
             database,
             connection=connection,

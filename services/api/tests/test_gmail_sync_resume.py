@@ -204,7 +204,9 @@ class Model:
         self.observations = observations
         self.failure = failure
 
-    async def extract_operational(self, document: SourceDocument) -> ModelExtractionResponse:
+    async def extract_operational(
+        self, document: SourceDocument, *, owner_email: str | None = None
+    ) -> ModelExtractionResponse:
         self.calls.append(document.external_id)
         if document.external_id == self.fail_id:
             raise self.failure or RuntimeError("temporary model failure")
@@ -219,6 +221,16 @@ class Model:
                     "action_text": "send",
                     "object_text": "budget",
                     "confidence": 0.99,
+                    "email_relevance": {
+                        "intent": "commitment_update"
+                        if document.external_id == "sent"
+                        else "action_required",
+                        "basis": "commitment_progress"
+                        if document.external_id == "sent"
+                        else "direct_request",
+                        "applies_to_user": True,
+                        "confidence": 0.99,
+                    },
                     "evidence": [
                         {
                             "source": "content",
