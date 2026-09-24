@@ -39,15 +39,17 @@ jobs:
           python3 scripts/apply-import-candidate.py
           (cd services/api && uv sync --locked --all-groups --quiet && uv run --no-sync ruff check --select I,F401 --fix . && uv run --no-sync ruff format .)
           npm ci --silent
-          npm exec -- biome check --write apps/web/src/components/file-import-panel.tsx apps/web/src/components/file-import-panel.module.css apps/web/src/components/connections-panel.tsx apps/web/src/lib/file-import.ts apps/web/src/lib/file-import.test.ts apps/web/src/lib/connection-management.ts
+          (cd apps/web && npm exec -- biome check --write src/components/file-import-panel.tsx src/components/file-import-panel.module.css src/components/connections-panel.tsx src/lib/file-import.ts src/lib/file-import.test.ts src/lib/connection-management.ts)
       - name: Fast boundary checks before the full gate
         run: |
-          set -euo pipefail
+          set -uo pipefail
           cd services/api
-          uv run --no-sync ruff check .
-          uv run --no-sync mypy navox
-          uv run --no-sync pytest tests/test_managed_imports.py tests/test_connection_management.py -q > "$RUNNER_TEMP/import-focused.log" 2>&1 || { tail -120 "$RUNNER_TEMP/import-focused.log"; exit 1; }
-          tail -6 "$RUNNER_TEMP/import-focused.log"
+          result=0
+          uv run --no-sync ruff check . > "$RUNNER_TEMP/import-lint.log" 2>&1 || result=1
+          uv run --no-sync mypy navox > "$RUNNER_TEMP/import-types.log" 2>&1 || result=1
+          uv run --no-sync pytest tests/test_managed_imports.py tests/test_connection_management.py -q --tb=short > "$RUNNER_TEMP/import-focused.log" 2>&1 || result=1
+          for log in lint types focused; do tail -130 "$RUNNER_TEMP/import-$log.log"; done
+          exit "$result"
       - name: Full API preflight on final candidate
         run: |
           set -euo pipefail
