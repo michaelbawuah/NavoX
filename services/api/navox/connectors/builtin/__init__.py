@@ -1,3 +1,4 @@
+from navox.connectors.builtin.imports import IMPORT_MANIFEST, ImportConnector
 """First-party connectors and compatibility bridges."""
 
 from navox.connectors.builtin.canvas import CANVAS_MANIFEST, CanvasConnector
@@ -9,6 +10,8 @@ from navox.connectors.builtin.google import (
 )
 
 __all__ = [
+    "IMPORT_MANIFEST",
+    "ImportConnector",
     "CANVAS_MANIFEST",
     "CanvasConnector",
     "GOOGLE_MANIFEST",
