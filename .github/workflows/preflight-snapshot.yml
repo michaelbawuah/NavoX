@@ -1,4 +1,4 @@
-name: Preflight source snapshot
+name: Secret boundary preflight candidate
 
 on:
   push:
@@ -6,30 +6,64 @@ on:
     paths: [.github/workflows/preflight-snapshot.yml]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  snapshot:
-    name: Prepare exact local development source
+  preflight:
+    name: Verify exact Secret Broker checkpoint
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           ref: 383c06fc4869c39419ec54ba18afc25be0c7b240
-          persist-credentials: false
-      - name: Archive tracked source only
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.15"
+      - name: Apply the locally verified patch
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "383c06fc4869c39419ec54ba18afc25be0c7b240"
-          git archive --format=zip --output="$RUNNER_TEMP/navox-runtime-source.zip" HEAD
-          git rev-parse HEAD > "$RUNNER_TEMP/source-commit.txt"
+          archive="$RUNNER_TEMP/secret-boundary.patch.gz"
+          : > "$archive"
+          for blob in 81247ca573cf0c14271b535b3ac9b63e9ce152c3 1045365c0d22d4646d3a06f3c42a8e02fdc13ff3 495e8de21ea2488076e6c5d02266078931a64088; do
+            gh api "repos/michaelbawuah/NavoX/git/blobs/$blob" --jq .content | base64 --decode > "$RUNNER_TEMP/patch-part"
+            test "$(git hash-object "$RUNNER_TEMP/patch-part")" = "$blob"
+            cat "$RUNNER_TEMP/patch-part" >> "$archive"
+          done
+          test "$(git hash-object "$archive")" = "216cdbcbb4e917ab053cdbf8c1ca0f44de427337"
+          gzip -dc "$archive" > "$RUNNER_TEMP/secret-boundary.patch"
+          git apply --check "$RUNNER_TEMP/secret-boundary.patch"
+          git apply --index "$RUNNER_TEMP/secret-boundary.patch"
+          test "$(git write-tree)" = "684e7aac55df016f3bef4c0054ce2043e6a52805"
+          test "$(git diff --cached --name-only | wc -l)" -eq 8
+          test -z "$(git diff --cached --name-only -- .github/workflows services/api/pyproject.toml services/api/uv.lock evals/gates.json)"
+          git diff --cached --stat
+      - name: Run every API preflight gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/check-api.sh | tee "$RUNNER_TEMP/secret-preflight.log"
+          git diff --exit-code
+          test "$(git write-tree)" = "684e7aac55df016f3bef4c0054ce2043e6a52805"
+      - name: Publish only the validated isolated candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(connectors): bind credential ownership and expire operation-scoped leases'
+          git push origin HEAD:refs/heads/chore/spec003-validated-secret-boundary
+          git rev-parse HEAD > "$RUNNER_TEMP/validated-candidate.txt"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: navox-runtime-source-383c06f
+          name: navox-secret-boundary-preflight
           path: |
-            ${{ runner.temp }}/navox-runtime-source.zip
-            ${{ runner.temp }}/source-commit.txt
-          if-no-files-found: error
-          retention-days: 1
+            ${{ runner.temp }}/secret-preflight.log
+            ${{ runner.temp }}/validated-candidate.txt
+          if-no-files-found: warn
+          retention-days: 7
