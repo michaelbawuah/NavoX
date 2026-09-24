@@ -46,7 +46,9 @@ class ScopedSecretLease:
 
 class SecretBroker:
     def __init__(self, settings: Settings) -> None:
-        configured = settings.connector_secret_encryption_key or settings.google_token_encryption_key
+        configured = (
+            settings.connector_secret_encryption_key or settings.google_token_encryption_key
+        )
         if configured is None or not configured.get_secret_value():
             raise SecretBrokerError("Connector secret encryption is not configured")
         try:
@@ -71,7 +73,9 @@ class SecretBroker:
         sealed = self._cipher.encrypt(
             json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).decode("utf-8")
-        credential = ConnectionCredential(encrypted_refresh_token=sealed, key_version="connector-v1")
+        credential = ConnectionCredential(
+            encrypted_refresh_token=sealed, key_version="connector-v1"
+        )
         database.add(credential)
         await database.flush()
         return credential.id
