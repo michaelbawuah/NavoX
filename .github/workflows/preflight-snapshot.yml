@@ -10,26 +10,34 @@ permissions:
 
 jobs:
   snapshot:
-    name: Prepare local preflight source
+    name: Prepare locked local preflight environment
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
+    env:
+      UV_PYTHON_INSTALL_DIR: ${{ runner.temp }}/navox-preflight-env/python
     steps:
       - uses: actions/checkout@v4
         with:
           ref: 1ba2fe13d01984a26f88e5b5462ff9eca0f9175b
           persist-credentials: false
-      - name: Archive tracked source only
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.15"
+      - name: Install the unchanged lockfile into a portable test environment
         shell: bash
+        working-directory: services/api
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "1ba2fe13d01984a26f88e5b5462ff9eca0f9175b"
-          git archive --format=zip --output="$RUNNER_TEMP/navox-preflight-source.zip" HEAD
-          git rev-parse HEAD > "$RUNNER_TEMP/source-commit.txt"
+          uv python install 3.12
+          uv sync --locked --all-groups --python 3.12 --managed-python
+          mkdir -p "$RUNNER_TEMP/navox-preflight-env"
+          cp -a .venv "$RUNNER_TEMP/navox-preflight-env/venv"
+          uv pip freeze --python .venv/bin/python > "$RUNNER_TEMP/navox-preflight-env/installed.txt"
+          git rev-parse HEAD > "$RUNNER_TEMP/navox-preflight-env/source-commit.txt"
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/navox-preflight-env.tar.gz" navox-preflight-env
       - uses: actions/upload-artifact@v4
         with:
-          name: navox-preflight-source-1ba2fe1
-          path: |
-            ${{ runner.temp }}/navox-preflight-source.zip
-            ${{ runner.temp }}/source-commit.txt
+          name: navox-preflight-env-1ba2fe1
+          path: ${{ runner.temp }}/navox-preflight-env.tar.gz
           if-no-files-found: error
           retention-days: 1
