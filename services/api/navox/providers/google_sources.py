@@ -754,6 +754,7 @@ class GoogleSourceGateway:
         workspace_id: UUID,
         connection_id: UUID,
         external_ids: list[str],
+        now: datetime | None = None,
     ) -> list[SourceDocument]:
         """Revalidate known facts when expired cursors lose deletion history."""
         if len(external_ids) > MAX_PAGES * 100:
@@ -781,7 +782,7 @@ class GoogleSourceGateway:
                         data,
                         workspace_id=workspace_id,
                         connection_id=connection_id,
-                        now=datetime.now(UTC),
+                        now=now or datetime.now(UTC),
                     )
                 )
         return documents

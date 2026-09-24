@@ -244,6 +244,14 @@ class SyncRequest(BaseModel):
     cursor: str | None = None
     limit: int = Field(default=250, ge=1, le=1_000)
     capabilities: frozenset[str]
+    started_at: datetime | None = None
+
+    @field_validator("started_at")
+    @classmethod
+    def timezone_aware_start(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("Sync start must include a timezone")
+        return value.astimezone(UTC) if value is not None else None
 
 
 class SyncPage(BaseModel):

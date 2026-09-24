@@ -151,6 +151,7 @@ async def ensure_google_connector_connection(
     mirror = await database.scalar(
         select(ConnectorConnection).where(
             ConnectorConnection.legacy_connection_id == legacy.id,
+            ConnectorConnection.connector_definition_id == definition.id,
         )
     )
     capabilities = sorted(google_capabilities(legacy.granted_scopes))

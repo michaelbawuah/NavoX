@@ -344,7 +344,11 @@ async def connector_reconciliation_activity() -> list[ConnectorSyncWork]:
         for connection in rows:
             # Google is still served by its original hardened workflows. A
             # compatibility mirror is not a functioning universal sync adapter.
-            if connection.config.get("legacy_bridge") or not connection.authorized_capabilities:
+            if (
+                connection.config.get("legacy_bridge")
+                or connection.config.get("managed_by_source_workflow")
+                or not connection.authorized_capabilities
+            ):
                 continue
             run = (
                 await database.get(ConnectorSyncRun, connection.sync_run_id)

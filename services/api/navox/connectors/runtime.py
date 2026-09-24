@@ -7,6 +7,7 @@ import hashlib
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
+from typing import Protocol
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -26,7 +27,7 @@ from navox.connectors.contracts import (
     SyncRequest,
 )
 from navox.connectors.registry import ConnectorRegistry
-from navox.connectors.secrets import SecretBroker, SecretBrokerError
+from navox.connectors.secrets import ScopedSecretLease, SecretBrokerError
 from navox.connectors.sync_state import (
     SyncTicket,
     claim_sync,
@@ -44,6 +45,25 @@ from navox.db.models import (
 )
 
 ResourceConsumer = Callable[[CanonicalResource], Awaitable[list[UUID] | None]]
+AuthorityCheck = Callable[[AsyncSession, bool], Awaitable[None]]
+SyncFinalizer = Callable[[ConnectorSyncRun], Awaitable[None]]
+
+
+class ReadSecretBroker(Protocol):
+    """Trusted credential adapters return only a bounded operation handle."""
+
+    async def lease(
+        self,
+        database: AsyncSession,
+        *,
+        connection_id: UUID,
+        workspace_id: UUID,
+        user_id: UUID,
+        purpose: str,
+        names: set[str] | frozenset[str],
+    ) -> ScopedSecretLease: ...
+
+
 MAX_SYNC_PAGES = 50
 MAX_SYNC_RESOURCES = 50_000
 PROVIDER_OPERATION_SECONDS = 240
@@ -83,11 +103,20 @@ class ConnectorRuntime:
         self,
         registry: ConnectorRegistry,
         capability_gateway: CapabilityGateway | None = None,
-        secret_broker: SecretBroker | None = None,
+        secret_broker: ReadSecretBroker | None = None,
+        *,
+        authority_check: AuthorityCheck | None = None,
+        retain_canonical_content: bool = True,
     ) -> None:
         self.registry = registry
         self.capability_gateway = capability_gateway or CapabilityGateway()
         self.secret_broker = secret_broker
+        self.authority_check = authority_check
+        self.retain_canonical_content = retain_canonical_content
+
+    async def _check_authority(self, database: AsyncSession, *, lock: bool) -> None:
+        if self.authority_check is not None:
+            await self.authority_check(database, lock)
 
     async def sync(
         self,
@@ -101,6 +130,7 @@ class ConnectorRuntime:
         consume: ResourceConsumer,
         trigger: str = "manual",
         consumer_version: str = "canonical-consumer.v1",
+        finalize: SyncFinalizer | None = None,
     ) -> ConnectorSyncRun:
         if not consumer_version or len(consumer_version) > 128:
             raise ConnectorRuntimeError("PERMANENT_FAILURE", "Invalid consumer version")
@@ -150,6 +180,7 @@ class ConnectorRuntime:
             )
             if not authorized.read:
                 raise ConnectorRuntimeError("PERMISSION_DENIED", "No authorized read capability")
+            await self._check_authority(database, lock=True)
             claimed = await claim_sync(
                 database,
                 connection=connection,
@@ -164,7 +195,7 @@ class ConnectorRuntime:
             ticket = claimed
             async with renew_sync_lease(database, ticket):
                 return await self._run(
-                    database, ticket, context, manifest, authorized.read, consume
+                    database, ticket, context, manifest, authorized.read, consume, finalize
                 )
         except ConnectorAccessDenied:
             denied = ConnectorRuntimeError("PERMISSION_DENIED", "Connector access denied")
@@ -192,6 +223,7 @@ class ConnectorRuntime:
         manifest: ConnectorManifest,
         capabilities: frozenset[str],
         consume: ResourceConsumer,
+        finalize: SyncFinalizer | None,
     ) -> ConnectorSyncRun:
         _, run = await guard_sync(database, ticket)
         complete = run.fetch_complete
@@ -203,6 +235,7 @@ class ConnectorRuntime:
                 async with asyncio.timeout(PROVIDER_OPERATION_SECONDS):
                     health = await connector.health(context)
             connection, _ = await guard_sync(database, ticket, lock_authority=True)
+            await self._check_authority(database, lock=True)
             if health.state not in {"CONNECTED", "DEGRADED"}:
                 code = health.reason_code or (
                     "RATE_LIMITED"
@@ -225,6 +258,7 @@ class ConnectorRuntime:
         while not complete:
             _, run = await guard_sync(database, ticket)
             cursor = run.checkpoint_cursor
+            started_at = utc(run.started_at)
             if run.pages_completed >= MAX_SYNC_PAGES:
                 raise ConnectorRuntimeError(
                     "INVALID_PROVIDER_RESPONSE", "Connector page budget exceeded"
@@ -240,6 +274,7 @@ class ConnectorRuntime:
                             workspace_id=ticket.workspace_id,
                             cursor=cursor,
                             capabilities=capabilities,
+                            started_at=started_at,
                         )
                     )
             try:
@@ -265,6 +300,7 @@ class ConnectorRuntime:
             for resource in page.resources:
                 await self._accept(database, ticket, resource, consume)
             connection, run = await guard_sync(database, ticket, lock_authority=True)
+            await self._check_authority(database, lock=True)
             run.checkpoint_cursor = page.next_cursor
             run.pages_completed += 1
             run.fetch_complete = not page.has_more
@@ -274,6 +310,13 @@ class ConnectorRuntime:
             await database.commit()
 
         connection, run = await guard_sync(database, ticket, lock_authority=True)
+        await self._check_authority(database, lock=True)
+        if finalize is not None:
+            with consumer_transaction(database):
+                await finalize(run)
+            # A finalizer stages compatibility state, never acknowledges the run.
+            connection, run = await guard_sync(database, ticket, lock_authority=True)
+            await self._check_authority(database, lock=True)
         connection.sync_cursor = run.checkpoint_cursor
         connection.last_synced_at = await database_now(database)
         connection.retry_not_before = None
@@ -294,6 +337,7 @@ class ConnectorRuntime:
         consume: ResourceConsumer,
     ) -> None:
         connection, run = await guard_sync(database, ticket)
+        await self._check_authority(database, lock=False)
         digest = resource_hash(resource)
         receipt = await database.scalar(
             select(ConnectorSyncReceipt.id).where(
@@ -335,6 +379,7 @@ class ConnectorRuntime:
                 async with asyncio.timeout(PROVIDER_OPERATION_SECONDS):
                     identifiers = await consume(resource)
         connection, run = await guard_sync(database, ticket, lock_authority=True)
+        await self._check_authority(database, lock=True)
         existing = await database.get(
             ConnectorResource, resource.resource_id, populate_existing=True
         )
@@ -401,9 +446,8 @@ class ConnectorRuntime:
                 "PERMISSION_DENIED", "Browser capture requires authorization"
             )
 
-    @staticmethod
     async def _persist_resource(
-        database: AsyncSession, resource: CanonicalResource, digest: str
+        self, database: AsyncSession, resource: CanonicalResource, digest: str
     ) -> None:
         existing = await database.get(
             ConnectorResource, resource.resource_id, populate_existing=True
@@ -425,8 +469,18 @@ class ConnectorRuntime:
             raise ConnectorRuntimeError("PERMISSION_DENIED", "Resource ownership mismatch")
         existing.external_parent_id = resource.external_parent_id
         existing.version = resource.version
-        existing.canonical = dict(resource.canonical)
-        existing.provider_metadata = dict(resource.provider_metadata)
+        if self.retain_canonical_content:
+            existing.canonical = dict(resource.canonical)
+            existing.provider_metadata = dict(resource.provider_metadata)
+        else:
+            # Selected by trusted application code, never by provider metadata.
+            # The complete transient resource is hashed/consumed but not stored.
+            status = resource.canonical.get("status")
+            existing.canonical = {
+                "status": status if isinstance(status, str) else "active",
+                "content_persisted": False,
+            }
+            existing.provider_metadata = {"resource_hash": digest}
         existing.source_url = resource.source_url
         existing.source_created_at = resource.created_at
         existing.source_updated_at = resource.updated_at
@@ -463,6 +517,7 @@ class ConnectorRuntime:
                 )
             ):
                 raise ConnectorAccessDenied("Connector authorization changed")
+            await self._check_authority(database, lock=False)
             if manifest.required_secrets:
                 if self.secret_broker is None:
                     raise SecretBrokerError("Connector credentials are unavailable")

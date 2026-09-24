@@ -197,6 +197,12 @@ async def process_connection(
     settings: Settings,
     extractor: OperationalExtractor,
 ) -> list[UUID]:
+    if source == "calendar":
+        from navox.connectors.google_calendar_sync import process_calendar_connection
+
+        return await process_calendar_connection(
+            database, connection_id=connection_id, settings=settings, extractor=extractor
+        )
     if source == "gmail":
         from navox.intelligence.gmail_sync import process_gmail_connection
 

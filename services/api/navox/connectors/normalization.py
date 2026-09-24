@@ -17,6 +17,22 @@ def canonical_resource_to_source_document(
     """Normalize a connector resource into the sole SPEC-002 input contract."""
 
     canonical = resource.canonical
+    if "source_document" in canonical:
+        envelope = canonical["source_document"]
+        if not isinstance(envelope, dict):
+            raise ValueError("Invalid SourceDocument envelope")
+        document = SourceDocument.model_validate(
+            {**envelope, "retrieved_at": resource.retrieved_at}
+        )
+        if (
+            document.workspace_id != resource.workspace_id
+            or document.provider != resource.provider
+            or document.external_id != resource.external_id
+            or document.external_parent_id != resource.external_parent_id
+            or document.metadata.get("status", "active") != canonical.get("status", "active")
+        ):
+            raise ValueError("SourceDocument envelope changed resource ownership")
+        return document
     occurred_at = _parse_time(canonical.get("occurred_at"))
     author = _identity(canonical.get("author"), resource.provider)
     recipients = _recipients(canonical.get("recipients"), resource.provider)

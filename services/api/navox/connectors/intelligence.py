@@ -35,6 +35,7 @@ async def ingest_connector_resource(
     resource: CanonicalResource,
     extractor: OperationalExtractor,
     timezone_name: str,
+    receipt_source: str | None = None,
 ) -> list[UUID]:
     """Feed one accepted canonical resource through existing SPEC-002 logic."""
 
@@ -64,7 +65,7 @@ async def ingest_connector_resource(
         resource,
         provenance_connection_id=provenance_id or connection_id,
     )
-    source = connector_receipt_source(resource.resource_type)
+    source = receipt_source or connector_receipt_source(resource.resource_type)
     source_hash = source_document_hash(document)
     tombstone = document.metadata.get("status") in {"cancelled", "deleted"}
     extractor_version = "provider-tombstone.v1" if tombstone else extractor.extractor_version
