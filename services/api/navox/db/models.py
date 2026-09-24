@@ -994,8 +994,12 @@ class ConnectorResource(Base):
     canonical: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
     provider_metadata: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    source_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    source_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    source_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
     deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
