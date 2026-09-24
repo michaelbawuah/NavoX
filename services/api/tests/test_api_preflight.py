@@ -11,7 +11,8 @@ SCRIPT = ROOT / "scripts/check-api.sh"
 
 
 @pytest.mark.parametrize(
-    "failed_stage", ["", "sync", "lint", "format", "mypy", "pytest", "alembic", "evaluation"]
+    "failed_stage",
+    ["", "sync", "lint", "format", "mypy", "pytest", "alembic", "evaluation", "schema"],
 )
 def test_api_preflight_blocks_failures_and_runs_remaining_gates(
     tmp_path: Path, failed_stage: str
@@ -44,9 +45,12 @@ if [ "$stage" = alembic ]; then
     people person_identities operational_observations observation_evidence
     intelligence_feedback intelligence_source_receipts gmail_sync_plans connector_definitions
     connector_connections connector_resources connector_subscriptions connector_sync_runs
-    connector_sync_receipts
+    connector_sync_receipts connector_import_snapshots
   )
   for table in "${tables[@]}"; do
+    if [ "$PREFLIGHT_TEST_FAILURE" = schema ]; then
+      [ "$table" = connector_import_snapshots ] && continue
+    fi
     printf 'CREATE TABLE %s (\\n' "$table"
   done
   printf '%s\\n' client_type

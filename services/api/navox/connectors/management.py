@@ -24,6 +24,7 @@ from navox.db.models import (
     ConnectionCredential,
     ConnectorConnection,
     ConnectorDefinition,
+    ConnectorImportSnapshot,
     ConnectorSyncRun,
     User,
     WorkspaceMembership,
@@ -98,9 +99,9 @@ CATALOG = (
         id="generic-import",
         name="File imports",
         category="Data",
-        description="Bring ICS, CSV and JSON through the same connector contracts.",
-        availability="setup_pending",
-        setup_label="Setup not enabled yet",
+        description="Preview and process encrypted, immutable ICS, CSV and JSON snapshots.",
+        availability="available",
+        setup_label="Import a file",
         authentication="None",
         read_capabilities=["imports.calendar.read", "imports.tabular.read", "imports.json.read"],
     ),
@@ -355,26 +356,54 @@ async def connection_views(
         if definition is None or not definition.active:
             state = "DEGRADED" if state not in {"PAUSED", "DISCONNECTED"} else state
         last = utc(row.last_synced_at) if row.last_synced_at else None
+        snapshot = (
+            await database.get(ConnectorImportSnapshot, row.id)
+            if entry and entry.id == "generic-import"
+            else None
+        )
+        is_snapshot = bool(
+            snapshot and snapshot.workspace_id == workspace_id and snapshot.user_id == user_id
+        )
+        from navox.connectors.import_parser import IMPORT_CAPABILITIES
+
+        snapshot_allowed = (
+            is_snapshot
+            and IMPORT_CAPABILITIES.get(str(row.config.get("format")))
+            in row.authorized_capabilities
+        )
+        retry = (
+            utc(row.retry_not_before)
+            if row.retry_not_before and utc(row.retry_not_before) > now
+            else None
+        )
         result.append(
             ConnectionView(
                 id=row.id,
                 connector_id=entry.id if entry else "private-connector",
                 name=entry.name if entry else "Private connector",
-                account_label=None,
+                account_label=row.display_name if is_snapshot else None,
                 health=state,
                 agent_paused=agent_paused,
                 permissions=_permissions(row.authorized_capabilities),
                 sources=[
                     SourceView(
-                        id="resources",
-                        name="Connected resources",
-                        authorized=True,
+                        id="snapshot" if is_snapshot else "resources",
+                        name="Imported snapshot" if is_snapshot else "Connected resources",
+                        authorized=bool(snapshot_allowed) if is_snapshot else True,
                         health=state,
                         last_synced_at=last,
-                        freshness=freshness(last, now),
+                        freshness="fresh" if is_snapshot and last else freshness(last, now),
                         syncing=_syncing(row, now),
-                        retry_at=utc(row.retry_not_before) if row.retry_not_before else None,
-                        can_sync=False,
+                        retry_at=retry,
+                        can_sync=bool(
+                            snapshot_allowed
+                            and definition
+                            and definition.active
+                            and not agent_paused
+                            and state not in {"PAUSED", "DISCONNECTED", "AUTH_EXPIRED"}
+                            and not _syncing(row, now)
+                            and retry is None
+                        ),
                     )
                 ],
                 can_pause=state not in {"PAUSED", "DISCONNECTED"},

@@ -73,6 +73,8 @@ export function sourceStatus(source: ConnectionSource): string {
   if (source.retry_at) return "Waiting for the provider cooldown";
   if (source.health !== "CONNECTED") return healthLabel(source.health);
   if (source.freshness === "never_synced") return "No completed sync yet";
+  if (source.id === "snapshot")
+    return "Imported snapshot processed — not a live source";
   if (source.freshness === "stale") return "Saved data may be out of date";
   if (source.freshness === "unknown") return "Freshness could not be verified";
   return "Recent sync recorded";

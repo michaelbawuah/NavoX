@@ -11,6 +11,7 @@ from navox.api.connector_management import router as connector_management_router
 from navox.api.events import router as events_router
 from navox.api.gmail_recheck import router as gmail_recheck_router
 from navox.api.health import router as health_router
+from navox.api.imports import router as import_router
 from navox.api.intelligence import router as intelligence_router
 from navox.api.intelligence_evidence import router as intelligence_evidence_router
 from navox.api.intelligence_sync import router as intelligence_sync_router
@@ -38,6 +39,7 @@ def create_app() -> FastAPI:
         max_age=600,
     )
     app.add_middleware(RequestHardeningMiddleware)
+    app.include_router(import_router, prefix="/api/v1")
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(gmail_recheck_router, prefix="/api/v1")
     app.include_router(intelligence_router, prefix="/api/v1")

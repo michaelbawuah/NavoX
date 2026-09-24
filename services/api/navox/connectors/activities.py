@@ -130,7 +130,11 @@ async def _connector_sync(payload: ConnectorSyncWork) -> int:
             secret_broker = SecretBroker(settings)
         except SecretBrokerError:
             secret_broker = None
-        runtime = ConnectorRuntime(registry, secret_broker=secret_broker)
+        runtime = ConnectorRuntime(
+            registry,
+            secret_broker=secret_broker,
+            retain_canonical_content=connection.provider != "import",
+        )
         extractor = OperationalExtractor(gateway)
 
         # Bind non-optional values before the nested consumer is constructed.
@@ -356,6 +360,13 @@ async def connector_reconciliation_activity() -> list[ConnectorSyncWork]:
                 else None
             )
             pending = run is not None and run.status in {"running", "failed", "interrupted"}
+            # Immutable snapshots have no upstream changes. Reconcile only unfinished work.
+            if (
+                connection.provider == "import"
+                and connection.last_synced_at is not None
+                and not pending
+            ):
+                continue
             if (
                 not pending
                 and connection.last_synced_at is not None
