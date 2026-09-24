@@ -2,22 +2,26 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from navox.connectors.authorization import ConnectorAccessDenied, owned_connector
 from navox.connectors.capabilities import CapabilityGateway
 from navox.connectors.contracts import (
     CanonicalResource,
     ConnectorConnectionContext,
+    ConnectorManifest,
     ConnectorRuntimeError,
+    NavoXConnector,
     SyncRequest,
 )
 from navox.connectors.registry import ConnectorRegistry
-from navox.connectors.secrets import SecretBroker
+from navox.connectors.secrets import SecretBroker, SecretBrokerError
 from navox.db.models import (
     ConnectorConnection,
     ConnectorDefinition,
@@ -47,19 +51,22 @@ class ConnectorRuntime:
         *,
         connection_id: UUID,
         workspace_id: UUID,
+        user_id: UUID,
         request_id: UUID,
         policy_allowed: set[str] | frozenset[str],
         consume: ResourceConsumer,
         trigger: str = "manual",
     ) -> ConnectorSyncRun:
-        connection = await database.scalar(
-            select(ConnectorConnection).where(
-                ConnectorConnection.id == connection_id,
-                ConnectorConnection.workspace_id == workspace_id,
+        try:
+            connection = await owned_connector(
+                database,
+                connection_id=connection_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                require_active=True,
             )
-        )
-        if connection is None:
-            raise ConnectorRuntimeError("PERMISSION_DENIED", "Connector connection not found")
+        except ConnectorAccessDenied:
+            raise ConnectorRuntimeError("PERMISSION_DENIED", "Connector access denied") from None
         existing_run = await database.scalar(
             select(ConnectorSyncRun).where(
                 ConnectorSyncRun.connector_connection_id == connection.id,
@@ -96,25 +103,21 @@ class ConnectorRuntime:
                 "INVALID_PROVIDER_RESPONSE",
                 "Connector config changed its registered identity",
             )
-        secret_lease = None
-        if manifest.required_secrets:
-            if self.secret_broker is None:
-                raise ConnectorRuntimeError(
-                    "PERMISSION_DENIED",
-                    "Connector credentials are unavailable",
-                )
-            secret_lease = await self.secret_broker.lease(
-                database,
-                connection_id=connection.id,
-                purpose="sync.read",
-                names=frozenset(manifest.required_secrets),
-            )
-        connector = self.registry.build(
-            definition.connector_key,
-            context.config,
-            secret_lease,
+        # A health probe also uses credentials/network access. Permission must
+        # precede it, not merely be checked after the provider reports success.
+        authorized = self.capability_gateway.evaluate(
+            manifest=manifest,
+            provider_capabilities=frozenset(connection.provider_capabilities),
+            user_authorized=frozenset(connection.authorized_capabilities),
+            policy_allowed=policy_allowed,
+            health_state="CONNECTED",
         )
-        health = await connector.health(context)
+        if not authorized.read:
+            raise ConnectorRuntimeError("PERMISSION_DENIED", "No authorized read capability")
+        async with self._adapter(
+            database, context, manifest, authorized.read, purpose="health.read"
+        ) as connector:
+            health = await connector.health(context)
         connection.health_state = health.state
         connection.last_error_code = health.reason_code
         if health.state == "CONNECTED":
@@ -150,14 +153,19 @@ class ConnectorRuntime:
         resource_count = processed_count = duplicate_count = 0
         try:
             for _page_number in range(50):
-                page = await connector.sync(
-                    SyncRequest(
-                        connection_id=connection.id,
-                        workspace_id=connection.workspace_id,
-                        cursor=cursor,
-                        capabilities=effective.read,
+                # Lease only for the provider call. In particular, the model
+                # consumer below is never handed a live secret lease.
+                async with self._adapter(
+                    database, context, manifest, effective.read, purpose="sync.read"
+                ) as connector:
+                    page = await connector.sync(
+                        SyncRequest(
+                            connection_id=connection.id,
+                            workspace_id=connection.workspace_id,
+                            cursor=cursor,
+                            capabilities=effective.read,
+                        )
                     )
-                )
                 for resource in page.resources:
                     self._validate_resource(connection, manifest.id, resource)
                     duplicate = await self._persist_resource(database, resource)
@@ -175,10 +183,11 @@ class ConnectorRuntime:
                     "Connector exceeded the bounded page limit",
                 )
 
-            connection = await database.get(ConnectorConnection, connection_id)
+            completed_connection = await database.get(ConnectorConnection, connection_id)
             completed_run = await database.get(ConnectorSyncRun, run_id)
-            if connection is None or completed_run is None:
+            if completed_connection is None or completed_run is None:
                 raise ConnectorRuntimeError("PERMANENT_FAILURE", "Connector state disappeared")
+            connection = completed_connection
             run = completed_run
             connection.sync_cursor = cursor
             connection.last_synced_at = datetime.now(UTC)
@@ -202,6 +211,60 @@ class ConnectorRuntime:
                 failed_run.completed_at = datetime.now(UTC)
                 await database.commit()
             raise
+
+    @asynccontextmanager
+    async def _adapter(
+        self,
+        database: AsyncSession,
+        context: ConnectorConnectionContext,
+        manifest: ConnectorManifest,
+        capabilities: frozenset[str],
+        *,
+        purpose: str,
+    ) -> AsyncIterator[NavoXConnector]:
+        lease = None
+        try:
+            current = await owned_connector(
+                database,
+                connection_id=context.id,
+                workspace_id=context.workspace_id,
+                user_id=context.user_id,
+                require_active=True,
+            )
+            if (
+                current.config != context.config
+                or current.provider != context.provider
+                or current.external_account_id != context.external_account_id
+                or not capabilities.issubset(
+                    set(current.authorized_capabilities) & set(current.provider_capabilities)
+                )
+            ):
+                raise ConnectorAccessDenied("Connector authorization changed")
+            if manifest.required_secrets:
+                if self.secret_broker is None:
+                    raise SecretBrokerError("Connector credentials are unavailable")
+                lease = await self.secret_broker.lease(
+                    database,
+                    connection_id=context.id,
+                    workspace_id=context.workspace_id,
+                    user_id=context.user_id,
+                    purpose=purpose,
+                    names=frozenset(manifest.required_secrets),
+                )
+            connector = self.registry.build(manifest.id, context.config, lease)
+        except (ConnectorAccessDenied, SecretBrokerError):
+            if lease is not None:
+                lease.close()
+            raise ConnectorRuntimeError("PERMISSION_DENIED", "Connector access denied") from None
+        except BaseException:
+            if lease is not None:
+                lease.close()
+            raise
+        try:
+            yield connector
+        finally:
+            if lease is not None:
+                lease.close()
 
     @staticmethod
     def _validate_resource(

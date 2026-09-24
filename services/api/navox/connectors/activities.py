@@ -8,6 +8,8 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from navox.ai.factory import AIProviderNotConfigured, build_ai_gateway
+from navox.connectors.authorization import ConnectorAccessDenied, owned_connector
+from navox.connectors.capabilities import CapabilityGateway
 from navox.connectors.catalog import build_connector_registry
 from navox.connectors.contracts import (
     CanonicalResource,
@@ -22,7 +24,7 @@ from navox.connectors.jobs import (
 )
 from navox.connectors.provenance import ensure_provenance_connection
 from navox.connectors.runtime import ConnectorRuntime
-from navox.connectors.secrets import SecretBroker, SecretBrokerError
+from navox.connectors.secrets import ScopedSecretLease, SecretBroker, SecretBrokerError
 from navox.core.settings import get_settings
 from navox.db.models import (
     ConnectorConnection,
@@ -141,6 +143,7 @@ async def connector_sync_activity(payload: ConnectorSyncWork) -> int:
                 database,
                 connection_id=connection.id,
                 workspace_id=connection.workspace_id,
+                user_id=user_id,
                 request_id=UUID(payload.request_id),
                 policy_allowed=set(connection.authorized_capabilities),
                 consume=consume,
@@ -171,15 +174,16 @@ async def connector_health_activity(payload: ConnectorHealthWork) -> str:
     user_id = UUID(payload.user_id)
     workspace_id = UUID(payload.workspace_id)
     async with get_session_factory()() as database:
-        connection = await database.scalar(
-            select(ConnectorConnection)
-            .where(
-                ConnectorConnection.id == connection_id,
-                ConnectorConnection.user_id == user_id,
-                ConnectorConnection.workspace_id == workspace_id,
+        try:
+            connection = await owned_connector(
+                database,
+                connection_id=connection_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                require_active=True,
             )
-            .with_for_update()
-        )
+        except ConnectorAccessDenied:
+            raise _failure("PERMISSION_DENIED") from None
         if connection is None:
             return "DISCONNECTED"
         if connection.status == "DISCONNECTED":
@@ -190,6 +194,7 @@ async def connector_health_activity(payload: ConnectorHealthWork) -> str:
             await database.commit()
             return "PAUSED"
 
+        secret_lease: ScopedSecretLease | None = None
         try:
             registry = build_connector_registry(settings)
             definition = await database.get(
@@ -214,13 +219,23 @@ async def connector_health_activity(payload: ConnectorHealthWork) -> str:
             registered = registry.get(definition.connector_key)
             preview = registered.factory(context.config, None)
             manifest = preview.get_manifest()
-            secret_lease = None
+            allowed = CapabilityGateway().evaluate(
+                manifest=manifest,
+                provider_capabilities=set(connection.provider_capabilities),
+                user_authorized=set(connection.authorized_capabilities),
+                policy_allowed=set(connection.authorized_capabilities),
+                health_state="CONNECTED",
+            )
+            if not allowed.read:
+                raise ConnectorRuntimeError("PERMISSION_DENIED")
             if manifest.required_secrets:
                 try:
                     secret_broker = SecretBroker(settings)
                     secret_lease = await secret_broker.lease(
                         database,
                         connection_id=connection.id,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
                         purpose="health.read",
                         names=frozenset(manifest.required_secrets),
                     )
@@ -234,7 +249,11 @@ async def connector_health_activity(payload: ConnectorHealthWork) -> str:
                 context.config,
                 secret_lease,
             )
-            result = await connector.health(context)
+            try:
+                result = await connector.health(context)
+            finally:
+                if secret_lease is not None:
+                    secret_lease.close()
             connection.health_state = result.state
             connection.last_error_code = result.reason_code
             if result.state == "CONNECTED":
@@ -252,6 +271,9 @@ async def connector_health_activity(payload: ConnectorHealthWork) -> str:
             connection.last_error_code = "TEMPORARY_FAILURE"
             await database.commit()
             raise _failure("TEMPORARY_FAILURE") from None
+        finally:
+            if secret_lease is not None:
+                secret_lease.close()
 
 
 @activity.defn

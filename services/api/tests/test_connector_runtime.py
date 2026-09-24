@@ -29,6 +29,7 @@ from navox.db.models import (
     ConnectorResource,
     User,
     Workspace,
+    WorkspaceMembership,
 )
 
 
@@ -124,6 +125,8 @@ async def test_runtime_persists_resources_and_advances_cursor_only_after_consume
     workspace = Workspace(name="Personal")
     database.add_all([user, workspace])
     await database.flush()
+    database.add(WorkspaceMembership(workspace_id=workspace.id, user_id=user.id))
+    await database.flush()
     definition = ConnectorDefinition(
         connector_key=manifest.id,
         version=manifest.version,
@@ -156,6 +159,7 @@ async def test_runtime_persists_resources_and_advances_cursor_only_after_consume
         database,
         connection_id=connection.id,
         workspace_id=workspace.id,
+        user_id=user.id,
         request_id=uuid4(),
         policy_allowed={"fixture.items.read"},
         consume=consume,
@@ -207,6 +211,8 @@ async def test_runtime_rejects_cross_workspace_resource_before_cursor_advance(
     workspace = Workspace(name="Personal")
     database.add_all([user, workspace])
     await database.flush()
+    database.add(WorkspaceMembership(workspace_id=workspace.id, user_id=user.id))
+    await database.flush()
     definition = ConnectorDefinition(
         connector_key=manifest.id,
         version=manifest.version,
@@ -233,16 +239,18 @@ async def test_runtime_rejects_cross_workspace_resource_before_cursor_advance(
     async def consume(_resource: CanonicalResource) -> None:
         return None
 
+    connection_id = connection.id
     with pytest.raises(ConnectorRuntimeError, match="Cross-workspace"):
         await runtime.sync(
             database,
             connection_id=connection.id,
             workspace_id=workspace.id,
+            user_id=user.id,
             request_id=uuid4(),
             policy_allowed={"fixture.items.read"},
             consume=consume,
         )
 
-    refreshed = await database.get(ConnectorConnection, connection.id)
+    refreshed = await database.get(ConnectorConnection, connection_id)
     assert refreshed is not None
     assert refreshed.sync_cursor is None
