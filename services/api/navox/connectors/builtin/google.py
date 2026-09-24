@@ -211,14 +211,14 @@ def google_canonical_resource(
         raise ValueError("Unsupported Google source type")
 
     status = document.metadata.get("status")
-    canonical = {
+    canonical: dict[str, JsonValue] = {
         "source_type": document.source_type,
         "occurred_at": document.occurred_at.isoformat(),
         "status": status if isinstance(status, str) else "active",
         "has_subject": bool(document.subject),
         "has_content": bool(document.content),
     }
-    provider_metadata = {
+    provider_metadata: dict[str, JsonValue] = {
         "source_hash": source_document_hash(document),
         "content_persisted": False,
     }
@@ -286,8 +286,8 @@ async def mirror_google_document(
         if existing.workspace_id != legacy_connection.workspace_id:
             raise ValueError("Google resource mirror crossed a workspace boundary")
         existing.external_parent_id = resource.external_parent_id
-        existing.canonical = resource.canonical
-        existing.provider_metadata = resource.provider_metadata
+        existing.canonical = dict(resource.canonical)
+        existing.provider_metadata = dict(resource.provider_metadata)
         existing.source_url = resource.source_url
         existing.source_updated_at = resource.updated_at
         existing.retrieved_at = resource.retrieved_at
@@ -305,7 +305,6 @@ def _legacy_error_code(connection: Connection) -> str | None:
     if connection.last_error:
         return "TEMPORARY_FAILURE"
     return None
-
 
 
 class GoogleCompatibilityConnector:

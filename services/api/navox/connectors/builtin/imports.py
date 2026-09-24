@@ -5,7 +5,7 @@ import io
 import json
 import re
 from collections.abc import Mapping
-from datetime import UTC, date, datetime, time
+from datetime import UTC, datetime, time
 from hashlib import sha256
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -84,12 +84,13 @@ class ImportConnector:
     ) -> None:
         del secrets
         self.format = str(config.get("format", "")).casefold()
-        self.content = config.get("content")
+        content = config.get("content")
         self.source_name = str(config.get("source_name", "Imported data"))[:256]
         if self.format not in {"ics", "csv", "json"}:
             raise ValueError("Import format must be ics, csv, or json")
-        if not isinstance(self.content, str):
+        if not isinstance(content, str):
             raise ValueError("Import content must be text")
+        self.content: str = content
         if len(self.content.encode("utf-8")) > MAX_IMPORT_BYTES:
             raise ValueError("Import exceeds the bounded size limit")
 
@@ -123,9 +124,7 @@ class ImportConnector:
         resources.sort(key=lambda item: (item.resource_type, item.external_id))
         after = request.cursor or ""
         pending = [
-            item
-            for item in resources
-            if f"{item.resource_type}\x00{item.external_id}" > after
+            item for item in resources if f"{item.resource_type}\x00{item.external_id}" > after
         ]
         selected = pending[: request.limit]
         has_more = len(pending) > len(selected)
@@ -150,7 +149,7 @@ class ImportConnector:
         del request
         raise ConnectorRuntimeError("UNSUPPORTED_CAPABILITY", "Imports are read-only")
 
-    def _resources(self, connection_id, workspace_id) -> list[CanonicalResource]:
+    def _resources(self, connection_id: UUID, workspace_id: UUID) -> list[CanonicalResource]:
         if self.format == "ics":
             return _ics_resources(self.content, connection_id, workspace_id)
         if self.format == "csv":
@@ -158,7 +157,9 @@ class ImportConnector:
         return _json_resources(self.content, connection_id, workspace_id)
 
 
-def _ics_resources(content: str, connection_id, workspace_id) -> list[CanonicalResource]:
+def _ics_resources(
+    content: str, connection_id: UUID, workspace_id: UUID
+) -> list[CanonicalResource]:
     unfolded = re.sub(r"\r?\n[ \t]", "", content)
     events = re.findall(
         r"BEGIN:VEVENT\r?\n(.*?)\r?\nEND:VEVENT",
@@ -206,7 +207,9 @@ def _ics_resources(content: str, connection_id, workspace_id) -> list[CanonicalR
     return resources
 
 
-def _csv_resources(content: str, connection_id, workspace_id) -> list[CanonicalResource]:
+def _csv_resources(
+    content: str, connection_id: UUID, workspace_id: UUID
+) -> list[CanonicalResource]:
     reader = csv.DictReader(io.StringIO(content))
     if not reader.fieldnames or len(reader.fieldnames) > MAX_IMPORT_FIELDS:
         raise ValueError("CSV must have a bounded header row")
@@ -235,7 +238,7 @@ def _csv_resources(content: str, connection_id, workspace_id) -> list[CanonicalR
                 source_url=_safe_url(_first(normalized, "url", "source_url")),
                 source_type="import_record",
                 metadata={
-                    "fields": normalized,
+                    "fields": dict(normalized),
                     "import_format": "csv",
                 },
             )
@@ -243,7 +246,9 @@ def _csv_resources(content: str, connection_id, workspace_id) -> list[CanonicalR
     return resources
 
 
-def _json_resources(content: str, connection_id, workspace_id) -> list[CanonicalResource]:
+def _json_resources(
+    content: str, connection_id: UUID, workspace_id: UUID
+) -> list[CanonicalResource]:
     try:
         payload = json.loads(content)
     except json.JSONDecodeError as error:
@@ -288,8 +293,8 @@ def _json_resources(content: str, connection_id, workspace_id) -> list[Canonical
 
 
 def _resource(
-    connection_id,
-    workspace_id,
+    connection_id: UUID,
+    workspace_id: UUID,
     resource_type: str,
     external_id: str,
     *,

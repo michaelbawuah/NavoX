@@ -10,6 +10,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 from navox.connectors.contracts import (
+    AuthMethod,
     AuthorizationRequest,
     AuthorizationResult,
     CanonicalResource,
@@ -19,6 +20,7 @@ from navox.connectors.contracts import (
     ConnectorCapabilities,
     ConnectorConnectionContext,
     ConnectorHealth,
+    ConnectorHealthState,
     ConnectorManifest,
     ConnectorRuntimeError,
     FetchResourceRequest,
@@ -145,9 +147,9 @@ class GenericAPIConnector:
     def get_manifest(self) -> ConnectorManifest:
         required = [self.config.token_secret_name] if self.config.auth == "bearer" else []
         auth = (
-            [{"kind": "api_token", "label": "API token", "scopes": []}]
+            [AuthMethod(kind="api_token", label="API token", scopes=[])]
             if required
-            else [{"kind": "none", "label": "No authentication", "scopes": []}]
+            else [AuthMethod(kind="none", label="No authentication", scopes=[])]
         )
         capabilities = [
             CapabilityDefinition(
@@ -188,11 +190,12 @@ class GenericAPIConnector:
                 await self._fetch_endpoint(client, endpoint, max_items=1)
             return ConnectorHealth(state="CONNECTED", checked_at=datetime.now(UTC))
         except ConnectorRuntimeError as error:
-            state = {
+            states: dict[str, ConnectorHealthState] = {
                 "AUTH_EXPIRED": "AUTH_EXPIRED",
                 "RATE_LIMITED": "RATE_LIMITED",
                 "PROVIDER_UNAVAILABLE": "DEGRADED",
-            }.get(error.code, "DEGRADED")
+            }
+            state = states.get(error.code, "DEGRADED")
             return ConnectorHealth(
                 state=state,
                 checked_at=datetime.now(UTC),
@@ -206,16 +209,11 @@ class GenericAPIConnector:
                 if endpoint.capability not in request.capabilities:
                     continue
                 items = await self._fetch_endpoint(client, endpoint)
-                resources.extend(
-                    self._resource(request, endpoint, item)
-                    for item in items
-                )
+                resources.extend(self._resource(request, endpoint, item) for item in items)
         resources.sort(key=lambda item: (item.resource_type, item.external_id))
         after = request.cursor or ""
         pending = [
-            item
-            for item in resources
-            if f"{item.resource_type}\x00{item.external_id}" > after
+            item for item in resources if f"{item.resource_type}\x00{item.external_id}" > after
         ]
         selected = pending[: request.limit]
         has_more = len(pending) > len(selected)
@@ -232,9 +230,7 @@ class GenericAPIConnector:
                 connection_id=request.connection_id,
                 workspace_id=request.workspace_id,
                 limit=1_000,
-                capabilities=frozenset(
-                    endpoint.capability for endpoint in self.config.endpoints
-                ),
+                capabilities=frozenset(endpoint.capability for endpoint in self.config.endpoints),
             )
         )
         for resource in page.resources:
@@ -289,9 +285,7 @@ class GenericAPIConnector:
             if len(items) >= max_items:
                 return items[:max_items]
             next_cursor = (
-                _field(payload, endpoint.next_cursor_field)
-                if endpoint.next_cursor_field
-                else None
+                _field(payload, endpoint.next_cursor_field) if endpoint.next_cursor_field else None
             )
             link = response.links.get("next")
             link_url = str(link["url"]) if link and link.get("url") else None
@@ -382,7 +376,9 @@ class GenericAPIConnector:
             external_parent_id=str(parent_value)[:512] if parent_value is not None else None,
             canonical={
                 "source_type": endpoint.resource_type,
-                "subject": str(subject_value)[:2_000] if subject_value is not None else endpoint.name,
+                "subject": str(subject_value)[:2_000]
+                if subject_value is not None
+                else endpoint.name,
                 "content": str(content_value)[:32_000] if content_value is not None else None,
                 "occurred_at": occurred.isoformat(),
                 "status": str(status_value)[:64] if status_value is not None else "active",

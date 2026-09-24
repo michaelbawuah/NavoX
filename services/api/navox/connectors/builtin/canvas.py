@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 from html import unescape
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
-from uuid import UUID
 
 import httpx
 from pydantic import JsonValue
@@ -20,6 +19,7 @@ from navox.connectors.contracts import (
     ConnectorActionResult,
     ConnectorConnectionContext,
     ConnectorHealth,
+    ConnectorHealthState,
     ConnectorManifest,
     ConnectorRuntimeError,
     FetchResourceRequest,
@@ -173,11 +173,12 @@ class CanvasConnector:
                 )
             return ConnectorHealth(state="CONNECTED", checked_at=datetime.now(UTC))
         except ConnectorRuntimeError as error:
-            state = {
+            states: dict[str, ConnectorHealthState] = {
                 "AUTH_EXPIRED": "AUTH_EXPIRED",
                 "RATE_LIMITED": "RATE_LIMITED",
                 "PROVIDER_UNAVAILABLE": "DEGRADED",
-            }.get(error.code, "DEGRADED")
+            }
+            state = states.get(error.code, "DEGRADED")
             return ConnectorHealth(
                 state=state,
                 checked_at=datetime.now(UTC),
@@ -240,7 +241,10 @@ class CanvasConnector:
                     announcements = await self._paginated(
                         client,
                         f"{self.base_url}/api/v1/announcements",
-                        params=[("per_page", "100"), *[("context_codes[]", code) for code in chunk]],
+                        params=[
+                            ("per_page", "100"),
+                            *[("context_codes[]", code) for code in chunk],
+                        ],
                     )
                     resources.extend(
                         self._announcement_resource(request, item)
@@ -271,9 +275,7 @@ class CanvasConnector:
         resources.sort(key=lambda item: (item.resource_type, item.external_id))
         after = request.cursor or ""
         pending = [
-            item
-            for item in resources
-            if f"{item.resource_type}\x00{item.external_id}" > after
+            item for item in resources if f"{item.resource_type}\x00{item.external_id}" > after
         ]
         selected = pending[: request.limit]
         has_more = len(pending) > len(selected)
@@ -343,7 +345,9 @@ class CanvasConnector:
     ) -> httpx.Response:
         self._validate_request_url(url)
         try:
-            response = await client.get(url, params=params)
+            # QueryParams preserves repeated Canvas keys without invariant list typing.
+            query = httpx.QueryParams(tuple(params) if isinstance(params, list) else params)
+            response = await client.get(url, params=query)
         except httpx.HTTPError:
             raise ConnectorRuntimeError(
                 "PROVIDER_UNAVAILABLE",
@@ -429,7 +433,9 @@ class CanvasConnector:
         course: dict[str, object],
         course_id: str,
     ) -> CanonicalResource:
-        name = _text(course.get("name")) or _text(course.get("course_code")) or f"Course {course_id}"
+        name = (
+            _text(course.get("name")) or _text(course.get("course_code")) or f"Course {course_id}"
+        )
         occurred = _time(course.get("start_at")) or datetime.now(UTC)
         return _resource(
             request,

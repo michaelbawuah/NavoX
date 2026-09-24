@@ -9,7 +9,11 @@ from temporalio.exceptions import ApplicationError
 
 from navox.ai.factory import AIProviderNotConfigured, build_ai_gateway
 from navox.connectors.catalog import build_connector_registry
-from navox.connectors.contracts import ConnectorConnectionContext, ConnectorRuntimeError
+from navox.connectors.contracts import (
+    CanonicalResource,
+    ConnectorConnectionContext,
+    ConnectorRuntimeError,
+)
 from navox.connectors.intelligence import ingest_connector_resource
 from navox.connectors.jobs import (
     ConnectorDisconnectWork,
@@ -119,13 +123,16 @@ async def connector_sync_activity(payload: ConnectorSyncWork) -> int:
         extractor = OperationalExtractor(gateway)
         affected: set[UUID] = set()
 
-        async def consume(resource) -> None:
+        # Bind non-optional values before the nested consumer is constructed.
+        owned_connection, owner = connection, user
+
+        async def consume(resource: CanonicalResource) -> None:
             identifiers = await ingest_connector_resource(
                 database,
-                connector_connection=connection,
+                connector_connection=owned_connection,
                 resource=resource,
                 extractor=extractor,
-                timezone_name=user.timezone,
+                timezone_name=owner.timezone,
             )
             affected.update(identifiers)
 
@@ -191,8 +198,21 @@ async def connector_health_activity(payload: ConnectorHealthWork) -> str:
             )
             if definition is None:
                 raise ConnectorRuntimeError("PERMANENT_FAILURE")
+            context = ConnectorConnectionContext.model_validate(
+                {
+                    "id": connection.id,
+                    "workspace_id": connection.workspace_id,
+                    "user_id": connection.user_id,
+                    "connector_id": definition.connector_key,
+                    "provider": connection.provider,
+                    "external_account_id": connection.external_account_id,
+                    "status": connection.health_state,
+                    "authorized_capabilities": connection.authorized_capabilities,
+                    "config": connection.config,
+                }
+            )
             registered = registry.get(definition.connector_key)
-            preview = registered.factory(connection.config, None)
+            preview = registered.factory(context.config, None)
             manifest = preview.get_manifest()
             secret_lease = None
             if manifest.required_secrets:
@@ -211,22 +231,10 @@ async def connector_health_activity(payload: ConnectorHealthWork) -> str:
                     return "AUTH_EXPIRED"
             connector = registry.build(
                 definition.connector_key,
-                connection.config,
+                context.config,
                 secret_lease,
             )
-            result = await connector.health(
-                ConnectorConnectionContext(
-                    id=connection.id,
-                    workspace_id=connection.workspace_id,
-                    user_id=connection.user_id,
-                    connector_id=definition.connector_key,
-                    provider=connection.provider,
-                    external_account_id=connection.external_account_id,
-                    status=connection.health_state,
-                    authorized_capabilities=frozenset(connection.authorized_capabilities),
-                    config=connection.config,
-                )
-            )
+            result = await connector.health(context)
             connection.health_state = result.state
             connection.last_error_code = result.reason_code
             if result.state == "CONNECTED":
@@ -276,9 +284,9 @@ async def connector_reconciliation_activity() -> list[ConnectorSyncWork]:
                     workspace_id=str(connection.workspace_id),
                     request_id=str(
                         UUID(
-                            bytes=__import__("hashlib").sha256(
-                                f"{connection.id}:{now:%Y%m%d%H%M}".encode()
-                            ).digest()[:16]
+                            bytes=__import__("hashlib")
+                            .sha256(f"{connection.id}:{now:%Y%m%d%H%M}".encode())
+                            .digest()[:16]
                         )
                     ),
                     trigger="reconciliation",

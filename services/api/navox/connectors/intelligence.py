@@ -6,6 +6,12 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from navox.connectors.contracts import CanonicalResource
+from navox.connectors.normalization import (
+    canonical_resource_to_source_document,
+    connector_receipt_source,
+)
+from navox.connectors.provenance import ensure_provenance_connection
 from navox.db.models import (
     AuditEvent,
     ConnectorConnection,
@@ -21,13 +27,6 @@ from navox.intelligence.extraction import (
     source_document_hash,
 )
 from navox.intelligence.resolution import resolve_extraction
-
-from navox.connectors.contracts import CanonicalResource
-from navox.connectors.normalization import (
-    canonical_resource_to_source_document,
-    connector_receipt_source,
-)
-from navox.connectors.provenance import ensure_provenance_connection
 
 
 async def ingest_connector_resource(

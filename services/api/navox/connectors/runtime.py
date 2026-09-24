@@ -75,8 +75,21 @@ class ConnectorRuntime:
         if definition is None or not definition.active:
             raise ConnectorRuntimeError("PERMANENT_FAILURE", "Connector definition unavailable")
 
+        context = ConnectorConnectionContext.model_validate(
+            {
+                "id": connection.id,
+                "workspace_id": connection.workspace_id,
+                "user_id": connection.user_id,
+                "connector_id": definition.connector_key,
+                "provider": connection.provider,
+                "external_account_id": connection.external_account_id,
+                "status": connection.health_state,
+                "authorized_capabilities": connection.authorized_capabilities,
+                "config": connection.config,
+            }
+        )
         registered = self.registry.get(definition.connector_key)
-        preview = registered.factory(connection.config, None)
+        preview = registered.factory(context.config, None)
         manifest = preview.get_manifest()
         if manifest.id != registered.manifest.id or manifest.version != registered.manifest.version:
             raise ConnectorRuntimeError(
@@ -98,19 +111,8 @@ class ConnectorRuntime:
             )
         connector = self.registry.build(
             definition.connector_key,
-            connection.config,
+            context.config,
             secret_lease,
-        )
-        context = ConnectorConnectionContext(
-            id=connection.id,
-            workspace_id=connection.workspace_id,
-            user_id=connection.user_id,
-            connector_id=manifest.id,
-            provider=connection.provider,
-            external_account_id=connection.external_account_id,
-            status=connection.health_state,
-            authorized_capabilities=frozenset(connection.authorized_capabilities),
-            config=connection.config,
         )
         health = await connector.health(context)
         connection.health_state = health.state
@@ -142,6 +144,8 @@ class ConnectorRuntime:
         database.add(run)
         await database.commit()
 
+        # Keep scalar identifiers across rollback, which expires ORM instances.
+        run_id = run.id
         cursor = connection.sync_cursor
         resource_count = processed_count = duplicate_count = 0
         try:
@@ -172,9 +176,10 @@ class ConnectorRuntime:
                 )
 
             connection = await database.get(ConnectorConnection, connection_id)
-            run = await database.get(ConnectorSyncRun, run.id)
-            if connection is None or run is None:
+            completed_run = await database.get(ConnectorSyncRun, run_id)
+            if connection is None or completed_run is None:
                 raise ConnectorRuntimeError("PERMANENT_FAILURE", "Connector state disappeared")
+            run = completed_run
             connection.sync_cursor = cursor
             connection.last_synced_at = datetime.now(UTC)
             connection.health_state = "CONNECTED"
@@ -188,13 +193,13 @@ class ConnectorRuntime:
             return run
         except Exception as error:
             await database.rollback()
-            run = await database.get(ConnectorSyncRun, run.id)
-            if run is not None:
-                run.status = "failed"
-                run.error_code = (
+            failed_run = await database.get(ConnectorSyncRun, run_id)
+            if failed_run is not None:
+                failed_run.status = "failed"
+                failed_run.error_code = (
                     error.code if isinstance(error, ConnectorRuntimeError) else "TEMPORARY_FAILURE"
                 )
-                run.completed_at = datetime.now(UTC)
+                failed_run.completed_at = datetime.now(UTC)
                 await database.commit()
             raise
 
@@ -260,8 +265,8 @@ class ConnectorRuntime:
             return False
         duplicate = existing.content_hash == content_hash
         existing.version = resource.version
-        existing.canonical = resource.canonical
-        existing.provider_metadata = resource.provider_metadata
+        existing.canonical = dict(resource.canonical)
+        existing.provider_metadata = dict(resource.provider_metadata)
         existing.source_url = resource.source_url
         existing.source_created_at = resource.created_at
         existing.source_updated_at = resource.updated_at

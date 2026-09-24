@@ -45,10 +45,7 @@ def canonical_resource_to_source_document(
         subject=subject,
         content=content,
         occurred_at=(
-            occurred_at
-            or resource.updated_at
-            or resource.created_at
-            or resource.retrieved_at
+            occurred_at or resource.updated_at or resource.created_at or resource.retrieved_at
         ),
         retrieved_at=resource.retrieved_at,
         metadata=metadata,
