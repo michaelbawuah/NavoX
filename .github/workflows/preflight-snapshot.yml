@@ -33,6 +33,11 @@ jobs:
           git apply --check "$RUNNER_TEMP/contention.patch"
           git apply --index "$RUNNER_TEMP/contention.patch"
           test "$(git write-tree)" = "e570fd8a88bf294de26081c7c0462884721a7ece"
+          gh api repos/michaelbawuah/NavoX/git/blobs/f71a2a00eab83b339066f743651b1593ff1475d8 --jq .content | base64 --decode > "$RUNNER_TEMP/contention-correction.patch"
+          test "$(git hash-object "$RUNNER_TEMP/contention-correction.patch")" = "f71a2a00eab83b339066f743651b1593ff1475d8"
+          git apply --check "$RUNNER_TEMP/contention-correction.patch"
+          git apply --index "$RUNNER_TEMP/contention-correction.patch"
+          test "$(git write-tree)" = "1b8fc0bece8ed82e6041f7e25033a2ab3b718020"
           test "$(git diff --cached --name-only | wc -l)" -eq 9
           test -z "$(git diff --cached --name-only -- .github/workflows services/api/pyproject.toml services/api/uv.lock package-lock.json evals/gates.json services/api/migrations)"
           git diff --cached --stat
@@ -42,7 +47,7 @@ jobs:
           set -euo pipefail
           bash scripts/check-api.sh | tee "$RUNNER_TEMP/contention-preflight.log"
           git diff --exit-code
-          test "$(git write-tree)" = "e570fd8a88bf294de26081c7c0462884721a7ece"
+          test "$(git write-tree)" = "1b8fc0bece8ed82e6041f7e25033a2ab3b718020"
       - name: Start production API worker PostgreSQL and Temporal images
         shell: bash
         run: |
@@ -79,11 +84,11 @@ jobs:
         run: |
           set -euo pipefail
           git diff --exit-code
-          test "$(git write-tree)" = "e570fd8a88bf294de26081c7c0462884721a7ece"
+          test "$(git write-tree)" = "1b8fc0bece8ed82e6041f7e25033a2ab3b718020"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'fix(connectors): separate source contention from provider failures'
-          git push origin HEAD:refs/heads/chore/spec003-validated-source-contention
+          git push origin HEAD:refs/heads/chore/spec003-validated-source-contention-v2
           git rev-parse HEAD > "$RUNNER_TEMP/validated-candidate.txt"
       - name: Capture diagnostics on failure
         if: failure()
