@@ -1,4 +1,4 @@
-name: SPEC-003 source snapshot
+name: Source contention integration preflight
 
 on:
   push:
@@ -6,32 +6,101 @@ on:
     paths: [.github/workflows/preflight-snapshot.yml]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  snapshot:
-    name: Prepare immutable source
+  preflight:
+    name: Verify source contention and complete Temporal smoke
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           ref: e0c55cdca682743023c490b54fb59e2fc3dcde72
-          persist-credentials: false
-      - name: Archive tracked files
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.15"
+      - name: Apply hash-verified locally tested patch
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "e0c55cdca682743023c490b54fb59e2fc3dcde72"
-          git archive --format=tar.gz --output="$RUNNER_TEMP/navox-source-e0c55cd.tar.gz" HEAD
-          git rev-parse HEAD > "$RUNNER_TEMP/source-commit.txt"
-          git rev-parse 'HEAD^{tree}' > "$RUNNER_TEMP/source-tree.txt"
+          gh api repos/michaelbawuah/NavoX/git/blobs/b570aabefc2099e9a3488eddb62fc580e31b4226 --jq .content | base64 --decode > "$RUNNER_TEMP/contention.patch.xz"
+          test "$(git hash-object "$RUNNER_TEMP/contention.patch.xz")" = "b570aabefc2099e9a3488eddb62fc580e31b4226"
+          python3 -c 'import lzma,sys; sys.stdout.buffer.write(lzma.decompress(open(sys.argv[1], "rb").read()))' "$RUNNER_TEMP/contention.patch.xz" > "$RUNNER_TEMP/contention.patch"
+          git apply --check "$RUNNER_TEMP/contention.patch"
+          git apply --index "$RUNNER_TEMP/contention.patch"
+          test "$(git write-tree)" = "e570fd8a88bf294de26081c7c0462884721a7ece"
+          test "$(git diff --cached --name-only | wc -l)" -eq 9
+          test -z "$(git diff --cached --name-only -- .github/workflows services/api/pyproject.toml services/api/uv.lock package-lock.json evals/gates.json services/api/migrations)"
+          git diff --cached --stat
+      - name: Run every API gate on exact patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/check-api.sh | tee "$RUNNER_TEMP/contention-preflight.log"
+          git diff --exit-code
+          test "$(git write-tree)" = "e570fd8a88bf294de26081c7c0462884721a7ece"
+      - name: Start production API worker PostgreSQL and Temporal images
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          docker compose up --build -d api worker
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://localhost:8000/api/v1/health/ready >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - name: Repeat Gmail Calendar recovery cases on PostgreSQL
+        working-directory: services/api
+        env:
+          NAVOX_CONNECTOR_TEST_DSN: postgresql+asyncpg://navox:navox@localhost:5432/navox
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run pytest tests/test_google_gmail_connector.py tests/test_google_calendar_connector.py tests/test_connector_sync_recovery.py --junitxml="$RUNNER_TEMP/source-runtime-pg.xml"
+          python -c 'import sys,xml.etree.ElementTree as E; s=E.parse(sys.argv[1]).getroot(); a=list(s.iter("testsuite")); assert sum(int(x.get("tests",0)) for x in a)==123; assert all(int(x.get(k,0))==0 for x in a for k in ("failures","errors","skipped"))' "$RUNNER_TEMP/source-runtime-pg.xml"
+      - name: Run complete provider-fixture smoke through real Temporal twice
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            docker compose run --rm --no-deps -T --volume "$PWD/services/api/integration:/app/integration:ro" api uv run --no-sync python -m integration.intelligence_temporal_smoke | tee "$RUNNER_TEMP/temporal-smoke-$attempt.log"
+            grep -F '"passed": true' "$RUNNER_TEMP/temporal-smoke-$attempt.log"
+            grep -F '"runtime_fence_concurrency_verified": true' "$RUNNER_TEMP/temporal-smoke-$attempt.log"
+          done
+      - name: Publish only the validated isolated candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test "$(git write-tree)" = "e570fd8a88bf294de26081c7c0462884721a7ece"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(connectors): separate source contention from provider failures'
+          git push origin HEAD:refs/heads/chore/spec003-validated-source-contention
+          git rev-parse HEAD > "$RUNNER_TEMP/validated-candidate.txt"
+      - name: Capture diagnostics on failure
+        if: failure()
+        run: |
+          docker compose ps
+          docker compose logs --tail 100 api worker postgres temporal
+      - name: Clean up disposable services
+        if: always()
+        run: docker compose down --volumes --remove-orphans
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: navox-source-e0c55cd
+          name: navox-source-contention-preflight
           path: |
-            ${{ runner.temp }}/navox-source-e0c55cd.tar.gz
-            ${{ runner.temp }}/source-commit.txt
-            ${{ runner.temp }}/source-tree.txt
-          if-no-files-found: error
-          retention-days: 1
+            ${{ runner.temp }}/contention-preflight.log
+            ${{ runner.temp }}/source-runtime-pg.xml
+            ${{ runner.temp }}/temporal-smoke-*.log
+            ${{ runner.temp }}/validated-candidate.txt
+          if-no-files-found: warn
+          retention-days: 7
