@@ -1,5 +1,6 @@
 """Authorized Google reads feed the provider-neutral intelligence boundary."""
 
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from secrets import token_urlsafe
@@ -77,8 +78,12 @@ async def _process_document(
     document: SourceDocument,
     source: str,
     extractor: OperationalExtractor,
+    mirror_source: bool = True,
+    reauthorize: Callable[[AsyncSession, UUID, str], Awaitable[tuple[Connection, User]]]
+    | None = None,
 ) -> tuple[set[UUID], str]:
     """Validate and apply one revision; the caller commits it with source progress."""
+    authorize = reauthorize or authorized_connection
     connection_id = connection.id
     if document.workspace_id != connection.workspace_id or document.provider != "google":
         raise GoogleSourceAuthorizationError("Source does not belong to this workspace")
@@ -116,11 +121,12 @@ async def _process_document(
     # SPEC-003 compatibility bridge: register the accepted provider revision in
     # the universal resource layer before SPEC-002 resolves it. The mirror is
     # content-minimized and shares the caller's transaction/cursor checkpoint.
-    await mirror_google_document(
-        database,
-        legacy_connection=connection,
-        document=document,
-    )
+    if mirror_source:
+        await mirror_google_document(
+            database,
+            legacy_connection=connection,
+            document=document,
+        )
 
     if tombstone:
         result = OperationalExtractionResult(
@@ -134,7 +140,7 @@ async def _process_document(
         try:
             result = await extractor.extract(document, owner_email=connection.external_email)
         except InvalidOperationalExtraction as error:
-            await authorized_connection(database, connection_id, source)
+            await authorize(database, connection_id, source)
             database.add(
                 IntelligenceSourceReceipt(
                     connection_id=connection_id,
@@ -166,7 +172,7 @@ async def _process_document(
             )
             return set(), "rejected"
     # Recheck after a slow provider/model call before applying any proposal.
-    connection, user = await authorized_connection(database, connection_id, source)
+    connection, user = await authorize(database, connection_id, source)
     resolved_ids = await resolve_extraction(
         database,
         connection=connection,

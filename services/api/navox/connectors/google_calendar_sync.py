@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from pydantic import JsonValue
@@ -60,6 +61,7 @@ class CalendarAuthority:
     credential_id: UUID | None
     account_id: str
     scopes: frozenset[str]
+    required_scope: str = CALENDAR_READ_SCOPE
 
     async def check(self, database: AsyncSession, lock: bool) -> None:
         query = select(Connection).where(
@@ -78,11 +80,9 @@ class CalendarAuthority:
             or row.credential_reference != self.credential_id
             or row.external_account_id != self.account_id
             or frozenset(row.granted_scopes) != self.scopes
-            or CALENDAR_READ_SCOPE not in row.granted_scopes
+            or self.required_scope not in row.granted_scopes
         ):
-            raise ConnectorRuntimeError(
-                "PERMISSION_DENIED", "Google Calendar authorization changed"
-            )
+            raise ConnectorRuntimeError("PERMISSION_DENIED", "Google read authorization changed")
 
 
 class GoogleCalendarTokenBroker:
@@ -93,9 +93,17 @@ class GoogleCalendarTokenBroker:
     """
 
     def __init__(
-        self, settings: Settings, authority: CalendarAuthority, connector_id: UUID
+        self,
+        settings: Settings,
+        authority: CalendarAuthority,
+        connector_id: UUID,
+        *,
+        cache_access_tokens: bool = False,
     ) -> None:
         self.settings, self.authority, self.connector_id = settings, authority, connector_id
+        self.cache_access_tokens = cache_access_tokens
+        self._cached_token: str | None = None
+        self._cached_until: datetime | None = None
 
     async def lease(
         self,
@@ -129,6 +137,20 @@ class GoogleCalendarTokenBroker:
         original = await database.get(Connection, self.authority.legacy_id)
         if original is None:
             raise SecretBrokerError("Google credential lease denied")
+        now = datetime.now(UTC)
+        if (
+            self.cache_access_tokens
+            and self._cached_token is not None
+            and self._cached_until is not None
+            and now < self._cached_until
+            and (
+                original.access_token_expires_at is None
+                or utc(original.access_token_expires_at) > now + timedelta(minutes=1)
+            )
+        ):
+            return ScopedSecretLease(
+                connection_id, purpose, {"GOOGLE_ACCESS_TOKEN": self._cached_token}
+            )
         detached = Connection(
             id=original.id,
             workspace_id=workspace_id,
@@ -178,6 +200,9 @@ class GoogleCalendarTokenBroker:
                 event_metadata={"purpose": purpose, "credential_kind": "google_access_token"},
             )
         )
+        if self.cache_access_tokens:
+            self._cached_token = token
+            self._cached_until = datetime.now(UTC) + timedelta(minutes=45)
         return ScopedSecretLease(connection_id, purpose, {"GOOGLE_ACCESS_TOKEN": token})
 
 

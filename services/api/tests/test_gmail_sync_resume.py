@@ -22,6 +22,7 @@ from navox.db.models import (
     Commitment,
     CommitmentSource,
     Connection,
+    ConnectorConnection,
     GmailSyncPlan,
     IntelligenceCursor,
     IntelligenceSourceReceipt,
@@ -247,6 +248,16 @@ class Model:
 
 
 async def run(database: AsyncSession, connection_id: UUID, model: Model) -> list[UUID]:
+    # These cases exercise *resumption after the retry window*, not scheduling.
+    # The shared runtime now persists that deadline; expire it explicitly instead
+    # of adding wall-clock sleeps. Dedicated migration tests cover early retries.
+    connections = await database.scalars(
+        select(ConnectorConnection).where(ConnectorConnection.legacy_connection_id == connection_id)
+    )
+    for connector in connections:
+        if connector.retry_not_before is not None:
+            connector.retry_not_before = datetime.now(UTC) - timedelta(seconds=1)
+    await database.commit()
     result = await ingestion.process_connection(
         database,
         connection_id=connection_id,

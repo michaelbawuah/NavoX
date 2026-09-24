@@ -47,6 +47,7 @@ from navox.db.models import (
 ResourceConsumer = Callable[[CanonicalResource], Awaitable[list[UUID] | None]]
 AuthorityCheck = Callable[[AsyncSession, bool], Awaitable[None]]
 SyncFinalizer = Callable[[ConnectorSyncRun], Awaitable[None]]
+PageCheckpoint = Callable[[ConnectorSyncRun, SyncPage], Awaitable[ConnectorRuntimeError | None]]
 
 
 class ReadSecretBroker(Protocol):
@@ -107,12 +108,16 @@ class ConnectorRuntime:
         *,
         authority_check: AuthorityCheck | None = None,
         retain_canonical_content: bool = True,
+        page_budget: int = MAX_SYNC_PAGES,
     ) -> None:
         self.registry = registry
         self.capability_gateway = capability_gateway or CapabilityGateway()
         self.secret_broker = secret_broker
         self.authority_check = authority_check
         self.retain_canonical_content = retain_canonical_content
+        if not 1 <= page_budget <= MAX_SYNC_RESOURCES:
+            raise ValueError("Invalid trusted connector page budget")
+        self.page_budget = page_budget
 
     async def _check_authority(self, database: AsyncSession, *, lock: bool) -> None:
         if self.authority_check is not None:
@@ -131,6 +136,7 @@ class ConnectorRuntime:
         trigger: str = "manual",
         consumer_version: str = "canonical-consumer.v1",
         finalize: SyncFinalizer | None = None,
+        checkpoint: PageCheckpoint | None = None,
     ) -> ConnectorSyncRun:
         if not consumer_version or len(consumer_version) > 128:
             raise ConnectorRuntimeError("PERMANENT_FAILURE", "Invalid consumer version")
@@ -194,8 +200,19 @@ class ConnectorRuntime:
                 return claimed
             ticket = claimed
             async with renew_sync_lease(database, ticket):
+                if checkpoint is None:
+                    return await self._run(
+                        database, ticket, context, manifest, authorized.read, consume, finalize
+                    )
                 return await self._run(
-                    database, ticket, context, manifest, authorized.read, consume, finalize
+                    database,
+                    ticket,
+                    context,
+                    manifest,
+                    authorized.read,
+                    consume,
+                    finalize,
+                    checkpoint,
                 )
         except ConnectorAccessDenied:
             denied = ConnectorRuntimeError("PERMISSION_DENIED", "Connector access denied")
@@ -224,6 +241,7 @@ class ConnectorRuntime:
         capabilities: frozenset[str],
         consume: ResourceConsumer,
         finalize: SyncFinalizer | None,
+        checkpoint: PageCheckpoint | None = None,
     ) -> ConnectorSyncRun:
         _, run = await guard_sync(database, ticket)
         complete = run.fetch_complete
@@ -259,7 +277,7 @@ class ConnectorRuntime:
             _, run = await guard_sync(database, ticket)
             cursor = run.checkpoint_cursor
             started_at = utc(run.started_at)
-            if run.pages_completed >= MAX_SYNC_PAGES:
+            if run.pages_completed >= self.page_budget:
                 raise ConnectorRuntimeError(
                     "INVALID_PROVIDER_RESPONSE", "Connector page budget exceeded"
                 )
@@ -301,6 +319,12 @@ class ConnectorRuntime:
                 await self._accept(database, ticket, resource, consume)
             connection, run = await guard_sync(database, ticket, lock_authority=True)
             await self._check_authority(database, lock=True)
+            deferred_error = None
+            if checkpoint is not None:
+                with consumer_transaction(database):
+                    deferred_error = await checkpoint(run, page)
+                connection, run = await guard_sync(database, ticket, lock_authority=True)
+                await self._check_authority(database, lock=True)
             run.checkpoint_cursor = page.next_cursor
             run.pages_completed += 1
             run.fetch_complete = not page.has_more
@@ -308,6 +332,8 @@ class ConnectorRuntime:
                 run.cursor_hashes = [*run.cursor_hashes, next_hash]
             complete = run.fetch_complete
             await database.commit()
+            if deferred_error is not None:
+                raise deferred_error
 
         connection, run = await guard_sync(database, ticket, lock_authority=True)
         await self._check_authority(database, lock=True)
