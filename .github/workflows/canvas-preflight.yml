@@ -1,35 +1,98 @@
-name: Canvas isolated workspace
+name: Canvas OAuth isolated preflight
 on:
   push:
     branches: [chore/spec003-canvas-20260924]
     paths: [.github/workflows/canvas-preflight.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  snapshot:
+  preflight:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17.5-alpine
+        env: {POSTGRES_USER: navox, POSTGRES_PASSWORD: navox, POSTGRES_DB: navox_canvas}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U navox -d navox_canvas"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: f5a14b6bd57b17fc31e7773bb0edb653de74a7c1
+        with: {fetch-depth: 0}
+      - uses: astral-sh/setup-uv@v6
+        with: {version: '0.12.15', python-version: '3.12'}
       - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - run: npm ci --ignore-scripts
-      - name: Export exact tracked source and package cache
+        with: {node-version: '24'}
+      - name: Verify transfer and apply exact locally validated patch
         run: |
           set -euo pipefail
-          git archive --format=tar.gz HEAD > "$RUNNER_TEMP/navox-canvas-base.tar.gz"
-          git rev-parse HEAD > "$RUNNER_TEMP/source-commit.txt"
-          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/source-tree.txt"
-          tar -czf "$RUNNER_TEMP/navox-web-dependencies.tar.gz" node_modules
+          python3 - <<'PY'
+          import gzip,hashlib,os
+          from pathlib import Path
+          parts=sorted(Path('.canvas-preflight').glob('*.part'))
+          assert len(parts)==5
+          packed=bytearray(b''.join(p.read_bytes() for p in parts))
+          # Correct the two identified transfer-byte substitutions, then require
+          # the original local archive AND patch hashes. No source edits occur here.
+          assert packed[13624:13626] == bytes([155,123])
+          packed[13624:13626] = bytes([203,187])
+          assert hashlib.sha256(packed).hexdigest()=='ab81d2541fa444b25c5b0cb5092311da15812a3053b32e0da0e46b8d685e2e9c'
+          patch=gzip.decompress(packed)
+          assert hashlib.sha256(patch).hexdigest()=='72eb88619dc4506ad99ab31b99f64043ef2c818f3be308e8e3dc44fc3f1d9ec4'
+          Path(os.environ['RUNNER_TEMP'],'canvas-final.patch').write_bytes(patch)
+          PY
+          git checkout --detach f5a14b6bd57b17fc31e7773bb0edb653de74a7c1
+          git apply --index --check "$RUNNER_TEMP/canvas-final.patch"
+          git apply --index "$RUNNER_TEMP/canvas-final.patch"
+          test "$(git write-tree)" = 4e7dc9ec844a206deb2f532d066b49e28764980b
+          git diff --cached --check
+      - name: Full unchanged API preflight
+        run: |
+          set -euo pipefail
+          bash scripts/check-api.sh > "$RUNNER_TEMP/canvas-api.log" 2>&1 || { tail -140 "$RUNNER_TEMP/canvas-api.log"; exit 1; }
+          grep -E 'passed|PASS:|Success:' "$RUNNER_TEMP/canvas-api.log"
+      - name: Full pinned web gates
+        run: |
+          set -euo pipefail
+          npm ci --silent
+          for gate in lint typecheck test build; do
+            npm run "$gate" > "$RUNNER_TEMP/canvas-web-$gate.log" 2>&1 || { tail -100 "$RUNNER_TEMP/canvas-web-$gate.log"; exit 1; }
+            tail -5 "$RUNNER_TEMP/canvas-web-$gate.log"
+          done
+      - name: Verify migration on disposable PostgreSQL
+        working-directory: services/api
+        env: {DATABASE_URL: 'postgresql+asyncpg://navox:navox@localhost:5432/navox_canvas'}
+        run: uv run --no-sync alembic upgrade head
+      - name: Canvas and existing management Google recovery on PostgreSQL
+        working-directory: services/api
+        env: {NAVOX_CONNECTOR_TEST_DSN: 'postgresql+asyncpg://navox:navox@localhost:5432/navox_canvas'}
+        run: |
+          set -euo pipefail
+          uv run --no-sync pytest tests/test_canvas_managed.py tests/test_connection_management.py tests/test_google_gmail_connector.py tests/test_google_calendar_connector.py tests/test_connector_sync_recovery.py --junitxml="$RUNNER_TEMP/canvas-pg.xml" > "$RUNNER_TEMP/canvas-pg.log" 2>&1 || { tail -140 "$RUNNER_TEMP/canvas-pg.log"; exit 1; }
+          tail -10 "$RUNNER_TEMP/canvas-pg.log"
+          python3 -c 'import sys,xml.etree.ElementTree as E; a=list(E.parse(sys.argv[1]).getroot().iter("testsuite")); assert sum(int(x.get("tests",0)) for x in a)==181; assert all(int(x.get(k,0))==0 for x in a for k in ("failures","errors","skipped"))' "$RUNNER_TEMP/canvas-pg.xml"
+      - name: Publish only the unchanged validated isolated candidate
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test "$(git write-tree)" = 4e7dc9ec844a206deb2f532d066b49e28764980b
+          test "$(git rev-parse HEAD)" = f5a14b6bd57b17fc31e7773bb0edb653de74a7c1
+          git diff --cached --exit-code -- .github/workflows package-lock.json services/api/uv.lock services/api/pyproject.toml evals/gates.json services/api/migrations
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(canvas): add institution-approved OAuth setup and bounded shared-runtime reads'
+          git push origin HEAD:refs/heads/chore/spec003-validated-canvas-oauth
+          git rev-parse HEAD > "$RUNNER_TEMP/canvas-candidate.txt"
+          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/canvas-tree.txt"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: navox-canvas-workspace
+          name: navox-canvas-oauth-preflight
           path: |
-            ${{ runner.temp }}/navox-canvas-base.tar.gz
-            ${{ runner.temp }}/navox-web-dependencies.tar.gz
-            ${{ runner.temp }}/source-commit.txt
-            ${{ runner.temp }}/source-tree.txt
+            ${{ runner.temp }}/canvas-*.log
+            ${{ runner.temp }}/canvas-pg.xml
+            ${{ runner.temp }}/canvas-final.patch
+            ${{ runner.temp }}/canvas-candidate.txt
+            ${{ runner.temp }}/canvas-tree.txt
           retention-days: 3
