@@ -8,7 +8,8 @@ from sqlalchemy import select
 
 from navox.agent.audit import add_audit_event
 from navox.api.auth import CurrentAccountDependency, DatabaseSession
-from navox.db.models import Commitment, CommitmentRelation, CommitmentSource, Workspace
+from navox.db.models import AuditEvent, Commitment, CommitmentRelation, CommitmentSource, Workspace
+from navox.intelligence.attention import ACTIVE
 
 router = APIRouter(prefix="/commitments", tags=["commitments"])
 
@@ -193,5 +194,44 @@ async def reject_commitment(
             detail="Only candidate commitments can be rejected",
         )
     commitment.status = "rejected"
+    await database.commit()
+    return response_from_commitment(commitment)
+
+
+@router.post("/{commitment_id}/keep", response_model=CommitmentResponse)
+async def keep_email_suggestion(
+    commitment_id: UUID,
+    current_account: CurrentAccountDependency,
+    database: DatabaseSession,
+) -> CommitmentResponse:
+    """Explicitly choose to track a saved suggestion without rereading the mailbox."""
+    commitment = await current_workspace_commitment(
+        commitment_id, current_account, database, lock=True
+    )
+    if commitment.created_by != "ai" or commitment.status not in ACTIVE:
+        raise HTTPException(409, "Only active suggestions can be kept")
+    existing = await database.scalar(
+        select(AuditEvent.id).where(
+            AuditEvent.user_id == current_account.user.id,
+            AuditEvent.workspace_id == current_account.workspace.id,
+            AuditEvent.entity_id == commitment.id,
+            AuditEvent.entity_type == "commitment",
+            AuditEvent.actor_type == "user",
+            AuditEvent.event_type == "commitment.kept",
+        )
+    )
+    if commitment.status == "candidate":
+        commitment.status = "confirmed"
+    if existing is None:
+        add_audit_event(
+            database,
+            user_id=current_account.user.id,
+            workspace_id=current_account.workspace.id,
+            event_type="commitment.kept",
+            entity_type="commitment",
+            entity_id=commitment.id,
+            actor_type="user",
+            actor_id=str(current_account.user.id),
+        )
     await database.commit()
     return response_from_commitment(commitment)

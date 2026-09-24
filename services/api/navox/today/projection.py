@@ -75,6 +75,7 @@ class TodayProjection:
     renewals: tuple[TodayItem, ...]
     waiting_on: tuple[TodayItem, ...]
     completed_recently: tuple[TodayItem, ...]
+    set_aside: tuple[TodayItem, ...] = ()
 
 
 def validated_timezone(name: str) -> ZoneInfo:
@@ -175,7 +176,11 @@ async def build_today_projection(
     active = [
         commitment
         for commitment in commitments
-        if active_at(commitment, current_time) and not attention_results[commitment.id].suppressed
+        if active_at(commitment, current_time)
+        and (
+            not attention_results[commitment.id].suppressed
+            or attention_results[commitment.id].email_hold_reason
+        )
     ]
     completed_cutoff = current_time - timedelta(days=7)
     completed_recently = [
@@ -263,6 +268,7 @@ async def build_today_projection(
             )
 
     items: list[tuple[Commitment, TodayItem]] = []
+    set_aside: list[TodayItem] = []
     for commitment in active:
         result = attention_results[commitment.id]
         items.append(
@@ -284,12 +290,16 @@ async def build_today_projection(
                     reasons=result.reasons,
                     factors=result.factors,
                     band=result.band,
-                    category=category_for(commitment, result, current_time, timezone),
+                    category="SET_ASIDE"
+                    if result.email_hold_reason
+                    else category_for(commitment, result, current_time, timezone),
                     suggested_capability=result.suggested_capability,
                     sources=tuple(source_map.get(commitment.id, [])),
                 ),
             )
         )
+        if result.email_hold_reason:
+            set_aside.append(items.pop()[1])
 
     attention = sorted(
         (
@@ -353,4 +363,5 @@ async def build_today_projection(
         renewals=tuple(renewals),
         waiting_on=tuple(waiting),
         completed_recently=tuple(completed_items),
+        set_aside=tuple(sorted(set_aside, key=lambda item: item.title.casefold())),
     )

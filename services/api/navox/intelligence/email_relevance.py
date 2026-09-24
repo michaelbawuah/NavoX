@@ -17,6 +17,21 @@ ALLOWED_BASES = {
     "commitment_update": {"commitment_progress"},
 }
 
+# Reject known non-task shapes even when a model mistakenly assigns high confidence.
+# These patterns describe the proposed action, not arbitrary words elsewhere in mail.
+NON_TASK_TITLE = re.compile(
+    r"^(?:(?:ends|closes|expires|arrives|should arrive|should be available)\b"
+    r"|(?:unlock|claim|earn|win|enter|redeem)\b.{0,100}\b"
+    r"(?:rewards?|giveaway|sweepstakes|bonus entries)\b"
+    r"|(?:use|enter|copy)\b.{0,40}\b(?:verification|sign.in|one.time) code\b)",
+    re.IGNORECASE,
+)
+
+
+def actionable_title(title: str) -> bool:
+    words = re.findall(r"[^\W\d_]+", title, re.UNICODE)
+    return len(words) >= 2 and NON_TASK_TITLE.search(title.strip()) is None
+
 
 def eligible_email_observation(
     candidate: OperationalObservationCandidate, document: SourceDocument
@@ -35,6 +50,11 @@ def eligible_email_observation(
         return False
     if (candidate.observation_type == "alert") != (relevance.intent == "important_alert"):
         return False
+    title = " ".join(part for part in (candidate.action_text, candidate.object_text) if part)
+    if not actionable_title(title):
+        return False
+    if not any(span.source == "content" for span in candidate.evidence):
+        return False  # A headline or CTA alone must not fill the review queue.
     labels = document.metadata.get("label_ids", [])
     labels = labels if isinstance(labels, list) else []
     if any(label in labels for label in ("SPAM", "TRASH", "DRAFT")):

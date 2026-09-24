@@ -229,6 +229,48 @@ async def test_mixed_email_keeps_only_the_relevant_observation(resolution_db):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "action,obj",
+    [
+        ("Unlock", "bonus travel rewards"),
+        ("Enter", "the seasonal giveaway"),
+        ("Expires", "the discount voucher"),
+        ("Use", "the verification code"),
+        ("Join", None),
+        ("Do", None),
+    ],
+)
+async def test_non_task_shapes_are_ignored_even_when_model_mislabels_them(
+    resolution_db, action, obj
+):
+    db, connection = resolution_db
+    doc = document(connection, " ".join(part for part in (action, obj) if part))
+    result = extraction(doc, action=action, obj=obj, kind="task", confidence=0.99)
+    assert result.extraction.observations[0].email_relevance.applies_to_user
+    assert await resolve_extraction(db, connection=connection, document=doc, result=result) == []
+    assert await db.scalar(select(func.count()).select_from(Commitment)) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "action,obj",
+    [
+        ("Return", "the faulty keyboard"),
+        ("Close", "the unused research account"),
+        ("Submit", "your missing application document"),
+        ("Review", "the giveaway compliance report"),
+    ],
+)
+async def test_specific_assigned_actions_survive_non_task_guards(resolution_db, action, obj):
+    db, connection = resolution_db
+    doc = document(connection, f"Please {action.lower()} {obj} as assigned.")
+    result = extraction(doc, action=action, obj=obj, kind="task", confidence=0.99)
+    assert (
+        len(await resolve_extraction(db, connection=connection, document=doc, result=result)) == 1
+    )
+
+
+@pytest.mark.asyncio
 async def test_missing_assessment_fails_closed_but_calendar_contract_remains_valid():
     output = valid_output()
     output["observations"][0].pop("email_relevance")

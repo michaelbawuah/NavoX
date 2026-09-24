@@ -55,6 +55,7 @@ class TodayResponse(BaseModel):
     renewals: list[TodayItemResponse]
     waiting_on: list[TodayItemResponse]
     completed_recently: list[TodayItemResponse]
+    set_aside: list[TodayItemResponse]
 
 
 QueryIntent = Literal[
@@ -140,6 +141,7 @@ def projection_response(projection: TodayProjection) -> TodayResponse:
         renewals=[item_response(item) for item in projection.renewals],
         waiting_on=[item_response(item) for item in projection.waiting_on],
         completed_recently=[item_response(item) for item in projection.completed_recently],
+        set_aside=[item_response(item) for item in projection.set_aside],
     )
 
 

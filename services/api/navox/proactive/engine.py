@@ -445,6 +445,8 @@ async def evaluate_workspace(
     for commitment in commitments:
         if not active_commitment(commitment, current_time):
             continue
+        if intelligence_scores[commitment.id].email_hold_reason:
+            continue
         if not should_have_signal(commitment, current_time):
             continue
         signal_type = signal_type_for(commitment)
@@ -613,7 +615,8 @@ async def visible_signals(
     user_id: UUID,
     workspace_id: UUID,
 ) -> list[ProactiveSignal]:
-    return list(
+    _, attention = await workspace_attention(database, user_id=user_id, workspace_id=workspace_id)
+    signals = list(
         await database.scalars(
             select(ProactiveSignal)
             .where(
@@ -625,6 +628,12 @@ async def visible_signals(
             .order_by(ProactiveSignal.attention_score.desc(), ProactiveSignal.created_at)
         )
     )
+    return [
+        signal
+        for signal in signals
+        if signal.commitment_id is None
+        or (signal.commitment_id in attention and not attention[signal.commitment_id].suppressed)
+    ]
 
 
 def briefing_hash(signals: list[ProactiveSignal]) -> str:
@@ -727,6 +736,9 @@ async def next_meeting_prep(
     now: datetime | None = None,
 ) -> MeetingPrep | None:
     current_time = aware(now or datetime.now(UTC))
+    _, attention = await workspace_attention(
+        database, user_id=user_id, workspace_id=workspace_id, now=current_time
+    )
     meetings = list(
         await database.scalars(
             select(Commitment)
@@ -747,6 +759,7 @@ async def next_meeting_prep(
             if item.due_at is not None
             and aware(item.due_at) >= current_time
             and active_commitment(item, current_time)
+            and not attention[item.id].suppressed
         ),
         None,
     )
@@ -773,6 +786,7 @@ async def next_meeting_prep(
     related_rows = tuple(
         (item.id, item.title, item.status)
         for item in sorted(related, key=lambda value: value.title.casefold())
+        if item.id in attention and not attention[item.id].email_hold_reason
     )
     minutes_until = max(
         0,

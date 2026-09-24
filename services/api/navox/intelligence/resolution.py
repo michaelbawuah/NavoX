@@ -725,6 +725,10 @@ async def resolve_extraction(
             continue
         outcome = "CREATE_NEW" if created else "MERGE_EVIDENCE"
         metadata = dict(existing.intelligence_metadata or {})
+        if document.source_type == "gmail_message" and candidate.email_relevance and not state_fact:
+            # A newer, validated action can upgrade an older matching card too.
+            metadata["email_relevance"] = candidate.email_relevance.model_dump()
+            metadata.pop("evidence_review_reason", None)
         if (
             existing.status == "superseded"
             and existing.created_by == "ai"

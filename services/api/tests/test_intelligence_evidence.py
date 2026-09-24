@@ -129,7 +129,7 @@ async def test_today_links_to_bounded_evidence_without_automatic_reads_or_body_s
 ):
     state = owned_evidence
     today = await state.client.get("/api/v1/today")
-    source = today.json()["needs_attention"][0]["sources"][0]
+    source = today.json()["set_aside"][0]["sources"][0]
     assert source["evidence_id"] == str(state.evidence_id)
     assert QUOTE not in today.text and PRIVATE not in today.text
     state.read.assert_not_awaited()
@@ -166,7 +166,8 @@ async def test_today_deduplicates_identical_citations_but_keeps_distinct_evidenc
             update={
                 "object_text": "Budget",
                 "evidence": [
-                    EvidenceSpan(source="subject", start_char=0, end_char=6, text="Budget")
+                    *candidate.evidence,
+                    EvidenceSpan(source="subject", start_char=0, end_char=6, text="Budget"),
                 ],
             }
         )
@@ -178,7 +179,7 @@ async def test_today_deduplicates_identical_citations_but_keeps_distinct_evidenc
         assert await db.scalar(select(func.count()).select_from(CommitmentSource)) == 2
         assert await db.scalar(select(func.count()).select_from(ObservationEvidence)) == 2
     today = (await state.client.get("/api/v1/today")).json()
-    sources = today["needs_attention"][0]["sources"]
+    sources = today["set_aside"][0]["sources"]
     assert len(sources) == (2 if distinct_passage else 1)
     assert all(source["connection_id"] == str(state.connection_id) for source in sources)
     state.read.assert_not_awaited()

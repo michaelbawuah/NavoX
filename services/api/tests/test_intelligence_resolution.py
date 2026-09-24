@@ -294,12 +294,12 @@ async def test_replay_has_one_commitment_and_bounded_evidence(resolution_db):
 @pytest.mark.parametrize(
     "source_type,subject_only,expected",
     [
-        ("gmail_message", True, "candidate"),
+        ("gmail_message", True, None),
         ("gmail_message", False, "confirmed"),
         ("calendar_event", True, "confirmed"),
     ],
 )
-async def test_headline_only_gmail_requires_review_despite_high_model_confidence(
+async def test_headline_only_gmail_is_ignored_despite_high_model_confidence(
     resolution_db, source_type, subject_only, expected
 ):
     db, connection = resolution_db
@@ -311,17 +311,17 @@ async def test_headline_only_gmail_requires_review_despite_high_model_confidence
         candidate = candidate.model_copy(update={"evidence": [candidate.evidence[1]]})
         result = replace(result, extraction=OperationalExtraction(observations=[candidate]))
     ids = await resolve_extraction(db, connection=connection, document=doc, result=result)
-    commitment = await db.get(Commitment, ids[0])
-    assert commitment.status == expected
-    if expected == "candidate":
-        assert commitment.confidence == 0.89
-        assert commitment.intelligence_metadata["evidence_review_reason"] == "subject_only"
+    if expected is None:
+        assert ids == []
+        assert await db.scalar(select(func.count()).select_from(Commitment)) == 0
     else:
+        commitment = await db.get(Commitment, ids[0])
+        assert commitment.status == expected
         assert commitment.confidence == 0.98
 
 
 @pytest.mark.asyncio
-async def test_subject_only_rsvp_stays_reviewable_and_cannot_complete_a_task(resolution_db):
+async def test_subject_only_rsvp_is_ignored_and_cannot_complete_existing_work(resolution_db):
     db, connection = resolution_db
     doc = document(connection, "You're invited to an optional webinar.")
     doc = doc.model_copy(update={"subject": "Webinar reminder: RSVP now for the systems seminar"})
@@ -331,9 +331,19 @@ async def test_subject_only_rsvp_stays_reviewable_and_cannot_complete_a_task(res
     )
     result = replace(result, extraction=OperationalExtraction(observations=[candidate]))
     ids = await resolve_extraction(db, connection=connection, document=doc, result=result)
+    assert ids == []
+    # Real body-backed work still cannot be completed by a headline alone.
+    real = doc.model_copy(
+        update={"content": "Please RSVP for the systems seminar assigned to you."}
+    )
+    ids = await resolve_extraction(
+        db,
+        connection=connection,
+        document=real,
+        result=extraction(real, action="RSVP", obj="systems seminar", kind="task", confidence=0.98),
+    )
     commitment = await db.get(Commitment, ids[0])
-    assert commitment.status == "candidate"
-    # Even a later high-confidence subject-only completion cannot change its state.
+    assert commitment.status == "confirmed"
     followup = doc.model_copy(
         update={"external_id": "mail-2", "subject": "RSVP systems seminar completed"}
     )
@@ -348,7 +358,7 @@ async def test_subject_only_rsvp_stays_reviewable_and_cannot_complete_a_task(res
         await resolve_extraction(db, connection=connection, document=followup, result=completion)
         == []
     )
-    assert commitment.status == "candidate"
+    assert commitment.status == "confirmed"
 
 
 @pytest.mark.asyncio

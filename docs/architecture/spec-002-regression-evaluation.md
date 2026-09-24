@@ -68,6 +68,19 @@ so one cannot silently substitute for the other.
 
 ## Older Gmail cleanup regressions
 
+`test_intelligence_email_focus.py` covers read-time exclusion of legacy and old
+undated Gmail cards, preservation of dated obligations/manual work/recorded user
+choices, recoverable set-aside records, owner-scoped idempotent keep, and stale
+proactive/meeting-prep paths. The relevance regressions include deliberately wrong
+high-confidence labels for non-task shapes plus real assigned return/application
+work. Subject-only Gmail no longer creates review cards; bounded evidence reading
+and citation deduplication are still exercised on set-aside suggestions.
+
+Web regressions cover six-row pagination and nonduplicated filter membership.
+The production build, types and static rendering tests are not a visual browser
+acceptance test. Local Chromium preview was unavailable because its download
+returned an unavailable page; desktop/mobile visual acceptance remains pending.
+
 `test_intelligence_gmail_recheck.py` verifies that listing/previewing does not
 change cards or ingestion state, ignored mail yields only a selectable suggestion,
 any relevant supporting email keeps the card, and malformed/changed/missing

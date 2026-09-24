@@ -44,8 +44,10 @@ Relevance must apply to the owner, use a compatible intent/basis, and have at le
 0.90 model confidence. This is a conservative decision threshold, not a calibrated
 probability or a measured precision claim. Exact evidence validation still applies.
 Spam, trash, drafts, outgoing questions misclassified as replies the owner owes,
-and quoted old requests cannot become new tasks. Subject-only proposals that
-otherwise qualify still require confirmation. Ordinary messages that need no
+and quoted old requests cannot become new tasks. Subject-only Gmail proposals
+are ignored rather than filling a confirmation queue. A concrete action/issue
+title is required; known giveaway, code and expiry fragments are rejected even
+when the model assigns high relevance. Ordinary messages that need no
 action do not accumulate incidental people, date, or relationship records.
 
 An unsubscribe header or Promotions label increases caution, while body-backed
@@ -58,14 +60,46 @@ The model output contract is `operational-extraction.v2`. Previously processed o
 quarantined v1 receipts are honored for unchanged source revisions, so this upgrade
 does not trigger a mailbox replay or retry already completed work. Ignored new
 revisions receive normal completion receipts and are skipped on retry. Existing
-saved cards are not bulk-deleted or silently reclassified by a rebuild; the owner
-can use **Not a task** on unwanted active AI-created items. The owner supplied a
+saved cards are not bulk-deleted by a rebuild. The owner supplied a
 passing 24/24 live-model relevance smoke report on 2026-09-24, recorded below.
-Relevance on fresh real Gmail messages and cleanup of legacy cards remain open.
+That report predates the additional saved-card eligibility rules below; relevance
+on fresh real Gmail messages remains a separate acceptance check.
+
+### Focused Today and existing cards
+
+Today, its query answers, proactive signals and meeting prep now share saved-email
+eligibility. AI-generated Gmail cards without a valid relevance assessment, clear
+action title, sufficient confidence or body support stay outside the main daily
+view. Automatic `confirmed` status does not count as the user's own decision.
+Undated, unreviewed email suggestions older than 14 days use `last_verified_at`
+(source occurrence time), not sync or scoring time. Past email-derived meetings
+are set aside after a day. Dated obligations, including overdue work, do not age
+out merely because their source email is old.
+
+Manual work and recorded owner confirmation/keep/state changes are preserved;
+the latest positive owner feedback also counts as a choice to track an item.
+These choices do not override terminal state, validity, duplicate, dismissal or
+snooze rules. Earlier confirmations with no audit record cannot be distinguished
+from automatic acceptance; affected items remain recoverable, never deleted.
+
+**Email suggestions set aside** is collapsed and excluded from the active count.
+There is no requirement to work through it. Open it only to recover something
+missing with **Keep in Today**, or dismiss a known unwanted suggestion. Keeping
+an active suggestion is owner/workspace scoped, audited, idempotent, and performs
+no provider/model calls. New terminal items cannot be restored by this action.
+`GET /today` exposes this group as `set_aside` with category `SET_ASIDE`; it is not
+included in Today query answers. No receipts, cursors, source records or messages
+are removed or replayed by the view change.
+
+The daily list shows one filter at a time, six compact rows per page, with details
+and actions expanded on demand. Waiting and renewal duplicates appear once in the
+web view. Ask NavoX and collapsed tools occupy an independent side column on wide
+screens and stack on narrow screens. Connection/sync controls are under
+**Connections & sync**. The older source recheck below remains optional.
 
 ### Recheck older Gmail cards
 
-The Google connection in **Connected understanding** now offers **Review older
+Under **Connections & sync**, the Google connection in **Connected understanding** offers **Review older
 Gmail items**. Opening it lists saved older cards without reading Google or calling
 the model. It uses stable pages of 25 items and provides **Load more older items**.
 

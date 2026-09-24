@@ -46,11 +46,21 @@ email_relevance separately from your confidence in extracting the text.
   routine notifications, FYI, and informational material. Return empty arrays when
   nothing qualifies. Optional 'buy', 'register', 'learn more', or 'increase your limit'
   calls to action and expiring offers are not obligations, even at high confidence.
+  This includes giveaway closing dates, bonus-entry expiration, job recommendation
+  digests, generic device setup tips, loyalty activation and one-time sign-in codes.
+  A merchant's delivery estimate or promise to send tracking is not the user's work.
+  An actual return the user initiated with a required drop-off step can be work;
+  generic return-policy language is not. A reminder about an application the user
+  started can qualify; an invitation to apply to an advertised opportunity cannot.
 Only retain observations whose evidence establishes that they apply to the user.
 Exclude quoted old requests already answered, negated/cancelled requirements, work
 assigned solely to others, and ambiguous relevance. Evidence must include the real
 request or consequence and its conditions; a subject keyword alone is insufficient
 to infer intent. An invitation is not acceptance. A deadline is not proof of a duty.
+Require body evidence for Gmail. Describe a concrete user action and its specific
+object, or a specific consequential issue for alerts. Never create vague fragments
+such as 'ends', 'expires', 'do', 'join', or an isolated date/amount as tasks. If the
+source cannot support a useful, specific title, omit the observation.
 Bulk-mail hints increase caution, but an unsubscribe footer does not by itself make
 a concrete tuition deadline, failed payment, or security problem irrelevant.
 For other source types use email_relevance=null and retain explicit grounded facts.
