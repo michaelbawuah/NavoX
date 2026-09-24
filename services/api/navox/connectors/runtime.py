@@ -17,6 +17,7 @@ from navox.connectors.contracts import (
     SyncRequest,
 )
 from navox.connectors.registry import ConnectorRegistry
+from navox.connectors.secrets import SecretBroker
 from navox.db.models import (
     ConnectorConnection,
     ConnectorDefinition,
@@ -34,9 +35,11 @@ class ConnectorRuntime:
         self,
         registry: ConnectorRegistry,
         capability_gateway: CapabilityGateway | None = None,
+        secret_broker: SecretBroker | None = None,
     ) -> None:
         self.registry = registry
         self.capability_gateway = capability_gateway or CapabilityGateway()
+        self.secret_broker = secret_broker
 
     async def sync(
         self,
@@ -72,8 +75,26 @@ class ConnectorRuntime:
         if definition is None or not definition.active:
             raise ConnectorRuntimeError("PERMANENT_FAILURE", "Connector definition unavailable")
 
-        connector = self.registry.build(definition.connector_key, connection.config)
-        manifest = connector.get_manifest()
+        registered = self.registry.get(definition.connector_key)
+        manifest = registered.manifest
+        secret_lease = None
+        if manifest.required_secrets:
+            if self.secret_broker is None:
+                raise ConnectorRuntimeError(
+                    "PERMISSION_DENIED",
+                    "Connector credentials are unavailable",
+                )
+            secret_lease = await self.secret_broker.lease(
+                database,
+                connection_id=connection.id,
+                purpose="sync.read",
+                names=frozenset(manifest.required_secrets),
+            )
+        connector = self.registry.build(
+            definition.connector_key,
+            connection.config,
+            secret_lease,
+        )
         context = ConnectorConnectionContext(
             id=connection.id,
             workspace_id=connection.workspace_id,
