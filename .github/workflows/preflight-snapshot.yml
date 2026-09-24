@@ -1,14 +1,14 @@
-name: Managed import isolated preflight
+name: Import and portability final preflight
 on:
   push:
     branches: [chore/spec003-preflight-20260924]
     paths: [.github/workflows/preflight-snapshot.yml]
 permissions:
-  contents: write
+  contents: read
 jobs:
   preflight:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:17.5-alpine
@@ -19,55 +19,31 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
-        with: {ref: 1d66af64b5b0358987c284c0ef6710c118fff6b3, fetch-depth: 2}
+        with: {ref: f5a14b6bd57b17fc31e7773bb0edb653de74a7c1, fetch-depth: 2}
       - uses: astral-sh/setup-uv@v6
         with: {version: '0.12.15', python-version: '3.12'}
       - uses: actions/setup-node@v4
         with: {node-version: '24'}
-      - name: Prepare exact candidate and apply safe formatters
+      - name: Verify exact candidate identity
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = f5a14b6bd57b17fc31e7773bb0edb653de74a7c1
           test "$(git rev-parse HEAD^)" = bf973b20cf7e62b3f4f91850ddd235fb3d9f4baa
-          python3 scripts/apply-import-candidate.py
-          python3 scripts/refine-import-candidate.py
-          python3 scripts/finalize-import-candidate.py
-          python3 scripts/check-import-idempotency.py
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('services/api/tests/test_api_preflight.py')
-          s = p.read_text()
-          assert s.count('    connector_sync_receipts\n') == 1
-          s = s.replace('    connector_sync_receipts\n', '    connector_sync_receipts connector_import_snapshots\n')
-          s = s.replace('"alembic", "evaluation"]', '"alembic", "evaluation", "schema"]')
-          needle = '  for table in "${tables[@]}"; do\n'
-          assert s.count(needle) == 1
-          s = s.replace(needle, needle + '    if [ "$PREFLIGHT_TEST_FAILURE" = schema ]; then\n      [ "$table" = connector_import_snapshots ] && continue\n    fi\n')
-          p.write_text(s)
-          PY
-          (cd services/api && uv sync --locked --all-groups --quiet && uv run --no-sync ruff check --select I,F401 --fix . && uv run --no-sync ruff format .)
+          test "$(git rev-parse HEAD^{tree})" = 1fed4e5fe1ff8651bd581a1b9bbd7c993ee7c786
+          git diff HEAD^ HEAD --check
+          test -z "$(git diff HEAD^ HEAD --name-only -- .github/workflows services/api/pyproject.toml services/api/uv.lock package-lock.json evals/gates.json)"
+      - name: Full API preflight
+        run: |
+          set -euo pipefail
+          bash scripts/check-api.sh > "$RUNNER_TEMP/final-api.log" 2>&1 || { tail -160 "$RUNNER_TEMP/final-api.log"; exit 1; }
+          grep -E 'passed|PASS:|Success:' "$RUNNER_TEMP/final-api.log"
+      - name: Full pinned web gates
+        run: |
+          set -euo pipefail
           npm ci --silent
-          (cd apps/web && npm exec -- biome format --write src/components/file-import-panel.tsx src/components/file-import-panel.module.css src/components/connections-panel.tsx src/lib/file-import.ts src/lib/file-import.test.ts src/lib/connection-management.ts)
-      - name: Fast boundary checks before the full gate
-        run: |
-          set -uo pipefail
-          result=0
-          (cd services/api && uv run --no-sync ruff check .) > "$RUNNER_TEMP/import-lint.log" 2>&1 || result=1
-          (cd services/api && uv run --no-sync mypy navox) > "$RUNNER_TEMP/import-types.log" 2>&1 || result=1
-          (cd services/api && uv run --no-sync pytest tests/test_api_preflight.py tests/test_managed_imports.py tests/test_connection_management.py -q --tb=short) > "$RUNNER_TEMP/import-focused.log" 2>&1 || result=1
-          (cd apps/web && npm exec -- biome check --write src/components/file-import-panel.tsx src/components/file-import-panel.module.css src/components/connections-panel.tsx src/lib/file-import.ts src/lib/file-import.test.ts src/lib/connection-management.ts) > "$RUNNER_TEMP/import-web-lint.log" 2>&1 || result=1
-          for log in lint types focused web-lint; do tail -140 "$RUNNER_TEMP/import-$log.log"; done
-          exit "$result"
-      - name: Full API preflight on final candidate
-        run: |
-          set -euo pipefail
-          bash scripts/check-api.sh > "$RUNNER_TEMP/import-api-preflight.log" 2>&1 || { tail -120 "$RUNNER_TEMP/import-api-preflight.log"; exit 1; }
-          grep -E 'passed|PASS:|Success:' "$RUNNER_TEMP/import-api-preflight.log"
-      - name: Full pinned web checks
-        run: |
-          set -euo pipefail
           for gate in lint typecheck test build; do
-            npm run "$gate" > "$RUNNER_TEMP/import-web-$gate.log" 2>&1 || { tail -100 "$RUNNER_TEMP/import-web-$gate.log"; exit 1; }
-            tail -6 "$RUNNER_TEMP/import-web-$gate.log"
+            npm run "$gate" > "$RUNNER_TEMP/final-web-$gate.log" 2>&1 || { tail -120 "$RUNNER_TEMP/final-web-$gate.log"; exit 1; }
+            tail -8 "$RUNNER_TEMP/final-web-$gate.log"
           done
       - name: PostgreSQL migration round trip
         working-directory: services/api
@@ -76,40 +52,28 @@ jobs:
           uv run --no-sync alembic upgrade head
           uv run --no-sync alembic downgrade 0016_connector_sync_recovery
           uv run --no-sync alembic upgrade head
-      - name: Repeat managed imports on PostgreSQL
+      - name: Real PostgreSQL import and unknown-service acceptance
         working-directory: services/api
         env: {NAVOX_CONNECTOR_TEST_DSN: 'postgresql+asyncpg://navox:navox@localhost:5432/navox_imports'}
         run: |
           set -euo pipefail
-          uv run --no-sync pytest tests/test_managed_imports.py --junitxml="$RUNNER_TEMP/import-pg.xml" > "$RUNNER_TEMP/import-pg.log" 2>&1 || { tail -120 "$RUNNER_TEMP/import-pg.log"; exit 1; }
-          tail -8 "$RUNNER_TEMP/import-pg.log"
-          python3 -c 'import sys,xml.etree.ElementTree as E; a=list(E.parse(sys.argv[1]).getroot().iter("testsuite")); assert sum(int(x.get("tests",0)) for x in a)>=35; assert all(int(x.get(k,0))==0 for x in a for k in ("failures","errors","skipped"))' "$RUNNER_TEMP/import-pg.xml"
-      - name: Publish only the validated isolated candidate
+          uv run --no-sync pytest tests/test_managed_imports.py tests/test_connector_portability.py --junitxml="$RUNNER_TEMP/final-pg.xml" > "$RUNNER_TEMP/final-pg.log" 2>&1 || { tail -160 "$RUNNER_TEMP/final-pg.log"; exit 1; }
+          tail -12 "$RUNNER_TEMP/final-pg.log"
+          python3 -c 'import sys,xml.etree.ElementTree as E; a=list(E.parse(sys.argv[1]).getroot().iter("testsuite")); assert sum(int(x.get("tests",0)) for x in a)==52; assert all(int(x.get(k,0))==0 for x in a for k in ("failures","errors","skipped"))' "$RUNNER_TEMP/final-pg.xml"
+      - name: Verify candidate remained unchanged
         run: |
-          set -euo pipefail
-          git diff --exit-code -- .github/workflows package-lock.json services/api/uv.lock services/api/pyproject.toml evals/gates.json
-          for script in apply refine finalize; do test ! -f "scripts/$script-import-candidate.py"; done
-          test ! -f scripts/check-import-idempotency.py
-          git reset --soft bf973b20cf7e62b3f4f91850ddd235fb3d9f4baa
-          git add -A
-          git diff --cached --check
-          git diff --cached --stat
-          git diff --cached > "$RUNNER_TEMP/import-final.patch"
-          git write-tree > "$RUNNER_TEMP/import-tree.txt"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'feat(imports): add previewed encrypted file snapshots through the shared runtime'
-          git push origin HEAD:refs/heads/chore/spec003-validated-imports-v3
-          git rev-parse HEAD > "$RUNNER_TEMP/import-candidate.txt"
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+          git rev-parse HEAD > "$RUNNER_TEMP/final-candidate.txt"
+          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/final-tree.txt"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: navox-managed-import-preflight
+          name: navox-import-portability-final-preflight
           path: |
-            ${{ runner.temp }}/import-*.log
-            ${{ runner.temp }}/import-pg.xml
-            ${{ runner.temp }}/import-final.patch
-            ${{ runner.temp }}/import-tree.txt
-            ${{ runner.temp }}/import-candidate.txt
+            ${{ runner.temp }}/final-*.log
+            ${{ runner.temp }}/final-pg.xml
+            ${{ runner.temp }}/final-candidate.txt
+            ${{ runner.temp }}/final-tree.txt
           if-no-files-found: warn
           retention-days: 3
