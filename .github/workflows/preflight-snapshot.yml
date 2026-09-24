@@ -32,6 +32,19 @@ jobs:
           python3 scripts/refine-import-candidate.py
           python3 scripts/finalize-import-candidate.py
           python3 scripts/check-import-idempotency.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('services/api/tests/test_api_preflight.py')
+          s = p.read_text()
+          assert s.count('    connector_sync_receipts\n') == 1
+          s = s.replace('    connector_sync_receipts\n', '    connector_sync_receipts connector_import_snapshots\n')
+          s = s.replace('"alembic", "evaluation"]', '"alembic", "evaluation", "schema"]')
+          needle = '  for table in "${tables[@]}"; do\n'
+          assert s.count(needle) == 1
+          s = s.replace(needle, needle + '    if [ "$PREFLIGHT_TEST_FAILURE" = schema ] && [ "$table" = connector_import_snapshots ]; then continue; fi\n')
+          s += '\n'
+          p.write_text(s)
+          PY
           (cd services/api && uv sync --locked --all-groups --quiet && uv run --no-sync ruff check --select I,F401 --fix . && uv run --no-sync ruff format .)
           npm ci --silent
           (cd apps/web && npm exec -- biome format --write src/components/file-import-panel.tsx src/components/file-import-panel.module.css src/components/connections-panel.tsx src/lib/file-import.ts src/lib/file-import.test.ts src/lib/connection-management.ts)
@@ -41,7 +54,7 @@ jobs:
           result=0
           (cd services/api && uv run --no-sync ruff check .) > "$RUNNER_TEMP/import-lint.log" 2>&1 || result=1
           (cd services/api && uv run --no-sync mypy navox) > "$RUNNER_TEMP/import-types.log" 2>&1 || result=1
-          (cd services/api && uv run --no-sync pytest tests/test_managed_imports.py tests/test_connection_management.py -q --tb=short) > "$RUNNER_TEMP/import-focused.log" 2>&1 || result=1
+          (cd services/api && uv run --no-sync pytest tests/test_api_preflight.py tests/test_managed_imports.py tests/test_connection_management.py -q --tb=short) > "$RUNNER_TEMP/import-focused.log" 2>&1 || result=1
           (cd apps/web && npm exec -- biome check --write src/components/file-import-panel.tsx src/components/file-import-panel.module.css src/components/connections-panel.tsx src/lib/file-import.ts src/lib/file-import.test.ts src/lib/connection-management.ts) > "$RUNNER_TEMP/import-web-lint.log" 2>&1 || result=1
           for log in lint types focused web-lint; do tail -140 "$RUNNER_TEMP/import-$log.log"; done
           exit "$result"
@@ -87,7 +100,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'feat(imports): add previewed encrypted file snapshots through the shared runtime'
-          git push origin HEAD:refs/heads/chore/spec003-validated-imports-v2
+          git push origin HEAD:refs/heads/chore/spec003-validated-imports-v3
           git rev-parse HEAD > "$RUNNER_TEMP/import-candidate.txt"
       - uses: actions/upload-artifact@v4
         if: always()
