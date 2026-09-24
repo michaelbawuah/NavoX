@@ -1,55 +1,107 @@
-name: SPEC-003 import development snapshot
+name: Managed import isolated preflight
 on:
   push:
     branches: [chore/spec003-preflight-20260924]
     paths: [.github/workflows/preflight-snapshot.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  snapshot:
+  preflight:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17.5-alpine
+        env:
+          POSTGRES_USER: navox
+          POSTGRES_PASSWORD: navox
+          POSTGRES_DB: navox_imports
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U navox -d navox_imports"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: bf973b20cf7e62b3f4f91850ddd235fb3d9f4baa
-          persist-credentials: false
+          ref: efea222a140dc79d5807004b545eb8176b41518e
+          fetch-depth: 2
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.15'
+          python-version: '3.12'
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Archive exact tracked source without credentials
+      - name: Prepare exact candidate and apply safe formatters
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = 'bf973b20cf7e62b3f4f91850ddd235fb3d9f4baa'
-          git archive --format=tar.gz HEAD > "$RUNNER_TEMP/navox-source-bf973b2.tar.gz"
-          git rev-parse HEAD > "$RUNNER_TEMP/source-commit.txt"
-          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/source-tree.txt"
+          test "$(git rev-parse HEAD^)" = bf973b20cf7e62b3f4f91850ddd235fb3d9f4baa
+          python3 scripts/apply-import-candidate.py
+          (cd services/api && uv sync --locked --all-groups --quiet && uv run --no-sync ruff check --select I,F401 --fix . && uv run --no-sync ruff format .)
+          npm ci --silent
+          npm exec -- biome check --write apps/web/src/components/file-import-panel.tsx apps/web/src/components/file-import-panel.module.css apps/web/src/components/connections-panel.tsx apps/web/src/lib/file-import.ts apps/web/src/lib/file-import.test.ts apps/web/src/lib/connection-management.ts
+      - name: Fast boundary checks before the full gate
+        run: |
+          set -euo pipefail
+          cd services/api
+          uv run --no-sync ruff check .
+          uv run --no-sync mypy navox
+          uv run --no-sync pytest tests/test_managed_imports.py tests/test_connection_management.py -q > "$RUNNER_TEMP/import-focused.log" 2>&1 || { tail -120 "$RUNNER_TEMP/import-focused.log"; exit 1; }
+          tail -6 "$RUNNER_TEMP/import-focused.log"
+      - name: Full API preflight on final candidate
+        run: |
+          set -euo pipefail
+          bash scripts/check-api.sh > "$RUNNER_TEMP/import-api-preflight.log" 2>&1 || { tail -120 "$RUNNER_TEMP/import-api-preflight.log"; exit 1; }
+          grep -E 'passed|PASS:|Success:' "$RUNNER_TEMP/import-api-preflight.log"
+      - name: Full pinned web checks
+        run: |
+          set -euo pipefail
+          for gate in lint typecheck test build; do
+            npm run "$gate" > "$RUNNER_TEMP/import-web-$gate.log" 2>&1 || { tail -100 "$RUNNER_TEMP/import-web-$gate.log"; exit 1; }
+            tail -6 "$RUNNER_TEMP/import-web-$gate.log"
+          done
+      - name: PostgreSQL migration round trip
+        working-directory: services/api
+        env:
+          DATABASE_URL: postgresql+asyncpg://navox:navox@localhost:5432/navox_imports
+        run: |
+          uv run --no-sync alembic upgrade head
+          uv run --no-sync alembic downgrade 0016_connector_sync_recovery
+          uv run --no-sync alembic upgrade head
+      - name: Repeat managed imports on PostgreSQL
+        working-directory: services/api
+        env:
+          NAVOX_CONNECTOR_TEST_DSN: postgresql+asyncpg://navox:navox@localhost:5432/navox_imports
+        run: |
+          set -euo pipefail
+          uv run --no-sync pytest tests/test_managed_imports.py --junitxml="$RUNNER_TEMP/import-pg.xml" > "$RUNNER_TEMP/import-pg.log" 2>&1 || { tail -120 "$RUNNER_TEMP/import-pg.log"; exit 1; }
+          tail -8 "$RUNNER_TEMP/import-pg.log"
+          python3 -c 'import sys,xml.etree.ElementTree as E; a=list(E.parse(sys.argv[1]).getroot().iter("testsuite")); assert sum(int(x.get("tests",0)) for x in a)>=30; assert all(int(x.get(k,0))==0 for x in a for k in ("failures","errors","skipped"))' "$RUNNER_TEMP/import-pg.xml"
+      - name: Publish only the validated isolated candidate
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- .github/workflows package-lock.json services/api/uv.lock services/api/pyproject.toml evals/gates.json
+          test ! -f scripts/apply-import-candidate.py
+          git reset --soft bf973b20cf7e62b3f4f91850ddd235fb3d9f4baa
+          git add -A
+          git diff --cached --check
+          git diff --cached --stat
+          git diff --cached > "$RUNNER_TEMP/import-final.patch"
+          git write-tree > "$RUNNER_TEMP/import-tree.txt"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(imports): add previewed encrypted file snapshots through the shared runtime'
+          git push origin HEAD:refs/heads/chore/spec003-validated-imports-v1
+          git rev-parse HEAD > "$RUNNER_TEMP/import-candidate.txt"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: navox-source-bf973b2
+          name: navox-managed-import-preflight
           path: |
-            ${{ runner.temp }}/navox-source-bf973b2.tar.gz
-            ${{ runner.temp }}/source-commit.txt
-            ${{ runner.temp }}/source-tree.txt
-          retention-days: 1
-      - run: npm ci
-      - name: Archive locked web dependencies and Node executable
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import os, pathlib, shutil, subprocess, tarfile
-          tmp = pathlib.Path(os.environ['RUNNER_TEMP'])
-          paths = [p for p in ('node_modules', 'apps/web/node_modules', 'apps/extension/node_modules') if pathlib.Path(p).exists()]
-          with tarfile.open(tmp / 'navox-web-tools-bf973b2.tar.gz', 'w:gz') as archive:
-              for path in paths:
-                  archive.add(path, arcname=path)
-              archive.add(shutil.which('node'), arcname='toolchain/bin/node')
-              npm = pathlib.Path(shutil.which('npm')).resolve().parent.parent
-              archive.add(npm, arcname='toolchain/lib/node_modules/npm')
-              archive.add('package-lock.json', arcname='toolchain/package-lock.json')
-          PY
-      - uses: actions/upload-artifact@v4
-        with:
-          name: navox-web-tools-bf973b2
-          path: ${{ runner.temp }}/navox-web-tools-bf973b2.tar.gz
-          retention-days: 1
+            ${{ runner.temp }}/import-*.log
+            ${{ runner.temp }}/import-pg.xml
+            ${{ runner.temp }}/import-final.patch
+            ${{ runner.temp }}/import-tree.txt
+            ${{ runner.temp }}/import-candidate.txt
+          if-no-files-found: warn
+          retention-days: 3
