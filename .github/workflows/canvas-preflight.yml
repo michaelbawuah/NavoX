@@ -1,0 +1,35 @@
+name: Canvas isolated workspace
+on:
+  push:
+    branches: [chore/spec003-canvas-20260924]
+    paths: [.github/workflows/canvas-preflight.yml]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: f5a14b6bd57b17fc31e7773bb0edb653de74a7c1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts
+      - name: Export exact tracked source and package cache
+        run: |
+          set -euo pipefail
+          git archive --format=tar.gz HEAD > "$RUNNER_TEMP/navox-canvas-base.tar.gz"
+          git rev-parse HEAD > "$RUNNER_TEMP/source-commit.txt"
+          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/source-tree.txt"
+          tar -czf "$RUNNER_TEMP/navox-web-dependencies.tar.gz" node_modules
+      - uses: actions/upload-artifact@v4
+        with:
+          name: navox-canvas-workspace
+          path: |
+            ${{ runner.temp }}/navox-canvas-base.tar.gz
+            ${{ runner.temp }}/navox-web-dependencies.tar.gz
+            ${{ runner.temp }}/source-commit.txt
+            ${{ runner.temp }}/source-tree.txt
+          retention-days: 3
