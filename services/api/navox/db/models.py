@@ -888,3 +888,177 @@ class WorkspaceDisplayPreference(Base):
     temperature_unit: Mapped[str] = mapped_column(String(16), default="celsius")
     weather_visible: Mapped[bool] = mapped_column(Boolean, default=False)
     weather_city: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
+class ConnectorDefinition(Base):
+    """Versioned connector manifest registered with NavoX core."""
+
+    __tablename__ = "connector_definitions"
+    __table_args__ = (
+        UniqueConstraint(
+            "connector_key",
+            "version",
+            name="uq_connector_definitions_key_version",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    connector_key: Mapped[str] = mapped_column(String(128), index=True)
+    version: Mapped[str] = mapped_column(String(64))
+    display_name: Mapped[str] = mapped_column(String(120))
+    connector_class: Mapped[str] = mapped_column(String(32), index=True)
+    trust_level: Mapped[str] = mapped_column(String(32), index=True)
+    manifest: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ConnectorConnection(Base):
+    """Workspace-scoped universal connector connection."""
+
+    __tablename__ = "connector_connections"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "connector_definition_id",
+            "external_account_id",
+            name="uq_connector_connections_workspace_definition_account",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    connector_definition_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("connector_definitions.id", ondelete="RESTRICT"), index=True
+    )
+    legacy_connection_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("connections.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    provider: Mapped[str] = mapped_column(String(64), index=True)
+    external_account_id: Mapped[str] = mapped_column(String(512))
+    display_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="CONNECTED", index=True)
+    health_state: Mapped[str] = mapped_column(String(32), default="CONNECTED", index=True)
+    authorized_capabilities: Mapped[list[str]] = mapped_column(JSON, default=list)
+    provider_capabilities: Mapped[list[str]] = mapped_column(JSON, default=list)
+    config: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    credential_reference: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("connection_credentials.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    sync_cursor: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_healthy_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ConnectorResource(Base):
+    """Canonical provider resource stored under one connector connection."""
+
+    __tablename__ = "connector_resources"
+    __table_args__ = (
+        UniqueConstraint(
+            "connector_connection_id",
+            "resource_type",
+            "external_id",
+            name="uq_connector_resources_connection_type_external",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    connector_connection_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("connector_connections.id", ondelete="CASCADE"), index=True
+    )
+    provider: Mapped[str] = mapped_column(String(64), index=True)
+    resource_type: Mapped[str] = mapped_column(String(128), index=True)
+    external_id: Mapped[str] = mapped_column(String(512), index=True)
+    external_parent_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    version: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    canonical: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    provider_metadata: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ConnectorSubscription(Base):
+    __tablename__ = "connector_subscriptions"
+    __table_args__ = (
+        UniqueConstraint(
+            "connector_connection_id",
+            "subscription_key",
+            name="uq_connector_subscriptions_connection_key",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    connector_connection_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("connector_connections.id", ondelete="CASCADE"), index=True
+    )
+    subscription_key: Mapped[str] = mapped_column(String(256))
+    external_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="CONNECTED", index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    subscription_metadata: Mapped[dict[str, object]] = mapped_column(
+        "metadata", JSON, default=dict
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ConnectorSyncRun(Base):
+    __tablename__ = "connector_sync_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "connector_connection_id",
+            "request_id",
+            name="uq_connector_sync_runs_connection_request",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    connector_connection_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("connector_connections.id", ondelete="CASCADE"), index=True
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    request_id: Mapped[UUID] = mapped_column(Uuid)
+    trigger: Mapped[str] = mapped_column(String(32), default="manual")
+    status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    cursor_before: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cursor_after: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resource_count: Mapped[int] = mapped_column(default=0)
+    processed_count: Mapped[int] = mapped_column(default=0)
+    duplicate_count: Mapped[int] = mapped_column(default=0)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
