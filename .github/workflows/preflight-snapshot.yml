@@ -13,8 +13,6 @@ jobs:
     name: Prepare locked local preflight environment
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    env:
-      UV_PYTHON_INSTALL_DIR: ${{ runner.temp }}/navox-preflight-env/python
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,6 +26,7 @@ jobs:
         working-directory: services/api
         run: |
           set -euo pipefail
+          export UV_PYTHON_INSTALL_DIR="$RUNNER_TEMP/navox-preflight-env/python"
           uv python install 3.12
           uv sync --locked --all-groups --python 3.12 --managed-python
           mkdir -p "$RUNNER_TEMP/navox-preflight-env"
