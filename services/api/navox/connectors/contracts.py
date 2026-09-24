@@ -281,6 +281,14 @@ class ConnectorActionResult(BaseModel):
 
 
 @runtime_checkable
+class SecretAccessor(Protocol):
+    @property
+    def names(self) -> frozenset[str]: ...
+
+    def get(self, name: str) -> str: ...
+
+
+@runtime_checkable
 class NavoXConnector(Protocol):
     def get_manifest(self) -> ConnectorManifest: ...
 
