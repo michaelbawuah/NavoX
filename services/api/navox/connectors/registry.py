@@ -6,11 +6,15 @@ from typing import Protocol
 
 from pydantic import JsonValue
 
-from navox.connectors.contracts import ConnectorManifest, NavoXConnector
+from navox.connectors.contracts import ConnectorManifest, NavoXConnector, SecretAccessor
 
 
 class ConnectorFactory(Protocol):
-    def __call__(self, config: Mapping[str, JsonValue]) -> NavoXConnector: ...
+    def __call__(
+        self,
+        config: Mapping[str, JsonValue],
+        secrets: SecretAccessor | None,
+    ) -> NavoXConnector: ...
 
 
 @dataclass(frozen=True)
@@ -40,9 +44,10 @@ class ConnectorRegistry:
         self,
         connector_id: str,
         config: Mapping[str, JsonValue],
+        secrets: SecretAccessor | None = None,
     ) -> NavoXConnector:
         registered = self.get(connector_id)
-        connector = registered.factory(config)
+        connector = registered.factory(config, secrets)
         actual = connector.get_manifest()
         if actual.id != registered.manifest.id or actual.version != registered.manifest.version:
             raise ValueError(
