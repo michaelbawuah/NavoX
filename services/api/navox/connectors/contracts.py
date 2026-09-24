@@ -122,7 +122,9 @@ class ConnectorManifest(BaseModel):
     auth: list[AuthMethod] = Field(default_factory=list, max_length=16)
     resource_types: list[str] = Field(alias="resourceTypes", min_length=1, max_length=128)
     capabilities: ConnectorCapabilities
-    required_secrets: list[str] = Field(alias="requiredSecrets", default_factory=list, max_length=32)
+    required_secrets: list[str] = Field(
+        alias="requiredSecrets", default_factory=list, max_length=32
+    )
     rate_limit_strategy: Literal["provider_headers", "fixed_backoff", "none"] = Field(
         alias="rateLimitStrategy"
     )
@@ -297,7 +299,9 @@ class NavoXConnector(Protocol):
 
 
 class ConnectorRuntimeError(RuntimeError):
-    def __init__(self, code: ConnectorErrorCode, message: str = "Connector operation failed") -> None:
+    def __init__(
+        self, code: ConnectorErrorCode, message: str = "Connector operation failed"
+    ) -> None:
         super().__init__(message)
         self.code = code
 
