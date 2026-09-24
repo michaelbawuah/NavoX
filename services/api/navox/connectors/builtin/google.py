@@ -1,14 +1,26 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from uuid import UUID
 
+from pydantic import JsonValue
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.connectors.contracts import (
+    AuthorizationRequest,
+    AuthorizationResult,
     CanonicalResource,
+    ConnectorActionRequest,
+    ConnectorActionResult,
+    ConnectorConnectionContext,
+    ConnectorHealth,
     ConnectorManifest,
+    ConnectorRuntimeError,
+    FetchResourceRequest,
+    SyncPage,
+    SyncRequest,
     stable_resource_id,
 )
 from navox.db.models import (
@@ -292,3 +304,43 @@ def _legacy_error_code(connection: Connection) -> str | None:
     if connection.last_error:
         return "TEMPORARY_FAILURE"
     return None
+
+
+
+class GoogleCompatibilityConnector:
+    """Catalog/runtime facade over the hardened existing Google source workflows."""
+
+    def __init__(self, config: Mapping[str, JsonValue]) -> None:
+        self.config = dict(config)
+
+    def get_manifest(self) -> ConnectorManifest:
+        return GOOGLE_MANIFEST
+
+    async def authorize(self, context: AuthorizationRequest) -> AuthorizationResult:
+        del context
+        return AuthorizationResult(authorized=False)
+
+    async def health(self, connection: ConnectorConnectionContext) -> ConnectorHealth:
+        state = connection.status
+        return ConnectorHealth(state=state, checked_at=datetime.now(UTC))
+
+    async def sync(self, request: SyncRequest) -> SyncPage:
+        del request
+        raise ConnectorRuntimeError(
+            "UNSUPPORTED_CAPABILITY",
+            "Google sync is delegated to the hardened source-specific workflow",
+        )
+
+    async def fetch_resource(self, request: FetchResourceRequest) -> CanonicalResource:
+        del request
+        raise ConnectorRuntimeError(
+            "UNSUPPORTED_CAPABILITY",
+            "Google resources are fetched by the hardened source-specific workflow",
+        )
+
+    async def execute(self, request: ConnectorActionRequest) -> ConnectorActionResult:
+        del request
+        raise ConnectorRuntimeError(
+            "UNSUPPORTED_CAPABILITY",
+            "Google writes remain behind SPEC-001 approval and the Tool Gateway",
+        )
