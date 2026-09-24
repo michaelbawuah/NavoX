@@ -33,8 +33,9 @@ from navox.db.models import (
 
 
 class FixtureConnector:
-    def __init__(self, config: Mapping[str, JsonValue]) -> None:
+    def __init__(self, config: Mapping[str, JsonValue], secrets=None) -> None:
         self.config = config
+        self.secrets = secrets
 
     def get_manifest(self) -> ConnectorManifest:
         return ConnectorManifest.model_validate(
