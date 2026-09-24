@@ -1,4 +1,4 @@
-name: Google Calendar runtime preflight
+name: SPEC-003 source snapshot
 
 on:
   push:
@@ -6,94 +6,32 @@ on:
     paths: [.github/workflows/preflight-snapshot.yml]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  preflight:
-    name: Verify exact Calendar migration checkpoint
+  snapshot:
+    name: Prepare immutable source
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    services:
-      postgres:
-        image: postgres:17.5-alpine
-        env:
-          POSTGRES_USER: navox
-          POSTGRES_PASSWORD: navox
-          POSTGRES_DB: navox_calendar
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U navox -d navox_calendar"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: be2ec9855a2592931effacc768d737311932529c
-      - uses: astral-sh/setup-uv@v6
-        with:
-          version: "0.12.15"
-      - name: Apply the locally validated patch
-        env:
-          GH_TOKEN: ${{ github.token }}
+          ref: bba81c776722d860966a45346956911482910e00
+          persist-credentials: false
+      - name: Archive tracked files
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "be2ec9855a2592931effacc768d737311932529c"
-          archive="$RUNNER_TEMP/calendar.patch.gz"
-          : > "$archive"
-          for blob in f96f96bef669cbf10dcaef17e7f317d5c801e865 44451b0872a1ae797222539fb57dbaec19ceb3fb; do
-            gh api "repos/michaelbawuah/NavoX/git/blobs/$blob" --jq .content | base64 --decode > "$RUNNER_TEMP/patch-part"
-            test "$(git hash-object "$RUNNER_TEMP/patch-part")" = "$blob"
-            cat "$RUNNER_TEMP/patch-part" >> "$archive"
-          done
-          test "$(git hash-object "$archive")" = "f93a51b9231a4e3493395a9255577e80383cbd53"
-          gzip -dc "$archive" > "$RUNNER_TEMP/calendar.patch"
-          git apply --check "$RUNNER_TEMP/calendar.patch"
-          git apply --index "$RUNNER_TEMP/calendar.patch"
-          test "$(git write-tree)" = "8f24f8b0f2140560ba5b7830155e9166fe0042b2"
-          test "$(git diff --cached --name-only | wc -l)" -eq 12
-          test -z "$(git diff --cached --name-only -- .github/workflows services/api/pyproject.toml services/api/uv.lock package-lock.json evals/gates.json)"
-          git diff --cached --stat
-      - name: Run all API preflight gates
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash scripts/check-api.sh | tee "$RUNNER_TEMP/calendar-preflight.log"
-          git diff --exit-code
-          test "$(git write-tree)" = "8f24f8b0f2140560ba5b7830155e9166fe0042b2"
-      - name: Verify PostgreSQL schema
-        working-directory: services/api
-        env:
-          DATABASE_URL: postgresql+asyncpg://navox:navox@localhost:5432/navox_calendar
-        shell: bash
-        run: |
-          set -euo pipefail
-          uv run alembic upgrade head
-      - name: Verify Calendar and recovery cases with PostgreSQL sessions
-        working-directory: services/api
-        env:
-          NAVOX_CONNECTOR_TEST_DSN: postgresql+asyncpg://navox:navox@localhost:5432/navox_calendar
-        shell: bash
-        run: |
-          set -euo pipefail
-          uv run pytest tests/test_google_calendar_connector.py tests/test_connector_sync_recovery.py --junitxml="$RUNNER_TEMP/calendar-pg.xml"
-      - name: Publish only the validated candidate
-        shell: bash
-        run: |
-          set -euo pipefail
-          git diff --exit-code
-          test "$(git write-tree)" = "8f24f8b0f2140560ba5b7830155e9166fe0042b2"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'refactor(google): route Calendar reads through the shared connector runtime'
-          git push origin HEAD:refs/heads/chore/spec003-validated-google-calendar
-          git rev-parse HEAD > "$RUNNER_TEMP/validated-candidate.txt"
+          test "$(git rev-parse HEAD)" = "bba81c776722d860966a45346956911482910e00"
+          git archive --format=tar.gz --output="$RUNNER_TEMP/navox-source-bba81c7.tar.gz" HEAD
+          git rev-parse HEAD > "$RUNNER_TEMP/source-commit.txt"
+          git rev-parse 'HEAD^{tree}' > "$RUNNER_TEMP/source-tree.txt"
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: navox-calendar-runtime-preflight
+          name: navox-source-bba81c7
           path: |
-            ${{ runner.temp }}/calendar-preflight.log
-            ${{ runner.temp }}/calendar-pg.xml
-            ${{ runner.temp }}/validated-candidate.txt
-          if-no-files-found: warn
-          retention-days: 7
+            ${{ runner.temp }}/navox-source-bba81c7.tar.gz
+            ${{ runner.temp }}/source-commit.txt
+            ${{ runner.temp }}/source-tree.txt
+          if-no-files-found: error
+          retention-days: 1
