@@ -14,6 +14,6 @@ def build_connector_registry(settings: Settings) -> ConnectorRegistry:
 
     del settings
     registry = ConnectorRegistry()
-    google = GoogleCompatibilityConnector({})
+    google = GoogleCompatibilityConnector({}, None)
     registry.register(google.get_manifest(), GoogleCompatibilityConnector)
     return registry
