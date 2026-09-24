@@ -19,6 +19,7 @@ from navox.connectors.contracts import (
     ConnectorManifest,
     ConnectorRuntimeError,
     FetchResourceRequest,
+    SecretAccessor,
     SyncPage,
     SyncRequest,
     stable_resource_id,
@@ -310,8 +311,13 @@ def _legacy_error_code(connection: Connection) -> str | None:
 class GoogleCompatibilityConnector:
     """Catalog/runtime facade over the hardened existing Google source workflows."""
 
-    def __init__(self, config: Mapping[str, JsonValue]) -> None:
+    def __init__(
+        self,
+        config: Mapping[str, JsonValue],
+        secrets: SecretAccessor | None = None,
+    ) -> None:
         self.config = dict(config)
+        self.secrets = secrets
 
     def get_manifest(self) -> ConnectorManifest:
         return GOOGLE_MANIFEST
