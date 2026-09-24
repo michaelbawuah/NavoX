@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
@@ -33,12 +32,37 @@ from navox.connectors.errors import retry_after_seconds
 from navox.connectors.network import (
     join_relative_path,
     require_same_origin,
-    validate_public_https_origin,
 )
+from navox.connectors.outbound import ApprovedHTTPSTransport, approved_origin
 
 MAX_GENERIC_RESPONSE_BYTES = 2_000_000
 MAX_GENERIC_ITEMS = 10_000
 MAX_GENERIC_PAGES = 50
+_SENSITIVE_QUERY_PARTS = (
+    "token",
+    "secret",
+    "password",
+    "credential",
+    "authorization",
+    "api_key",
+    "apikey",
+    "session",
+    "signature",
+    "access_key",
+    "client_key",
+    "auth",
+)
+
+
+def _sensitive_query_key(key: str) -> bool:
+    words = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", key)
+    normalized = re.sub(r"[^a-z0-9]+", "_", words.casefold()).strip("_")
+    return normalized in {
+        "api_key",
+        "access_key",
+        "client_key",
+        "private_key",
+    } or any(part in _SENSITIVE_QUERY_PARTS for part in normalized.split("_"))
 
 
 class GenericEndpointConfig(BaseModel):
@@ -72,10 +96,43 @@ class GenericEndpointConfig(BaseModel):
     @model_validator(mode="after")
     def validate_endpoint(self) -> GenericEndpointConfig:
         join_relative_path("https://example.invalid", self.path)
+        parsed = urlsplit(self.path)
+        if parsed.query or parsed.fragment or "?" in self.path or "#" in self.path:
+            raise ValueError("Endpoint path cannot include query parameters or fragments")
         if (self.cursor_param is None) is not (self.next_cursor_field is None):
             raise ValueError("Cursor request and response fields must be configured together")
         if len(self.static_params) > 32:
             raise ValueError("Too many static endpoint parameters")
+        for key, value in self.static_params.items():
+            if (
+                not key
+                or len(key) > 80
+                or key.casefold() in {"code", "key"}
+                or _sensitive_query_key(key)
+                or len(value) > 512
+            ):
+                raise ValueError("Static endpoint parameters must be bounded and credential-free")
+        if any(
+            name is not None and _sensitive_query_key(name)
+            for name in (self.cursor_param, self.page_size_param)
+        ):
+            raise ValueError("Pagination parameter names must be credential-free")
+        mapped_fields = (
+            self.items_field,
+            self.id_field,
+            self.subject_field,
+            self.content_field,
+            self.occurred_at_field,
+            self.parent_field,
+            self.status_field,
+            self.source_url_field,
+            self.next_cursor_field,
+        )
+        if any(
+            field is not None and any(_sensitive_query_key(part) for part in field.split("."))
+            for field in mapped_fields
+        ):
+            raise ValueError("Resource fields cannot map credential material")
         return self
 
 
@@ -92,7 +149,7 @@ class GenericAPIConfig(BaseModel):
     @field_validator("base_url")
     @classmethod
     def validate_base_url(cls, value: str) -> str:
-        return validate_public_https_origin(value)
+        return approved_origin(value)
 
     @model_validator(mode="after")
     def validate_unique_endpoints(self) -> GenericAPIConfig:
@@ -257,10 +314,11 @@ class GenericAPIConnector:
                 raise ConnectorRuntimeError("AUTH_EXPIRED", "API credential is unavailable")
             headers["Authorization"] = f"Bearer {self.secrets.get(self.config.token_secret_name)}"
         return httpx.AsyncClient(
-            transport=self.transport,
+            transport=self.transport or ApprovedHTTPSTransport(self.config.base_url),
             headers=headers,
             timeout=30.0,
             follow_redirects=False,
+            trust_env=False,
         )
 
     async def _fetch_endpoint(
@@ -281,7 +339,10 @@ class GenericAPIConnector:
             if cursor is not None and endpoint.cursor_param:
                 page_params[endpoint.cursor_param] = cursor
             response = await self._request(client, url, page_params)
-            payload = _json_payload(response)
+            payload = _json_payload(
+                response,
+                credential=client.headers.get("Authorization", "").removeprefix("Bearer "),
+            )
             page_items = _items(payload, endpoint.items_field)
             items.extend(page_items)
             if len(items) >= max_items:
@@ -325,6 +386,13 @@ class GenericAPIConnector:
                 "INVALID_PROVIDER_RESPONSE",
                 "Configured API response exceeded the bounded size limit",
             )
+        authorization = client.headers.get("Authorization", "")
+        if authorization.startswith("Bearer "):
+            credential = authorization.removeprefix("Bearer ")
+            if credential and credential.encode("utf-8") in response.content:
+                raise ConnectorRuntimeError(
+                    "INVALID_PROVIDER_RESPONSE", "Provider response contains credential material"
+                )
         if response.status_code == 401:
             raise ConnectorRuntimeError("AUTH_EXPIRED", "Configured API authorization expired")
         if response.status_code == 403:
@@ -369,8 +437,12 @@ class GenericAPIConnector:
         parent_value = _field(item, endpoint.parent_field)
         source_url_value = _field(item, endpoint.source_url_field)
         status_value = _field(item, endpoint.status_field)
+        mapped_values = (identifier, subject_value, content_value, parent_value, status_value)
+        if any(isinstance(value, dict | list) for value in mapped_values):
+            raise ConnectorRuntimeError(
+                "INVALID_PROVIDER_RESPONSE", "Configured API field must contain a scalar value"
+            )
         occurred = _parse_time(occurred_value) or datetime.now(UTC)
-        bounded = _bounded_object(item)
         source_url = _safe_deep_link(source_url_value)
         return CanonicalResource(
             resource_id=stable_resource_id(
@@ -392,7 +464,7 @@ class GenericAPIConnector:
                 "content": str(content_value)[:32_000] if content_value is not None else None,
                 "occurred_at": occurred.isoformat(),
                 "status": str(status_value)[:64] if status_value is not None else "active",
-                "metadata": {"fields": bounded, "endpoint": endpoint.name},
+                "metadata": {"endpoint": endpoint.name},
             },
             provider_metadata={"configured_endpoint": endpoint.name},
             source_url=source_url,
@@ -401,14 +473,39 @@ class GenericAPIConnector:
         )
 
 
-def _json_payload(response: httpx.Response) -> object:
+def _json_payload(response: httpx.Response, *, credential: str = "") -> object:
     try:
-        return response.json()
+        payload = response.json()
     except ValueError:
         raise ConnectorRuntimeError(
             "INVALID_PROVIDER_RESPONSE",
             "Configured API returned invalid JSON",
         ) from None
+    if credential and _contains_credential(payload, credential):
+        raise ConnectorRuntimeError(
+            "INVALID_PROVIDER_RESPONSE", "Provider response contains credential material"
+        )
+    return payload
+
+
+def _contains_credential(payload: object, credential: str) -> bool:
+    pending = [payload]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, str):
+            for _ in range(3):
+                if credential in value:
+                    return True
+                decoded = unquote(value)
+                if decoded == value:
+                    break
+                value = decoded
+        if isinstance(value, dict):
+            pending.extend(value.keys())
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    return False
 
 
 def _items(payload: object, items_field: str | None) -> list[dict[str, object]]:
@@ -451,32 +548,22 @@ def _parse_time(value: object) -> datetime | None:
 
 
 def _safe_deep_link(value: object) -> str | None:
-    if not isinstance(value, str):
+    if not isinstance(value, str) or len(value) > 2_000:
         return None
-    parsed = urlsplit(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+    try:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.fragment
+            or parsed.query
+            or "\\" in value
+            or any(ord(char) <= 32 or ord(char) == 127 for char in value)
+        ):
+            return None
+        approved_origin(f"https://{parsed.netloc}")
+    except ValueError:
         return None
-    return value[:2_000]
-
-
-def _bounded_object(value: dict[str, object]) -> dict[str, JsonValue]:
-    encoded = json.loads(json.dumps(value, default=str))
-    if not isinstance(encoded, dict):
-        return {}
-    result: dict[str, JsonValue] = {}
-    for key, item in list(encoded.items())[:128]:
-        if isinstance(item, str):
-            result[str(key)[:128]] = item[:4_000]
-        elif item is None or isinstance(item, bool | int | float):
-            result[str(key)[:128]] = item
-        elif isinstance(item, list):
-            result[str(key)[:128]] = [
-                str(entry)[:500] if not isinstance(entry, bool | int | float) else entry
-                for entry in item[:50]
-            ]
-        elif isinstance(item, dict):
-            result[str(key)[:128]] = {
-                str(subkey)[:128]: str(subvalue)[:1_000]
-                for subkey, subvalue in list(item.items())[:50]
-            }
-    return result
+    return value
