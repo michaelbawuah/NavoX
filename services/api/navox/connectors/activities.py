@@ -192,15 +192,17 @@ async def connector_health_activity(payload: ConnectorHealthWork) -> str:
             if definition is None:
                 raise ConnectorRuntimeError("PERMANENT_FAILURE")
             registered = registry.get(definition.connector_key)
+            preview = registered.factory(connection.config, None)
+            manifest = preview.get_manifest()
             secret_lease = None
-            if registered.manifest.required_secrets:
+            if manifest.required_secrets:
                 try:
                     secret_broker = SecretBroker(settings)
                     secret_lease = await secret_broker.lease(
                         database,
                         connection_id=connection.id,
                         purpose="health.read",
-                        names=frozenset(registered.manifest.required_secrets),
+                        names=frozenset(manifest.required_secrets),
                     )
                 except SecretBrokerError:
                     connection.health_state = "AUTH_EXPIRED"
