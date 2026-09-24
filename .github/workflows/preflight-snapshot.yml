@@ -1,0 +1,35 @@
+name: Preflight source snapshot
+
+on:
+  push:
+    branches: [chore/spec003-preflight-20260924]
+    paths: [.github/workflows/preflight-snapshot.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    name: Prepare local preflight source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 1ba2fe13d01984a26f88e5b5462ff9eca0f9175b
+          persist-credentials: false
+      - name: Archive tracked source only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "1ba2fe13d01984a26f88e5b5462ff9eca0f9175b"
+          git archive --format=zip --output="$RUNNER_TEMP/navox-preflight-source.zip" HEAD
+          git rev-parse HEAD > "$RUNNER_TEMP/source-commit.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: navox-preflight-source-1ba2fe1
+          path: |
+            ${{ runner.temp }}/navox-preflight-source.zip
+            ${{ runner.temp }}/source-commit.txt
+          if-no-files-found: error
+          retention-days: 1
