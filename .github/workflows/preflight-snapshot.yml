@@ -41,8 +41,7 @@ jobs:
           s = s.replace('"alembic", "evaluation"]', '"alembic", "evaluation", "schema"]')
           needle = '  for table in "${tables[@]}"; do\n'
           assert s.count(needle) == 1
-          s = s.replace(needle, needle + '    if [ "$PREFLIGHT_TEST_FAILURE" = schema ] && [ "$table" = connector_import_snapshots ]; then continue; fi\n')
-          s += '\n'
+          s = s.replace(needle, needle + '    if [ "$PREFLIGHT_TEST_FAILURE" = schema ]; then\n      [ "$table" = connector_import_snapshots ] && continue\n    fi\n')
           p.write_text(s)
           PY
           (cd services/api && uv sync --locked --all-groups --quiet && uv run --no-sync ruff check --select I,F401 --fix . && uv run --no-sync ruff format .)
