@@ -186,7 +186,9 @@ class ConnectorRuntime:
         if connector_id == "browser-assisted" and not bool(
             connection.config.get("explicit_capture_authorized", False)
         ):
-            raise ConnectorRuntimeError("PERMISSION_DENIED", "Browser capture requires authorization")
+            raise ConnectorRuntimeError(
+                "PERMISSION_DENIED", "Browser capture requires authorization"
+            )
 
     @staticmethod
     async def _persist_resource(
