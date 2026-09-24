@@ -22,7 +22,7 @@ from navox.connectors.authorization import ConnectorAccessDenied, owned_connecto
 from navox.core.settings import Settings
 from navox.db.models import AuditEvent, Connection, ConnectionCredential, ConnectorConnection
 
-LEASE_PURPOSES = frozenset({"sync.read", "health.read"})
+LEASE_PURPOSES = frozenset({"sync.read", "health.read", "events.manage", "events.cleanup"})
 LEASE_TTL_SECONDS = 300.0
 MAX_SECRET_BYTES = 65_536
 _KEY_PRIMARY = "connector-v2:primary"
@@ -163,10 +163,22 @@ class SecretBroker:
         if connection.provider == "google" or connection.config.get("legacy_bridge"):
             raise SecretBrokerError("Legacy connector credentials require their original flow")
         previous = await _credential(database, connection)
+        provenance = await _owned_provenance(database, connection)
+        provenance_previous = (
+            await database.get(ConnectionCredential, provenance.credential_reference)
+            if provenance is not None and provenance.credential_reference is not None
+            else None
+        )
         if previous is not None and previous.key_version.startswith("connector-v2:"):
             self._decrypt(previous, connection)
         elif previous is not None and previous.key_version != "connector-v1":
             raise SecretBrokerError("Legacy connector credentials require their original flow")
+        # A stale mirror can survive a credential rotation made before this fix.
+        # Prove it belongs to this native connection before replacing its link.
+        if provenance_previous is not None and provenance_previous is not previous:
+            if not provenance_previous.key_version.startswith("connector-v2:"):
+                raise SecretBrokerError("Connector provenance credentials require review")
+            self._decrypt(provenance_previous, connection)
         credential_id = uuid4()
         envelope = {
             "version": 2,
@@ -189,9 +201,13 @@ class SecretBroker:
         )
         await database.flush()
         connection.credential_reference = credential_id
+        if provenance is not None:
+            provenance.credential_reference = credential_id
         await database.flush()
         if previous is not None and previous.key_version.startswith("connector-v2:"):
             await _delete_unreferenced(database, previous)
+        if provenance_previous is not None and provenance_previous is not previous:
+            await _delete_unreferenced(database, provenance_previous)
         _audit(database, connection, "stored")
         return credential_id
 
@@ -214,7 +230,7 @@ class SecretBroker:
             connection_id=connection_id,
             workspace_id=workspace_id,
             user_id=user_id,
-            active=True,
+            active=purpose != "events.cleanup",
         )
         credential = await _credential(database, connection)
         if credential is None:
@@ -270,11 +286,21 @@ class SecretBroker:
             user_id=user_id,
             active=False,
         )
+        if connection.provider == "google" or connection.config.get("legacy_bridge"):
+            raise SecretBrokerError("Legacy connector credentials require their original flow")
+        provenance = await _owned_provenance(database, connection)
         credential = await _credential(database, connection)
         if credential is None:
             return
         self._decrypt(credential, connection)
+        if provenance is not None and provenance.credential_reference not in {
+            None,
+            credential.id,
+        }:
+            raise SecretBrokerError("Connector provenance credentials require review")
         connection.credential_reference = None
+        if provenance is not None:
+            provenance.credential_reference = None
         await database.flush()
         await _delete_unreferenced(database, credential)
         _audit(database, connection, "deleted")
@@ -288,6 +314,39 @@ async def _credential(
     return await database.get(
         ConnectionCredential, connection.credential_reference, populate_existing=True
     )
+
+
+async def _owned_provenance(
+    database: AsyncSession, connection: ConnectorConnection
+) -> Connection | None:
+    """Lock only this connector's generated compatibility row, never a borrowed legacy account."""
+    if connection.legacy_connection_id is None:
+        return None
+    provenance = await database.scalar(
+        select(Connection)
+        .where(
+            Connection.id == connection.legacy_connection_id,
+            Connection.workspace_id == connection.workspace_id,
+            Connection.user_id == connection.user_id,
+            Connection.provider == connection.provider,
+            Connection.external_account_id == f"connector:{connection.id}",
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if provenance is None:
+        raise SecretBrokerError("Connector provenance requires review")
+    shared = await database.scalar(
+        select(ConnectorConnection.id)
+        .where(
+            ConnectorConnection.legacy_connection_id == provenance.id,
+            ConnectorConnection.id != connection.id,
+        )
+        .limit(1)
+    )
+    if shared is not None:
+        raise SecretBrokerError("Connector provenance requires review")
+    return provenance
 
 
 async def _delete_unreferenced(database: AsyncSession, credential: ConnectionCredential) -> None:

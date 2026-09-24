@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, JsonValue, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     google_oauth_redirect_uri: str = "http://localhost:8000/api/v1/connections/google/callback"
     google_token_encryption_key: SecretStr | None = None
     connector_secret_encryption_key: SecretStr | None = None
+    # Deployment-operator reviewed configurations. Users cannot supply network targets.
+    generic_rest_connectors: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=20)
+    mcp_servers: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=20)
     google_gmail_push_subscription: str = ""
     google_gmail_watch_topic: str = ""
     google_calendar_push_url: str = ""

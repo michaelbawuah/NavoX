@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   type ConnectionSource,
+  type ConnectorEntry,
+  canManageLifecycle,
+  canOpenConnector,
+  canReconnect,
+  catalogAvailability,
   connectionPage,
   formatConnectionTime,
   googleAuthorizationUrl,
   healthLabel,
+  lifecycleConfirmation,
   type ManagedConnection,
   matchesConnection,
   sourceStatus,
@@ -62,6 +68,71 @@ describe("connection status", () => {
     expect(matchesConnection(connection, " OWNER@EXAMPLE ")).toBe(true);
     expect(matchesConnection(connection, "calendar")).toBe(true);
     expect(matchesConnection(connection, "Canvas")).toBe(false);
+  });
+});
+
+describe("connection lifecycle availability", () => {
+  const connection = {
+    health: "CONNECTED",
+    can_disconnect: false,
+    can_delete_data: false,
+  } as ManagedConnection;
+
+  it("keeps unfinished destructive operations unavailable by default", () => {
+    expect(canManageLifecycle(connection, "disconnect")).toBe(false);
+    expect(canManageLifecycle(connection, "delete-data")).toBe(false);
+    expect(
+      canManageLifecycle(
+        { ...connection, can_delete_data: true },
+        "delete-data",
+      ),
+    ).toBe(false);
+  });
+
+  it("requires a disconnected state and API capability before deletion", () => {
+    expect(
+      canManageLifecycle({ ...connection, can_disconnect: true }, "disconnect"),
+    ).toBe(true);
+    const disconnected = {
+      ...connection,
+      health: "DISCONNECTED" as const,
+      can_disconnect: true,
+      can_delete_data: true,
+    };
+    expect(canManageLifecycle(disconnected, "disconnect")).toBe(false);
+    expect(canManageLifecycle(disconnected, "delete-data")).toBe(true);
+    expect(lifecycleConfirmation("disconnect")).toBe("DISCONNECT");
+    expect(lifecycleConfirmation("delete-data")).toBe("DELETE");
+  });
+
+  it("shows setup pending and planned as separate statuses", () => {
+    expect(catalogAvailability("setup_pending")).toBe("Setup pending");
+    expect(catalogAvailability("planned")).toBe("Planned");
+    expect(catalogAvailability("available")).toBe("Available");
+  });
+
+  it("only enables explicitly implemented setup routes when available", () => {
+    const entry = { id: "mcp", availability: "available" } as ConnectorEntry;
+    expect(canOpenConnector(entry)).toBe(true);
+    expect(canOpenConnector({ ...entry, id: "generic-rest-api" })).toBe(true);
+    expect(canOpenConnector({ ...entry, id: "future-connector" })).toBe(false);
+    expect(canOpenConnector({ ...entry, availability: "setup_pending" })).toBe(
+      false,
+    );
+    expect(
+      canReconnect({
+        ...connection,
+        connector_id: "mcp",
+        can_reauthorize: true,
+      }),
+    ).toBe(false);
+    expect(
+      canReconnect({
+        ...connection,
+        connector_id: "generic-rest-api",
+        can_reauthorize: true,
+      }),
+    ).toBe(true);
   });
 });
 

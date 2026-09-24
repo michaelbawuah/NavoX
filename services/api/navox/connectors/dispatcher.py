@@ -13,6 +13,7 @@ from navox.workflows.connectors import (
     ConnectorHealthWorkflow,
     ConnectorIncrementalSyncWorkflow,
     ConnectorInitialSyncWorkflow,
+    ConnectorSubscriptionWorkflow,
 )
 
 
@@ -49,6 +50,26 @@ async def dispatch_connector_health(
     try:
         await client.start_workflow(
             ConnectorHealthWorkflow.run,
+            payload,
+            id=workflow_id,
+            task_queue=settings.temporal_task_queue,
+            id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
+        )
+    except WorkflowAlreadyStartedError:
+        pass
+    return workflow_id
+
+
+async def dispatch_connector_subscription(
+    payload: ConnectorHealthWork,
+    *,
+    settings: Settings,
+) -> str:
+    workflow_id = f"connector-subscription:{payload.connection_id}"
+    client = await Client.connect(settings.temporal_target)
+    try:
+        await client.start_workflow(
+            ConnectorSubscriptionWorkflow.run,
             payload,
             id=workflow_id,
             task_queue=settings.temporal_task_queue,

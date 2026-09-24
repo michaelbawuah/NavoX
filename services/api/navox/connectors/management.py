@@ -25,7 +25,9 @@ from navox.db.models import (
     ConnectorConnection,
     ConnectorDefinition,
     ConnectorImportSnapshot,
+    ConnectorSubscription,
     ConnectorSyncRun,
+    ProviderEventSubscription,
     User,
     WorkspaceMembership,
 )
@@ -158,7 +160,6 @@ class ConnectionView(BaseModel):
     can_pause: bool
     can_resume: bool
     can_reauthorize: bool
-    # Never imply the unfinished disconnect/delete-data path is supported.
     can_disconnect: bool = False
     can_delete_data: bool = False
 
@@ -225,6 +226,8 @@ async def connection_views(
     user_id: UUID,
     agent_paused: bool,
     connection_id: UUID | None = None,
+    approved_rest_keys: frozenset[str] = frozenset(),
+    approved_mcp_keys: frozenset[str] = frozenset(),
 ) -> list[ConnectionView]:
     """Bounded owner-scoped overview. Do not serialize ORM rows or connector config."""
     now = await database_now(database)
@@ -259,6 +262,22 @@ async def connection_views(
             )
         )
     }
+    pending_native = set(
+        await database.scalars(
+            select(ConnectorSubscription.connector_connection_id).where(
+                ConnectorSubscription.connector_connection_id.in_([row.id for row in native]),
+                ConnectorSubscription.status != "cancelled",
+            )
+        )
+    )
+    pending_provider = set(
+        await database.scalars(
+            select(ProviderEventSubscription.connection_id).where(
+                ProviderEventSubscription.connection_id.in_([row.id for row in legacy]),
+                ProviderEventSubscription.status != "cancelled",
+            )
+        )
+    )
     result: list[ConnectionView] = []
     for account in legacy:
         linked = [
@@ -344,6 +363,10 @@ async def connection_views(
                 can_pause=health not in {"PAUSED", "DISCONNECTED"},
                 can_resume=health == "PAUSED",
                 can_reauthorize=health != "DISCONNECTED",
+                can_disconnect=health != "DISCONNECTED",
+                can_delete_data=health == "DISCONNECTED"
+                and account.id not in pending_provider
+                and not any(row.id in pending_native for row in linked),
             )
         )
     # Google compatibility/source mirrors are represented by their original account ID.
@@ -352,8 +375,27 @@ async def connection_views(
             continue
         definition = definitions.get(row.connector_definition_id)
         entry = next((e for e in CATALOG if definition and e.id == definition.connector_key), None)
+        is_rest = bool(
+            definition
+            and definition.connector_key in approved_rest_keys
+            and definition.connector_class == "GENERIC_API"
+        )
+        if is_rest:
+            entry = catalog_entry("generic-rest-api")
+        is_mcp = bool(
+            definition
+            and definition.connector_key in approved_mcp_keys
+            and definition.connector_class == "MCP"
+        )
+        if is_mcp:
+            entry = catalog_entry("mcp")
         state = _health(row, now, fallback="CONNECTED")
-        if definition is None or not definition.active:
+        if (
+            definition is None
+            or not definition.active
+            or (definition.connector_class == "GENERIC_API" and not is_rest)
+            or (definition.connector_class == "MCP" and not is_mcp)
+        ):
             state = "DEGRADED" if state not in {"PAUSED", "DISCONNECTED"} else state
         last = utc(row.last_synced_at) if row.last_synced_at else None
         snapshot = (
@@ -384,11 +426,32 @@ async def connection_views(
             and row.credential_reference
             and "academic.courses.read" in row.authorized_capabilities
         )
+        rest_allowed = bool(
+            is_rest
+            and (row.config.get("auth") == "none" or row.credential_reference)
+            and row.authorized_capabilities
+            and set(row.authorized_capabilities).issubset(set(row.provider_capabilities))
+        )
+        mcp_allowed = bool(
+            is_mcp
+            and definition
+            and isinstance(row.config.get("server_id"), str)
+            and isinstance(row.config.get("policy_digest"), str)
+            and definition.connector_key
+            == f"mcp-{row.config['server_id']}-{str(row.config['policy_digest'])[:12]}"
+            and row.authorized_capabilities
+            and set(row.authorized_capabilities).issubset(set(row.provider_capabilities))
+            and (row.credential_reference or not definition.manifest.get("requiredSecrets"))
+        )
         result.append(
             ConnectionView(
                 id=row.id,
                 connector_id=entry.id if entry else "private-connector",
-                name=entry.name if entry else "Private connector",
+                name=row.display_name
+                if (is_rest or is_mcp) and row.display_name
+                else entry.name
+                if entry
+                else "Private connector",
                 account_label=row.display_name if is_snapshot or is_canvas else None,
                 health=state,
                 agent_paused=agent_paused,
@@ -405,6 +468,8 @@ async def connection_views(
                         if is_snapshot
                         else canvas_allowed
                         if is_canvas
+                        else (rest_allowed or mcp_allowed)
+                        if is_rest or is_mcp
                         else True,
                         health=state,
                         last_synced_at=last,
@@ -412,7 +477,7 @@ async def connection_views(
                         syncing=_syncing(row, now),
                         retry_at=retry,
                         can_sync=bool(
-                            (snapshot_allowed or canvas_allowed)
+                            (snapshot_allowed or canvas_allowed or rest_allowed or mcp_allowed)
                             and definition
                             and definition.active
                             and not agent_paused
@@ -423,8 +488,20 @@ async def connection_views(
                     )
                 ],
                 can_pause=state not in {"PAUSED", "DISCONNECTED"},
-                can_resume=state == "PAUSED" and bool(definition and definition.active),
-                can_reauthorize=is_canvas and state != "DISCONNECTED",
+                can_resume=state == "PAUSED"
+                and bool(definition and definition.active)
+                and (
+                    not definition
+                    or definition.connector_class not in {"GENERIC_API", "MCP"}
+                    or is_rest
+                    or is_mcp
+                ),
+                can_reauthorize=(is_canvas or (is_rest and row.config.get("auth") == "bearer"))
+                and state != "DISCONNECTED",
+                can_disconnect=state != "DISCONNECTED",
+                can_delete_data=state == "DISCONNECTED"
+                and row.id not in pending_native
+                and row.legacy_connection_id not in pending_provider,
             )
         )
     return result

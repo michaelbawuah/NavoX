@@ -51,6 +51,51 @@ export interface ManagedConnection {
   can_delete_data: boolean;
 }
 
+export type LifecycleAction = "disconnect" | "delete-data";
+
+export function canManageLifecycle(
+  connection: ManagedConnection,
+  action: LifecycleAction,
+): boolean {
+  return action === "disconnect"
+    ? connection.can_disconnect === true && connection.health !== "DISCONNECTED"
+    : connection.can_delete_data === true &&
+        connection.health === "DISCONNECTED";
+}
+
+export function lifecycleConfirmation(action: LifecycleAction): string {
+  return action === "disconnect" ? "DISCONNECT" : "DELETE";
+}
+
+export function catalogAvailability(
+  availability: ConnectorEntry["availability"],
+): string {
+  if (availability === "available") return "Available";
+  if (availability === "setup_pending") return "Setup pending";
+  return "Planned";
+}
+
+const connectableIds = new Set([
+  "google-workspace",
+  "canvas-lms",
+  "generic-import",
+  "generic-rest-api",
+  "mcp",
+]);
+
+export function canOpenConnector(entry: ConnectorEntry): boolean {
+  return entry.availability === "available" && connectableIds.has(entry.id);
+}
+
+export function canReconnect(connection: ManagedConnection): boolean {
+  return (
+    connection.can_reauthorize === true &&
+    ["google-workspace", "canvas-lms", "generic-rest-api"].includes(
+      connection.connector_id,
+    )
+  );
+}
+
 const healthLabels: Record<ConnectionHealth, string> = {
   CONNECTED: "Connected",
   DEGRADED: "Needs checking",

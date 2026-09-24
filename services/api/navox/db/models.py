@@ -1036,6 +1036,12 @@ class ConnectorSubscription(Base):
     external_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="CONNECTED", index=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    generation: Mapped[int] = mapped_column(default=0, server_default="0")
+    lease_token: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    authorization_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     subscription_metadata: Mapped[dict[str, object]] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

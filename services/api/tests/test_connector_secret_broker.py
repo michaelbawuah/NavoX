@@ -13,6 +13,8 @@ from cryptography.fernet import Fernet
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from navox.connectors.lifecycle import disconnect
+from navox.connectors.provenance import ensure_provenance_connection
 from navox.connectors.secrets import ScopedSecretLease, SecretBroker, SecretBrokerError
 from navox.core.settings import Settings
 from navox.db.base import Base
@@ -351,6 +353,116 @@ async def test_delete_is_owner_scoped_idempotent_and_retains_shared_rows(databas
     assert connection.credential_reference is None
     assert anchor.credential_reference == credential_id
     assert await database.get(ConnectionCredential, credential_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_reauthorization_rotates_provenance_and_disconnect_removes_secret(database, broker):
+    connection = await owner(database, broker)
+    old_id = connection.credential_reference
+    provenance = await ensure_provenance_connection(database, connection)
+    assert provenance.credential_reference == old_id
+    await database.commit()
+
+    new_id = await broker.store(database, {"API_TOKEN": "reauthorized"}, **scope(connection))
+    await database.commit()
+    assert connection.credential_reference == new_id
+    assert provenance.credential_reference == new_id
+    assert await database.get(ConnectionCredential, old_id) is None
+    with await lease(database, broker, connection) as handle:
+        assert handle.get("API_TOKEN") == "reauthorized"
+
+    await disconnect(database, **scope(connection), request_id=uuid4())
+    assert connection.credential_reference is None
+    assert provenance.credential_reference is None
+    assert await database.get(ConnectionCredential, new_id) is None
+
+
+@pytest.mark.asyncio
+async def test_broker_delete_detaches_owned_provenance_and_retains_borrowed_reference(
+    database, broker
+):
+    connection = await owner(database, broker)
+    old_id = connection.credential_reference
+    provenance = await ensure_provenance_connection(database, connection)
+    borrowed = Connection(
+        user_id=connection.user_id,
+        workspace_id=connection.workspace_id,
+        provider="demo",
+        external_account_id="different-native-account",
+        credential_reference=old_id,
+    )
+    database.add(borrowed)
+    await database.commit()
+
+    await broker.delete_for_connection(database, **scope(connection))
+    await database.commit()
+    assert connection.credential_reference is None
+    assert provenance.credential_reference is None
+    assert borrowed.credential_reference == old_id
+    assert await database.get(ConnectionCredential, old_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_broker_refuses_to_rotate_a_borrowed_provenance_anchor(database, broker):
+    connection = await owner(database, broker)
+    original = connection.credential_reference
+    borrowed = Connection(
+        user_id=connection.user_id,
+        workspace_id=connection.workspace_id,
+        provider="demo",
+        external_account_id="another-account",
+        credential_reference=original,
+    )
+    database.add(borrowed)
+    await database.flush()
+    connection.legacy_connection_id = borrowed.id
+    await database.commit()
+
+    with pytest.raises(SecretBrokerError, match="provenance requires review"):
+        await broker.store(database, {"API_TOKEN": "replacement"}, **scope(connection))
+    assert connection.credential_reference == original
+    assert borrowed.credential_reference == original
+    assert await database.get(ConnectionCredential, original) is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("borrowed_reference", [False, True])
+async def test_provenance_refresh_reclaims_only_unreferenced_owned_stale_v2_credential(
+    database, monkeypatch, borrowed_reference
+):
+    settings = Settings(
+        _env_file=None, connector_secret_encryption_key=Fernet.generate_key().decode()
+    )
+    broker = SecretBroker(settings)
+    connection = await owner(database, broker)
+    old_id = connection.credential_reference
+    provenance = await ensure_provenance_connection(database, connection)
+    # Reproduce the old store behavior: native A→B while the anchor still holds A.
+    connection.legacy_connection_id = None
+    await database.flush()
+    new_id = await broker.store(database, {"API_TOKEN": "new"}, **scope(connection))
+    assert provenance.credential_reference == old_id
+    assert await database.get(ConnectionCredential, old_id) is not None
+    connection.legacy_connection_id = provenance.id
+    if borrowed_reference:
+        database.add(
+            Connection(
+                user_id=connection.user_id,
+                workspace_id=connection.workspace_id,
+                provider="demo",
+                external_account_id="borrowed-secret-reference",
+                credential_reference=old_id,
+            )
+        )
+    await database.commit()
+
+    monkeypatch.setattr("navox.connectors.provenance.get_settings", lambda: settings)
+    await ensure_provenance_connection(database, connection)
+    await database.commit()
+    assert provenance.credential_reference == new_id
+    assert (await database.get(ConnectionCredential, old_id) is not None) is borrowed_reference
+    with await lease(database, broker, connection) as handle:
+        assert handle.get("API_TOKEN") == "new"
 
 
 @pytest.mark.asyncio

@@ -20,6 +20,8 @@ from navox.api.connections import (
     start_google_authorization,
 )
 from navox.api.intelligence_sync import SyncRequest, sync_source
+from navox.connectors.generic_registration import approved_generic_connectors
+from navox.connectors.lifecycle import delete_learned_data, disconnect
 from navox.connectors.management import (
     CATALOG,
     CatalogEntry,
@@ -28,6 +30,7 @@ from navox.connectors.management import (
     connection_views,
     transition_connection,
 )
+from navox.connectors.mcp_registration import approved_mcp_policies
 from navox.connectors.sync_state import database_now
 from navox.db.models import Connection, OAuthAuthorizationAttempt
 
@@ -40,7 +43,21 @@ class ManagementCommand(BaseModel):
 
 
 class ManagedSyncCommand(ManagementCommand):
-    source: Literal["gmail", "calendar", "snapshot", "canvas"]
+    source: Literal["gmail", "calendar", "snapshot", "canvas", "resources"]
+
+
+def rest_keys(settings: SettingsDependency) -> frozenset[str]:
+    try:
+        return frozenset(item.connector_key for item in approved_generic_connectors(settings))
+    except ValueError:
+        return frozenset()
+
+
+def mcp_keys(settings: SettingsDependency) -> frozenset[str]:
+    try:
+        return frozenset(item.connector_key for item in approved_mcp_policies(settings))
+    except ValueError:
+        return frozenset()
 
 
 def require_origin(request: Request, web_origin: str) -> None:
@@ -57,6 +74,22 @@ async def list_connectors(
     from navox.api.canvas import configured
 
     result = list(CATALOG)
+    result = [
+        entry.model_copy(update={"availability": "available", "setup_label": "Connect REST API"})
+        if entry.id == "generic-rest-api" and rest_keys(settings)
+        else entry.model_copy(
+            update={
+                "availability": "available",
+                "setup_label": "Connect MCP server",
+                "description": (
+                    "Discover reviewed resources and read tools under selected permissions."
+                ),
+            }
+        )
+        if entry.id == "mcp" and mcp_keys(settings)
+        else entry
+        for entry in result
+    ]
     try:
         configured(settings)
     except HTTPException:
@@ -99,17 +132,23 @@ async def connect_catalog_entry(
 async def list_connections(
     current_account: CurrentAccountDependency,
     database: DatabaseSession,
+    settings: SettingsDependency,
 ) -> list[ConnectionView]:
     return await connection_views(
         database,
         workspace_id=current_account.workspace.id,
         user_id=current_account.user.id,
         agent_paused=current_account.user.agent_paused,
+        approved_rest_keys=rest_keys(settings),
+        approved_mcp_keys=mcp_keys(settings),
     )
 
 
 async def _detail(
-    connection_id: UUID, current_account: CurrentAccountDependency, database: DatabaseSession
+    connection_id: UUID,
+    current_account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
 ) -> ConnectionView:
     views = await connection_views(
         database,
@@ -117,6 +156,8 @@ async def _detail(
         user_id=current_account.user.id,
         agent_paused=current_account.user.agent_paused,
         connection_id=connection_id,
+        approved_rest_keys=rest_keys(settings),
+        approved_mcp_keys=mcp_keys(settings),
     )
     if len(views) != 1:
         raise HTTPException(404, "Connection not found")
@@ -128,8 +169,9 @@ async def describe_connection(
     connection_id: UUID,
     current_account: CurrentAccountDependency,
     database: DatabaseSession,
+    settings: SettingsDependency,
 ) -> ConnectionView:
-    return await _detail(connection_id, current_account, database)
+    return await _detail(connection_id, current_account, database, settings)
 
 
 @router.post("/connections/{connection_id}/pause", response_model=ConnectionView)
@@ -150,7 +192,7 @@ async def pause_connection(
         operation="pause",
         request_id=payload.request_id,
     )
-    return await _detail(connection_id, current_account, database)
+    return await _detail(connection_id, current_account, database, settings)
 
 
 @router.post("/connections/{connection_id}/resume", response_model=ConnectionView)
@@ -171,7 +213,47 @@ async def resume_connection(
         operation="resume",
         request_id=payload.request_id,
     )
-    return await _detail(connection_id, current_account, database)
+    return await _detail(connection_id, current_account, database, settings)
+
+
+@router.delete("/connections/{connection_id}", response_model=ConnectionView)
+async def disconnect_connection(
+    connection_id: UUID,
+    payload: ManagementCommand,
+    request: Request,
+    current_account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> ConnectionView:
+    require_origin(request, settings.web_origin)
+    await disconnect(
+        database,
+        workspace_id=current_account.workspace.id,
+        user_id=current_account.user.id,
+        connection_id=connection_id,
+        request_id=payload.request_id,
+    )
+    return await _detail(connection_id, current_account, database, settings)
+
+
+@router.post("/connections/{connection_id}/delete-data", response_model=ConnectionView)
+async def delete_connection_data(
+    connection_id: UUID,
+    payload: ManagementCommand,
+    request: Request,
+    current_account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> ConnectionView:
+    require_origin(request, settings.web_origin)
+    await delete_learned_data(
+        database,
+        workspace_id=current_account.workspace.id,
+        user_id=current_account.user.id,
+        connection_id=connection_id,
+        request_id=payload.request_id,
+    )
+    return await _detail(connection_id, current_account, database, settings)
 
 
 @router.post("/connections/{connection_id}/sync", status_code=202)
@@ -184,7 +266,35 @@ async def sync_connection(
     settings: SettingsDependency,
 ) -> dict[str, str]:
     require_origin(request, settings.web_origin)
-    view = await _detail(connection_id, current_account, database)
+    view = await _detail(connection_id, current_account, database, settings)
+    if view.connector_id == "generic-rest-api" and payload.source == "resources":
+        if not any(source.id == "resources" and source.can_sync for source in view.sources):
+            raise HTTPException(409, "REST connection is paused, busy, or unavailable")
+        from navox.api.generic_rest import queue
+        from navox.connectors.authorization import owned_connector
+
+        row = await owned_connector(
+            database,
+            connection_id=connection_id,
+            workspace_id=current_account.workspace.id,
+            user_id=current_account.user.id,
+            require_active=True,
+        )
+        return {"dispatch_status": await queue(database, row, payload.request_id, settings)}
+    if view.connector_id == "mcp" and payload.source == "resources":
+        if not any(source.id == "resources" and source.can_sync for source in view.sources):
+            raise HTTPException(409, "MCP connection is paused, busy, or unavailable")
+        from navox.api.mcp import queue
+        from navox.connectors.authorization import owned_connector
+
+        row = await owned_connector(
+            database,
+            connection_id=connection_id,
+            workspace_id=current_account.workspace.id,
+            user_id=current_account.user.id,
+            require_active=True,
+        )
+        return {"dispatch_status": await queue(database, row, payload.request_id, settings)}
     if view.connector_id == "generic-import" and payload.source == "snapshot":
         if not any(source.id == "snapshot" and source.can_sync for source in view.sources):
             raise HTTPException(409, "Snapshot processing is paused, active, or unavailable")
@@ -214,7 +324,11 @@ async def sync_connection(
             require_active=True,
         )
         return {"dispatch_status": await queue(database, row, payload.request_id, settings)}
-    if view.connector_id != "google-workspace" or payload.source in {"snapshot", "canvas"}:
+    if view.connector_id != "google-workspace" or payload.source in {
+        "snapshot",
+        "canvas",
+        "resources",
+    }:
         raise HTTPException(409, "Manual sync is not enabled for this connector yet")
     if view.health in {"PAUSED", "DISCONNECTED"}:
         raise HTTPException(409, "Resume or reconnect before syncing")

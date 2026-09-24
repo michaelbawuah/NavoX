@@ -288,6 +288,45 @@ class ConnectorActionResult(BaseModel):
     result: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+class EventSubscriptionRequest(BaseModel):
+    """One declared event capability and a stable provider idempotency key."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    connection_id: UUID
+    workspace_id: UUID
+    event: str = Field(min_length=3, max_length=160)
+    idempotency_key: UUID
+    external_id: str | None = None
+
+
+class EventSubscriptionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    external_id: str = Field(min_length=1, max_length=512)
+    expires_at: datetime | None = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def normalize_expiration(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("Subscription expiration must include a timezone")
+        return value.astimezone(UTC) if value is not None else None
+
+
+@runtime_checkable
+class EventSubscriptionConnector(Protocol):
+    """Optional trusted adapter contract. Replays of the key must be idempotent.
+
+    A renewal that rotates an external ID must retire the prior ID at the
+    provider; the core cannot atomically rotate two provider subscriptions.
+    """
+
+    async def subscribe(self, request: EventSubscriptionRequest) -> EventSubscriptionResult: ...
+
+    async def unsubscribe(self, request: EventSubscriptionRequest) -> None: ...
+
+
 @runtime_checkable
 class SecretAccessor(Protocol):
     @property

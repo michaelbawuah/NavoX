@@ -30,7 +30,8 @@
   font-size: 0.9rem;
   font-weight: 650;
 }
-.field input {
+.field input,
+.field select {
   min-width: 0;
   width: 100%;
   box-sizing: border-box;
@@ -59,7 +60,8 @@
   cursor: not-allowed;
 }
 .panel button:focus-visible,
-.field input:focus-visible {
+.field input:focus-visible,
+.field select:focus-visible {
   outline: 3px solid #408577;
   outline-offset: 3px;
 }

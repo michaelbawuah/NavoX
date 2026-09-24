@@ -11,7 +11,7 @@ from navox.connectors import activities
 from navox.connectors.builtin.canvas import CanvasConnector
 from navox.connectors.contracts import ConnectorConnectionContext
 from navox.connectors.errors import retry_after_seconds
-from navox.connectors.jobs import ConnectorSyncWork
+from navox.connectors.jobs import ConnectorDisconnectWork, ConnectorSyncWork
 from navox.connectors.secrets import ScopedSecretLease
 from navox.workflows import connectors
 
@@ -138,3 +138,17 @@ def test_temporal_failure_carries_only_code_and_retry_duration():
     assert failure.details == ({"code": "RATE_LIMITED", "retry_after_seconds": 123},)
     assert failure.next_retry_delay == timedelta(seconds=123)
     assert failure.non_retryable is False
+
+
+@pytest.mark.asyncio
+async def test_legacy_disconnect_activity_cannot_bypass_reviewed_data_deletion():
+    payload = ConnectorDisconnectWork(
+        connection_id=str(uuid4()),
+        user_id=str(uuid4()),
+        workspace_id=str(uuid4()),
+        delete_data=True,
+    )
+    with pytest.raises(ApplicationError) as rejected:
+        await activities.connector_disconnect_activity(payload)
+    assert rejected.value.non_retryable is True
+    assert rejected.value.details == ({"code": "UNSUPPORTED_CAPABILITY"},)

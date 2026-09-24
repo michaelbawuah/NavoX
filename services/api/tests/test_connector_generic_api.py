@@ -5,7 +5,12 @@ import httpx
 import pytest
 
 from navox.connectors.builtin.generic_api import GenericAPIConnector
-from navox.connectors.contracts import ConnectorRuntimeError, SyncRequest
+from navox.connectors.contracts import (
+    ConnectorConnectionContext,
+    ConnectorRuntimeError,
+    FetchResourceRequest,
+    SyncRequest,
+)
 from navox.connectors.normalization import canonical_resource_to_source_document
 from navox.connectors.outbound import MAX_RESPONSE_BYTES, ApprovedHTTPSTransport
 
@@ -127,6 +132,58 @@ async def test_generic_api_configuration_drives_unknown_service_without_core_cod
     assert page.resources[0].canonical["subject"] == "Review launch plan"
 
 
+@pytest.mark.asyncio
+async def test_generic_health_only_uses_an_explicitly_authorized_endpoint() -> None:
+    conf = config()
+    conf["endpoints"] = [
+        {
+            "name": "private",
+            "path": "/private",
+            "capability": "private.items.read",
+            "resource_type": "private.item",
+        },
+        {
+            "name": "public",
+            "path": "/public",
+            "capability": "public.items.read",
+            "resource_type": "public.item",
+        },
+    ]
+    seen = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200, json=[])
+
+    adapter = GenericAPIConnector(conf, Secrets(), transport=httpx.MockTransport(handler))
+    request = sync_request()
+    context = ConnectorConnectionContext(
+        id=request.connection_id,
+        user_id=UUID("33333333-3333-4333-8333-333333333333"),
+        workspace_id=request.workspace_id,
+        connector_id="generic-rest-api",
+        provider="unknown_tasks",
+        external_account_id="account",
+        status="CONNECTED",
+        authorized_capabilities=frozenset({"public.items.read"}),
+    )
+    assert (await adapter.health(context)).state == "CONNECTED"
+    assert seen == ["https://api.unknown.example/public"]
+    with pytest.raises(ConnectorRuntimeError, match="No approved REST health endpoint"):
+        await adapter.health(context.model_copy(update={"authorized_capabilities": frozenset()}))
+    assert len(seen) == 1
+    with pytest.raises(ConnectorRuntimeError, match="fetch-by-id requires scoped authorization"):
+        await adapter.fetch_resource(
+            FetchResourceRequest(
+                connection_id=context.id,
+                workspace_id=context.workspace_id,
+                resource_type="private.item",
+                external_id="1",
+            )
+        )
+    assert len(seen) == 1
+
+
 def test_generic_api_rejects_undeclared_domains_and_unsafe_paths() -> None:
     bad = config()
     bad["base_url"] = "http://127.0.0.1"
@@ -146,6 +203,28 @@ def test_generic_api_rejects_undeclared_domains_and_unsafe_paths() -> None:
     bad["endpoints"] = [endpoint]
     with pytest.raises(ValueError):
         GenericAPIConnector(bad, Secrets())
+
+
+def test_generic_provider_fits_legacy_source_and_provenance_columns() -> None:
+    valid = config()
+    valid["provider"] = "p" * 32
+    assert GenericAPIConnector(valid, Secrets()).config.provider == "p" * 32
+    invalid = config()
+    invalid["provider"] = "p" * 33
+    with pytest.raises(ValueError):
+        GenericAPIConnector(invalid, Secrets())
+
+
+def test_generic_api_requires_distinct_read_grants_per_endpoint() -> None:
+    duplicate = config()
+    endpoints = duplicate["endpoints"]
+    assert isinstance(endpoints, list)
+    second = dict(endpoints[0])
+    second["name"] = "other"
+    second["resource_type"] = "other.item"
+    duplicate["endpoints"] = [endpoints[0], second]
+    with pytest.raises(ValueError, match="read capabilities must be unique"):
+        GenericAPIConnector(duplicate, Secrets())
 
 
 @pytest.mark.parametrize(

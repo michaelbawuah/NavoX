@@ -140,7 +140,8 @@ class GenericAPIConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     display_name: str = Field(min_length=1, max_length=120)
-    provider: str = Field(min_length=2, max_length=64, pattern=r"^[a-z][a-z0-9_-]+$")
+    # SPEC-002 source/provenance tables still store provider in String(32).
+    provider: str = Field(min_length=2, max_length=32, pattern=r"^[a-z][a-z0-9_-]+$")
     base_url: str
     auth: str = Field(default="bearer", pattern=r"^(bearer|none)$")
     token_secret_name: str = Field(default="API_TOKEN", pattern=r"^[A-Z][A-Z0-9_]{1,63}$")
@@ -155,10 +156,13 @@ class GenericAPIConfig(BaseModel):
     def validate_unique_endpoints(self) -> GenericAPIConfig:
         names = [endpoint.name for endpoint in self.endpoints]
         resources = [endpoint.resource_type for endpoint in self.endpoints]
+        capabilities = [endpoint.capability for endpoint in self.endpoints]
         if len(names) != len(set(names)):
             raise ValueError("Generic API endpoint names must be unique")
         if len(resources) != len(set(resources)):
             raise ValueError("Generic API resource types must be unique")
+        if len(capabilities) != len(set(capabilities)):
+            raise ValueError("Generic API read capabilities must be unique")
         return self
 
 
@@ -241,8 +245,16 @@ class GenericAPIConnector:
         return AuthorizationResult(authorized=False)
 
     async def health(self, connection: ConnectorConnectionContext) -> ConnectorHealth:
-        del connection
-        endpoint = self.config.endpoints[0]
+        endpoint = next(
+            (
+                item
+                for item in self.config.endpoints
+                if item.capability in connection.authorized_capabilities
+            ),
+            None,
+        )
+        if endpoint is None:
+            raise ConnectorRuntimeError("PERMISSION_DENIED", "No approved REST health endpoint")
         try:
             async with self._client() as client:
                 await self._fetch_endpoint(client, endpoint, max_items=1)
@@ -284,21 +296,12 @@ class GenericAPIConnector:
         return SyncPage(resources=selected, next_cursor=next_cursor, has_more=has_more)
 
     async def fetch_resource(self, request: FetchResourceRequest) -> CanonicalResource:
-        page = await self.sync(
-            SyncRequest(
-                connection_id=request.connection_id,
-                workspace_id=request.workspace_id,
-                limit=1_000,
-                capabilities=frozenset(endpoint.capability for endpoint in self.config.endpoints),
-            )
+        del request
+        # Fetch-by-id has no capability context in the current connector contract.
+        # A direct call must not implicitly fetch every configured endpoint.
+        raise ConnectorRuntimeError(
+            "UNSUPPORTED_CAPABILITY", "Configured REST fetch-by-id requires scoped authorization"
         )
-        for resource in page.resources:
-            if (
-                resource.resource_type == request.resource_type
-                and resource.external_id == request.external_id
-            ):
-                return resource
-        raise ConnectorRuntimeError("RESOURCE_NOT_FOUND", "Configured API resource was not found")
 
     async def execute(self, request: ConnectorActionRequest) -> ConnectorActionResult:
         del request

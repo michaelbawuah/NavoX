@@ -123,9 +123,20 @@ class ApprovedHTTPSTransport(httpx.AsyncBaseTransport):
         *,
         resolver: Resolver = resolve_public,
         transport: httpx.AsyncBaseTransport | None = None,
+        allowed_post_paths: frozenset[str] = frozenset(),
     ) -> None:
         self.origin = approved_origin(origin)
         self.resolver = resolver
+        if any(
+            not path.startswith("/")
+            or "?" in path
+            or "#" in path
+            or "\\" in path
+            or any(segment in {".", ".."} for segment in path.split("/"))
+            for path in allowed_post_paths
+        ):
+            raise ValueError("POST paths must be fixed absolute paths")
+        self.allowed_post_paths = allowed_post_paths
         self.transport = transport or httpx.AsyncHTTPTransport(
             verify=True, trust_env=False, retries=0
         )
@@ -133,7 +144,8 @@ class ApprovedHTTPSTransport(httpx.AsyncBaseTransport):
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         validate_target(request.url, self.origin)
         if request.method != "GET" and not (
-            request.method == "POST" and request.url.path == "/login/oauth2/token"
+            request.method == "POST"
+            and request.url.path in self.allowed_post_paths | {"/login/oauth2/token"}
         ):
             raise ConnectorRuntimeError("PERMISSION_DENIED", "Outbound method is not approved")
         addresses = public_addresses(await self.resolver(request.url.host))

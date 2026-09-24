@@ -10,6 +10,8 @@ with workflow.unsafe.imports_passed_through():
         connector_disconnect_activity,
         connector_health_activity,
         connector_reconciliation_activity,
+        connector_subscription_activity,
+        connector_subscription_reconciliation_activity,
         connector_sync_activity,
     )
     from navox.connectors.jobs import (
@@ -65,12 +67,11 @@ class ConnectorHealthWorkflow:
 class ConnectorSubscriptionWorkflow:
     @workflow.run
     async def run(self, payload: ConnectorHealthWork) -> str:
-        # Subscription setup remains connector-specific; health is the fail-closed
-        # common contract until a connector declares event delivery support.
-        return await workflow.execute_child_workflow(
-            ConnectorHealthWorkflow.run,
+        return await workflow.execute_activity(
+            connector_subscription_activity,
             payload,
-            id=f"connector-subscription-health:{workflow.uuid4()}",
+            start_to_close_timeout=timedelta(minutes=5),
+            retry_policy=RetryPolicy(maximum_attempts=3),
         )
 
 
@@ -104,6 +105,20 @@ async def _run_one(payload: ConnectorSyncWork, semaphore: asyncio.Semaphore) -> 
             workflow.logger.warning("Connector sync deferred to next reconciliation")
 
 
+async def _run_subscription(payload: ConnectorHealthWork, semaphore: asyncio.Semaphore) -> None:
+    async with semaphore:
+        try:
+            await workflow.execute_child_workflow(
+                ConnectorSubscriptionWorkflow.run,
+                payload,
+                id=f"connector-subscription:{payload.connection_id}:{workflow.uuid4()}",
+            )
+        except Exception as error:
+            if is_cancelled_exception(error):
+                raise
+            workflow.logger.warning("Connector subscription deferred to next reconciliation")
+
+
 @workflow.defn
 class ConnectorReconciliationWorkflow:
     @workflow.run
@@ -117,6 +132,15 @@ class ConnectorReconciliationWorkflow:
                 )
                 semaphore = asyncio.Semaphore(4)
                 await asyncio.gather(*(_run_one(item, semaphore) for item in pending))
+                if workflow.patched("connector-subscriptions-v1"):
+                    subscriptions = await workflow.execute_activity(
+                        connector_subscription_reconciliation_activity,
+                        start_to_close_timeout=timedelta(minutes=2),
+                        retry_policy=RetryPolicy(maximum_attempts=3),
+                    )
+                    await asyncio.gather(
+                        *(_run_subscription(item, semaphore) for item in subscriptions)
+                    )
             except ActivityError as error:
                 if is_cancelled_exception(error):
                     raise

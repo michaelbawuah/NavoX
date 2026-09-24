@@ -4,17 +4,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { canvasAuthorizationUrl } from "../lib/canvas-setup";
 import {
   type ConnectorEntry,
+  canOpenConnector,
+  canReconnect,
+  catalogAvailability,
   connectionPage,
   formatConnectionTime,
   googleAuthorizationUrl,
   healthLabel,
+  type LifecycleAction,
   type ManagedConnection,
   matchesConnection,
   sourceStatus,
 } from "../lib/connection-management";
+import { ApprovedConnectPanel } from "./approved-connect-panel";
 import { CanvasConnectPanel } from "./canvas-connect-panel";
+import { ConnectionLifecycleControls } from "./connection-lifecycle-controls";
 import styles from "./connections-panel.module.css";
 import { FileImportPanel } from "./file-import-panel";
+import { RestCredentialPanel } from "./rest-credential-panel";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
@@ -65,6 +72,9 @@ export function ConnectionsPanel({
   const [query, setQuery] = useState("");
   const [showImport, setShowImport] = useState(false);
   const [showCanvas, setShowCanvas] = useState(false);
+  const [showRest, setShowRest] = useState(false);
+  const [showMcp, setShowMcp] = useState(false);
+  const [restReconnectId, setRestReconnectId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -139,8 +149,9 @@ export function ConnectionsPanel({
     successMessage: string,
     redirect = false,
     source?: string,
-  ) {
-    if (busy.current) return;
+    method = "POST",
+  ): Promise<boolean> {
+    if (busy.current) return false;
     busy.current = true;
     ++version.current;
     controller.current?.abort();
@@ -149,14 +160,14 @@ export function ConnectionsPanel({
     setNotice("");
     try {
       const body = await requestJson<{ authorization_url?: string }>(path, {
-        method: "POST",
+        method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           request_id: crypto.randomUUID(),
           ...(source ? { source } : {}),
         }),
       });
-      if (!mounted.current) return;
+      if (!mounted.current) return false;
       if (redirect) {
         if (
           connections.some(
@@ -174,7 +185,7 @@ export function ConnectionsPanel({
           window.location.assign(
             googleAuthorizationUrl(body.authorization_url),
           );
-        return;
+        return true;
       }
       setNotice(successMessage);
       await refresh();
@@ -186,6 +197,7 @@ export function ConnectionsPanel({
             "The operation succeeded, but other workspace controls could not refresh. Reload before using them.",
           );
       }
+      return true;
     } catch (failure) {
       if (mounted.current)
         setError(
@@ -193,10 +205,27 @@ export function ConnectionsPanel({
             ? failure.message
             : "The operation did not complete.",
         );
+      return false;
     } finally {
       busy.current = false;
       if (mounted.current) setPending(null);
     }
+  }
+
+  function manageLifecycle(
+    connection: ManagedConnection,
+    action: LifecycleAction,
+  ) {
+    return perform(
+      `${connection.id}:${action}`,
+      `/connections/${connection.id}${action === "disconnect" ? "" : "/delete-data"}`,
+      action === "disconnect"
+        ? "Connection disconnected. Future source access is blocked; learned data remains until you remove it."
+        : "Connection-specific learned data removed. Knowledge backed by other sources remains.",
+      false,
+      undefined,
+      action === "disconnect" ? "DELETE" : "POST",
+    );
   }
 
   const visibleConnections = connectionPage(
@@ -213,6 +242,13 @@ export function ConnectionsPanel({
     page,
   );
   const pagination = tab === "connected" ? visibleConnections : visibleCatalog;
+  const restReconnect =
+    connections.find(
+      (connection) =>
+        connection.id === restReconnectId &&
+        connection.connector_id === "generic-rest-api" &&
+        connection.can_reauthorize,
+    ) ?? null;
 
   return (
     <section aria-labelledby="connections-heading" className={styles.panel}>
@@ -403,17 +439,19 @@ export function ConnectionsPanel({
                       : "Resume"}
                   </button>
                 ) : null}
-                {connection.can_reauthorize ? (
+                {canReconnect(connection) ? (
                   <button
                     type="button"
                     disabled={pending !== null}
                     onClick={() =>
-                      void perform(
-                        `${connection.id}:reauthorize`,
-                        `/connections/${connection.id}/reauthorize`,
-                        "",
-                        true,
-                      )
+                      connection.connector_id === "generic-rest-api"
+                        ? setRestReconnectId(connection.id)
+                        : void perform(
+                            `${connection.id}:reauthorize`,
+                            `/connections/${connection.id}/reauthorize`,
+                            "",
+                            true,
+                          )
                     }
                   >
                     {pending === `${connection.id}:reauthorize`
@@ -422,11 +460,17 @@ export function ConnectionsPanel({
                   </button>
                 ) : null}
               </div>
+              <ConnectionLifecycleControls
+                connection={connection}
+                pending={pending !== null}
+                onConfirm={(action) => manageLifecycle(connection, action)}
+              />
               <p className={styles.footnote}>
                 {connection.connector_id === "google-workspace"
                   ? "Reconnect requests existing permissions only. Add read access below in Connected understanding. "
                   : ""}
-                Pause is not disconnect or data deletion.
+                Source status is based on the last saved sync and authorization
+                check.
               </p>
             </article>
           ))}
@@ -462,9 +506,7 @@ export function ConnectionsPanel({
                   <h3>{entry.name}</h3>
                 </div>
                 <span className={styles.badge}>
-                  {entry.availability === "available"
-                    ? "Available"
-                    : "Not enabled"}
+                  {catalogAvailability(entry.availability)}
                 </span>
               </div>
               <p className={styles.copy}>{entry.description}</p>
@@ -473,20 +515,24 @@ export function ConnectionsPanel({
               </p>
               <button
                 type="button"
-                disabled={
-                  pending !== null || entry.availability !== "available"
-                }
+                disabled={pending !== null || !canOpenConnector(entry)}
                 onClick={() =>
                   entry.id === "canvas-lms"
                     ? setShowCanvas(true)
                     : entry.id === "generic-import"
                       ? setShowImport(true)
-                      : void perform(
-                          `connect:${entry.id}`,
-                          `/connectors/${entry.id}/connect`,
-                          "",
-                          true,
-                        )
+                      : entry.id === "generic-rest-api"
+                        ? setShowRest(true)
+                        : entry.id === "mcp"
+                          ? setShowMcp(true)
+                          : entry.id === "google-workspace"
+                            ? void perform(
+                                `connect:${entry.id}`,
+                                `/connectors/${entry.id}/connect`,
+                                "",
+                                true,
+                              )
+                            : undefined
                 }
               >
                 {pending === `connect:${entry.id}`
@@ -498,6 +544,12 @@ export function ConnectionsPanel({
                   Linking requests account identity only. Reading Gmail or
                   Calendar requires separate consent. Sending email always
                   requires separate permission and exact-action approval.
+                </p>
+              ) : null}
+              {entry.id === "mcp" && entry.availability !== "available" ? (
+                <p className={styles.footnote}>
+                  MCP setup is pending. Connecting requires an operator reviewed
+                  server and an explicit read permission selection.
                 </p>
               ) : null}
             </article>
@@ -527,6 +579,54 @@ export function ConnectionsPanel({
             setPage(0);
             setNotice(
               "Snapshot saved. Processing is queued or awaiting the worker; completion appears in its status.",
+            );
+          }}
+        />
+      ) : null}
+      {showRest ? (
+        <ApprovedConnectPanel
+          apiBaseUrl={apiBaseUrl}
+          kind="rest"
+          onClose={() => setShowRest(false)}
+          onConnected={async () => {
+            await refresh();
+            await onConnectionsChanged();
+            setTab("connected");
+            setQuery("");
+            setPage(0);
+            setNotice(
+              "REST connection created. Source processing appears in its connection status.",
+            );
+          }}
+        />
+      ) : null}
+      {showMcp ? (
+        <ApprovedConnectPanel
+          apiBaseUrl={apiBaseUrl}
+          kind="mcp"
+          onClose={() => setShowMcp(false)}
+          onConnected={async () => {
+            await refresh();
+            await onConnectionsChanged();
+            setTab("connected");
+            setQuery("");
+            setPage(0);
+            setNotice(
+              "Reviewed MCP server connected. Source processing appears in its connection status.",
+            );
+          }}
+        />
+      ) : null}
+      {restReconnect ? (
+        <RestCredentialPanel
+          apiBaseUrl={apiBaseUrl}
+          connection={restReconnect}
+          onClose={() => setRestReconnectId(null)}
+          onReconnected={async () => {
+            await refresh();
+            await onConnectionsChanged();
+            setNotice(
+              "REST credential replaced. Sync remains subject to connection and provider state.",
             );
           }}
         />

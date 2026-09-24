@@ -14,6 +14,8 @@ from navox.connectors.activities import (
     connector_disconnect_activity,
     connector_health_activity,
     connector_reconciliation_activity,
+    connector_subscription_activity,
+    connector_subscription_reconciliation_activity,
     connector_sync_activity,
 )
 from navox.core.settings import get_settings
@@ -89,6 +91,8 @@ async def main() -> None:
             connector_sync_activity,
             connector_health_activity,
             connector_reconciliation_activity,
+            connector_subscription_activity,
+            connector_subscription_reconciliation_activity,
             connector_disconnect_activity,
             intelligence_workspaces_activity,
             process_source_activity,

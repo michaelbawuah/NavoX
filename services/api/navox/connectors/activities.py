@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import or_, select, update
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
@@ -15,6 +15,7 @@ from navox.connectors.contracts import (
     CanonicalResource,
     ConnectorConnectionContext,
     ConnectorRuntimeError,
+    EventSubscriptionConnector,
 )
 from navox.connectors.intelligence import ingest_connector_resource
 from navox.connectors.jobs import (
@@ -25,12 +26,12 @@ from navox.connectors.jobs import (
 from navox.connectors.provenance import ensure_provenance_connection
 from navox.connectors.runtime import ConnectorRuntime
 from navox.connectors.secrets import ScopedSecretLease, SecretBroker, SecretBrokerError
+from navox.connectors.subscriptions import cancel_subscription, register_or_renew
 from navox.connectors.sync_state import RETRYABLE_CODES, database_now, utc
 from navox.core.settings import get_settings
 from navox.db.models import (
     ConnectorConnection,
     ConnectorDefinition,
-    ConnectorResource,
     ConnectorSubscription,
     ConnectorSyncRun,
     User,
@@ -303,6 +304,178 @@ async def connector_health_activity(payload: ConnectorHealthWork) -> str:
 
 
 @activity.defn
+async def connector_subscription_activity(payload: ConnectorHealthWork) -> str:
+    """Manage only registered event adapters under their explicit event grants."""
+    settings = get_settings()
+    registry = build_connector_registry(settings)
+    connection_id, user_id, workspace_id = (
+        UUID(payload.connection_id),
+        UUID(payload.user_id),
+        UUID(payload.workspace_id),
+    )
+    try:
+        broker: SecretBroker | None = SecretBroker(settings)
+    except SecretBrokerError:
+        broker = None
+    async with get_session_factory()() as database:
+        connection = await database.get(ConnectorConnection, connection_id)
+        if connection is None or (connection.user_id, connection.workspace_id) != (
+            user_id,
+            workspace_id,
+        ):
+            raise _failure("PERMISSION_DENIED")
+        definition = await database.get(ConnectorDefinition, connection.connector_definition_id)
+        if definition is None or connection.config.get("legacy_bridge"):
+            raise _failure("UNSUPPORTED_CAPABILITY")
+        try:
+            manifest = registry.get(definition.connector_key).manifest
+        except KeyError:
+            raise _failure("UNSUPPORTED_CAPABILITY") from None
+        events = sorted(set(manifest.capabilities.events))
+        allowed = frozenset(connection.authorized_capabilities)
+        pending = {
+            row.subscription_key
+            for row in await database.scalars(
+                select(ConnectorSubscription).where(
+                    ConnectorSubscription.connector_connection_id == connection_id,
+                    ConnectorSubscription.status == "cancel_pending",
+                )
+            )
+        }
+    if not events and not pending:
+        raise _failure("UNSUPPORTED_CAPABILITY")
+    try:
+        for event in sorted(pending):
+            async with get_session_factory()() as database:
+                await cancel_subscription(
+                    database,
+                    registry,
+                    connection_id=connection_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    event=event,
+                    secret_broker=broker,
+                )
+        for event in events if connection.status in {"CONNECTED", "DEGRADED"} else ():
+            if event not in allowed or event in pending:
+                continue
+            async with get_session_factory()() as database:
+                await register_or_renew(
+                    database,
+                    registry,
+                    connection_id=connection_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    event=event,
+                    policy_allowed=allowed,
+                    secret_broker=broker,
+                )
+    except ConnectorRuntimeError as error:
+        raise _failure(error.code, retry_after_seconds=error.retry_after_seconds) from None
+    except Exception:
+        raise _failure("TEMPORARY_FAILURE") from None
+    return "active" if connection.status in {"CONNECTED", "DEGRADED"} else "cancelled"
+
+
+@activity.defn
+async def connector_subscription_reconciliation_activity() -> list[ConnectorHealthWork]:
+    """Find due leases without inventing event support for a manifest-only adapter."""
+    registry = build_connector_registry(get_settings())
+    async with get_session_factory()() as database:
+        now = await database_now(database)
+        rows = list(
+            await database.scalars(
+                select(ConnectorConnection)
+                .join(
+                    WorkspaceMembership,
+                    (WorkspaceMembership.workspace_id == ConnectorConnection.workspace_id)
+                    & (WorkspaceMembership.user_id == ConnectorConnection.user_id),
+                )
+                .join(User, User.id == ConnectorConnection.user_id)
+                .join(
+                    ConnectorDefinition,
+                    ConnectorDefinition.id == ConnectorConnection.connector_definition_id,
+                )
+                .order_by(ConnectorConnection.id)
+                .limit(200)
+            )
+        )
+        result = []
+        for connection in rows:
+            if connection.config.get("legacy_bridge"):
+                continue
+            definition = await database.get(ConnectorDefinition, connection.connector_definition_id)
+            if definition is None:
+                continue
+            try:
+                registered = registry.get(definition.connector_key)
+                context = ConnectorConnectionContext.model_validate(
+                    {
+                        "id": connection.id,
+                        "workspace_id": connection.workspace_id,
+                        "user_id": connection.user_id,
+                        "connector_id": definition.connector_key,
+                        "provider": connection.provider,
+                        "external_account_id": connection.external_account_id,
+                        "status": connection.health_state,
+                        "authorized_capabilities": connection.authorized_capabilities,
+                        "config": connection.config,
+                    }
+                )
+                if not isinstance(
+                    registry.build(definition.connector_key, context.config),
+                    EventSubscriptionConnector,
+                ):
+                    continue
+            except (KeyError, ValueError):
+                continue
+            subscriptions = {
+                sub.subscription_key: sub
+                for sub in await database.scalars(
+                    select(ConnectorSubscription).where(
+                        ConnectorSubscription.connector_connection_id == connection.id
+                    )
+                )
+            }
+            pending_cleanup = any(
+                sub.status == "cancel_pending"
+                and (
+                    sub.lease_token is None
+                    or (sub.lease_expires_at and utc(sub.lease_expires_at) <= now)
+                )
+                for sub in subscriptions.values()
+            )
+            active = connection.status in {"CONNECTED", "DEGRADED"}
+            due = (
+                active
+                and definition.active
+                and any(
+                    event in connection.authorized_capabilities
+                    and event in connection.provider_capabilities
+                    and (
+                        (sub := subscriptions.get(event)) is None
+                        or sub.status in {"failed", "pending"}
+                        or (
+                            sub.status == "active"
+                            and sub.expires_at is not None
+                            and utc(sub.expires_at) <= now + timedelta(days=1)
+                        )
+                    )
+                    for event in registered.manifest.capabilities.events
+                )
+            )
+            if pending_cleanup or due:
+                result.append(
+                    ConnectorHealthWork(
+                        connection_id=str(connection.id),
+                        user_id=str(connection.user_id),
+                        workspace_id=str(connection.workspace_id),
+                    )
+                )
+        return result
+
+
+@activity.defn
 async def connector_reconciliation_activity() -> list[ConnectorSyncWork]:
     settings = get_settings()
     registered_keys = [manifest.id for manifest in build_connector_registry(settings).manifests()]
@@ -395,40 +568,38 @@ async def connector_reconciliation_activity() -> list[ConnectorSyncWork]:
 
 @activity.defn
 async def connector_disconnect_activity(payload: ConnectorDisconnectWork) -> str:
+    # Source deletion needs the reviewed evidence/provenance cleanup in
+    # lifecycle.delete_learned_data; this legacy activity cannot supply it.
+    if payload.delete_data:
+        raise _failure("UNSUPPORTED_CAPABILITY")
     connection_id = UUID(payload.connection_id)
     user_id = UUID(payload.user_id)
     workspace_id = UUID(payload.workspace_id)
     async with get_session_factory()() as database:
-        connection = await database.scalar(
-            select(ConnectorConnection)
-            .where(
-                ConnectorConnection.id == connection_id,
-                ConnectorConnection.user_id == user_id,
-                ConnectorConnection.workspace_id == workspace_id,
+        try:
+            connection = await owned_connector(
+                database,
+                connection_id=connection_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                require_active=False,
+                lock_authority=True,
             )
-            .with_for_update()
-        )
-        if connection is None:
-            return "DISCONNECTED"
+        except ConnectorAccessDenied:
+            raise _failure("PERMISSION_DENIED") from None
         connection.status = "DISCONNECTED"
         connection.health_state = "DISCONNECTED"
-        connection.paused_at = None
+        connection.sync_generation += 1
+        connection.sync_lease_token = None
+        connection.sync_lease_expires_at = None
         await ensure_provenance_connection(database, connection)
         await database.execute(
-            delete(ConnectorSubscription).where(
-                ConnectorSubscription.connector_connection_id == connection.id
+            update(ConnectorSubscription)
+            .where(
+                ConnectorSubscription.connector_connection_id == connection.id,
+                ConnectorSubscription.status != "cancelled",
             )
+            .values(status="cancel_pending")
         )
-        if payload.delete_data:
-            await database.execute(
-                delete(ConnectorResource).where(
-                    ConnectorResource.connector_connection_id == connection.id
-                )
-            )
-            await database.execute(
-                delete(ConnectorSyncRun).where(
-                    ConnectorSyncRun.connector_connection_id == connection.id
-                )
-            )
         await database.commit()
         return "DISCONNECTED"

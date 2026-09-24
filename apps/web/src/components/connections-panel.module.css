@@ -214,6 +214,43 @@
   margin: 0.8rem 0 0;
 }
 
+.lifecycle {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid #344b5d;
+}
+
+.confirmation {
+  margin-top: 0.8rem;
+  padding: 0.9rem;
+  border: 1px solid #bb9258;
+  border-radius: 0.75rem;
+  background: #30291f;
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.confirmation h4 {
+  margin: 0 0 0.45rem;
+}
+
+.confirmation label {
+  display: grid;
+  gap: 0.45rem;
+  margin-block: 0.75rem;
+}
+
+.confirmation input {
+  width: min(100%, 24rem);
+  box-sizing: border-box;
+  padding: 0.55rem;
+  border: 1px solid #8e9fae;
+  border-radius: 0.5rem;
+  background: #101d2a;
+  color: #eff7fc;
+  font: inherit;
+}
+
 .warning,
 .notice {
   padding: 0.8rem 1rem;
