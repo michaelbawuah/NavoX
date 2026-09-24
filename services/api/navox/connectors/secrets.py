@@ -97,9 +97,9 @@ class SecretBroker:
         if credential is None:
             raise SecretBrokerError("Connector credentials are unavailable")
         try:
-            raw = self._cipher.decrypt(
-                credential.encrypted_refresh_token.encode("utf-8")
-            ).decode("utf-8")
+            raw = self._cipher.decrypt(credential.encrypted_refresh_token.encode("utf-8")).decode(
+                "utf-8"
+            )
             parsed = json.loads(raw)
         except (InvalidToken, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise SecretBrokerError("Connector credentials cannot be decrypted") from error
