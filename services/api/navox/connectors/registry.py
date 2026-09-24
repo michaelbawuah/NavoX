@@ -45,7 +45,9 @@ class ConnectorRegistry:
         connector = registered.factory(config)
         actual = connector.get_manifest()
         if actual.id != registered.manifest.id or actual.version != registered.manifest.version:
-            raise ValueError("Connector factory returned a manifest that does not match registration")
+            raise ValueError(
+                "Connector factory returned a manifest that does not match registration"
+            )
         return connector
 
     def manifests(self) -> tuple[ConnectorManifest, ...]:
