@@ -76,7 +76,13 @@ class ConnectorRuntime:
             raise ConnectorRuntimeError("PERMANENT_FAILURE", "Connector definition unavailable")
 
         registered = self.registry.get(definition.connector_key)
-        manifest = registered.manifest
+        preview = registered.factory(connection.config, None)
+        manifest = preview.get_manifest()
+        if manifest.id != registered.manifest.id or manifest.version != registered.manifest.version:
+            raise ConnectorRuntimeError(
+                "INVALID_PROVIDER_RESPONSE",
+                "Connector config changed its registered identity",
+            )
         secret_lease = None
         if manifest.required_secrets:
             if self.secret_broker is None:
