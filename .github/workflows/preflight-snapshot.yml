@@ -19,7 +19,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
-        with: {ref: 6993c2e98b54170fae6acf69dce244cbf822b651, fetch-depth: 2}
+        with: {ref: 1d66af64b5b0358987c284c0ef6710c118fff6b3, fetch-depth: 2}
       - uses: astral-sh/setup-uv@v6
         with: {version: '0.12.15', python-version: '3.12'}
       - uses: actions/setup-node@v4
@@ -31,6 +31,7 @@ jobs:
           python3 scripts/apply-import-candidate.py
           python3 scripts/refine-import-candidate.py
           python3 scripts/finalize-import-candidate.py
+          python3 scripts/check-import-idempotency.py
           (cd services/api && uv sync --locked --all-groups --quiet && uv run --no-sync ruff check --select I,F401 --fix . && uv run --no-sync ruff format .)
           npm ci --silent
           (cd apps/web && npm exec -- biome format --write src/components/file-import-panel.tsx src/components/file-import-panel.module.css src/components/connections-panel.tsx src/lib/file-import.ts src/lib/file-import.test.ts src/lib/connection-management.ts)
@@ -76,6 +77,7 @@ jobs:
           set -euo pipefail
           git diff --exit-code -- .github/workflows package-lock.json services/api/uv.lock services/api/pyproject.toml evals/gates.json
           for script in apply refine finalize; do test ! -f "scripts/$script-import-candidate.py"; done
+          test ! -f scripts/check-import-idempotency.py
           git reset --soft bf973b20cf7e62b3f4f91850ddd235fb3d9f4baa
           git add -A
           git diff --cached --check
@@ -85,7 +87,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'feat(imports): add previewed encrypted file snapshots through the shared runtime'
-          git push origin HEAD:refs/heads/chore/spec003-validated-imports-v1
+          git push origin HEAD:refs/heads/chore/spec003-validated-imports-v2
           git rev-parse HEAD > "$RUNNER_TEMP/import-candidate.txt"
       - uses: actions/upload-artifact@v4
         if: always()
