@@ -1,4 +1,4 @@
-name: API preflight candidate
+name: Preflight source snapshot
 
 on:
   push:
@@ -6,55 +6,30 @@ on:
     paths: [.github/workflows/preflight-snapshot.yml]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  preflight:
-    name: Verify and package API quality fix
+  snapshot:
+    name: Prepare exact local development source
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 1ba2fe13d01984a26f88e5b5462ff9eca0f9175b
-      - uses: astral-sh/setup-uv@v6
-        with:
-          version: "0.12.15"
-      - name: Apply the hash-verified, locally tested patch
-        env:
-          GH_TOKEN: ${{ github.token }}
+          ref: 383c06fc4869c39419ec54ba18afc25be0c7b240
+          persist-credentials: false
+      - name: Archive tracked source only
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "1ba2fe13d01984a26f88e5b5462ff9eca0f9175b"
-          gh api repos/michaelbawuah/NavoX/git/blobs/7d99d52084437dad729aaac5b7d76f94f12223d3 --jq .content | base64 --decode > "$RUNNER_TEMP/api-quality.patch"
-          test "$(git hash-object "$RUNNER_TEMP/api-quality.patch")" = "7d99d52084437dad729aaac5b7d76f94f12223d3"
-          git apply --check --unidiff-zero "$RUNNER_TEMP/api-quality.patch"
-          git apply --index --unidiff-zero "$RUNNER_TEMP/api-quality.patch"
-          test "$(git diff --cached --name-only | wc -l)" -eq 14
-          test -z "$(git diff --cached --name-only -- .github/workflows services/api/pyproject.toml services/api/uv.lock evals/gates.json)"
-          git diff --cached --stat
-      - name: Run every API preflight gate before creating the candidate
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash scripts/check-api.sh | tee "$RUNNER_TEMP/api-preflight.log"
-          git diff --exit-code
-      - name: Publish only the isolated validated candidate
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'fix(connectors): resolve API quality failures and add pre-push validation'
-          git push origin HEAD:refs/heads/chore/spec003-validated-api-quality
-          git rev-parse HEAD > "$RUNNER_TEMP/validated-candidate.txt"
+          test "$(git rev-parse HEAD)" = "383c06fc4869c39419ec54ba18afc25be0c7b240"
+          git archive --format=zip --output="$RUNNER_TEMP/navox-runtime-source.zip" HEAD
+          git rev-parse HEAD > "$RUNNER_TEMP/source-commit.txt"
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: navox-api-preflight-validation
+          name: navox-runtime-source-383c06f
           path: |
-            ${{ runner.temp }}/api-preflight.log
-            ${{ runner.temp }}/validated-candidate.txt
-          if-no-files-found: warn
-          retention-days: 7
+            ${{ runner.temp }}/navox-runtime-source.zip
+            ${{ runner.temp }}/source-commit.txt
+          if-no-files-found: error
+          retention-days: 1
