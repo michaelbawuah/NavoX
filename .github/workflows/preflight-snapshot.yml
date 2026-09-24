@@ -12,32 +12,25 @@ jobs:
     services:
       postgres:
         image: postgres:17.5-alpine
-        env:
-          POSTGRES_USER: navox
-          POSTGRES_PASSWORD: navox
-          POSTGRES_DB: navox_imports
+        env: {POSTGRES_USER: navox, POSTGRES_PASSWORD: navox, POSTGRES_DB: navox_imports}
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U navox -d navox_imports"
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: 15708633fc669482329977d6732b63e803fbdc0e
-          fetch-depth: 2
+        with: {ref: 6993c2e98b54170fae6acf69dce244cbf822b651, fetch-depth: 2}
       - uses: astral-sh/setup-uv@v6
-        with:
-          version: '0.12.15'
-          python-version: '3.12'
+        with: {version: '0.12.15', python-version: '3.12'}
       - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
+        with: {node-version: '24'}
       - name: Prepare exact candidate and apply safe formatters
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD^)" = bf973b20cf7e62b3f4f91850ddd235fb3d9f4baa
           python3 scripts/apply-import-candidate.py
           python3 scripts/refine-import-candidate.py
+          python3 scripts/finalize-import-candidate.py
           (cd services/api && uv sync --locked --all-groups --quiet && uv run --no-sync ruff check --select I,F401 --fix . && uv run --no-sync ruff format .)
           npm ci --silent
           (cd apps/web && npm exec -- biome format --write src/components/file-import-panel.tsx src/components/file-import-panel.module.css src/components/connections-panel.tsx src/lib/file-import.ts src/lib/file-import.test.ts src/lib/connection-management.ts)
@@ -65,16 +58,14 @@ jobs:
           done
       - name: PostgreSQL migration round trip
         working-directory: services/api
-        env:
-          DATABASE_URL: postgresql+asyncpg://navox:navox@localhost:5432/navox_imports
+        env: {DATABASE_URL: 'postgresql+asyncpg://navox:navox@localhost:5432/navox_imports'}
         run: |
           uv run --no-sync alembic upgrade head
           uv run --no-sync alembic downgrade 0016_connector_sync_recovery
           uv run --no-sync alembic upgrade head
       - name: Repeat managed imports on PostgreSQL
         working-directory: services/api
-        env:
-          NAVOX_CONNECTOR_TEST_DSN: postgresql+asyncpg://navox:navox@localhost:5432/navox_imports
+        env: {NAVOX_CONNECTOR_TEST_DSN: 'postgresql+asyncpg://navox:navox@localhost:5432/navox_imports'}
         run: |
           set -euo pipefail
           uv run --no-sync pytest tests/test_managed_imports.py --junitxml="$RUNNER_TEMP/import-pg.xml" > "$RUNNER_TEMP/import-pg.log" 2>&1 || { tail -120 "$RUNNER_TEMP/import-pg.log"; exit 1; }
@@ -84,8 +75,7 @@ jobs:
         run: |
           set -euo pipefail
           git diff --exit-code -- .github/workflows package-lock.json services/api/uv.lock services/api/pyproject.toml evals/gates.json
-          test ! -f scripts/apply-import-candidate.py
-          test ! -f scripts/refine-import-candidate.py
+          for script in apply refine finalize; do test ! -f "scripts/$script-import-candidate.py"; done
           git reset --soft bf973b20cf7e62b3f4f91850ddd235fb3d9f4baa
           git add -A
           git diff --cached --check
