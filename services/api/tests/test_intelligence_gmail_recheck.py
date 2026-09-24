@@ -283,7 +283,78 @@ async def test_uncertain_or_relevant_sources_never_authorize_removal(legacy, mod
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "mode", ["title", "terminal", "feedback", "source", "expired", "preview_id"]
+    "mode,outcome,reason",
+    [
+        ("same_action", "retained", "matching_action"),
+        ("case_and_spacing", "retained", "matching_action"),
+        ("different_action", "needs_review", "action_not_verified"),
+        ("different_object", "needs_review", "action_not_verified"),
+        ("paraphrase", "needs_review", "action_not_verified"),
+        ("uncertain", "needs_review", "action_not_verified"),
+        ("completion", "needs_review", "possible_state_change"),
+        ("waiting", "needs_review", "possible_state_change"),
+    ],
+)
+async def test_recheck_assesses_the_saved_action_not_just_any_work_in_the_email(
+    legacy, mode, outcome, reason
+):
+    state = legacy
+    output = state.extraction.extraction.model_dump()
+    candidate = output["observations"][0]
+    candidate["confidence"] = 0.99
+    if mode == "case_and_spacing":
+        candidate["action_text"] = "  SEND  "
+    elif mode == "different_action":
+        candidate["action_text"] = "Review"
+    elif mode == "different_object":
+        candidate["object_text"] = "message text"
+        start = state.document.content.index(PRIVATE)
+        candidate["evidence"] = [
+            {
+                "source": "content",
+                "start_char": start,
+                "end_char": start + len(PRIVATE),
+                "text": PRIVATE,
+            }
+        ]
+    elif mode == "paraphrase":
+        candidate["action_text"] = "Deliver"
+    elif mode == "uncertain":
+        candidate["confidence"] = 0.89
+    elif mode in {"completion", "waiting"}:
+        candidate["observation_type"] = mode
+        candidate["email_relevance"].update(intent="commitment_update", basis="commitment_progress")
+    state.model.return_value.output = output
+    result = await preview(state)
+    assert (result["outcome"], result["reason"]) == (outcome, reason)
+    assert (await apply(state, result)).json()["skipped"] == [str(state.card_id)]
+    async with state.factory() as db:
+        card = await db.get(Commitment, state.card_id)
+        assert card.status == "confirmed"
+        assert card.intelligence_metadata == {}
+    # A recheck is evidence for the owner, not an automatic Keep decision.
+    today = (await state.client.get("/api/v1/today")).json()
+    assert str(state.card_id) in {item["id"] for item in today["set_aside"]}
+
+
+@pytest.mark.asyncio
+async def test_a_promotional_card_is_not_endorsed_by_an_unrelated_task_in_its_source(legacy):
+    state = legacy
+    async with state.factory() as db:
+        (await db.get(Commitment, state.card_id)).title = "Explore optional upgrades"
+        await db.commit()
+    output = state.extraction.extraction.model_dump()
+    output["observations"][0]["confidence"] = 0.99
+    state.model.return_value.output = output
+    result = await preview(state)
+    assert result["outcome"] == "needs_review"
+    assert result["reason"] == "action_not_verified"
+    assert (await apply(state, result)).json()["applied"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mode", ["title", "terminal", "feedback", "source", "expired", "preview_id", "policy"]
 )
 async def test_stale_or_tampered_previews_cannot_remove_a_card(legacy, mode):
     state = legacy
@@ -306,6 +377,8 @@ async def test_stale_or_tampered_previews_cannot_remove_a_card(legacy, mode):
             )
         elif mode == "source":
             (await db.get(ObservationEvidence, state.evidence_id)).source_hash = "f" * 64
+        elif mode == "policy":
+            (await db.get(GmailRecheck, card.id)).policy_version = "gmail-recheck.v1"
         elif mode == "expired":
             (await db.get(GmailRecheck, card.id)).expires_at = datetime.now(UTC) - timedelta(
                 seconds=1
@@ -313,6 +386,10 @@ async def test_stale_or_tampered_previews_cannot_remove_a_card(legacy, mode):
         else:
             result["preview_id"] = str(uuid4())
         await db.commit()
+    if mode == "policy":
+        page = await state.client.get(ROOT, params={"connection_id": str(state.connection_id)})
+        assert page.json()["items"][0]["outcome"] == "unchecked"
+        state.model.assert_awaited_once()
     assert (await apply(state, result)).json() == {"applied": [], "skipped": [str(state.card_id)]}
     async with state.factory() as db:
         assert (await db.get(Commitment, state.card_id)).status != "rejected"
@@ -496,7 +573,17 @@ async def test_duplicate_support_for_one_message_is_read_and_classified_once(leg
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["all_irrelevant", "later_relevant", "too_many"])
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "all_irrelevant",
+        "later_relevant",
+        "later_state",
+        "later_paraphrased_state",
+        "later_failure",
+        "too_many",
+    ],
+)
 async def test_all_current_support_is_checked_with_a_three_message_limit(legacy, mode):
     state = legacy
     documents = {state.document.external_id: state.document}
@@ -545,10 +632,24 @@ async def test_all_current_support_is_checked_with_a_three_message_limit(legacy,
         return documents[kwargs["external_id"]]
 
     async def model(document, **kwargs):
-        if mode == "later_relevant" and document.external_id == "mail2":
-            return SimpleNamespace(
-                output=state.extraction.extraction.model_dump(), provider="fixture", model="fixture"
-            )
+        if mode == "later_failure" and document.external_id == "mail3":
+            raise AIProviderError("private-provider-error-text")
+        if (mode == "later_relevant" and document.external_id == "mail2") or (
+            mode in {"later_state", "later_paraphrased_state", "later_failure"}
+        ):
+            output = state.extraction.extraction.model_dump()
+            output["observations"][0]["confidence"] = 0.99
+            if (
+                mode in {"later_state", "later_paraphrased_state"}
+                and document.external_id == "mail3"
+            ):
+                output["observations"][0]["observation_type"] = "completion"
+                if mode == "later_paraphrased_state":
+                    output["observations"][0]["action_text"] = "Deliver"
+                output["observations"][0]["email_relevance"].update(
+                    intent="commitment_update", basis="commitment_progress"
+                )
+            return SimpleNamespace(output=output, provider="fixture", model="fixture")
         return state.model.return_value
 
     state.read.side_effect = read
@@ -559,7 +660,13 @@ async def test_all_current_support_is_checked_with_a_three_message_limit(legacy,
         state.read.assert_not_awaited()
         state.model.assert_not_awaited()
     elif mode == "later_relevant":
-        assert result["outcome"] == "retained" and state.model.await_count == 2
+        assert result["outcome"] == "retained" and state.model.await_count == 3
+    elif mode in {"later_state", "later_paraphrased_state"}:
+        assert result["outcome"] == "needs_review" and state.model.await_count == 3
+        assert result["reason"] == "possible_state_change"
+    elif mode == "later_failure":
+        assert result["outcome"] == "failed" and state.model.await_count == 3
+        assert result["reason"] == "ai_request_failed"
     else:
         assert result["outcome"] == "remove_suggested" and state.model.await_count == 3
 

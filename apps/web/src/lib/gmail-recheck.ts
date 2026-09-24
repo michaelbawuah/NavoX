@@ -18,8 +18,11 @@ export const recheckReasons: Record<string, string> = {
   checking_sources: "Checking the supporting emails…",
   no_action_found:
     "No required action or important alert found. Review before removing.",
-  relevant_email:
-    "The supporting email contains an action, alert, or commitment update. Kept.",
+  matching_action: "The supporting email contains this saved action.",
+  action_not_verified:
+    "The email contains possible work, but this saved action could not be verified.",
+  possible_state_change:
+    "The email may describe a completion or waiting update. Review this item's status.",
   source_unavailable: "The email is unavailable. This item needs your review.",
   source_changed:
     "The email changed since this item was saved. This item needs your review.",

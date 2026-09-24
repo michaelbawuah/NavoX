@@ -32,7 +32,7 @@ describe("older Gmail review", () => {
             commitment_id: "a",
             title: "Saved item",
             outcome,
-            reason: "relevant_email",
+            reason: "matching_action",
             preview_id: "preview",
             checked_at: null,
           },

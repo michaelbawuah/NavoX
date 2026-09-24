@@ -110,9 +110,14 @@ the model. It uses stable pages of 25 items and provides **Load more older items
 2. Review the results and optionally choose **View source text**. A removal is
    suggested only when every current supporting email passes the saved hash/span
    checks and produces no eligible observations through the existing v2 extractor
-   and relevance filter. Any eligible observation preserves the card, even when it
-   may concern a different action in the same email. Recheck does not match loosely
-   similar actions, create new commitments, or infer completion/waiting changes.
+   and relevance filter. The saved action is supported only when a high-confidence
+   current observation matches its title apart from case and spacing. Other actions,
+   paraphrases and uncertain matches require review; they never authorize removal.
+   Every supporting email is checked before reaching that result. A
+   completion/waiting observation requires status review even if another source
+   still contains the original request; a paraphrased update may refer to that work.
+   Recheck does not create commitments, change their status or automatically
+   restore set-aside items to Today.
 3. Choose **Select suggested removals**, or select individual cards, then
    **Remove selected**. Up to 25 selected suggestions are applied together. Nothing
    is selected or removed automatically. **Keep this item** records an explicit
@@ -130,8 +135,9 @@ automatic acceptance and user confirmation cannot always be distinguished, so
 older `confirmed` cards still require explicit selection before removal. Mixed
 provider/account support, more than three emails, missing or changed evidence,
 invalid model proposals and untrusted source instructions produce no removal
-authority. A relevant email preserves the card conservatively; this is not a new
-production-precision claim.
+authority. The check distinguishes support for the saved action from unrelated work
+in the same email. Exact wording can miss valid paraphrases, which remain unverified;
+this is not a production-precision claim.
 
 The authenticated endpoints are `GET /intelligence/gmail-recheck?connection_id=...`,
 `POST /intelligence/gmail-recheck/preview` and
@@ -144,8 +150,10 @@ model calls; expired claims can be resumed and stale attempts cannot replace a
 newer preview. PostgreSQL locks serialize selection with other recorded choices.
 
 `gmail_rechecks` stores only item/account identifiers, a state/evidence fingerprint,
-policy version, fixed outcome/reason, and timestamps. Previews expire after 30
-minutes. Applying a selection revalidates its preview ID, fingerprint, permissions,
+policy version, fixed outcome/reason, and timestamps. The action-specific policy is
+`gmail-recheck.v2`; previews made under an earlier policy cannot authorize a new
+selection and are shown as unchecked. Previews expire after 30 minutes.
+Applying a selection revalidates its preview ID, fingerprint, permissions,
 expiry and outcome; changed/expired items are skipped. Retry after a lost response
 is idempotent, including the audit event. Removal sets `rejected`, retains evidence,
 and uses the existing terminal-state replay protection. It never deletes Gmail

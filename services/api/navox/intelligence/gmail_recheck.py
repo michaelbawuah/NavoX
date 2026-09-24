@@ -1,6 +1,7 @@
 """Select and fingerprint older cards without re-running source ingestion."""
 
 import json
+import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -17,8 +18,9 @@ from navox.db.models import (
     ObservationEvidence,
     OperationalObservation,
 )
+from navox.intelligence.extraction import OperationalObservationCandidate
 
-POLICY_VERSION = "gmail-recheck.v1"
+POLICY_VERSION = "gmail-recheck.v2"
 ACTIVE_STATUSES = ("candidate", "confirmed", "attention", "upcoming")
 MAX_SOURCES = 3
 MAX_REFERENCES = 32
@@ -26,6 +28,36 @@ MAX_REFERENCES = 32
 
 def utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def assess_card_support(
+    title: str, observations: list[OperationalObservationCandidate]
+) -> tuple[str, str]:
+    """Assess already validated/filtered facts without guessing that actions are equivalent.
+
+    Exact wording (apart from case and spacing) can support the saved action. A
+    different verb, object, paraphrase, or uncertain fact needs review, never removal
+    authority. State facts are not evidence that the original work is still pending.
+    """
+    if not observations:
+        return "remove_suggested", "no_action_found"
+    if any(item.observation_type in {"completion", "waiting"} for item in observations):
+        # A paraphrased update may refer to this work too. Without resolving state,
+        # this preview cannot establish that the original action remains pending.
+        return "needs_review", "possible_state_change"
+
+    def normalized(value: str) -> str:
+        return " ".join(unicodedata.normalize("NFC", value).casefold().split())
+
+    matching = [
+        item
+        for item in observations
+        if normalized(" ".join(p for p in (item.action_text, item.object_text) if p))
+        == normalized(title)
+    ]
+    if any(item.confidence >= 0.9 for item in matching):
+        return "retained", "matching_action"
+    return "needs_review", "action_not_verified"
 
 
 @dataclass(frozen=True)

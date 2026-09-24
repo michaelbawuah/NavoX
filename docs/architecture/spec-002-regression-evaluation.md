@@ -83,9 +83,12 @@ returned an unavailable page; desktop/mobile visual acceptance remains pending.
 
 `test_intelligence_gmail_recheck.py` verifies that listing/previewing does not
 change cards or ingestion state, ignored mail yields only a selectable suggestion,
-any relevant supporting email keeps the card, and malformed/changed/missing
-evidence cannot authorize removal. It exercises the three-message limit,
-deduplicated reads, paused/revoked/narrowed access, cache and timeout recovery,
+only a high-confidence matching action is reported as supported, and unrelated
+work, paraphrases, uncertain proposals and completion/waiting updates require
+review. Multiple-source tests verify that a later state update or provider failure
+is not hidden by an earlier matching request. Malformed/changed/missing evidence
+and previews from an older policy cannot authorize removal. It exercises the
+three-message limit, deduplicated reads, paused/revoked/narrowed access, cache and timeout recovery,
 Google cooldowns, expired claims, obsolete preview IDs, state changes during model
 I/O, ownership, batch bounds, keep decisions, and idempotent selected removal.
 The frontend tests cover explicit selection, sequential ten-item batches, stopping

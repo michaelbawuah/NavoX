@@ -29,11 +29,13 @@ from navox.intelligence.extraction import (
     INSTRUCTION_LIKE_MARKERS,
     InvalidOperationalExtraction,
     OperationalExtractor,
+    OperationalObservationCandidate,
 )
 from navox.intelligence.gmail_recheck import (
     ACTIVE_STATUSES,
     POLICY_VERSION,
     CardSnapshot,
+    assess_card_support,
     snapshot_card,
     utc,
 )
@@ -306,6 +308,7 @@ async def preview_older_item(
     await database.commit()
 
     outcome, reason = "remove_suggested", "no_action_found"
+    observations: list[OperationalObservationCandidate] = []
     provider_failure: GoogleSourceError | None = None
     try:
         async with asyncio.timeout(budget):
@@ -353,11 +356,13 @@ async def preview_older_item(
                 await database.commit()
                 result = await extractor.extract(document, owner_email=owner_email)
                 await authorize(database, **scope)
-                if filter_email_extraction(result.extraction, document).observations:
-                    # Any relevant fact preserves the card. Recheck never invents new tasks,
-                    # matches vaguely similar actions, or changes completion/waiting states.
-                    outcome, reason = "retained", "relevant_email"
-                    break
+                observations.extend(
+                    filter_email_extraction(result.extraction, document).observations
+                )
+            else:
+                # Check all support: a later email can describe a status change even
+                # when the first email still contains the original request.
+                outcome, reason = assess_card_support(card.title, observations)
     except TimeoutError:
         outcome, reason = "failed", "timeout"
     except GoogleAccessTokenError:
