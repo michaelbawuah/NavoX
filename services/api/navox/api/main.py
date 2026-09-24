@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from navox.api.actions import router as actions_router
 from navox.api.agent import router as agent_router
 from navox.api.auth import router as auth_router
+from navox.api.canvas import router as canvas_router
 from navox.api.commitment_actions import router as commitment_actions_router
 from navox.api.commitments import router as commitments_router
 from navox.api.connections import router as connections_router
@@ -39,6 +40,7 @@ def create_app() -> FastAPI:
         max_age=600,
     )
     app.add_middleware(RequestHardeningMiddleware)
+    app.include_router(canvas_router, prefix="/api/v1")
     app.include_router(import_router, prefix="/api/v1")
     app.include_router(health_router, prefix="/api/v1")
     app.include_router(gmail_recheck_router, prefix="/api/v1")

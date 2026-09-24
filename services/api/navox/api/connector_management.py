@@ -40,7 +40,7 @@ class ManagementCommand(BaseModel):
 
 
 class ManagedSyncCommand(ManagementCommand):
-    source: Literal["gmail", "calendar", "snapshot"]
+    source: Literal["gmail", "calendar", "snapshot", "canvas"]
 
 
 def require_origin(request: Request, web_origin: str) -> None:
@@ -50,17 +50,32 @@ def require_origin(request: Request, web_origin: str) -> None:
 
 
 @router.get("/connectors", response_model=list[CatalogEntry])
-async def list_connectors(current_account: CurrentAccountDependency) -> list[CatalogEntry]:
+async def list_connectors(
+    current_account: CurrentAccountDependency, settings: SettingsDependency
+) -> list[CatalogEntry]:
     del current_account
-    return list(CATALOG)
+    from navox.api.canvas import configured
+
+    result = list(CATALOG)
+    try:
+        configured(settings)
+    except HTTPException:
+        return result
+    return [
+        entry.model_copy(update={"availability": "available", "setup_label": "Connect Canvas"})
+        if entry.id == "canvas-lms"
+        else entry
+        for entry in result
+    ]
 
 
 @router.get("/connectors/{connector_id}", response_model=CatalogEntry)
 async def describe_connector(
-    connector_id: str, current_account: CurrentAccountDependency
+    connector_id: str, current_account: CurrentAccountDependency, settings: SettingsDependency
 ) -> CatalogEntry:
-    del current_account
-    return catalog_entry(connector_id)
+    catalog_entry(connector_id)  # Preserve the existing not-found response.
+    entries = await list_connectors(current_account, settings)
+    return next(entry for entry in entries if entry.id == connector_id)
 
 
 @router.post("/connectors/{connector_id}/connect", response_model=GoogleAuthorizationStartResponse)
@@ -185,7 +200,21 @@ async def sync_connection(
         )
         status = await queue_snapshot(database, row, payload.request_id, settings)
         return {"dispatch_status": status}
-    if view.connector_id != "google-workspace" or payload.source == "snapshot":
+    if view.connector_id == "canvas-lms" and payload.source == "canvas":
+        if not any(source.id == "canvas" and source.can_sync for source in view.sources):
+            raise HTTPException(409, "Canvas is paused, busy, or needs reconnection")
+        from navox.api.canvas import queue
+        from navox.connectors.authorization import owned_connector
+
+        row = await owned_connector(
+            database,
+            connection_id=connection_id,
+            workspace_id=current_account.workspace.id,
+            user_id=current_account.user.id,
+            require_active=True,
+        )
+        return {"dispatch_status": await queue(database, row, payload.request_id, settings)}
+    if view.connector_id != "google-workspace" or payload.source in {"snapshot", "canvas"}:
         raise HTTPException(409, "Manual sync is not enabled for this connector yet")
     if view.health in {"PAUSED", "DISCONNECTED"}:
         raise HTTPException(409, "Resume or reconnect before syncing")
@@ -193,7 +222,9 @@ async def sync_connection(
     # identifiers-only Temporal dispatch checks in one place.
     return await sync_source(
         SyncRequest(
-            connection_id=connection_id, source=payload.source, request_id=payload.request_id
+            connection_id=connection_id,
+            source="gmail" if payload.source == "gmail" else "calendar",
+            request_id=payload.request_id,
         ),
         current_account,
         database,
@@ -214,6 +245,28 @@ async def reauthorize_connection(
 ) -> GoogleAuthorizationStartResponse:
     del payload
     require_origin(request, settings.web_origin)
+    from navox.db.models import ConnectorConnection
+
+    canvas = await database.scalar(
+        select(ConnectorConnection).where(
+            ConnectorConnection.id == connection_id,
+            ConnectorConnection.workspace_id == current_account.workspace.id,
+            ConnectorConnection.user_id == current_account.user.id,
+            ConnectorConnection.provider == "canvas",
+        )
+    )
+    if canvas is not None:
+        from navox.api.canvas import start
+
+        return GoogleAuthorizationStartResponse.model_validate(
+            await start(
+                current_account,
+                database,
+                settings,
+                list(canvas.authorized_capabilities),
+                connection_id,
+            )
+        )
     connection = await database.scalar(
         select(Connection).where(
             Connection.id == connection_id,

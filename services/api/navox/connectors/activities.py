@@ -133,7 +133,8 @@ async def _connector_sync(payload: ConnectorSyncWork) -> int:
         runtime = ConnectorRuntime(
             registry,
             secret_broker=secret_broker,
-            retain_canonical_content=connection.provider != "import",
+            retain_canonical_content=connection.provider not in {"import", "canvas"},
+            page_budget=1000 if connection.provider == "canvas" else 50,
         )
         extractor = OperationalExtractor(gateway)
 

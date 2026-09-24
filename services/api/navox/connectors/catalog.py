@@ -4,9 +4,9 @@ from collections.abc import Mapping
 
 from pydantic import JsonValue
 
-from navox.connectors.builtin.canvas import CanvasConnector
 from navox.connectors.builtin.google import GoogleCompatibilityConnector
 from navox.connectors.builtin.imports import IMPORT_MANIFEST
+from navox.connectors.builtin.oauth_canvas import OAUTH_CANVAS_MANIFEST, OAuthCanvasConnector
 from navox.connectors.builtin.stored_import import StoredImportConnector
 from navox.connectors.contracts import NavoXConnector, SecretAccessor
 from navox.connectors.import_storage import ImportSnapshotReader
@@ -24,11 +24,11 @@ def build_connector_registry(settings: Settings) -> ConnectorRegistry:
     registry = ConnectorRegistry()
     google = GoogleCompatibilityConnector({}, None)
     registry.register(google.get_manifest(), GoogleCompatibilityConnector)
-    canvas = CanvasConnector(
-        {"base_url": "https://canvas.invalid"},
-        None,
-    )
-    registry.register(canvas.get_manifest(), CanvasConnector)
+
+    def canvas(config: Mapping[str, JsonValue], secrets: SecretAccessor | None) -> NavoXConnector:
+        return OAuthCanvasConnector(config, secrets, settings=settings)
+
+    registry.register(OAUTH_CANVAS_MANIFEST, canvas)
 
     def imported(config: Mapping[str, JsonValue], secrets: SecretAccessor | None) -> NavoXConnector:
         return StoredImportConnector(config, secrets, reader=ImportSnapshotReader(settings))

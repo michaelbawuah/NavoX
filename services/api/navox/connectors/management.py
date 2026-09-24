@@ -87,7 +87,7 @@ CATALOG = (
         description="Courses, assignments, submission state, announcements and calendar context.",
         availability="setup_pending",
         setup_label="Setup not enabled yet",
-        authentication="API token",
+        authentication="Institution-approved OAuth",
         read_capabilities=[
             "academic.courses.read",
             "academic.assignments.read",
@@ -376,27 +376,43 @@ async def connection_views(
             if row.retry_not_before and utc(row.retry_not_before) > now
             else None
         )
+        is_canvas = bool(
+            entry and entry.id == "canvas-lms" and definition and definition.version == "1.1.0"
+        )
+        canvas_allowed = bool(
+            is_canvas
+            and row.credential_reference
+            and "academic.courses.read" in row.authorized_capabilities
+        )
         result.append(
             ConnectionView(
                 id=row.id,
                 connector_id=entry.id if entry else "private-connector",
                 name=entry.name if entry else "Private connector",
-                account_label=row.display_name if is_snapshot else None,
+                account_label=row.display_name if is_snapshot or is_canvas else None,
                 health=state,
                 agent_paused=agent_paused,
                 permissions=_permissions(row.authorized_capabilities),
                 sources=[
                     SourceView(
-                        id="snapshot" if is_snapshot else "resources",
-                        name="Imported snapshot" if is_snapshot else "Connected resources",
-                        authorized=bool(snapshot_allowed) if is_snapshot else True,
+                        id="snapshot" if is_snapshot else "canvas" if is_canvas else "resources",
+                        name="Imported snapshot"
+                        if is_snapshot
+                        else "Canvas academic context"
+                        if is_canvas
+                        else "Connected resources",
+                        authorized=bool(snapshot_allowed)
+                        if is_snapshot
+                        else canvas_allowed
+                        if is_canvas
+                        else True,
                         health=state,
                         last_synced_at=last,
                         freshness="fresh" if is_snapshot and last else freshness(last, now),
                         syncing=_syncing(row, now),
                         retry_at=retry,
                         can_sync=bool(
-                            snapshot_allowed
+                            (snapshot_allowed or canvas_allowed)
                             and definition
                             and definition.active
                             and not agent_paused
@@ -408,7 +424,7 @@ async def connection_views(
                 ],
                 can_pause=state not in {"PAUSED", "DISCONNECTED"},
                 can_resume=state == "PAUSED" and bool(definition and definition.active),
-                can_reauthorize=False,
+                can_reauthorize=is_canvas and state != "DISCONNECTED",
             )
         )
     return result

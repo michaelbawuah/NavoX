@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { canvasAuthorizationUrl } from "../lib/canvas-setup";
 import {
   type ConnectorEntry,
   connectionPage,
@@ -11,6 +12,7 @@ import {
   matchesConnection,
   sourceStatus,
 } from "../lib/connection-management";
+import { CanvasConnectPanel } from "./canvas-connect-panel";
 import styles from "./connections-panel.module.css";
 import { FileImportPanel } from "./file-import-panel";
 
@@ -62,6 +64,7 @@ export function ConnectionsPanel({
   const [tab, setTab] = useState<"connected" | "browse">("connected");
   const [query, setQuery] = useState("");
   const [showImport, setShowImport] = useState(false);
+  const [showCanvas, setShowCanvas] = useState(false);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -155,7 +158,22 @@ export function ConnectionsPanel({
       });
       if (!mounted.current) return;
       if (redirect) {
-        window.location.assign(googleAuthorizationUrl(body.authorization_url));
+        if (
+          connections.some(
+            (c) =>
+              c.connector_id === "canvas-lms" && key === `${c.id}:reauthorize`,
+          )
+        ) {
+          const setup = await requestJson<{ origin: string }>(
+            "/connectors/canvas-lms/setup",
+          );
+          window.location.assign(
+            canvasAuthorizationUrl(body.authorization_url, setup.origin),
+          );
+        } else
+          window.location.assign(
+            googleAuthorizationUrl(body.authorization_url),
+          );
         return;
       }
       setNotice(successMessage);
@@ -399,7 +417,7 @@ export function ConnectionsPanel({
                     }
                   >
                     {pending === `${connection.id}:reauthorize`
-                      ? "Opening Google…"
+                      ? "Opening authorization…"
                       : "Reconnect"}
                   </button>
                 ) : null}
@@ -459,14 +477,16 @@ export function ConnectionsPanel({
                   pending !== null || entry.availability !== "available"
                 }
                 onClick={() =>
-                  entry.id === "generic-import"
-                    ? setShowImport(true)
-                    : void perform(
-                        `connect:${entry.id}`,
-                        `/connectors/${entry.id}/connect`,
-                        "",
-                        true,
-                      )
+                  entry.id === "canvas-lms"
+                    ? setShowCanvas(true)
+                    : entry.id === "generic-import"
+                      ? setShowImport(true)
+                      : void perform(
+                          `connect:${entry.id}`,
+                          `/connectors/${entry.id}/connect`,
+                          "",
+                          true,
+                        )
                 }
               >
                 {pending === `connect:${entry.id}`
@@ -488,6 +508,12 @@ export function ConnectionsPanel({
             </p>
           ) : null}
         </div>
+      ) : null}
+      {showCanvas ? (
+        <CanvasConnectPanel
+          apiBaseUrl={apiBaseUrl}
+          onClose={() => setShowCanvas(false)}
+        />
       ) : null}
       {showImport ? (
         <FileImportPanel

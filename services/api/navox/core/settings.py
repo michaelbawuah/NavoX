@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     session_cookie_name: str = "navox_session"
     session_ttl_hours: int = Field(default=168, ge=1, le=720)
     extension_session_ttl_hours: int = Field(default=72, ge=1, le=168)
+    canvas_base_url: str = ""
+    canvas_oauth_client_id: str = ""
+    canvas_oauth_client_secret: SecretStr | None = None
+    canvas_oauth_redirect_uri: str = "http://localhost:8000/api/v1/connectors/canvas-lms/callback"
     google_oauth_client_id: str = ""
     google_oauth_client_secret: SecretStr | None = None
     google_oauth_redirect_uri: str = "http://localhost:8000/api/v1/connections/google/callback"
