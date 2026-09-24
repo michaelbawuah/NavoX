@@ -1,4 +1,4 @@
-name: SPEC-003 management source snapshot
+name: SPEC-003 import development snapshot
 on:
   push:
     branches: [chore/spec003-preflight-20260924]
@@ -12,31 +12,44 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 28e0c022f819292db07bc5a74bdbfdffce1cee6d
+          ref: bf973b20cf7e62b3f4f91850ddd235fb3d9f4baa
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
-      - name: Archive exact tracked source
+          node-version: '24'
+      - name: Archive exact tracked source without credentials
         run: |
-          set -eu
-          test "$(git rev-parse HEAD)" = '28e0c022f819292db07bc5a74bdbfdffce1cee6d'
-          git archive --format=tar.gz HEAD > "$RUNNER_TEMP/navox-source-28e0c02.tar.gz"
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'bf973b20cf7e62b3f4f91850ddd235fb3d9f4baa'
+          git archive --format=tar.gz HEAD > "$RUNNER_TEMP/navox-source-bf973b2.tar.gz"
           git rev-parse HEAD > "$RUNNER_TEMP/source-commit.txt"
           git rev-parse HEAD^{tree} > "$RUNNER_TEMP/source-tree.txt"
       - uses: actions/upload-artifact@v4
         with:
-          name: navox-source-28e0c02
+          name: navox-source-bf973b2
           path: |
-            ${{ runner.temp }}/navox-source-28e0c02.tar.gz
+            ${{ runner.temp }}/navox-source-bf973b2.tar.gz
             ${{ runner.temp }}/source-commit.txt
             ${{ runner.temp }}/source-tree.txt
           retention-days: 1
       - run: npm ci
-      - name: Archive locked web dependencies
-        run: tar -czf "$RUNNER_TEMP/navox-web-env.tar.gz" node_modules apps/web/node_modules apps/extension/node_modules 2>/dev/null || test -s "$RUNNER_TEMP/navox-web-env.tar.gz"
+      - name: Archive locked web dependencies and Node executable
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, pathlib, shutil, subprocess, tarfile
+          tmp = pathlib.Path(os.environ['RUNNER_TEMP'])
+          paths = [p for p in ('node_modules', 'apps/web/node_modules', 'apps/extension/node_modules') if pathlib.Path(p).exists()]
+          with tarfile.open(tmp / 'navox-web-tools-bf973b2.tar.gz', 'w:gz') as archive:
+              for path in paths:
+                  archive.add(path, arcname=path)
+              archive.add(shutil.which('node'), arcname='toolchain/bin/node')
+              npm = pathlib.Path(shutil.which('npm')).resolve().parent.parent
+              archive.add(npm, arcname='toolchain/lib/node_modules/npm')
+              archive.add('package-lock.json', arcname='toolchain/package-lock.json')
+          PY
       - uses: actions/upload-artifact@v4
         with:
-          name: navox-web-env-28e0c02
-          path: ${{ runner.temp }}/navox-web-env.tar.gz
+          name: navox-web-tools-bf973b2
+          path: ${{ runner.temp }}/navox-web-tools-bf973b2.tar.gz
           retention-days: 1
