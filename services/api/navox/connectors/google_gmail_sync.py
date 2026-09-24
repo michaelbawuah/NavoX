@@ -35,7 +35,13 @@ from navox.connectors.google_calendar_sync import CalendarAuthority, GoogleCalen
 from navox.connectors.normalization import canonical_resource_to_source_document
 from navox.connectors.registry import ConnectorRegistry
 from navox.connectors.runtime import ConnectorRuntime
-from navox.connectors.sync_state import RETRYABLE_CODES, authorization_hash, database_now, utc
+from navox.connectors.sync_state import (
+    RETRYABLE_CODES,
+    SyncAlreadyActive,
+    authorization_hash,
+    database_now,
+    utc,
+)
 from navox.core.settings import Settings
 from navox.db.models import (
     AuditEvent,
@@ -50,7 +56,11 @@ from navox.db.models import (
     WorkspaceMembership,
 )
 from navox.intelligence.extraction import OperationalExtractor
-from navox.intelligence.source_cooldown import GoogleSourceCooldownError, source_cooldown
+from navox.intelligence.source_cooldown import (
+    GoogleSourceBusyError,
+    GoogleSourceCooldownError,
+    source_cooldown,
+)
 from navox.providers.google_sources import (
     GMAIL_READ_SCOPE,
     MAX_PAGES,
@@ -196,11 +206,7 @@ async def process_gmail_connection(
         and utc(connection.sync_lease_expires_at) > now
     ):
         await database.rollback()
-        raise GoogleSourceError(
-            "Gmail synchronization already active",
-            code="google_provider_unavailable",
-            retry_after_seconds=15,
-        )
+        raise GoogleSourceBusyError()
     cursor = await database.scalar(
         select(IntelligenceCursor)
         .where(
@@ -454,6 +460,8 @@ async def process_gmail_connection(
             http_status=error.google_http_status,
             retry_after_seconds=error.retry_after_seconds,
         ) from None
+    except SyncAlreadyActive:
+        raise GoogleSourceBusyError() from None
     except ConnectorRuntimeError as error:
         if error.code in {"PERMISSION_DENIED", "AUTH_EXPIRED", "AUTH_REVOKED"}:
             raise GoogleSourceAuthorizationError(

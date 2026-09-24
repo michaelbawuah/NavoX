@@ -506,3 +506,36 @@ async def test_cooldown_observed_between_checkpoints_does_not_create_new_failure
     async with factory() as database:
         audits = list(await database.scalars(select(AuditEvent)))
         assert [audit.id for audit in audits] == [original_id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["gmail", "calendar"])
+async def test_local_contention_rolls_back_without_becoming_shared_provider_failure(
+    cooldown_env, monkeypatch, source
+):
+    from navox.intelligence.source_cooldown import GoogleSourceBusyError
+
+    factory, connections = cooldown_env
+    connection = connections[0]
+
+    async def contention(database, **kwargs):
+        database.add(failure_audit(connection, occurred_at=datetime.now(UTC), source=source))
+        await database.flush()
+        raise GoogleSourceBusyError()
+
+    monkeypatch.setattr(ingestion, "process_connection", contention)
+    monkeypatch.setattr(activities, "get_session_factory", lambda: factory)
+    monkeypatch.setattr(
+        activities, "get_settings", lambda: Settings(ai_provider="openai", openai_api_key="test")
+    )
+    payload = SourceWork(
+        str(connection.id), str(connection.user_id), str(connection.workspace_id), source
+    )
+    for _ in range(2):
+        with pytest.raises(ApplicationError) as error:
+            await activities.process_source_activity(payload)
+        assert error.value.non_retryable is False
+        assert error.value.next_retry_delay == timedelta(seconds=15)
+        async with factory() as database:
+            assert await source_cooldown(database, connection.id, source) is None
+            assert list(await database.scalars(select(AuditEvent))) == []

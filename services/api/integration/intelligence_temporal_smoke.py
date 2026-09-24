@@ -11,12 +11,12 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, patch
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import httpx
 from pydantic import SecretStr
 from pydantic_settings import SettingsConfigDict
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from temporalio.client import Client, WorkflowFailureError
 from temporalio.worker import Worker
@@ -31,6 +31,8 @@ from navox.db.models import (
     AuditEvent,
     Commitment,
     Connection,
+    ConnectorConnection,
+    ConnectorSyncRun,
     GmailSyncPlan,
     IncomingEvent,
     IntelligenceCursor,
@@ -46,8 +48,9 @@ from navox.db.models import (
 from navox.intelligence.activities import process_source_activity, refresh_intelligence_activity
 from navox.intelligence.dispatcher import dispatch_feedback, dispatch_source
 from navox.intelligence.feedback import record_feedback
+from navox.intelligence.ingestion import process_connection as actual_process_connection
 from navox.intelligence.jobs import SourceWork, WorkspaceWork
-from navox.intelligence.source_cooldown import source_cooldown
+from navox.intelligence.source_cooldown import GoogleSourceBusyError, source_cooldown
 from navox.proactive.engine import aware, evaluate_workspace
 from navox.providers.google_sources import (
     CALENDAR_READ_SCOPE,
@@ -82,6 +85,9 @@ class ProviderFixtures:
         self.resume_full_order: list[str] = []
         self.resume_started: asyncio.Event | None = None
         self.resume_release: asyncio.Event | None = None
+        self.busy_started: asyncio.Event | None = None
+        self.busy_connection_id: UUID | None = None
+        self.busy_deferrals = 0
 
     async def google(self, request: httpx.Request) -> httpx.Response:
         self.reads += 1
@@ -316,36 +322,48 @@ async def seed(
     return connection_id, events
 
 
-async def wait_for_source_lock(sessions: async_sessionmaker[AsyncSession]) -> None:
-    """Observe real PostgreSQL contention before releasing the first Google response."""
-    query = text(
-        """
-        SELECT EXISTS (
-            SELECT 1
-            FROM pg_stat_activity AS waiter
-            JOIN pg_stat_activity AS blocker
-              ON blocker.pid = ANY(pg_blocking_pids(waiter.pid))
-            WHERE waiter.datname = current_database()
-              AND waiter.application_name = current_setting('application_name')
-              AND blocker.application_name = waiter.application_name
-              AND waiter.wait_event_type = 'Lock'
-              AND waiter.query ILIKE '%FROM connections%'
-              AND waiter.query ILIKE '%FOR UPDATE%'
+async def source_fence_snapshot(
+    sessions: async_sessionmaker[AsyncSession], connection_id: UUID
+) -> tuple[UUID | None, int, UUID | None, str | None]:
+    """Provider I/O must leave authority rows unlocked while its attempt stays fenced."""
+    connector_id = uuid5(NAMESPACE_URL, f"navox:google-gmail:{connection_id}")
+    async with sessions() as database:
+        # NOWAIT deliberately fails if a provider request retains either lock.
+        # The old harness required exactly that obsolete lock-over-I/O behavior.
+        connection = await database.scalar(
+            select(ConnectorConnection)
+            .where(ConnectorConnection.id == connector_id)
+            .with_for_update(nowait=True)
         )
-        """
-    )
-    try:
-        async with asyncio.timeout(15):
-            while True:
-                # End each transaction so PostgreSQL statistics snapshots refresh.
-                async with sessions() as database:
-                    if await database.scalar(query):
-                        return
-                await asyncio.sleep(0.05)
-    except TimeoutError:
-        raise AssertionError(
-            "Concurrent source activity did not wait on its connection lock"
-        ) from None
+        legacy = await database.scalar(
+            select(Connection).where(Connection.id == connection_id).with_for_update(nowait=True)
+        )
+        assert legacy is not None and connection is not None
+        assert connection.sync_lease_token is not None
+        assert connection.sync_lease_expires_at is not None
+        assert aware(connection.sync_lease_expires_at) > datetime.now(UTC)
+        run = await database.get(ConnectorSyncRun, connection.sync_run_id)
+        assert run is not None and run.status == "running"
+        assert await source_cooldown(database, connection_id, "gmail") is None
+        return (
+            connection.sync_run_id,
+            connection.sync_generation,
+            connection.sync_lease_token,
+            run.checkpoint_cursor,
+        )
+
+
+async def wait_for_source_deferral(
+    sessions: async_sessionmaker[AsyncSession],
+    connection_id: UUID,
+    fixtures: ProviderFixtures,
+    before: tuple[UUID | None, int, UUID | None, str | None],
+) -> None:
+    """Observe a real competing activity hitting the fence, not an arbitrary sleep."""
+    assert fixtures.busy_started is not None
+    await asyncio.wait_for(fixtures.busy_started.wait(), timeout=15)
+    assert fixtures.busy_connection_id == connection_id
+    assert await source_fence_snapshot(sessions, connection_id) == before
 
 
 async def verify(
@@ -471,9 +489,9 @@ async def verify(
             )
     finally:
         fixtures.google_disabled = False
-    # Hold the first provider response until a second real Temporal activity is
-    # blocked on the same PostgreSQL connection row. Both must observe one durable
-    # quota failure; a later third workflow must not slide the original deadline.
+    # Hold the provider response until a second real Temporal activity hits the
+    # durable attempt fence. No row lock is held over I/O, no duplicate provider
+    # read occurs, and local contention must not create an upstream cooldown.
     reads_before_quota = fixtures.reads
     fixtures.google_quota_limited = True
     fixtures.quota_started = asyncio.Event()
@@ -490,8 +508,11 @@ async def verify(
         quota_workflows = [await dispatch_quota()]
         try:
             await asyncio.wait_for(fixtures.quota_started.wait(), timeout=15)
+            before = await source_fence_snapshot(sessions, connection_id)
+            fixtures.busy_started = asyncio.Event()
             quota_workflows.append(await dispatch_quota())
-            await wait_for_source_lock(sessions)
+            await wait_for_source_deferral(sessions, connection_id, fixtures, before)
+            assert fixtures.reads == reads_before_quota + 1
         finally:
             fixtures.quota_release.set()
         for attempt in range(3):
@@ -646,8 +667,10 @@ async def verify_gmail_resume(
             )
             assert len(failures) == 1
             assert await source_cooldown(database, connection_id, "gmail") is not None
-            # Expire only this isolated synthetic cooldown to avoid a five-minute
-            # wall-clock wait; the separate quota gate verifies deadline durability.
+            # This fixture returns a non-retryable daily quota error. Its durable
+            # cooldown is the source audit, not a fabricated transient-provider
+            # retry deadline. Expire only this isolated synthetic audit deadline;
+            # the quota gate above verifies real retries cannot bypass/slide it.
             failures[0].event_metadata = {
                 **failures[0].event_metadata,
                 "retry_not_before": (datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
@@ -659,8 +682,12 @@ async def verify_gmail_resume(
         workflows = [await dispatch()]
         try:
             await asyncio.wait_for(fixtures.resume_started.wait(), timeout=15)
+            before = await source_fence_snapshot(sessions, connection_id)
+            fixtures.busy_started = asyncio.Event()
+            reads_before_competitor = fixtures.resume_reads.copy()
             workflows.append(await dispatch())
-            await wait_for_source_lock(sessions)
+            await wait_for_source_deferral(sessions, connection_id, fixtures, before)
+            assert fixtures.resume_reads == reads_before_competitor
         finally:
             fixtures.resume_release.set()
         for workflow_id in workflows:
@@ -840,7 +867,19 @@ async def run() -> None:
         await verify_proactive_concurrency(sessions)
         connection_id, events = await seed(sessions, user_id, workspace_id)
         client = await Client.connect(settings.temporal_target)
+
+        async def observe_processing(database: AsyncSession, **kwargs: Any) -> list[UUID]:
+            try:
+                return await actual_process_connection(database, **kwargs)
+            except GoogleSourceBusyError:
+                fixtures.busy_deferrals += 1
+                fixtures.busy_connection_id = kwargs["connection_id"]
+                if fixtures.busy_started is not None:
+                    fixtures.busy_started.set()
+                raise
+
         with (
+            patch("navox.intelligence.ingestion.process_connection", observe_processing),
             patch("navox.intelligence.activities.get_settings", return_value=settings),
             patch("navox.intelligence.activities.get_session_factory", return_value=sessions),
             patch(
@@ -886,6 +925,7 @@ async def run() -> None:
                 )
                 await verify_gmail_resume(sessions, client, settings, fixtures)
                 await verify_gmail_recheck_concurrency(sessions, settings)
+                assert fixtures.busy_deferrals >= 2
         print(
             json.dumps(
                 {
@@ -899,6 +939,7 @@ async def run() -> None:
                     "sync_failure_diagnostic_verified": True,
                     "quota_cooldown_verified": True,
                     "quota_concurrency_verified": True,
+                    "runtime_fence_concurrency_verified": fixtures.busy_deferrals >= 2,
                     "gmail_partial_resume_verified": True,
                     "gmail_resume_concurrency_verified": True,
                     "proactive_concurrency_verified": True,

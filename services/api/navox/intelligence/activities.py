@@ -27,6 +27,7 @@ from navox.intelligence.jobs import SourceWork, WorkspaceWork
 from navox.intelligence.source_cooldown import (
     HARD_QUOTA_CODES,
     SOURCE_BACKOFF_CODES,
+    GoogleSourceBusyError,
     GoogleSourceCooldownError,
     source_cooldown,
 )
@@ -160,6 +161,12 @@ async def _process_source(payload: SourceWork) -> int:
             )
             await database.commit()
             return len(ids)
+        except GoogleSourceBusyError as error:
+            # The winning sync still owns the lease. Contention must not mark
+            # its provider unhealthy, fail the queued event, or start/slide a
+            # shared cooldown that would block subsequent work.
+            await database.rollback()
+            raise _source_failure(error.diagnostic()) from None
         except GoogleSourceCooldownError as error:
             # A concurrent sync can establish a cooldown between checkpoints.
             # Reuse its deadline without recording another failure or extending it.
@@ -175,9 +182,10 @@ async def _process_source(payload: SourceWork) -> int:
             )
             if not preserve_backoff_lock:
                 await database.rollback()
-            # Each provider read holds the connection lock; previous source
-            # checkpoints have already committed. Keep that lock through the audit,
-            # so a waiting job cannot pass the cooldown check and contact Google.
+            # Legacy readers may retain their source lock through this audit.
+            # Shared-runtime readers release I/O locks and persist backoff under
+            # their attempt fence before this source-level diagnostic is written.
+            # Local contention was handled above; it is not a provider failure.
             failed_at = datetime.now(UTC)
             if payload.event_id:
                 failed_event = await database.get(IncomingEvent, UUID(payload.event_id))

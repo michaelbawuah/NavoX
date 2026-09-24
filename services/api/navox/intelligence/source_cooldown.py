@@ -17,6 +17,17 @@ SOURCE_BACKOFF_CODES = SOURCE_QUOTA_CODES | {"google_provider_unavailable"}
 MAX_RETRY_SECONDS = 86_400
 
 
+class GoogleSourceBusyError(GoogleSourceError):
+    """Retry this caller without recording an upstream failure or shared cooldown."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Source synchronization already active",
+            code="google_provider_unavailable",
+            retry_after_seconds=15,
+        )
+
+
 class GoogleSourceCooldownError(GoogleSourceError):
     """An existing cooldown was observed; this is not a new provider failure."""
 

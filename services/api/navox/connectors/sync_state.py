@@ -28,6 +28,13 @@ SYNC_RENEW_SECONDS = 15
 RETRYABLE_CODES = frozenset({"RATE_LIMITED", "PROVIDER_UNAVAILABLE", "TEMPORARY_FAILURE"})
 
 
+class SyncAlreadyActive(ConnectorRuntimeError):
+    """Local contention, not a provider outage or a new cooldown."""
+
+    def __init__(self) -> None:
+        super().__init__("TEMPORARY_FAILURE", "Another sync is active", retry_after_seconds=15)
+
+
 class SyncLeaseLost(ConnectorRuntimeError):
     def __init__(self) -> None:
         super().__init__("TEMPORARY_FAILURE", "Sync attempt no longer owns its lease")
@@ -128,9 +135,7 @@ async def claim_sync(
         and connection.sync_lease_expires_at is not None
         and utc(connection.sync_lease_expires_at) > now
     ):
-        raise ConnectorRuntimeError(
-            "TEMPORARY_FAILURE", "Another sync is active", retry_after_seconds=15
-        )
+        raise SyncAlreadyActive()
     if run is not None and (
         run.status not in {"running", "failed", "interrupted"}
         or run.generation == 0  # An old, uncheckpointed run needs an explicit new request.
@@ -170,9 +175,7 @@ async def claim_sync(
         .execution_options(synchronize_session=False)
     )
     if claimed is None:
-        raise ConnectorRuntimeError(
-            "TEMPORARY_FAILURE", "Another sync claimed this connection", retry_after_seconds=15
-        )
+        raise SyncAlreadyActive()
     if run is None:
         if old_run_id is not None:
             await database.execute(

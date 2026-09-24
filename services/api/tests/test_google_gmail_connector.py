@@ -661,3 +661,103 @@ async def test_cached_tokens_still_use_closed_operation_leases_before_model_proc
     await system.sync()
     await check_closed(None)
     assert system.refresh_calls == 1 and len(issued) > 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked_stage", ["provider", "model"])
+async def test_competing_source_activity_defers_without_provider_cooldown(
+    system, monkeypatch, blocked_stage
+):
+    from temporalio.exceptions import ApplicationError
+
+    from navox.db.models import IncomingEvent
+    from navox.intelligence import activities
+    from navox.intelligence.jobs import SourceWork
+    from navox.intelligence.source_cooldown import source_cooldown
+
+    entered, release = asyncio.Event(), asyncio.Event()
+    blocked = False
+
+    async def block_once(value):
+        nonlocal blocked
+        if blocked_stage == "provider" and value.url.params.get("format") != "full":
+            return
+        if not blocked:
+            blocked = True
+            entered.set()
+            await release.wait()
+
+    if blocked_stage == "provider":
+        system.provider_hook = block_once
+    else:
+        system.model_hook = block_once
+    monkeypatch.setattr(activities, "get_session_factory", lambda: system.factory)
+    monkeypatch.setattr(
+        activities, "get_settings", lambda: ingestion.Settings(ai_provider="openai")
+    )
+    monkeypatch.setattr(activities, "build_ai_gateway", lambda _: system.model)
+    event_id = uuid4()
+    async with system.factory() as db:
+        db.add(
+            IncomingEvent(
+                id=event_id,
+                connection_id=system.connection_id,
+                user_id=system.user_id,
+                workspace_id=system.workspace_id,
+                provider="google",
+                source="gmail",
+                event_type="gmail.changed",
+                external_event_id=str(event_id),
+                payload_hash="0" * 64,
+            )
+        )
+        await db.commit()
+    payload = SourceWork(
+        str(system.connection_id), str(system.user_id), str(system.workspace_id), "gmail"
+    )
+    queued = SourceWork(
+        payload.connection_id, payload.user_id, payload.workspace_id, "gmail", str(event_id)
+    )
+    winner = asyncio.create_task(activities.process_source_activity(payload))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=10)
+        before_calls = list(system.mailbox.calls)
+        async with system.factory() as db:
+            row = await db.get(ConnectorConnection, system.connector_id)
+            before_fence = (row.sync_run_id, row.sync_generation, row.sync_lease_token)
+        for _ in range(2):
+            with pytest.raises(ApplicationError) as error:
+                await activities.process_source_activity(queued)
+            assert error.value.non_retryable is False
+            assert error.value.next_retry_delay == timedelta(seconds=15)
+            assert error.value.details == (
+                {"code": "google_provider_unavailable", "retry_after_seconds": 15},
+            )
+            async with system.factory() as db:
+                assert await source_cooldown(db, system.connection_id, "gmail") is None
+                assert (
+                    await db.scalar(
+                        select(func.count())
+                        .select_from(AuditEvent)
+                        .where(AuditEvent.event_type == "intelligence.source.failed")
+                    )
+                    == 0
+                )
+                event = await db.get(IncomingEvent, event_id)
+                assert event.intelligence_status == "pending" and event.processed_at is None
+                row = await db.get(ConnectorConnection, system.connector_id)
+                assert (row.sync_run_id, row.sync_generation, row.sync_lease_token) == before_fence
+                assert row.retry_not_before is None
+                assert await db.scalar(select(func.count()).select_from(ConnectorSyncRun)) == 1
+            assert list(system.mailbox.calls) == before_calls
+    finally:
+        release.set()
+        assert await asyncio.wait_for(winner, timeout=15) == 0
+    # The queued event remains replayable immediately after the winning sync,
+    # with no fabricated cooldown and no duplicate model work.
+    assert await activities.process_source_activity(queued) == 0
+    assert system.model.calls == ["first", "second"]
+    async with system.factory() as db:
+        event = await db.get(IncomingEvent, event_id)
+        assert event.intelligence_status == "completed"
+        assert await db.scalar(select(func.count()).select_from(IntelligenceSourceReceipt)) == 2
