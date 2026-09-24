@@ -128,9 +128,7 @@ class ConnectorManifest(BaseModel):
     rate_limit_strategy: Literal["provider_headers", "fixed_backoff", "none"] = Field(
         alias="rateLimitStrategy"
     )
-    minimum_navox_connector_api_version: str = Field(
-        alias="minimumNavoxConnectorApiVersion"
-    )
+    minimum_navox_connector_api_version: str = Field(alias="minimumNavoxConnectorApiVersion")
 
     @model_validator(mode="after")
     def validate_manifest(self) -> ConnectorManifest:
