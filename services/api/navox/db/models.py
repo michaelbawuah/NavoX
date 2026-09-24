@@ -1112,3 +1112,28 @@ class ConnectorSyncReceipt(Base):
     accepted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class ConnectorImportSnapshot(Base):
+    """Encrypted source data, stored separately from runtime history and credentials."""
+
+    __tablename__ = "connector_import_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "user_id", "digest", name="uq_import_snapshot_owner_digest"
+        ),
+    )
+    connection_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("connector_connections.id", ondelete="CASCADE"), primary_key=True
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    digest: Mapped[str] = mapped_column(String(64))
+    format: Mapped[str] = mapped_column(String(8))
+    record_count: Mapped[int] = mapped_column()
+    encrypted_payload: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

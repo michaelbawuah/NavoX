@@ -40,7 +40,7 @@ class ManagementCommand(BaseModel):
 
 
 class ManagedSyncCommand(ManagementCommand):
-    source: Literal["gmail", "calendar"]
+    source: Literal["gmail", "calendar", "snapshot"]
 
 
 def require_origin(request: Request, web_origin: str) -> None:
@@ -75,8 +75,8 @@ async def connect_catalog_entry(
     del payload
     require_origin(request, settings.web_origin)
     entry = catalog_entry(connector_id)
-    if entry.availability != "available":
-        raise HTTPException(409, "Setup is not enabled for this connector yet")
+    if entry.availability != "available" or entry.id != "google-workspace":
+        raise HTTPException(409, "Use the connector-specific setup flow")
     return await start_google_authorization(current_account, database, settings)
 
 
@@ -170,7 +170,22 @@ async def sync_connection(
 ) -> dict[str, str]:
     require_origin(request, settings.web_origin)
     view = await _detail(connection_id, current_account, database)
-    if view.connector_id != "google-workspace":
+    if view.connector_id == "generic-import" and payload.source == "snapshot":
+        if not any(source.id == "snapshot" and source.can_sync for source in view.sources):
+            raise HTTPException(409, "Snapshot processing is paused, active, or unavailable")
+        from navox.api.imports import queue_snapshot
+        from navox.connectors.authorization import owned_connector
+
+        row = await owned_connector(
+            database,
+            connection_id=connection_id,
+            workspace_id=current_account.workspace.id,
+            user_id=current_account.user.id,
+            require_active=True,
+        )
+        status = await queue_snapshot(database, row, payload.request_id, settings)
+        return {"dispatch_status": status}
+    if view.connector_id != "google-workspace" or payload.source == "snapshot":
         raise HTTPException(409, "Manual sync is not enabled for this connector yet")
     if view.health in {"PAUSED", "DISCONNECTED"}:
         raise HTTPException(409, "Resume or reconnect before syncing")

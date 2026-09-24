@@ -134,7 +134,10 @@ async def test_catalog_is_authenticated_and_does_not_claim_unfinished_setup(env)
         "generic-rest-api",
         "mcp",
     }
-    assert [e["id"] for e in entries if e["availability"] == "available"] == ["google-workspace"]
+    assert [e["id"] for e in entries if e["availability"] == "available"] == [
+        "google-workspace",
+        "generic-import",
+    ]
     for entry in entries:
         response = await env.client.get(f"/api/v1/connectors/{entry['id']}")
         assert response.json() == entry

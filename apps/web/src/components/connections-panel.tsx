@@ -12,6 +12,7 @@ import {
   sourceStatus,
 } from "../lib/connection-management";
 import styles from "./connections-panel.module.css";
+import { FileImportPanel } from "./file-import-panel";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
@@ -60,6 +61,7 @@ export function ConnectionsPanel({
   const [connections, setConnections] = useState<ManagedConnection[]>([]);
   const [tab, setTab] = useState<"connected" | "browse">("connected");
   const [query, setQuery] = useState("");
+  const [showImport, setShowImport] = useState(false);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -457,12 +459,14 @@ export function ConnectionsPanel({
                   pending !== null || entry.availability !== "available"
                 }
                 onClick={() =>
-                  void perform(
-                    `connect:${entry.id}`,
-                    `/connectors/${entry.id}/connect`,
-                    "",
-                    true,
-                  )
+                  entry.id === "generic-import"
+                    ? setShowImport(true)
+                    : void perform(
+                        `connect:${entry.id}`,
+                        `/connectors/${entry.id}/connect`,
+                        "",
+                        true,
+                      )
                 }
               >
                 {pending === `connect:${entry.id}`
@@ -484,6 +488,22 @@ export function ConnectionsPanel({
             </p>
           ) : null}
         </div>
+      ) : null}
+      {showImport ? (
+        <FileImportPanel
+          apiBaseUrl={apiBaseUrl}
+          onClose={() => setShowImport(false)}
+          onImported={async () => {
+            await refresh();
+            await onConnectionsChanged();
+            setTab("connected");
+            setQuery("");
+            setPage(0);
+            setNotice(
+              "Snapshot saved. Processing is queued or awaiting the worker; completion appears in its status.",
+            );
+          }}
+        />
       ) : null}
       <div className={styles.footer}>
         <small>
