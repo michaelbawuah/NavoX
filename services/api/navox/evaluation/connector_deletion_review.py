@@ -148,6 +148,18 @@ async def inspect_connection(database: AsyncSession, connection_id: UUID) -> dic
         or 0
     )
     counts["ingestion_without_provenance_anchor"] = 0
+    counts["unattributed_plans"] = int(
+        await database.scalar(
+            select(func.count())
+            .select_from(Plan)
+            .where(
+                Plan.workspace_id == workspace_id,
+                Plan.user_id == user_id,
+                Plan.source_attributed.is_(False),
+            )
+        )
+        or 0
+    )
     if not provenance_ids:
         for ingested_model in (ConnectorResource, ConnectorSyncRun):
             counts["ingestion_without_provenance_anchor"] += int(
@@ -167,7 +179,9 @@ async def inspect_connection(database: AsyncSession, connection_id: UUID) -> dic
         and all(row.status == "DISCONNECTED" for row in rows),
         "affected_commitments": affected,
         "review_counts": counts,
-        "requires_historical_review": any(counts.values()),
+        "requires_historical_review": any(
+            value for key, value in counts.items() if not key.startswith("potentially_embedded_")
+        ),
         "deletion_authorized": False,
         "limitations": (
             "Read-only inventory; deletion also validates surviving and "

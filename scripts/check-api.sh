@@ -43,7 +43,7 @@ render_schema() {
   local table
   tables=(
     users workspaces workspace_memberships plans
-    plan_steps actions approvals workflow_refs
+    plan_steps plan_sources actions approvals workflow_refs
     audit_events proactive_preferences proactive_signals briefing_snapshots
     people person_identities person_identity_sources operational_observations observation_evidence
     intelligence_feedback intelligence_source_receipts gmail_sync_plans connector_definitions

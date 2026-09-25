@@ -1913,3 +1913,534 @@ async def test_historical_deletion_inventory_rejects_unknown_connection(env):
     async with env.factory() as db:
         with pytest.raises(DeletionReviewError, match="not_found"):
             await inspect_connection(db, uuid4())
+
+
+async def seed_historical_review(env):
+    from navox.db.models import Action, Approval, Plan, PlanStep, WorkflowRef
+
+    async with env.factory() as db:
+        person = Person(workspace_id=env.workspace_id, canonical_name="Private historical person")
+        manual = Commitment(
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            commitment_type="task",
+            title="Independent manual task",
+            status="confirmed",
+            created_by="user",
+            dedupe_key=uuid4().hex,
+        )
+        learned = Commitment(
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            commitment_type="task",
+            title="Source private task",
+            status="confirmed",
+            created_by="ai",
+            dedupe_key=uuid4().hex,
+        )
+        db.add_all([person, manual, learned])
+        await db.flush()
+        identity = PersonIdentity(
+            workspace_id=env.workspace_id,
+            person_id=person.id,
+            provider="google",
+            identity_type="email",
+            identity_value="legacy-private@example.invalid",
+        )
+        db.add_all(
+            [
+                identity,
+                CommitmentSource(commitment_id=manual.id, provider="navox", source_type="manual"),
+                CommitmentSource(
+                    commitment_id=learned.id,
+                    connection_id=env.id,
+                    provider="google",
+                    source_type="gmail_message",
+                    external_resource_id="mail-1",
+                ),
+            ]
+        )
+        manual_plan = Plan(
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            commitment_id=manual.id,
+            request_id=uuid4(),
+            goal="Independent goal",
+            status="completed",
+            context_snapshot={
+                "commitment": {"id": str(manual.id), "created_by": "user"},
+                "sources": [{"provider": "navox", "source_type": "manual"}],
+                "relations": [],
+            },
+            context_hash="a" * 64,
+        )
+        source_plan = Plan(
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            commitment_id=learned.id,
+            request_id=uuid4(),
+            goal="Private goal",
+            status="completed",
+            context_snapshot={
+                "commitment": {"id": str(learned.id)},
+                "sources": [{"provider": "google"}],
+                "relations": [],
+            },
+            context_hash="b" * 64,
+        )
+        approval_plan = Plan(
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            commitment_id=manual.id,
+            request_id=uuid4(),
+            goal="Private email",
+            status="manual_review",
+            context_snapshot={
+                "commitment": {"id": str(manual.id)},
+                "connection": {"id": str(env.id), "provider": "google"},
+            },
+            context_hash="c" * 64,
+        )
+        db.add_all([manual_plan, source_plan, approval_plan])
+        await db.flush()
+        step = PlanStep(
+            plan_id=approval_plan.id,
+            sequence_number=1,
+            action_type="gmail.send",
+            description="Private email body",
+            status="uncertain",
+            risk_level="R3",
+            input_payload={"body_text": "PRIVATE-BODY", "connection_id": str(env.id)},
+        )
+        db.add(step)
+        await db.flush()
+        action = Action(
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            plan_step_id=step.id,
+            commitment_id=manual.id,
+            provider="google",
+            action_type="gmail.send",
+            risk_level="R3",
+            requires_approval=True,
+            status="uncertain",
+            payload=step.input_payload,
+            payload_hash="d" * 64,
+            idempotency_key=uuid4().hex,
+        )
+        db.add(action)
+        await db.flush()
+        approval = Approval(
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            action_id=action.id,
+            version=1,
+            action_payload_hash=action.payload_hash,
+            status="consuming",
+            expires_at=datetime.now(UTC),
+            consumed_at=datetime.now(UTC),
+        )
+        db.add_all(
+            [
+                approval,
+                WorkflowRef(
+                    user_id=env.user_id,
+                    workspace_id=env.workspace_id,
+                    entity_type="action",
+                    entity_id=action.id,
+                    workflow_type="approved_action",
+                    temporal_workflow_id=uuid4().hex,
+                    status="manual_review",
+                ),
+                AuditEvent(
+                    user_id=env.user_id,
+                    workspace_id=env.workspace_id,
+                    actor_type="system",
+                    entity_type="action",
+                    entity_id=action.id,
+                    event_type="action.execution.uncertain",
+                    event_metadata={"payload_hash": action.payload_hash},
+                ),
+            ]
+        )
+        await db.commit()
+        return SimpleNamespace(
+            identity=identity.id,
+            manual=manual.id,
+            learned=learned.id,
+            manual_plan=manual_plan.id,
+            source_plan=source_plan.id,
+            approval_plan=approval_plan.id,
+            step=step.id,
+            action=action.id,
+            approval=approval.id,
+        )
+
+
+async def export_historical_review(env):
+    from navox.connectors.historical_provenance import export_review
+
+    async with env.factory() as db:
+        return await export_review(
+            db, connection_id=env.id, workspace_id=env.workspace_id, user_id=env.user_id
+        )
+
+
+@pytest.mark.asyncio
+async def test_owner_review_backfills_only_provenance_then_deletes_only_source_histories(env):
+    from navox.connectors.historical_provenance import apply_review, digest
+    from navox.db.models import Action, Approval, Plan, PlanSource, PlanStep, WorkflowRef
+
+    records = await seed_historical_review(env)
+    manifest = await export_historical_review(env)
+    proposals = {a.id: a.connection_ids for a in manifest.assignments}
+    assert proposals == {
+        records.identity: [env.id],
+        records.manual_plan: [],
+        records.source_plan: [env.id],
+        records.approval_plan: [env.id],
+    }
+    assert "PRIVATE-BODY" in manifest.model_dump_json()
+    assert "SECRET-SENTINEL" not in manifest.model_dump_json()
+    async with env.factory() as db:
+        assert not (await db.get(PersonIdentity, records.identity)).source_attributed
+        assert not (await db.get(Plan, records.manual_plan)).source_attributed
+        result = await apply_review(
+            db, manifest, approved_sha256=digest(manifest.model_dump(mode="json"))
+        )
+        assert result == {"applied": True, "reviewed_records": 4, "deleted_records": 0}
+        assert (await db.get(Connection, env.id)).status == "active"
+        assert await db.get(Action, records.action) is not None
+        assert await db.get(PlanSource, (records.approval_plan, env.id)) is not None
+        replay = await apply_review(
+            db, manifest, approved_sha256=digest(manifest.model_dump(mode="json"))
+        )
+        assert replay["already_applied"] is True
+    await env.client.request("DELETE", f"/api/v1/connections/{env.id}", json=command())
+    request = command()
+    response = await env.client.post(f"/api/v1/connections/{env.id}/delete-data", json=request)
+    assert response.status_code == 200, response.text
+    assert (
+        await env.client.post(f"/api/v1/connections/{env.id}/delete-data", json=request)
+    ).status_code == 200
+    async with env.factory() as db:
+        assert await db.get(Commitment, records.manual) is not None
+        assert await db.get(Plan, records.manual_plan) is not None
+        for model, identifier in [
+            (Commitment, records.learned),
+            (PersonIdentity, records.identity),
+            (Plan, records.source_plan),
+            (Plan, records.approval_plan),
+            (PlanStep, records.step),
+            (Action, records.action),
+            (Approval, records.approval),
+        ]:
+            assert await db.get(model, identifier) is None
+        assert (
+            await db.scalar(select(WorkflowRef.id).where(WorkflowRef.entity_id == records.action))
+            is None
+        )
+        assert (
+            await db.scalar(select(AuditEvent.id).where(AuditEvent.entity_id == records.action))
+            is None
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["identity", "plan", "action", "new_source", "new_identity"])
+async def test_historical_review_rejects_changed_records(env, change):
+    from navox.connectors.historical_provenance import HistoricalReviewError, apply_review, digest
+    from navox.db.models import Action, Plan
+
+    records = await seed_historical_review(env)
+    manifest = await export_historical_review(env)
+    async with env.factory() as db:
+        if change == "identity":
+            (
+                await db.get(PersonIdentity, records.identity)
+            ).identity_value = "changed@example.invalid"
+        elif change == "plan":
+            (await db.get(Plan, records.source_plan)).context_snapshot = {"changed": True}
+        elif change == "action":
+            (await db.get(Action, records.action)).payload = {"body_text": "changed"}
+        elif change == "new_source":
+            db.add(
+                CommitmentSource(
+                    commitment_id=records.manual,
+                    provider="google",
+                    source_type="gmail_message",
+                    connection_id=env.id,
+                )
+            )
+        else:
+            person_id = (await db.get(PersonIdentity, records.identity)).person_id
+            db.add(
+                PersonIdentity(
+                    workspace_id=env.workspace_id,
+                    person_id=person_id,
+                    provider="google",
+                    identity_type="email",
+                    identity_value="new@example.invalid",
+                )
+            )
+        await db.commit()
+    async with env.factory() as db:
+        with pytest.raises(HistoricalReviewError, match="history_changed"):
+            await apply_review(
+                db, manifest, approved_sha256=digest(manifest.model_dump(mode="json"))
+            )
+        assert not (await db.get(PersonIdentity, records.identity)).source_attributed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "wrong_digest",
+        "missing",
+        "duplicate",
+        "unresolved",
+        "foreign",
+        "empty_identity",
+        "explicit_plan",
+    ],
+)
+async def test_historical_review_rejects_invalid_assignments_atomically(env, tamper):
+    from navox.connectors.historical_provenance import HistoricalReviewError, apply_review, digest
+    from navox.db.models import Plan
+
+    records = await seed_historical_review(env)
+    manifest = await export_historical_review(env)
+    identity = next(a for a in manifest.assignments if a.id == records.identity)
+    if tamper == "missing":
+        manifest.assignments.pop()
+    elif tamper == "duplicate":
+        manifest.assignments.append(identity)
+    elif tamper == "unresolved":
+        identity.connection_ids = None
+    elif tamper == "foreign":
+        identity.connection_ids = [uuid4()]
+    elif tamper == "empty_identity":
+        identity.connection_ids = []
+    elif tamper == "explicit_plan":
+        next(a for a in manifest.assignments if a.id == records.approval_plan).connection_ids = []
+    sha = "incorrect" if tamper == "wrong_digest" else digest(manifest.model_dump(mode="json"))
+    async with env.factory() as db:
+        with pytest.raises(HistoricalReviewError):
+            await apply_review(db, manifest, approved_sha256=sha)
+        # Deliberately commit after a rejected review: partial attribution must not survive.
+        await db.commit()
+        assert not (await db.get(PersonIdentity, records.identity)).source_attributed
+        assert not (await db.get(Plan, records.source_plan)).source_attributed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["executing", "approved", "awaiting_approval", "running"])
+async def test_source_deletion_rejects_active_plan_after_review(env, state):
+    from navox.connectors.historical_provenance import apply_review, digest
+    from navox.db.models import Plan
+
+    records = await seed_historical_review(env)
+    manifest = await export_historical_review(env)
+    async with env.factory() as db:
+        await apply_review(db, manifest, approved_sha256=digest(manifest.model_dump(mode="json")))
+        (await db.get(Plan, records.approval_plan)).status = state
+        await db.commit()
+    await env.client.request("DELETE", f"/api/v1/connections/{env.id}", json=command())
+    response = await env.client.post(f"/api/v1/connections/{env.id}/delete-data", json=command())
+    assert response.status_code == 409, response.text
+    async with env.factory() as db:
+        assert await db.get(Commitment, records.learned) is not None
+        assert await db.get(PersonIdentity, records.identity) is not None
+
+
+@pytest.mark.asyncio
+async def test_new_plan_tracks_sources_beyond_snapshot_limit_and_in_related_cards(env):
+    from navox.agent.service import BoundedAgentService
+    from navox.db.models import CommitmentRelation, PlanSource
+
+    records = await seed_historical_review(env)
+    async with env.factory() as db:
+        other = Connection(
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            provider="github_issues",
+            external_account_id="other",
+            status="active",
+            granted_scopes=[],
+        )
+        db.add(other)
+        await db.flush()
+        for index in range(13):
+            db.add(
+                CommitmentSource(
+                    commitment_id=records.manual,
+                    provider="github_issues",
+                    connection_id=other.id,
+                    source_type="issue",
+                    external_resource_id=str(index),
+                )
+            )
+        db.add(
+            CommitmentRelation(
+                from_commitment_id=records.manual,
+                to_commitment_id=records.learned,
+                relation_type="related_to",
+            )
+        )
+        await db.commit()
+        plan, _, _ = await BoundedAgentService().create_plan(
+            db,
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            commitment_id=records.manual,
+            request_id=uuid4(),
+            goal=None,
+        )
+        assert plan.source_attributed
+        assert len(plan.context_snapshot["sources"]) == 12
+        links = set(
+            await db.scalars(select(PlanSource.connection_id).where(PlanSource.plan_id == plan.id))
+        )
+        assert links == {env.id, other.id}
+
+
+@pytest.mark.asyncio
+async def test_historical_review_cannot_cross_owner_or_reassign_shared_workspace_history(env):
+    from fastapi import HTTPException
+
+    from navox.connectors.historical_provenance import HistoricalReviewError, export_review
+
+    await seed_historical_review(env)
+    async with env.factory() as db:
+        with pytest.raises(HTTPException) as error:
+            await export_review(
+                db, connection_id=env.id, workspace_id=env.workspace_id, user_id=uuid4()
+            )
+        assert error.value.status_code == 404
+    async with env.factory() as db:
+        other = User(email="second@example.invalid", display_name="Other", password_hash="unused")
+        db.add(other)
+        await db.flush()
+        db.add(WorkspaceMembership(workspace_id=env.workspace_id, user_id=other.id, role="member"))
+        await db.commit()
+    async with env.factory() as db:
+        with pytest.raises(HistoricalReviewError, match="shared_workspace"):
+            await export_review(
+                db, connection_id=env.id, workspace_id=env.workspace_id, user_id=env.user_id
+            )
+
+
+@pytest.mark.asyncio
+async def test_private_review_cli_requires_digest_and_refuses_overwrite(env, tmp_path, monkeypatch):
+    import argparse
+    import stat
+
+    from navox.connectors.historical_provenance import HistoricalReviewError
+    from navox.evaluation import connector_provenance_review as cli
+
+    records = await seed_historical_review(env)
+    monkeypatch.setattr(cli, "get_session_factory", lambda: env.factory)
+    path = tmp_path / "review.json"
+    args = argparse.Namespace(
+        connection_id=env.id, digest=False, apply=False, file=str(path), approve_sha256=None
+    )
+    report = await cli.run(args)
+    assert report["records"] == 4
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    with pytest.raises(FileExistsError):
+        await cli.run(args)
+    args.apply = True
+    with pytest.raises(HistoricalReviewError, match="explicit_owner_review"):
+        await cli.run(args)
+    async with env.factory() as db:
+        assert not (await db.get(PersonIdentity, records.identity)).source_attributed
+    args.digest = True
+    assert (await cli.run(args))["review_sha256"] == report["review_sha256"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["plan", "action", "surviving_source"])
+async def test_source_plan_deletion_rejects_foreign_artifacts(env, scope):
+    from navox.connectors.historical_provenance import apply_review, digest
+    from navox.db.models import Action, Plan, PlanSource
+
+    records = await seed_historical_review(env)
+    manifest = await export_historical_review(env)
+    async with env.factory() as db:
+        await apply_review(db, manifest, approved_sha256=digest(manifest.model_dump(mode="json")))
+        other = User(
+            email="foreign@example.invalid", display_name="Foreign", password_hash="unused"
+        )
+        workspace = Workspace(name="Foreign workspace")
+        db.add_all([other, workspace])
+        await db.flush()
+        if scope == "plan":
+            plan = await db.get(Plan, records.source_plan)
+            plan.user_id, plan.workspace_id = other.id, workspace.id
+        elif scope == "action":
+            action = await db.get(Action, records.action)
+            action.user_id, action.workspace_id = other.id, workspace.id
+        else:
+            source = Connection(
+                user_id=other.id,
+                workspace_id=workspace.id,
+                provider="google",
+                external_account_id="foreign",
+                status="active",
+                granted_scopes=[],
+            )
+            db.add(source)
+            await db.flush()
+            db.add(PlanSource(plan_id=records.source_plan, connection_id=source.id))
+        await db.commit()
+    await env.client.request("DELETE", f"/api/v1/connections/{env.id}", json=command())
+    response = await env.client.post(f"/api/v1/connections/{env.id}/delete-data", json=command())
+    assert response.status_code == 409, response.text
+    async with env.factory() as db:
+        assert await db.get(Plan, records.source_plan) is not None
+        assert await db.get(Commitment, records.learned) is not None
+
+
+@pytest.mark.asyncio
+async def test_unreviewed_plan_blocks_deletion_even_without_remaining_commitment_edges(env):
+    from navox.db.models import Plan
+
+    async with env.factory() as db:
+        plan = Plan(
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            request_id=uuid4(),
+            goal="Historical source title",
+            status="completed",
+            context_snapshot={},
+            context_hash="e" * 64,
+        )
+        db.add(plan)
+        await db.commit()
+    await env.client.request("DELETE", f"/api/v1/connections/{env.id}", json=command())
+    response = await env.client.post(f"/api/v1/connections/{env.id}/delete-data", json=command())
+    assert response.status_code == 409, response.text
+
+
+@pytest.mark.asyncio
+async def test_new_plan_with_missing_source_anchor_remains_unattributed(env):
+    from navox.agent.service import BoundedAgentService
+
+    records = await seed_historical_review(env)
+    async with env.factory() as db:
+        db.add(
+            CommitmentSource(
+                commitment_id=records.manual, provider="google", source_type="gmail_message"
+            )
+        )
+        await db.commit()
+        plan, _, _ = await BoundedAgentService().create_plan(
+            db,
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            commitment_id=records.manual,
+            request_id=uuid4(),
+            goal=None,
+        )
+        assert not plan.source_attributed

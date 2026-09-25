@@ -12,10 +12,9 @@ from fastapi import HTTPException
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from navox.agent.provenance import erase_source_plans
 from navox.connectors.sync_state import database_now
 from navox.db.models import (
-    Action,
-    Approval,
     AuditEvent,
     BriefingSnapshot,
     Commitment,
@@ -42,7 +41,6 @@ from navox.db.models import (
     Person,
     PersonIdentity,
     PersonIdentitySource,
-    Plan,
     ProactiveSignal,
     ProviderEventSubscription,
     User,
@@ -479,26 +477,12 @@ async def delete_learned_data(
         .limit(1)
     ):
         raise HTTPException(409, "Person identity provenance needs manual review")
-    # Plans/actions can embed source text in snapshots and payloads without a
-    # source key, so an automated source-only erase cannot promise completeness.
-    if affected and (
-        await database.scalar(
-            select(Plan.id)
-            .where(Plan.workspace_id == workspace_id, Plan.user_id == user_id)
-            .limit(1)
-        )
-        or await database.scalar(
-            select(Action.id)
-            .where(Action.workspace_id == workspace_id, Action.user_id == user_id)
-            .limit(1)
-        )
-        or await database.scalar(
-            select(Approval.id)
-            .where(Approval.workspace_id == workspace_id, Approval.user_id == user_id)
-            .limit(1)
-        )
-    ):
-        raise HTTPException(409, "Plans or actions require a reviewed deletion")
+    await erase_source_plans(
+        database,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        connection_ids={identifier for identifier in provenance_ids if identifier is not None},
+    )
     if provenance_ids:
         await database.execute(
             delete(CommitmentSource).where(CommitmentSource.connection_id.in_(provenance_ids))

@@ -114,7 +114,8 @@ requires repository **Issues: read** permission for a fine-grained token. Scope 
 to this repository. The endpoint also returns pull requests; this example reads
 only the ten most recently updated open records and does not follow GitHub's Link
 pagination headers. It is a bounded interoperability demonstration, not a complete
-repository mirror. Actual HTTP/provider acceptance remains unmeasured here.
+repository mirror. The owner supplied a passing deployed-worker report for this
+service on 2026-09-25, recorded below.
 
 1. Check out `spec-003-universal-connectors` in your local NavoX checkout and pull
    its latest revision. Preserve any local changes before switching branches.
@@ -145,3 +146,20 @@ issue or PR body must actually contain actionable evidence. If the report says
 `source_linked_results_in_today: false`, inspect the source and Today rather than
 creating a fabricated result or overriding extraction. Record the deployment
 commit and JSON report to close mandatory demonstration D.
+
+## Recorded owner-run live acceptance — 2026-09-25
+
+The owner supplied the deployed report generated at `2026-09-25T11:40:49.433700+00:00`
+on commit `e372494a1aa0f4c626aa57789c5930ecd077927a`. It reports `passed: true`
+through `deployed_temporal_worker` for generic REST connection
+`8c7ac295-9734-5f0c-ab54-026ec3881a8b`, sync run
+`3b0282a2-bce0-49f7-849c-eaaa79afa175`, and manifest SHA-256
+`d420ae5f251d72332a5fb8cf31248f7e41821caeb920d70606a19e766b699123`.
+
+All five checks passed: sync completion, resources seen, canonical acceptance,
+SPEC-002 results, and source-linked Today results. The run saw two live resources,
+accepted two receipts, and linked four result IDs/four Today matches. It reused
+two existing revisions and processed zero new revisions; this report does not
+claim four new tasks were created during the verification run. This is owner
+supplied live evidence for mandatory demonstration D, not an independently
+queried database result or a production reliability-rate measurement.

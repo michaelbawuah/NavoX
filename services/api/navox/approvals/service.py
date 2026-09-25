@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.agent.audit import add_audit_event
 from navox.agent.hashing import action_security_hash, canonical_hash
+from navox.agent.provenance import record_plan_sources
 from navox.approvals.schemas import EditGmailSendRequest, PrepareGmailSendRequest
 from navox.db.models import (
     Action,
@@ -166,7 +167,7 @@ class ApprovalService:
             ensure_same_prepare_request(existing_action, request)
             return existing_action, existing_approval, False
 
-        user = await database.scalar(select(User).where(User.id == user_id))
+        user = await database.scalar(select(User).where(User.id == user_id).with_for_update())
         if user is None:
             raise ApprovalNotFoundError("User not found")
         if user.agent_paused:
@@ -243,6 +244,9 @@ class ApprovalService:
         )
         database.add(plan)
         await database.flush()
+        await record_plan_sources(
+            database, plan, {commitment.id}, explicit_connections={connection.id}
+        )
 
         step = PlanStep(
             plan_id=plan.id,
