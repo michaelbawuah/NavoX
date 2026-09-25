@@ -15,6 +15,7 @@ import {
   subscriptionMoney,
 } from "../lib/subscriptions";
 import { CancellationReview } from "./cancellation-review";
+import { SubscriptionEditor } from "./subscription-editor";
 
 const now = Date.parse("2026-09-25T15:00:00Z");
 const item = {
@@ -79,6 +80,28 @@ const attempt: CancellationAttempt = {
 };
 
 describe("subscription decisions", () => {
+  it.each([
+    [null, ""],
+    ["USD", "USD"],
+    ["GHS", "GHS"],
+    ["DEM", "DEM"],
+  ])(
+    "preserves the saved currency %s when opening corrections",
+    (saved, expected) => {
+      const markup = renderToStaticMarkup(
+        createElement(SubscriptionEditor, {
+          item: { ...item, billing_currency: saved },
+          onSave: vi.fn(),
+          onClose: vi.fn(),
+        }),
+      );
+      const currency = markup.match(
+        /<select name="billing_currency"[^>]*>[\s\S]*?<\/select>/,
+      )?.[0];
+      expect(currency).toBeDefined();
+      expect(currency).toContain(`<option value="${expected}" selected="">`);
+    },
+  );
   it("records only changed form fields as user corrections", () => {
     const original = {
       ...item,

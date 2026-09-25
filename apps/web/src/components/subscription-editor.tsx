@@ -7,6 +7,7 @@ import type {
   SubscriptionType,
 } from "@navox/contracts";
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { SUBSCRIPTION_CURRENCIES } from "../lib/currencies";
 import styles from "./subscriptions-dashboard.module.css";
 
 function localDate(value: string | null | undefined): string {
@@ -85,7 +86,7 @@ export function SubscriptionEditor({
       !name.trim() ||
       ((amount || trialPrice) && !/^[A-Z]{3}$/.test(currency))
     ) {
-      setError("Enter a name and a three-letter currency for any known price.");
+      setError("Enter a name and select a currency for any known price.");
       return;
     }
     saving.current = true;
@@ -231,16 +232,27 @@ export function SubscriptionEditor({
             </label>
             <label>
               Currency
-              <input
-                maxLength={3}
-                pattern="[A-Z]{3}"
+              <select
+                name="billing_currency"
                 value={currency}
-                onChange={(event) =>
-                  setCurrency(event.target.value.toUpperCase())
-                }
-                placeholder="USD, EUR, GHS…"
+                onChange={(event) => setCurrency(event.target.value)}
                 required={!!amount || !!trialPrice}
-              />
+              >
+                <option value="">Select currency · Unknown</option>
+                {currency &&
+                  !SUBSCRIPTION_CURRENCIES.some(
+                    ([code]) => code === currency,
+                  ) && (
+                    <option value={currency}>
+                      {currency} — Saved currency
+                    </option>
+                  )}
+                {SUBSCRIPTION_CURRENCIES.map(([code, label]) => (
+                  <option key={code} value={code}>
+                    {code} — {label}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               Billing interval
