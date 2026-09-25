@@ -254,3 +254,71 @@ async def test_runtime_rejects_cross_workspace_resource_before_cursor_advance(
     refreshed = await database.get(ConnectorConnection, connection_id)
     assert refreshed is not None
     assert refreshed.sync_cursor is None
+
+
+@pytest.mark.asyncio
+async def test_browser_connector_rejects_background_sync_even_with_persisted_consent_flag(
+    database: AsyncSession,
+) -> None:
+    class BrowserFixture(FixtureConnector):
+        async def sync(self, request: SyncRequest) -> SyncPage:
+            pytest.fail("Browser adapter must not run from ordinary sync")
+
+        def get_manifest(self) -> ConnectorManifest:
+            return FixtureConnector.get_manifest(self).model_copy(
+                update={"connector_class": "BROWSER_ASSISTED"}
+            )
+
+    manifest = BrowserFixture({}).get_manifest()
+    registry = ConnectorRegistry()
+    registry.register(manifest, BrowserFixture)
+    runtime = ConnectorRuntime(registry)
+    user, workspace = User(email="browser-owner@example.com"), Workspace(name="Browser")
+    database.add_all([user, workspace])
+    await database.flush()
+    database.add(WorkspaceMembership(workspace_id=workspace.id, user_id=user.id))
+    definition = ConnectorDefinition(
+        connector_key=manifest.id,
+        version=manifest.version,
+        display_name=manifest.display_name,
+        connector_class=manifest.connector_class,
+        trust_level="NAVOX_FIRST_PARTY",
+        manifest=manifest.model_dump(mode="json", by_alias=True),
+    )
+    database.add(definition)
+    await database.flush()
+    connection = ConnectorConnection(
+        connector_definition_id=definition.id,
+        user_id=user.id,
+        workspace_id=workspace.id,
+        provider="fixture",
+        external_account_id="browser",
+        authorized_capabilities=["fixture.items.read"],
+        provider_capabilities=["fixture.items.read"],
+        config={"explicit_capture_authorized": True},
+    )
+    database.add(connection)
+    await database.commit()
+
+    async def consume(_resource: CanonicalResource) -> None:
+        pytest.fail("No browser resource may be consumed")
+
+    connection_id, workspace_id, user_id = connection.id, workspace.id, user.id
+    for trigger in ("manual", "scheduled", "browser_capture"):
+        with pytest.raises(ConnectorRuntimeError, match="explicit user action"):
+            await runtime.sync(
+                database,
+                connection_id=connection_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                request_id=uuid4(),
+                policy_allowed={"fixture.items.read"},
+                consume=consume,
+                trigger=trigger,
+            )
+    assert (
+        await database.get(
+            ConnectorResource, stable_resource_id(connection_id, "fixture.item", "item-1")
+        )
+        is None
+    )

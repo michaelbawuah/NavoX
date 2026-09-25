@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from navox.connectors.contracts import (
+    BrowserCaptureRequest,
     CanonicalResource,
     ConnectorManifest,
     stable_resource_id,
@@ -86,3 +87,28 @@ def test_canonical_resource_requires_stable_identity() -> None:
     payload["resource_id"] = UUID(int=1)
     with pytest.raises(ValidationError, match="stable"):
         CanonicalResource.model_validate(payload)
+
+
+def test_browser_capture_contract_requires_fresh_scoped_https_request() -> None:
+    request = BrowserCaptureRequest(
+        connection_id=UUID(int=1),
+        workspace_id=UUID(int=2),
+        user_id=UUID(int=3),
+        request_id=UUID(int=4),
+        source_url="https://example.org/current-page",
+        authorized_at=datetime.now(UTC),
+    )
+    assert request.source_url.startswith("https://")
+    for invalid_url in (
+        "http://example.org",
+        "javascript:alert(1)",
+        "https://user:pass@example.org",
+    ):
+        with pytest.raises(ValidationError):
+            BrowserCaptureRequest.model_validate(
+                {**request.model_dump(), "source_url": invalid_url}
+            )
+    with pytest.raises(ValidationError, match="timezone"):
+        BrowserCaptureRequest.model_validate(
+            {**request.model_dump(), "authorized_at": datetime.now(UTC).replace(tzinfo=None)}
+        )

@@ -177,6 +177,12 @@ class ConnectorRuntime:
                 raise ConnectorRuntimeError(
                     "INVALID_PROVIDER_RESPONSE", "Connector version mismatch"
                 )
+            if manifest.connector_class == "BROWSER_ASSISTED":
+                # A persisted config bit cannot attest to a fresh user action.
+                # Browser capture needs a separate, owner-authenticated command.
+                raise ConnectorRuntimeError(
+                    "PERMISSION_DENIED", "Browser capture requires an explicit user action"
+                )
             authorized = self.capability_gateway.evaluate(
                 manifest=manifest,
                 provider_capabilities=set(connection.provider_capabilities),
@@ -463,13 +469,6 @@ class ConnectorRuntime:
         ):
             raise ConnectorRuntimeError(
                 "INVALID_PROVIDER_RESPONSE", "Undeclared provider or resource type"
-            )
-        if (
-            manifest.connector_class == "BROWSER_ASSISTED"
-            and context.config.get("explicit_capture_authorized") is not True
-        ):
-            raise ConnectorRuntimeError(
-                "PERMISSION_DENIED", "Browser capture requires authorization"
             )
 
     async def _persist_resource(

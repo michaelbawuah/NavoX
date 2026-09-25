@@ -263,6 +263,48 @@ class SyncPage(BaseModel):
     has_more: bool = False
 
 
+class BrowserCaptureRequest(BaseModel):
+    """A single visible, owner-initiated capture; never a background sync grant.
+
+    The trusted API must derive these fields from the authenticated session and
+    a fresh user gesture, then pass them to a separately authorized adapter.
+    A connector-supplied config flag is not proof of that gesture.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    connection_id: UUID
+    workspace_id: UUID
+    user_id: UUID
+    request_id: UUID
+    source_url: str = Field(min_length=1, max_length=2_000)
+    authorized_at: datetime
+
+    @field_validator("authorized_at")
+    @classmethod
+    def timezone_aware_authorization(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            raise ValueError("Browser capture authorization must include a timezone")
+        return value.astimezone(UTC)
+
+    @field_validator("source_url")
+    @classmethod
+    def require_https_source(cls, value: str) -> str:
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(value)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError("Browser capture source must be an HTTPS origin")
+        return value
+
+
+@runtime_checkable
+class BrowserAssistedConnector(Protocol):
+    """Future one-shot capture boundary; ordinary sync never invokes this."""
+
+    async def capture(self, request: BrowserCaptureRequest) -> SyncPage: ...
+
+
 class FetchResourceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
