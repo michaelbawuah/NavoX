@@ -291,10 +291,16 @@ async def connector_health_activity(payload: ConnectorHealthWork) -> str:
             await database.commit()
             return result.state
         except ConnectorRuntimeError as error:
-            connection.health_state = "SYNC_FAILED"
+            connection.health_state = (
+                "AUTH_EXPIRED"
+                if error.code in {"AUTH_EXPIRED", "AUTH_REVOKED"}
+                else "RATE_LIMITED"
+                if error.code == "RATE_LIMITED"
+                else "SYNC_FAILED"
+            )
             connection.last_error_code = error.code
             await database.commit()
-            raise _failure(error.code) from None
+            raise _failure(error.code, retry_after_seconds=error.retry_after_seconds) from None
         except Exception:
             connection.health_state = "DEGRADED"
             connection.last_error_code = "TEMPORARY_FAILURE"

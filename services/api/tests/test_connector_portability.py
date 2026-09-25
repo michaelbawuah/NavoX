@@ -259,7 +259,9 @@ async def portable(tmp_path, request):
 
 
 @pytest.mark.asyncio
-async def test_unknown_rest_reaches_today_and_replay_does_not_duplicate_intelligence(portable):
+async def test_unknown_rest_reaches_today_and_replay_does_not_duplicate_intelligence(
+    portable, measure
+):
     result = await portable.sync()
     assert result.status == "completed" and result.processed_count == 1
     assert len(portable.model.calls) == 1
@@ -288,6 +290,13 @@ async def test_unknown_rest_reaches_today_and_replay_does_not_duplicate_intellig
         assert "Please submit" not in saved and "External checkpoint" not in saved
         assert await db.scalar(select(func.count()).select_from(Action)) == 0
         assert await db.scalar(select(func.count()).select_from(Approval)) == 0
+    measure(
+        "secret_to_llm",
+        0,
+        len(portable.model.calls),
+        "unknown REST document excludes synthetic bearer token; lease closed",
+        database=True,
+    )
     replay = await portable.sync()
     assert replay.status == "completed" and replay.duplicate_count == 1
     assert len(portable.model.calls) == 1

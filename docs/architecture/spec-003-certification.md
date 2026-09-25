@@ -6,8 +6,10 @@ Run the fixture-backed connector gate from the repository root:
 bash scripts/certify-connectors.sh /tmp/navox-connector-certification.xml
 ```
 
-The command fails on any failed test and writes JUnit XML with the exact test
-names and counts. It combines the contract, capability, tenant, credential,
+The command fails on any failed test or missing/failed metric threshold. It writes
+JUnit XML with the exact test names and a sibling `-measurements.json` report with
+explicit operation counts, scenario names, database environment, commit/tree IDs,
+dirty-worktree status and a SHA-256 digest of the JUnit evidence. It combines the contract, capability, tenant, credential,
 runtime, sync recovery, event subscription and ingress, Google, Canvas, import,
 generic REST, MCP, unknown-service, and connection management suites. It is
 additive to the required full API gate
@@ -64,10 +66,57 @@ Fixture/staged measurements must identify their scenarios and cannot be
 presented as measured production rates. Test totals alone are not denominators
 for each of these metrics.
 
-Still required: record demonstration D using the live acceptance command in
-`spec-003-portability-acceptance.md`; assemble the metric-specific evidence;
-resolve or explicitly review lifecycle limitations for ambiguous historical
-provenance and unconfirmed old watches; retain zero accepted SPEC-002 regressions
-on the full API/hosted gates. Record the exact commit, environment, sample size,
+The metric-specific fixture evidence is now executable and enforced in
+`scripts/check-api.sh` and the hosted API job. CI retains both JUnit and the JSON
+report in the `navox-connector-measurements` artifact for the tested revision.
+Still required: record demonstration D using the prepared GitHub configuration
+and live command in `spec-003-portability-acceptance.md`; inspect actual historical
+connections with the read-only command in `spec-003-connection-lifecycle.md`, then
+resolve or explicitly review any ambiguous provenance or unconfirmed watches;
+retain zero accepted SPEC-002 regressions on the full API/hosted gates. Record the exact commit, environment, sample size,
 numerator, denominator and failures. A live result from one service establishes
 that interoperability case, not safe semantics for every REST or MCP endpoint.
+
+
+## Measurement definitions
+
+`navox.evaluation.connector_metrics` reads explicit `spec003.measurement` JUnit
+properties emitted at the operation assertions. It does not convert the total
+number of passing tests into provider reliability. Every metric requires a
+nonzero denominator; malformed/duplicate samples, skipped tests, failures and
+missing SPEC-002 acceptance checks fail the gate. Fractions are compared exactly:
+1 duplicate in 100 replays fails the strict <1% target.
+
+| Metric | Fixture sample unit | Current corpus |
+| --- | --- | --- |
+| Contract compliance | Strict reference manifest round trip | 7 manifests |
+| Canonical validity | Resource schema round trip | 6 provider/import mappings |
+| Workspace violations | Broker store/lease/delete with wrong owner, workspace or connection | 9 denied operations |
+| Credential leakage | Encrypted storage, lease representation, audit metadata | 3 inspected surfaces |
+| Unauthorized actions | Unapproved writes to read-only adapters | 5 attempts |
+| Replay duplication | Extra canonical rows after a fresh replay request | 125 replayed revisions |
+| Incremental correctness | Final version and tombstone state against the expected corpus | 125 resources |
+| Cursor recovery | Provider interruption, partial consumer rollback, cancellation, finalization crash | 4 recovery schedules |
+| OAuth refresh | Valid Google/Canvas responses with standard/string expiry, narrowed scope or rotated refresh field | 8 refresh responses |
+| Health accuracy | Returned health states, all structured error codes, unexpected exception | 18 classifications |
+| Event deduplication | HTTP delivery replays, with final receipt and dispatch counts checked | 1,000 duplicates across 20 signed event IDs |
+| Stable identity | Same source mapped again under the same connection | 6 provider/import mappings |
+| Secret exposure to LLM | Actual input documents from unknown REST integration | 2 documents (no-auth and synthetic bearer) |
+| Cross-connector credential exposure | Borrowed credential lease/deletion | 2 attempts |
+| Capability-policy bypass | Each of provider/user/policy grants independently absent | 21 evaluations |
+| SPEC-002 regressions | Executed `test_intelligence_*` checks plus required demo names | Counted separately in each report |
+
+The incremental corpus starts with 100 records, then applies 50 updates, 25
+tombstones, 25 unchanged revisions and 25 new records over multiple pages. The
+replay checks both resource cardinality and committed consumer effects. Event
+replays use the authenticated receiver, its database receipts and dispatch
+boundary; no production provider webhook is implied. The OAuth corpus measures
+acceptance of successful response shapes, not provider outage frequency, token
+rotation persistence, or all failure distributions. Small finite samples,
+especially the six identity mappings and eight refresh responses, cannot
+establish production probabilities at the stated percentages.
+
+The health matrix exposed and now covers a fix: `AUTH_EXPIRED`/`AUTH_REVOKED`
+exceptions persist `AUTH_EXPIRED`, rate limits persist `RATE_LIMITED` and retain
+provider retry delay. Other structured failures remain `SYNC_FAILED`; unexpected
+exceptions are sanitized and classified as `DEGRADED`.

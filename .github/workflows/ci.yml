@@ -93,8 +93,25 @@ jobs:
         working-directory: services/api
       - run: uv run mypy navox
         working-directory: services/api
-      - run: uv run pytest
+      - run: uv run pytest --junitxml=/tmp/navox-api-tests.xml
         working-directory: services/api
+      - name: Enforce measured SPEC-003 fixture thresholds
+        if: always()
+        run: >-
+          uv run python -m navox.evaluation.connector_metrics
+          --junit /tmp/navox-api-tests.xml
+          --output /tmp/navox-connector-measurements.json
+        working-directory: services/api
+      - name: Upload SPEC-003 measured evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: navox-connector-measurements
+          path: |
+            /tmp/navox-api-tests.xml
+            /tmp/navox-connector-measurements.json
+          if-no-files-found: error
+          retention-days: 30
       - run: uv run alembic upgrade head --sql > /tmp/navox-schema.sql
         working-directory: services/api
       - name: Verify required schema tables

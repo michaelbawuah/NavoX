@@ -33,7 +33,9 @@ check 'Ruff lint' uv run --no-sync python -m ruff check .
 check 'Ruff formatting' uv run --no-sync python -m ruff format --check .
 check 'Strict mypy' uv run --no-sync python -m mypy navox
 check 'PostgreSQL Alembic revision width' uv run --no-sync python -c 'from alembic.config import Config; from alembic.script import ScriptDirectory; revisions = ScriptDirectory.from_config(Config("alembic.ini")).walk_revisions(); assert all(len(item.revision) <= 32 for item in revisions), "Alembic revision exceeds PostgreSQL version_num width"'
-check 'Full API test suite' uv run --no-sync python -m pytest
+check 'Full API test suite' uv run --no-sync python -m pytest --junitxml="$reports/tests.xml"
+check 'SPEC-003 metric thresholds' uv run --no-sync python -m navox.evaluation.connector_metrics \
+  --junit "$reports/tests.xml" --output "$reports/connector-measurements.json"
 
 render_schema() {
   uv run --no-sync python -m alembic upgrade head --sql > "$reports/schema.sql" || return $?

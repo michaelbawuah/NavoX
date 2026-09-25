@@ -150,6 +150,8 @@ async def system(tmp_path):
 
         async def health(self, context):
             state.health_calls += 1
+            if isinstance(state.health, Exception):
+                raise state.health
             return state.health
 
         async def sync(self, request):
@@ -239,7 +241,7 @@ async def system(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_retry_continues_last_accepted_page_and_replays_completed_result(system):
+async def test_retry_continues_last_accepted_page_and_replays_completed_result(system, measure):
     fail = True
 
     async def fetch(request):
@@ -274,10 +276,13 @@ async def test_retry_continues_last_accepted_page_and_replays_completed_result(s
     replay = await system.run()
     assert replay.id == result.id and replay.result_ids == result.result_ids
     assert system.calls == calls and system.model_calls == models and system.health_calls == health
+    measure("cursor_recovery", 1, 1, "page checkpoint after provider interruption", database=True)
 
 
 @pytest.mark.asyncio
-async def test_partial_page_replay_skips_accepted_revision_but_retries_rolled_back_consumer(system):
+async def test_partial_page_replay_skips_accepted_revision_but_retries_rolled_back_consumer(
+    system, measure
+):
     async def fetch(_):
         return SyncPage(
             resources=[system.resource("one"), system.resource("two")], next_cursor="final"
@@ -309,6 +314,7 @@ async def test_partial_page_replay_skips_accepted_revision_but_retries_rolled_ba
     assert system.model_calls == ["one", "two", "two"]
     after = await system.snapshot()
     assert len(after.effects) == 2 and len(after.resources) == 2
+    measure("cursor_recovery", 1, 1, "partial page consumer rollback", database=True)
 
 
 @pytest.mark.asyncio
@@ -505,7 +511,9 @@ async def test_consumer_cannot_commit_ahead_of_final_permission_fence(system):
 
 
 @pytest.mark.asyncio
-async def test_failure_after_final_page_retries_finalization_without_rereading(system, monkeypatch):
+async def test_failure_after_final_page_retries_finalization_without_rereading(
+    system, monkeypatch, measure
+):
     original = runtime_module.guard_sync
     fail = True
 
@@ -528,6 +536,7 @@ async def test_failure_after_final_page_retries_finalization_without_rereading(s
     assert (
         system.calls == ["initial"] and system.model_calls == ["one"] and system.health_calls == 1
     )
+    measure("cursor_recovery", 1, 1, "finalization after last page", database=True)
 
 
 @pytest.mark.asyncio
@@ -553,7 +562,7 @@ async def test_rate_limit_backoff_is_durable_and_new_request_does_not_slide_dead
 
 
 @pytest.mark.asyncio
-async def test_cancellation_is_not_success_and_releases_claim_for_retry(system):
+async def test_cancellation_is_not_success_and_releases_claim_for_retry(system, measure):
     started, release = asyncio.Event(), asyncio.Event()
     original = system.fetch
 
@@ -572,6 +581,7 @@ async def test_cancellation_is_not_success_and_releases_claim_for_retry(system):
     assert snap.connection.sync_lease_token is None and snap.runs[0].status == "interrupted"
     release.set()
     assert (await system.run()).status == "completed"
+    measure("cursor_recovery", 1, 1, "cancelled attempt retry", database=True)
 
 
 @pytest.mark.asyncio
@@ -875,3 +885,129 @@ async def test_real_model_wait_does_not_lock_revocation_or_publish_learned_data(
             assert await db.scalar(select(func.count()).select_from(model)) == 0
     snap = await system.snapshot()
     assert snap.connection.sync_cursor == "initial" and snap.runs[0].status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_measured_incremental_corpus_and_replay(system, measure):
+    # Four pages first, then modifications, tombstones, unchanged and new records.
+    initial = [system.resource(f"item-{i}") for i in range(100)]
+    delta = [system.resource(f"item-{i}", version=2) for i in range(50)]
+    delta += [system.resource(f"item-{i}", version=2, status="deleted") for i in range(50, 75)]
+    delta += [system.resource(f"item-{i}") for i in range(75, 125)]
+    current = initial
+
+    async def pages(request):
+        index = (
+            int(request.cursor.split(":")[1]) if (request.cursor or "").startswith("page:") else 0
+        )
+        end = min(index + 25, len(current))
+        return SyncPage(
+            resources=current[index:end],
+            next_cursor=f"page:{end}" if end < len(current) else "complete",
+            has_more=end < len(current),
+        )
+
+    system.fetch = pages
+    await system.run()
+    current = delta
+    await system.run(uuid4())
+    snapshot = await system.snapshot()
+    actual = {
+        row.external_id: (row.canonical["version"], row.deleted) for row in snapshot.resources
+    }
+    expected = {f"item-{i}": (2 if i < 75 else 1, 50 <= i < 75) for i in range(125)}
+    correct = sum(actual.get(key) == state for key, state in expected.items())
+    measure(
+        "incremental_correctness",
+        correct,
+        len(expected),
+        "100 initial records; 50 updates, 25 tombstones, 25 unchanged and 25 additions",
+        database=True,
+    )
+    assert actual == expected and snapshot.connection.sync_cursor == "complete"
+    before_resources, before_effects = len(snapshot.resources), len(snapshot.effects)
+    replay = await system.run(uuid4())
+    after = await system.snapshot()
+    extra = max(0, len(after.resources) - before_resources)
+    measure(
+        "replay_duplication",
+        extra,
+        len(current),
+        "new request replays all 125 delta revisions",
+        database=True,
+    )
+    assert extra == 0 and len(after.effects) == before_effects
+    assert replay.processed_count == 0 and replay.duplicate_count == 125
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reported,expected",
+    [
+        *[
+            (state, state)
+            for state in (
+                "CONNECTED",
+                "DEGRADED",
+                "AUTH_EXPIRED",
+                "RATE_LIMITED",
+                "SYNC_FAILED",
+                "PAUSED",
+                "DISCONNECTED",
+            )
+        ],
+        ("error:AUTH_EXPIRED", "AUTH_EXPIRED"),
+        ("error:AUTH_REVOKED", "AUTH_EXPIRED"),
+        ("error:RATE_LIMITED", "RATE_LIMITED"),
+        *[
+            (f"error:{code}", "SYNC_FAILED")
+            for code in (
+                "PROVIDER_UNAVAILABLE",
+                "RESOURCE_NOT_FOUND",
+                "PERMISSION_DENIED",
+                "INVALID_PROVIDER_RESPONSE",
+                "UNSUPPORTED_CAPABILITY",
+                "TEMPORARY_FAILURE",
+                "PERMANENT_FAILURE",
+            )
+        ],
+        ("unexpected", "DEGRADED"),
+    ],
+)
+async def test_measured_health_classification(system, monkeypatch, measure, reported, expected):
+    from temporalio.exceptions import ApplicationError
+
+    from navox.connectors.jobs import ConnectorHealthWork
+    from navox.core.settings import Settings
+
+    monkeypatch.setattr(activities, "get_settings", lambda: Settings())
+    monkeypatch.setattr(activities, "get_session_factory", lambda: system.factory)
+    monkeypatch.setattr(activities, "build_connector_registry", lambda _: system.registry)
+    if reported.startswith("error:"):
+        code = reported.split(":", 1)[1]
+        system.health = ConnectorRuntimeError(
+            code, retry_after_seconds=120 if code == "RATE_LIMITED" else None
+        )
+    elif reported == "unexpected":
+        system.health = RuntimeError("private provider detail")
+    else:
+        system.health = ConnectorHealth(state=reported, checked_at=datetime.now(UTC))
+    work = ConnectorHealthWork(**{key: str(value) for key, value in system.ids.items()})
+    if isinstance(system.health, Exception):
+        with pytest.raises(ApplicationError) as error:
+            await activities.connector_health_activity(work)
+        assert "private provider detail" not in str(error.value)
+        if reported == "error:RATE_LIMITED":
+            assert error.value.next_retry_delay == timedelta(seconds=120)
+    else:
+        assert await activities.connector_health_activity(work) == expected
+    snapshot = await system.snapshot()
+    correct = snapshot.connection.health_state == expected
+    measure(
+        "health_accuracy",
+        int(correct),
+        1,
+        f"provider outcome {reported} -> {expected}",
+        database=True,
+    )
+    assert correct

@@ -69,7 +69,7 @@ MANIFESTS = [
 
 
 @pytest.mark.parametrize("manifest", MANIFESTS, ids=lambda value: value.id)
-def test_each_reference_manifest_roundtrips_and_cannot_add_authority(manifest):
+def test_each_reference_manifest_roundtrips_and_cannot_add_authority(manifest, measure):
     payload = manifest.model_dump(mode="json", by_alias=True)
     assert (
         ConnectorManifest.model_validate_json(manifest.model_dump_json(by_alias=True)) == manifest
@@ -77,6 +77,7 @@ def test_each_reference_manifest_roundtrips_and_cannot_add_authority(manifest):
     assert payload["minimumNavoxConnectorApiVersion"] == "1"
     assert set(manifest.required_secrets).isdisjoint(payload.keys())
     assert all(name not in payload for name in ("password", "access_token", "private_key"))
+    measure("contract_compliance", 1, 1, f"strict manifest round trip: {manifest.id}")
     poisoned = {**payload, "grantedPermissions": ["communication.messages.send"]}
     with pytest.raises(ValidationError):
         ConnectorManifest.model_validate(poisoned)
@@ -86,7 +87,7 @@ def test_each_reference_manifest_roundtrips_and_cannot_add_authority(manifest):
 
 
 @pytest.mark.parametrize("manifest", MANIFESTS, ids=lambda value: value.id)
-def test_each_reference_manifest_needs_all_permission_layers(manifest):
+def test_each_reference_manifest_needs_all_permission_layers(manifest, measure):
     declared = {
         *(item.name for item in manifest.capabilities.read),
         *(item.name for item in manifest.capabilities.write),
@@ -104,6 +105,12 @@ def test_each_reference_manifest_needs_all_permission_layers(manifest):
         }
         grants[missing] = set()
         assert not gateway.evaluate(**common, **grants).all
+    measure(
+        "capability_bypass",
+        0,
+        3,
+        f"independently absent provider/user/policy grants: {manifest.id}",
+    )
     grants[missing] = declared | {"injected.permissions.write"}
     assert "injected.permissions.write" not in gateway.evaluate(**common, **grants).all
     assert not gateway.evaluate(
@@ -200,7 +207,7 @@ async def _resources(kind: str, connection: UUID, workspace: UUID) -> list[Canon
 @pytest.mark.parametrize(
     "kind", ["google", "canvas", "import-ics", "import-csv", "import-json", "generic"]
 )
-async def test_cross_provider_canonical_identity_and_spec_002_boundary(kind):
+async def test_cross_provider_canonical_identity_and_spec_002_boundary(kind, measure):
     connection, workspace = uuid4(), uuid4()
     first = await _resources(kind, connection, workspace)
     replay = await _resources(kind, connection, workspace)
@@ -213,6 +220,13 @@ async def test_cross_provider_canonical_identity_and_spec_002_boundary(kind):
         assert resource.resource_id != separate.resource_id
         assert resource.resource_id == stable_resource_id(
             connection, resource.resource_type, resource.external_id
+        )
+        measure("canonical_validity", int(validated == resource), 1, f"resource round trip: {kind}")
+        measure(
+            "stable_identity",
+            int(resource.resource_id == repeat.resource_id),
+            1,
+            f"repeat mapping: {kind}",
         )
         document = canonical_resource_to_source_document(
             resource, provenance_connection_id=connection
@@ -260,3 +274,4 @@ async def test_cross_provider_canonical_identity_and_spec_002_boundary(kind):
         with pytest.raises(ConnectorRuntimeError) as denied:
             await adapter.execute(action)
         assert denied.value.code == "UNSUPPORTED_CAPABILITY"
+        measure("unauthorized_actions", 0, 1, f"ungranted write rejected: {kind}")

@@ -413,3 +413,34 @@ async def test_many_revoked_receipts_do_not_starve_new_valid_delivery(delivery_s
         rows = list(await db.scalars(select(ConnectorEventReceipt)))
     assert sum(item.status == "invalidated" for item in rows) == 101
     assert sum(item.status == "dispatched" for item in rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_measured_authenticated_event_replay_corpus(delivery_system, measure):
+    client, factory, _, sub_id, calls, _ = delivery_system
+    duplicate_successes = 0
+    # 20 distinct signed event IDs, each replayed 50 times through the HTTP route.
+    for index in range(20):
+        headers = signed_headers(sub_id, delivery_id=f"measured-{index}")
+        first = await client.post(
+            "/api/v1/connectors/events/fixture", headers=headers, content=BODY
+        )
+        assert first.status_code == 202 and first.json() == {"status": "accepted"}
+        for _ in range(50):
+            response = await client.post(
+                "/api/v1/connectors/events/fixture", headers=headers, content=BODY
+            )
+            duplicate_successes += int(
+                response.status_code == 202 and response.json() == {"status": "duplicate"}
+            )
+    async with factory() as db:
+        receipts = list(await db.scalars(select(ConnectorEventReceipt)))
+    assert len(receipts) == len(calls) == 20
+    measure(
+        "event_deduplication",
+        duplicate_successes,
+        1000,
+        "20 authenticated deliveries, each replayed 50 times; exactly 20 receipts and dispatches",
+        database="sqlite",
+    )
+    assert duplicate_successes == 1000

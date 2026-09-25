@@ -46,8 +46,9 @@ checks and their limits. This portability test does not exercise those setup,
 webhook, or cleanup paths, nor does it authorize arbitrary domains, third-party
 code execution, or writes. No shipped universal adapter currently implements
 event verification. Live unknown-service ingestion, real provider behavior,
-Google watch retirement, and numerical reliability/security targets still need
-independent acceptance evidence.
+Google watch retirement and actual historical deletion still need deployment
+evidence. Numerical fixture measurements now have their own explicit counters
+and thresholds in `spec-003-certification.md`; they are not live reliability rates.
 
 A passing suite is evidence for these named behaviors only; it is not a declaration
 that SPEC-003 is complete.
@@ -98,3 +99,49 @@ the numerical reliability targets or production-wide security certification.
 Tests of the command use provider/model fixtures and are not live acceptance
 results themselves. Keep the report and deployment revision together when
 recording demonstration D.
+
+## Prepared live service: this repository's GitHub issues
+
+`examples/connectors/navox-github-issues.json` is a ready-to-review configuration
+for the actual `michaelbawuah/NavoX` repository. It maps GitHub's `id`, `title`,
+`body`, `updated_at`, `html_url` and `state` fields through the existing generic
+adapter. There is no GitHub-specific intelligence or new core adapter. The repo
+is private, so this example requires an owner-provided token. Do not paste it
+into JSON, `.env`, reports, a terminal command or chat; enter it in Connected Apps.
+
+The [GitHub repository issues documentation](https://docs.github.com/en/rest/issues/issues#list-repository-issues)
+requires repository **Issues: read** permission for a fine-grained token. Scope it
+to this repository. The endpoint also returns pull requests; this example reads
+only the ten most recently updated open records and does not follow GitHub's Link
+pagination headers. It is a bounded interoperability demonstration, not a complete
+repository mirror. Actual HTTP/provider acceptance remains unmeasured here.
+
+1. Check out `spec-003-universal-connectors` in your local NavoX checkout and pull
+   its latest revision. Preserve any local changes before switching branches.
+2. Print the configuration as an environment value:
+
+   ```bash
+   python3 - <<'PY'
+   import json
+   from pathlib import Path
+   entry = json.loads(Path("examples/connectors/navox-github-issues.json").read_text())
+   print("GENERIC_REST_CONNECTORS=" + json.dumps([entry], separators=(",", ":")))
+   PY
+   ```
+
+   Put that line in `.env`. If `GENERIC_REST_CONNECTORS` already contains approved
+   services, append the new object to its existing JSON array instead of replacing
+   them. API and worker both read `.env` in the existing Compose configuration.
+3. Run `docker compose up -d --build api worker`. The migration service applies
+   the current schema. Keep your existing AI provider configuration.
+4. In **Connected Apps → Generic REST API**, choose **NavoX GitHub issues**,
+   approve `development.issues.read`, and enter the repository-scoped token.
+5. Run the `--list` and `--connection-id ... --live` commands above. The connection
+   can already have synced: a fresh run may reuse identical accepted revisions,
+   but it must still read the live source and link that run's receipts to Today.
+
+Use a real open task assigned to you with a clear requested action; an existing
+issue or PR body must actually contain actionable evidence. If the report says
+`source_linked_results_in_today: false`, inspect the source and Today rather than
+creating a fabricated result or overriding extraction. Record the deployment
+commit and JSON report to close mandatory demonstration D.

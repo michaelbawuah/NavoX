@@ -20,6 +20,7 @@ SCRIPT = ROOT / "scripts/check-api.sh"
         "mypy",
         "revision",
         "pytest",
+        "measurements",
         "alembic",
         "evaluation",
         "schema",
@@ -44,6 +45,7 @@ case "$*" in
   *'mypy '*) stage=mypy ;;
   *'ScriptDirectory.from_config'*) stage=revision ;;
   *'pytest'*) stage=pytest ;;
+  *'navox.evaluation.connector_metrics '*) stage=measurements ;;
   *'alembic '*) stage=alembic ;;
   *'navox.evaluation '*) stage=evaluation ;;
 esac
@@ -101,9 +103,10 @@ fi
     if failed_stage == "sync":
         assert commands.splitlines() == ["sync --locked --all-groups"]
     else:
-        assert len(commands.splitlines()) == 8
+        assert len(commands.splitlines()) == 9
         assert "ScriptDirectory.from_config" in commands
         assert "python -m pytest" in commands
+        assert "python -m navox.evaluation.connector_metrics" in commands
         assert "python -m navox.evaluation --fail-on-gate" in commands
         assert "python -m mypy navox" in commands
     assert ("API preflight PASSED" in completed.stdout) is (not failed_stage)

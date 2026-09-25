@@ -102,7 +102,7 @@ async def lease(database, broker, connection):
 
 
 @pytest.mark.asyncio
-async def test_secret_broker_scopes_and_redacts_secret_values(database, broker):
+async def test_secret_broker_scopes_and_redacts_secret_values(database, broker, measure):
     connection = await owner(database, broker)
     credential = await database.get(ConnectionCredential, connection.credential_reference)
     assert credential is not None and SECRET not in credential.encrypted_refresh_token
@@ -121,13 +121,20 @@ async def test_secret_broker_scopes_and_redacts_secret_values(database, broker):
         "connector.credentials.leased",
     }
     assert SECRET not in json.dumps([item.event_metadata for item in audits])
+    measure(
+        "credential_leakage",
+        0,
+        3,
+        "encrypted credential, handle repr, and audit metadata",
+        database="sqlite",
+    )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["store", "lease", "delete"])
 @pytest.mark.parametrize("wrong", ["user_id", "workspace_id", "connection_id"])
 async def test_broker_operations_require_matching_owner_and_workspace(
-    database, broker, operation, wrong
+    database, broker, operation, wrong, measure
 ):
     connection = await owner(database, broker)
     original = connection.credential_reference
@@ -142,10 +149,13 @@ async def test_broker_operations_require_matching_owner_and_workspace(
             await broker.delete_for_connection(database, **values)
     assert connection.credential_reference == original
     assert await database.get(ConnectionCredential, original) is not None
+    measure(
+        "workspace_violations", 0, 1, f"broker {operation} with foreign {wrong}", database="sqlite"
+    )
 
 
 @pytest.mark.asyncio
-async def test_secret_broker_cannot_lease_another_connections_bundle(database, broker):
+async def test_secret_broker_cannot_lease_another_connections_bundle(database, broker, measure):
     first = await owner(database, broker)
     second = await owner(database, broker)
     second.credential_reference = first.credential_reference
@@ -154,6 +164,13 @@ async def test_secret_broker_cannot_lease_another_connections_bundle(database, b
         await lease(database, broker, second)
     with pytest.raises(SecretBrokerError, match="binding"):
         await broker.delete_for_connection(database, **scope(second))
+    measure(
+        "cross_connector_credentials",
+        0,
+        2,
+        "borrowed bundle lease and deletion rejected",
+        database="sqlite",
+    )
     with await lease(database, broker, first) as valid:
         assert valid.get("API_TOKEN") == SECRET
 

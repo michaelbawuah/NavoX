@@ -46,3 +46,31 @@ affected card. A shared legacy provenance anchor also returns 409. This is an
 honest partial implementation and is not full learned-data deletion across
 every existing account. Audit retention and upstream subscription cancellation
 must be reviewed as part of production acceptance.
+
+## Inspect historical blockers without changing data
+
+Run this against the deployed app after updating the API image:
+
+```bash
+docker compose exec -T api uv run --no-sync python -m navox.evaluation.connector_deletion_review --list
+
+docker compose exec -T api uv run --no-sync python -m navox.evaluation.connector_deletion_review \
+  --connection-id 00000000-0000-0000-0000-000000000000 \
+  > spec-003-deletion-review.json
+```
+
+The first command lists at most 100 eligible connection IDs and reports truncation.
+The second reports counts for pending/unconfirmed watches, pending universal
+subscriptions, un-attributed identities, potentially embedded plans/actions/
+approvals, shared anchors, and partial ingestion without an anchor. It includes
+no emails, identity values, tokens, source bodies or provider errors. It does not
+change a grant, assign an identity to a guessed source, cancel a watch, or erase
+anything. A false `requires_historical_review` is an inventory result, not deletion
+authorization: the deletion transaction still checks ownership and surviving
+provenance. Run it for the connections used before migration `0020_identity_sources`.
+
+When a review count is nonzero, preserve the existing guarded behavior until the
+actual records have been reviewed. Provider names alone cannot reconstruct lost
+identity provenance, and an old provisional watch deadline is not confirmation
+of provider expiration. These are historical-data acceptance cases, not a reason
+to bypass the source-only deletion boundary.

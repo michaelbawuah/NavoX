@@ -1871,3 +1871,45 @@ async def test_successful_reconnect_can_resume_despite_stale_source_auth_error(e
     assert gmail["health"] != "AUTH_EXPIRED" and gmail["can_sync"] is True
     async with env.factory() as db:
         assert (await db.get(Connection, env.id)).status == "active"
+
+
+@pytest.mark.asyncio
+async def test_historical_deletion_inventory_is_read_only_and_omits_identity_values(env):
+    import json
+
+    from navox.evaluation.connector_deletion_review import inspect_connection
+
+    async with env.factory() as db:
+        person = Person(workspace_id=env.workspace_id, canonical_name="PRIVATE-NAME")
+        db.add(person)
+        await db.flush()
+        identity = PersonIdentity(
+            workspace_id=env.workspace_id,
+            person_id=person.id,
+            provider="google",
+            identity_type="email",
+            identity_value="PRIVATE-EMAIL@example.invalid",
+        )
+        db.add(identity)
+        await db.commit()
+        identity_id = identity.id
+    async with env.factory() as db:
+        report = await inspect_connection(db, env.id)
+        assert report["review_counts"]["unattributed_person_identities"] == 1
+        assert report["requires_historical_review"] and not report["deletion_authorized"]
+        assert not report["disconnected"]
+        assert "PRIVATE" not in json.dumps(report) and "SECRET-SENTINEL" not in json.dumps(report)
+        assert not db.new and not db.dirty and not db.deleted
+        identity = await db.get(PersonIdentity, identity_id)
+        assert identity is not None and not identity.source_attributed
+        assert await db.get(PersonIdentitySource, (identity_id, env.id)) is None
+        assert (await db.get(Connection, env.id)).status == "active"
+
+
+@pytest.mark.asyncio
+async def test_historical_deletion_inventory_rejects_unknown_connection(env):
+    from navox.evaluation.connector_deletion_review import DeletionReviewError, inspect_connection
+
+    async with env.factory() as db:
+        with pytest.raises(DeletionReviewError, match="not_found"):
+            await inspect_connection(db, uuid4())
