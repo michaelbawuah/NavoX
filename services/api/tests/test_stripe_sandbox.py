@@ -424,6 +424,27 @@ async def test_erasure_removes_stripe_derived_records_and_prices(stripe_env):
 
 
 @pytest.mark.asyncio
+async def test_generic_scheduler_cannot_degrade_explicit_stripe_connection(stripe_env, monkeypatch):
+    from navox.connectors import activities
+
+    env = stripe_env
+    await connected(env)
+    monkeypatch.setattr(activities, "get_settings", lambda: env.settings)
+    monkeypatch.setattr(activities, "get_session_factory", lambda: env.factory)
+    assert await activities.connector_reconciliation_activity() == []
+    connection = await env.database.scalar(select(ConnectorConnection))
+    response = await env.client.post(
+        f"/api/v1/connections/{connection.id}/sync",
+        headers=env.headers,
+        json={"request_id": str(uuid4()), "source": "resources"},
+    )
+    assert response.status_code == 409, response.text
+    await env.database.refresh(connection)
+    assert connection.status == connection.health_state == "CONNECTED"
+    assert env.provider.writes == []
+
+
+@pytest.mark.asyncio
 async def test_sdk_write_cannot_bypass_exact_approval():
     binding = stripe.StripeBinding(
         account_id=ACCOUNT, subscription_id=SUBSCRIPTION, customer_id=CUSTOMER

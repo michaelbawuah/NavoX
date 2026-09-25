@@ -116,6 +116,7 @@ class StripeBinding(BaseModel):
     subscription_id: str = Field(pattern=r"^sub_[A-Za-z0-9]{1,120}$")
     customer_id: str = Field(pattern=r"^cus_[A-Za-z0-9]{1,120}$")
     api_version: Literal["2026-08-26.dahlia"] = API_VERSION
+    managed_by_source_workflow: Literal[True] = True
 
 
 class StripeState(BaseModel):
