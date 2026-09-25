@@ -36,6 +36,8 @@ check 'PostgreSQL Alembic revision width' uv run --no-sync python -c 'from alemb
 check 'Full API test suite' uv run --no-sync python -m pytest --junitxml="$reports/tests.xml"
 check 'SPEC-003 metric thresholds' uv run --no-sync python -m navox.evaluation.connector_metrics \
   --junit "$reports/tests.xml" --output "$reports/connector-measurements.json"
+check 'SPEC-004 fixture thresholds and safety checks' uv run --no-sync python -m navox.evaluation.subscription_metrics \
+  --junit "$reports/tests.xml" --output "$reports/subscription-measurements.json"
 
 render_schema() {
   uv run --no-sync python -m alembic upgrade head --sql > "$reports/schema.sql" || return $?
@@ -48,6 +50,8 @@ render_schema() {
     people person_identities person_identity_sources operational_observations observation_evidence
     intelligence_feedback intelligence_source_receipts gmail_sync_plans connector_definitions
     connector_connections connector_resources connector_subscriptions connector_event_receipts connector_sync_runs connector_sync_receipts connector_import_snapshots
+    merchants merchant_aliases recurring_obligations recurring_obligation_evidence
+    obligation_price_history cancellation_attempts cancellation_evidence subscription_events
   )
   for table in "${tables[@]}"; do
     grep -F "CREATE TABLE $table (" "$reports/schema.sql" >/dev/null || {

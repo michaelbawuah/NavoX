@@ -46,6 +46,7 @@ from navox.db.models import (
     User,
     WorkspaceMembership,
 )
+from navox.subscriptions.provenance import erase_source_subscriptions
 
 
 async def _locked_ownership(
@@ -478,6 +479,12 @@ async def delete_learned_data(
     ):
         raise HTTPException(409, "Person identity provenance needs manual review")
     await erase_source_plans(
+        database,
+        workspace_id=workspace_id,
+        user_id=user_id,
+        connection_ids={identifier for identifier in provenance_ids if identifier is not None},
+    )
+    await erase_source_subscriptions(
         database,
         workspace_id=workspace_id,
         user_id=user_id,

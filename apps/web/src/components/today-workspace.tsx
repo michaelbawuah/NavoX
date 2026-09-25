@@ -759,6 +759,12 @@ export function TodayWorkspace({
           </span>
           NavoX
         </a>
+        <nav className={styles.workspaceNav} aria-label="Workspace">
+          <a href="/" aria-current="page">
+            Today
+          </a>
+          <a href="/subscriptions">Subscriptions</a>
+        </nav>
         <div className={styles.topbarMeta}>
           <span>{account.workspace.name}</span>
           <button onClick={() => void onSignOut()} type="button">

@@ -353,6 +353,10 @@ class ApprovalService:
             user_id=user_id,
             workspace_id=workspace_id,
         )
+        if action.action_type == "subscription.cancel":
+            raise ApprovalConflictError(
+                "Subscription cancellation requires its exact R4 preview confirmation"
+            )
         user = await database.scalar(select(User).where(User.id == user_id))
         if user is None:
             raise ApprovalNotFoundError("User not found")

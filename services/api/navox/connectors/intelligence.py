@@ -26,6 +26,7 @@ from navox.intelligence.extraction import (
     source_document_hash,
 )
 from navox.intelligence.resolution import resolve_extraction
+from navox.subscriptions.resolution import ingest_source_document
 
 
 async def ingest_connector_resource(
@@ -124,6 +125,14 @@ async def ingest_connector_resource(
         lock_authority=True,
     )
     provenance = await ensure_provenance_connection(database, connector_connection)
+    if not tombstone:
+        await ingest_source_document(
+            database,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            connection_id=provenance.id,
+            document=document,
+        )
     if rejection is not None:
         database.add(
             IntelligenceSourceReceipt(

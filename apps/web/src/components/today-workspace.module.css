@@ -1386,3 +1386,36 @@
   font-size: 0.56rem;
   text-transform: capitalize;
 }
+
+.workspaceNav {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-inline: 1rem;
+}
+.workspaceNav a {
+  color: #98abc2;
+  text-decoration: none;
+  font-size: 0.75rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.5rem;
+}
+.workspaceNav a[aria-current="page"] {
+  color: #b3f3dd;
+  background: #193635;
+}
+.workspaceNav a:hover,
+.workspaceNav a:focus-visible {
+  color: #e0fff5;
+  outline-color: #a4ebd9;
+}
+@media (max-width: 580px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    padding-bottom: 0.8rem;
+  }
+  .workspaceNav {
+    margin: 0;
+  }
+}

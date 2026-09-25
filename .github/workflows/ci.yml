@@ -112,11 +112,25 @@ jobs:
             /tmp/navox-connector-measurements.json
           if-no-files-found: error
           retention-days: 30
+      - name: Enforce measured SPEC-004 fixture thresholds and safety checks
+        run: >-
+          uv run python -m navox.evaluation.subscription_metrics
+          --junit /tmp/navox-api-tests.xml
+          --output /tmp/navox-subscription-measurements.json
+        working-directory: services/api
+      - name: Upload SPEC-004 measured evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: navox-subscription-measurements
+          path: /tmp/navox-subscription-measurements.json
+          if-no-files-found: error
+          retention-days: 30
       - run: uv run alembic upgrade head --sql > /tmp/navox-schema.sql
         working-directory: services/api
       - name: Verify required schema tables
         run: |
-          for table in users workspaces workspace_memberships plans plan_steps plan_sources actions approvals workflow_refs audit_events proactive_preferences proactive_signals briefing_snapshots people person_identities person_identity_sources operational_observations observation_evidence intelligence_feedback intelligence_source_receipts gmail_sync_plans connector_definitions connector_connections connector_resources connector_subscriptions connector_event_receipts connector_sync_runs connector_sync_receipts; do
+          for table in users workspaces workspace_memberships plans plan_steps plan_sources actions approvals workflow_refs audit_events proactive_preferences proactive_signals briefing_snapshots people person_identities person_identity_sources operational_observations observation_evidence intelligence_feedback intelligence_source_receipts gmail_sync_plans connector_definitions connector_connections connector_resources connector_subscriptions connector_event_receipts connector_sync_runs connector_sync_receipts merchants merchant_aliases recurring_obligations recurring_obligation_evidence obligation_price_history cancellation_attempts cancellation_evidence subscription_events; do
             grep -F "CREATE TABLE $table" /tmp/navox-schema.sql
           done
           grep -F "client_type" /tmp/navox-schema.sql
@@ -140,6 +154,10 @@ jobs:
           uv run pytest tests/test_connector_sync_recovery.py
           tests/test_google_calendar_connector.py tests/test_google_gmail_connector.py
           tests/test_connection_management.py
+          tests/test_subscriptions_registry.py tests/test_subscriptions_discovery.py
+          tests/test_subscription_cancellation.py tests/test_subscription_provider_capability.py
+          tests/test_subscription_lifecycle.py tests/test_subscription_provenance.py
+          tests/test_subscriptions_api.py tests/test_stripe_sandbox.py
 
   dependency-security:
     name: Dependency security
@@ -441,6 +459,16 @@ jobs:
           docker compose run --rm --no-deps -T \
             --volume "$PWD/services/api/integration:/app/integration:ro" \
             api uv run --no-sync python -m integration.intelligence_temporal_smoke
+      - name: Verify SPEC-004 cancellation through API, Temporal and PostgreSQL
+        run: |
+          docker compose run --rm --no-deps -T \
+            --volume "$PWD/services/api/integration:/app/integration:ro" \
+            api uv run --no-sync python -m integration.subscription_temporal_smoke
+      - name: Verify native Stripe sandbox adapter through API, Temporal and PostgreSQL
+        run: |
+          docker compose run --rm --no-deps -T \
+            --volume "$PWD/services/api/integration:/app/integration:ro" \
+            api uv run --no-sync python -m integration.stripe_subscription_temporal_smoke
       - name: Capture service diagnostics on failure
         if: failure()
         run: docker compose logs --no-color --tail=300 api worker postgres

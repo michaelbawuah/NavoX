@@ -42,6 +42,7 @@ from navox.providers.google_sources import (
 from navox.providers.google_sources import (
     GoogleSourceGateway as GoogleSourceGateway,
 )
+from navox.subscriptions.resolution import ingest_source_document
 
 
 async def authorized_connection(
@@ -140,7 +141,14 @@ async def _process_document(
         try:
             result = await extractor.extract(document, owner_email=connection.external_email)
         except InvalidOperationalExtraction as error:
-            await authorize(database, connection_id, source)
+            connection, user = await authorize(database, connection_id, source)
+            await ingest_source_document(
+                database,
+                workspace_id=connection.workspace_id,
+                user_id=connection.user_id,
+                connection_id=connection.id,
+                document=document,
+            )
             database.add(
                 IntelligenceSourceReceipt(
                     connection_id=connection_id,
@@ -173,6 +181,14 @@ async def _process_document(
             return set(), "rejected"
     # Recheck after a slow provider/model call before applying any proposal.
     connection, user = await authorize(database, connection_id, source)
+    if not tombstone:
+        await ingest_source_document(
+            database,
+            workspace_id=connection.workspace_id,
+            user_id=connection.user_id,
+            connection_id=connection.id,
+            document=document,
+        )
     resolved_ids = await resolve_extraction(
         database,
         connection=connection,

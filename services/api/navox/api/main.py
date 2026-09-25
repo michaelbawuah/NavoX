@@ -21,6 +21,7 @@ from navox.api.intelligence_sync import router as intelligence_sync_router
 from navox.api.mcp import router as mcp_router
 from navox.api.middleware import RequestHardeningMiddleware
 from navox.api.proactive import router as proactive_router
+from navox.api.subscriptions import router as subscriptions_router
 from navox.api.today import router as today_router
 from navox.api.workspace import router as workspace_router
 from navox.core.settings import get_settings
@@ -37,7 +38,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=[settings.web_origin],
         allow_credentials=True,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
         expose_headers=["Server-Timing", "X-Request-ID"],
         max_age=600,
@@ -54,6 +55,7 @@ def create_app() -> FastAPI:
     app.include_router(intelligence_sync_router, prefix="/api/v1")
     app.include_router(workspace_router, prefix="/api/v1")
     app.include_router(proactive_router, prefix="/api/v1")
+    app.include_router(subscriptions_router, prefix="/api/v1")
     app.include_router(actions_router, prefix="/api/v1")
     app.include_router(agent_router, prefix="/api/v1")
     app.include_router(auth_router, prefix="/api/v1")

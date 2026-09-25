@@ -40,6 +40,15 @@ def _contract(
 
 
 ACTION_CONTRACTS: dict[str, ActionContract] = {
+    "subscription.cancel": _contract(
+        "subscription.cancel",
+        "connector",
+        "R4",
+        permissions=("subscription.cancel",),
+        idempotency="navox_at_most_once_no_ambiguous_retry",
+        verification="independent_provider_state",
+        executable=True,
+    ),
     "navox.commitment.inspect": _contract(
         "navox.commitment.inspect",
         "navox",
