@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useState } from "react";
 import {
   AccessStage,
   LandingAtmosphere,
@@ -49,10 +49,6 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [connections, setConnections] = useState<GoogleConnection[]>([]);
-  const [isConnectingGoogle, setIsConnectingGoogle] = useState(false);
-  const [checkingConnectionId, setCheckingConnectionId] = useState<
-    string | null
-  >(null);
   const [isLoading, setIsLoading] = useState(true);
   const [effectsPaused, setEffectsPaused] = useState(false);
 
@@ -65,6 +61,10 @@ export default function Home() {
         cancelled: "Google connection was cancelled.",
         connected:
           "Google account linked. No Gmail, Calendar, or Drive data was requested.",
+        reconnected:
+          "Google authorization refreshed. Any paused connection remains paused.",
+        intelligence_enabled:
+          "Google read access approved. Start a sync when you are ready.",
         gmail_send_enabled:
           "Gmail sending permission enabled. Every send still requires exact approval.",
         failed: "Google could not complete the connection. Please try again.",
@@ -137,49 +137,21 @@ export default function Home() {
     setIsLoading(false);
   }
 
-  async function connectGoogle() {
-    setMessage("");
-    setIsConnectingGoogle(true);
-    const response = await fetch(`${apiBaseUrl}/connections/google/start`, {
-      credentials: "include",
-    });
-
-    if (!response.ok) {
-      setMessage(await readApiError(response));
-      setIsConnectingGoogle(false);
-      return;
+  const refreshConnections = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiBaseUrl}/connections/google`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!response.ok)
+        throw new Error("Connection controls could not refresh.");
+      setConnections((await response.json()) as GoogleConnection[]);
+    } catch (error) {
+      // Do not leave older approval/read controls advertising a stale active account.
+      setConnections([]);
+      throw error;
     }
-
-    const body = (await response.json()) as { authorization_url: string };
-    window.location.assign(body.authorization_url);
-  }
-
-  async function checkGoogleConnection(connectionId: string) {
-    setMessage("");
-    setCheckingConnectionId(connectionId);
-    const response = await fetch(
-      `${apiBaseUrl}/connections/google/${connectionId}/health`,
-      { method: "POST", credentials: "include" },
-    );
-    if (!response.ok) {
-      setMessage(await readApiError(response));
-      setCheckingConnectionId(null);
-      return;
-    }
-
-    const updated = (await response.json()) as GoogleConnection;
-    setConnections((current) =>
-      current.map((connection) =>
-        connection.id === updated.id ? updated : connection,
-      ),
-    );
-    setMessage(
-      updated.status === "active"
-        ? "Google connection is healthy."
-        : "Google needs to be reauthorized.",
-    );
-    setCheckingConnectionId(null);
-  }
+  }, []);
 
   async function signOut() {
     setIsLoading(true);
@@ -205,12 +177,9 @@ export default function Home() {
     return (
       <TodayWorkspace
         account={account}
-        checkingConnectionId={checkingConnectionId}
         connections={connections}
-        isConnectingGoogle={isConnectingGoogle}
         message={message}
-        onCheckGoogle={checkGoogleConnection}
-        onConnectGoogle={connectGoogle}
+        onConnectionsChanged={refreshConnections}
         onSignOut={signOut}
       />
     );

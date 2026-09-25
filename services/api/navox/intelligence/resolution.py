@@ -5,6 +5,7 @@ updates, while stable IDs make replays safe without retaining source bodies.
 """
 
 import re
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from hashlib import sha256
@@ -23,10 +24,12 @@ from navox.db.models import (
     OperationalObservation,
     Person,
     PersonIdentity,
+    PersonIdentitySource,
     User,
     WorkspaceMembership,
 )
 from navox.intelligence.contracts import SourceDocument, SourceIdentity
+from navox.intelligence.email_relevance import filter_email_extraction
 from navox.intelligence.extraction import (
     INSTRUCTION_LIKE_MARKERS,
     EvidenceSpan,
@@ -109,8 +112,16 @@ def _identity_value(identity: SourceIdentity) -> str:
 
 
 async def resolve_identity(
-    database: AsyncSession, *, workspace_id: UUID, identity: SourceIdentity
+    database: AsyncSession,
+    *,
+    workspace_id: UUID,
+    identity: SourceIdentity,
+    connection_id: UUID | None = None,
 ) -> UUID:
+    if connection_id is not None:
+        source_connection = await database.get(Connection, connection_id)
+        if source_connection is None or source_connection.workspace_id != workspace_id:
+            raise PermissionError("Identity source is outside its workspace")
     value = _identity_value(identity)
     identity_type = identity.identity_type
     if identity_type != "email" and identity.provider:
@@ -131,6 +142,7 @@ async def resolve_identity(
         )
         if person is None:
             raise ValueError("Identity points outside its workspace")
+        await _attach_identity_source(database, existing, connection_id)
         return person.id
     person_id = _stable_id("person", workspace_id, identity_type, value)
     # Savepoint handles the same stable identity arriving on two connections.
@@ -155,6 +167,7 @@ async def resolve_identity(
                     identity_type=identity_type,
                     identity_value=value,
                     confidence=Decimal("1"),
+                    source_attributed=connection_id is not None,
                 )
             )
             await database.flush()
@@ -168,8 +181,39 @@ async def resolve_identity(
         )
         if existing is None:
             raise
+        await _attach_identity_source(database, existing, connection_id)
         return UUID(str(existing.person_id))
+    if connection_id is not None:
+        identity_row = await database.scalar(
+            select(PersonIdentity).where(
+                PersonIdentity.workspace_id == workspace_id,
+                PersonIdentity.identity_type == identity_type,
+                PersonIdentity.identity_value == value,
+            )
+        )
+        if identity_row is None:
+            raise RuntimeError("Created identity is missing")
+        await _attach_identity_source(database, identity_row, connection_id)
     return person_id
+
+
+async def _attach_identity_source(
+    database: AsyncSession, identity: PersonIdentity, connection_id: UUID | None
+) -> None:
+    if connection_id is None:
+        return
+    key = (identity.id, connection_id)
+    if await database.get(PersonIdentitySource, key) is not None:
+        return
+    from sqlalchemy.exc import IntegrityError
+
+    try:
+        async with database.begin_nested():
+            database.add(PersonIdentitySource(identity_id=identity.id, connection_id=connection_id))
+            await database.flush()
+    except IntegrityError:
+        if await database.get(PersonIdentitySource, key) is None:
+            raise
 
 
 async def _record_observation(
@@ -523,12 +567,18 @@ async def resolve_extraction(
     source_text = f"{document.subject or ''}\n{document.content or ''}".casefold()
     if any(marker in source_text for marker in INSTRUCTION_LIKE_MARKERS):
         return []
+    result = replace(result, extraction=filter_email_extraction(result.extraction, document))
     identities = ([document.author] if document.author else []) + list(document.recipients)
+    if document.source_type == "gmail_message" and not result.extraction.observations:
+        identities = []
     resolved_people: dict[str, UUID] = {}
     ambiguous_names: set[str] = set()
     for identity in identities:
         identity_person_id = await resolve_identity(
-            database, workspace_id=document.workspace_id, identity=identity
+            database,
+            workspace_id=document.workspace_id,
+            identity=identity,
+            connection_id=connection.id,
         )
         resolved_people[_identity_value(identity)] = identity_person_id
         if identity.display_name:
@@ -558,6 +608,7 @@ async def resolve_extraction(
                         identity_value=identity_key,
                         display_name=mention.name,
                     ),
+                    connection_id=connection.id,
                 )
                 resolved_people[identity_key] = mentioned_person_id
                 # Body-only identities do not establish unambiguous name aliases.
@@ -594,9 +645,6 @@ async def resolve_extraction(
     cancelled = (
         document.source_type == "calendar_event" and document.metadata.get("status") == "cancelled"
     )
-    labels = document.metadata.get("label_ids", [])
-    marketing = isinstance(labels, list) and "CATEGORY_PROMOTIONS" in labels
-    marketing = marketing or document.metadata.get("list_unsubscribe") is True
     for candidate in result.extraction.observations:
         temporal = resolve_temporal(
             candidate.temporal_expression,
@@ -624,9 +672,18 @@ async def resolve_extraction(
             1.0 if not subject or person_id or subject in {"i", "you", "me", "we"} else 0.89
         )
         confidence = min(candidate.confidence, entity_cap)
+        if document.source_type == "gmail_message" and candidate.email_relevance:
+            confidence = min(confidence, candidate.email_relevance.confidence)
+        subject_only = document.source_type == "gmail_message" and all(
+            span.source == "subject" for span in candidate.evidence
+        )
+        if subject_only:
+            # A headline can name an action without establishing a personal
+            # obligation. It cannot bypass review or drive a state transition.
+            confidence = min(confidence, 0.89)
         if candidate.temporal_expression:
             confidence = min(confidence, max(0.75, temporal.confidence))
-        if marketing or cancelled:
+        if cancelled:
             confidence = min(confidence, 0.5)
         observation = await _record_observation(
             database,
@@ -668,7 +725,7 @@ async def resolve_extraction(
                     id=_stable_id("commitment", connection.workspace_id, dedupe),
                     workspace_id=connection.workspace_id,
                     user_id=connection.user_id,
-                    commitment_type={"request": "task"}.get(
+                    commitment_type={"request": "task", "alert": "task"}.get(
                         candidate.observation_type, candidate.observation_type
                     ),
                     title=title[:256],
@@ -683,6 +740,12 @@ async def resolve_extraction(
                         "temporal": temporal.as_metadata(),
                         "resolution": "CREATE_NEW",
                         "source_updated_at": document.occurred_at.isoformat(),
+                        **({"evidence_review_reason": "subject_only"} if subject_only else {}),
+                        **(
+                            {"email_relevance": candidate.email_relevance.model_dump()}
+                            if document.source_type == "gmail_message" and candidate.email_relevance
+                            else {}
+                        ),
                     },
                 )
                 database.add(existing)
@@ -708,6 +771,35 @@ async def resolve_extraction(
             continue
         outcome = "CREATE_NEW" if created else "MERGE_EVIDENCE"
         metadata = dict(existing.intelligence_metadata or {})
+        if document.source_type == "gmail_message" and candidate.email_relevance and not state_fact:
+            # A newer, validated action can upgrade an older matching card too.
+            metadata["email_relevance"] = candidate.email_relevance.model_dump()
+            metadata.pop("evidence_review_reason", None)
+        if (
+            existing.status == "superseded"
+            and existing.created_by == "ai"
+            and metadata.get("reason") in {"source_cancelled", "source_corrected"}
+            and document.source_type == "calendar_event"
+            and candidate.observation_type == "meeting"
+            and document.metadata.get("status") == "confirmed"
+            and confidence >= 0.9
+            and temporal.start_at is not None
+            and existing.valid_until is not None
+            and document.occurred_at > _utc(existing.valid_until)
+        ):
+            # A newer authoritative calendar revision can restore its own withdrawn
+            # meeting. User completion/rejection and stale revisions stay terminal.
+            existing.status = "confirmed"
+            existing.valid_until = None
+            existing.due_at = temporal.resolved_at
+            existing.confidence = confidence
+            metadata.pop("reason", None)
+            metadata.pop("conflicting_temporal", None)
+            metadata.pop("calendar_end_at", None)
+            metadata.pop("completion_condition", None)
+            metadata["temporal"] = temporal.as_metadata()
+            metadata["lifecycle_state"] = "CONFIRMED"
+            outcome = "UPDATE_EXISTING"
         if document.source_type == "calendar_event" and candidate.observation_type == "meeting":
             end_at = document.metadata.get("end_at")
             if isinstance(end_at, str):
@@ -823,7 +915,7 @@ async def resolve_extraction(
             temporal=temporal,
         )
     for relationship in result.extraction.relationships:
-        relationship_confidence = min(relationship.confidence, 0.5 if marketing else 1.0)
+        relationship_confidence = relationship.confidence
         observation_id = await _record_auxiliary_fact(
             database,
             connection=connection,

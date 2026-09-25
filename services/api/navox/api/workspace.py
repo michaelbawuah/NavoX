@@ -101,20 +101,47 @@ _weather_cache: dict[tuple[str, str], tuple[datetime, WeatherResponse]] = {}
 async def city_weather(
     city: str, unit: Literal["celsius", "fahrenheit"], client: httpx.AsyncClient
 ) -> WeatherResponse:
-    geocoded = await client.get(
-        "https://geocoding-api.open-meteo.com/v1/search",
-        params={"name": city, "count": 1, "language": "en", "format": "json"},
-    )
-    geocoded.raise_for_status()
-    places = geocoded.json().get("results", [])
-    if not places:
-        return WeatherResponse(status="unavailable", unit=unit, city=city)
-    place = places[0]
+    # Prefer the full location supplied by the user, but fall back to the city
+    # portion when a misspelled state/region makes an otherwise clear city fail
+    # to geocode (for example, "Ithaca,Newyork"). The returned label always
+    # shows the provider's recognized place so the user can spot a mismatch.
+    normalized_city = ", ".join(part.strip() for part in city.split(",") if part.strip())
+    queries = [normalized_city]
+    primary_city = normalized_city.split(",", maxsplit=1)[0]
+    if primary_city and primary_city.casefold() != normalized_city.casefold():
+        queries.append(primary_city)
+
+    place: dict[str, object] | None = None
+    for query in queries:
+        geocoded = await client.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": query, "count": 1, "language": "en", "format": "json"},
+        )
+        geocoded.raise_for_status()
+        places = geocoded.json().get("results", [])
+        if places:
+            place = places[0]
+            break
+    if place is None:
+        return WeatherResponse(
+            status="unavailable",
+            unit=unit,
+            city=normalized_city or city,
+            description="Try a city name or City, State.",
+        )
+    latitude_value = place.get("latitude")
+    longitude_value = place.get("longitude")
+    if not isinstance(latitude_value, (int, float, str)) or not isinstance(
+        longitude_value, (int, float, str)
+    ):
+        raise ValueError("Invalid weather location")
+    latitude = float(latitude_value)
+    longitude = float(longitude_value)
     forecast = await client.get(
         "https://api.open-meteo.com/v1/forecast",
         params={
-            "latitude": place["latitude"],
-            "longitude": place["longitude"],
+            "latitude": latitude,
+            "longitude": longitude,
             "current": "temperature_2m,weather_code",
             "temperature_unit": unit,
             "timezone": "UTC",
@@ -144,12 +171,17 @@ async def city_weather(
         if code <= 86
         else "Thunderstorms"
     )
+    location_parts = [str(place.get("name", city))]
+    for key in ("admin1", "country"):
+        value = place.get(key)
+        if value and str(value) not in location_parts:
+            location_parts.append(str(value))
     return WeatherResponse(
         status="ready",
         temperature=temperature,
         unit=unit,
         description=description,
-        city=str(place.get("name", city)),
+        city=", ".join(location_parts),
         observed_at=str(current["time"]) + "Z",
     )
 
@@ -167,7 +199,7 @@ async def get_weather(
     if cached and cached[0] > now:
         return cached[1]
     try:
-        async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=False) as client:
             result = await city_weather(prefs.weather_city, prefs.temperature_unit, client)
     except (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError):
         result = WeatherResponse(
@@ -175,5 +207,8 @@ async def get_weather(
         )
     if len(_weather_cache) >= 256:
         _weather_cache.clear()
-    _weather_cache[key] = (now + timedelta(minutes=15), result)
+    # A successful weather reading can safely be reused for a short period.
+    # Do not keep a transient provider failure around for fifteen minutes.
+    ttl = timedelta(minutes=15 if result.status == "ready" else 1)
+    _weather_cache[key] = (now + ttl, result)
     return result

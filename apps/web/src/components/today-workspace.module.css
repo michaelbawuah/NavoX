@@ -115,6 +115,7 @@
 
 .topbarMeta button,
 .itemActions button,
+.sourceReader button,
 .connectionList button {
   border: 1px solid rgb(145 168 207 / 22%);
   border-radius: 0.55rem;
@@ -125,14 +126,15 @@
 }
 
 .hero {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 2rem;
-  padding-block: clamp(3rem, 8vh, 6rem) 2.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(19rem, 23rem);
+  align-items: start;
+  gap: 1.5rem;
+  padding-block: 1.8rem;
 }
 
-.hero > div:first-child {
+.heroIntro {
+  min-width: 0;
   max-width: 51rem;
 }
 
@@ -146,12 +148,12 @@
 }
 
 .hero h1 {
-  max-width: 14ch;
+  max-width: 26ch;
   margin: 0;
-  font-size: clamp(3rem, 5.3vw, 5.9rem);
+  font-size: clamp(2rem, 3vw, 3.1rem);
   font-weight: 760;
-  line-height: 0.92;
-  letter-spacing: -0.068em;
+  line-height: 1.1;
+  letter-spacing: -0.045em;
 }
 
 .heroAccent {
@@ -168,10 +170,11 @@
 }
 
 .posture {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 0.7rem;
   min-width: 11rem;
+  margin-top: 1.25rem;
   padding: 0.85rem 1rem;
   border: 1px solid rgb(119 166 255 / 22%);
   border-radius: 0.85rem;
@@ -225,6 +228,141 @@
 .layout {
   display: grid;
   gap: 1rem;
+}
+
+.focusLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(19rem, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.focusColumn,
+.toolsColumn {
+  display: grid;
+  gap: 0.8rem;
+  min-width: 0;
+}
+
+.focusHeading h2 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.focusHeading p,
+.setAside p {
+  margin: 0.5rem 0;
+  color: #9daac1;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.focusFilters,
+.pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.focusFilters button,
+.pagination button,
+.setAside > button {
+  border: 1px solid rgb(145 168 207 / 22%);
+  border-radius: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  background: rgb(18 30 53 / 76%);
+  color: #d9e2f4;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.focusFilters button[aria-pressed="true"] {
+  border-color: #61dfc4;
+  color: #adf6e4;
+  background: rgb(51 146 127 / 18%);
+}
+
+.focusFilters span,
+.setAside :where(button) span {
+  margin-left: 0.35rem;
+  color: #8de4cf;
+}
+
+.pagination {
+  justify-content: space-between;
+  padding-top: 0.8rem;
+  color: #9daac1;
+  font-size: 0.75rem;
+}
+
+.pagination button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.toolDisclosure {
+  min-width: 0;
+  border: 1px solid rgb(136 162 204 / 18%);
+  border-radius: 0.85rem;
+  background: rgb(10 18 34 / 88%);
+}
+
+.toolDisclosure > summary {
+  padding: 1rem;
+  color: #bdcce2;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.setAside {
+  padding: 0.5rem 0;
+}
+
+.itemSummary {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.4rem 0.6rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.itemSummary::-webkit-details-marker {
+  display: none;
+}
+
+.itemSummary :where(h3, .itemTopline) {
+  grid-column: 1 / -1;
+}
+
+.itemSummary h3 {
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+
+.expandHint {
+  font-size: 0.65rem;
+  color: #a7dfd0;
+}
+
+.itemDetail {
+  display: grid;
+  gap: 0.6rem;
+  padding-top: 0.7rem;
+  margin-top: 0.7rem;
+  border-top: 1px solid rgb(136 162 204 / 18%);
+}
+
+.itemDetail > p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #9daac1;
+}
+
+.workspace :where(button, summary):focus-visible {
+  outline: 2px solid #61dfc4;
+  outline-offset: 3px;
 }
 
 .topWorkspace {
@@ -308,8 +446,6 @@
 }
 
 .item {
-  display: grid;
-  gap: 0.52rem;
   padding: 0.9rem;
   border: 1px solid rgb(143 164 201 / 15%);
   border-radius: 0.82rem;
@@ -431,6 +567,35 @@
   margin: 0;
 }
 
+.evidenceReference {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.sourceReader {
+  display: grid;
+  justify-items: start;
+  gap: 0.5rem;
+  margin-block: 0.4rem;
+}
+
+.sourceReader button {
+  font-size: 0.68rem;
+}
+
+.evidencePassages {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.evidencePassages blockquote {
+  margin: 0.2rem 0 0;
+  border-left: 2px solid #528b8a;
+  padding-left: 0.7rem;
+  color: #d8e2f3;
+  white-space: pre-wrap;
+}
+
 .itemActions {
   margin-top: 0.2rem;
 }
@@ -522,6 +687,7 @@
 .queryForm button:disabled,
 .controlCard > button:disabled,
 .itemActions button:disabled,
+.sourceReader button:disabled,
 .connectionList button:disabled {
   cursor: wait;
   opacity: 0.6;
@@ -694,9 +860,12 @@
 }
 
 @media (max-width: 980px) {
+  .focusLayout {
+    grid-template-columns: 1fr;
+  }
   .hero {
-    align-items: start;
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
   }
 
   .topWorkspace {
@@ -718,11 +887,11 @@
   }
 
   .hero {
-    padding-top: 2.6rem;
+    padding-top: 1.5rem;
   }
 
   .hero h1 {
-    font-size: clamp(2.7rem, 14vw, 4.4rem);
+    font-size: clamp(2rem, 8vw, 2.6rem);
   }
 
   .dashboardGrid {

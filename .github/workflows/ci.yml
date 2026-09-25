@@ -46,7 +46,7 @@ jobs:
           const manifest = JSON.parse(
             fs.readFileSync("apps/extension/dist/manifest.json", "utf8"),
           );
-          const expected = ["sidePanel", "storage"];
+          const expected = ["sidePanel", "storage", "activeTab"];
           if (manifest.manifest_version !== 3) throw new Error("Manifest V3 required");
           if (JSON.stringify(manifest.permissions) !== JSON.stringify(expected)) {
             throw new Error("Unexpected extension permissions");
@@ -62,11 +62,24 @@ jobs:
           zip -qr /tmp/navox-chrome-extension.zip .
           unzip -l /tmp/navox-chrome-extension.zip | grep -F manifest.json
           unzip -l /tmp/navox-chrome-extension.zip | grep -F service-worker.js
+          unzip -l /tmp/navox-chrome-extension.zip | grep -F capture.js
           unzip -l /tmp/navox-chrome-extension.zip | grep -F sidepanel.html
 
   api:
     name: API quality
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17.5-alpine
+        env:
+          POSTGRES_USER: navox
+          POSTGRES_PASSWORD: navox
+          POSTGRES_DB: navox_recovery
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U navox -d navox_recovery"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -80,18 +93,53 @@ jobs:
         working-directory: services/api
       - run: uv run mypy navox
         working-directory: services/api
-      - run: uv run pytest
+      - run: uv run pytest --junitxml=/tmp/navox-api-tests.xml
         working-directory: services/api
+      - name: Enforce measured SPEC-003 fixture thresholds
+        if: always()
+        run: >-
+          uv run python -m navox.evaluation.connector_metrics
+          --junit /tmp/navox-api-tests.xml
+          --output /tmp/navox-connector-measurements.json
+        working-directory: services/api
+      - name: Upload SPEC-003 measured evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: navox-connector-measurements
+          path: |
+            /tmp/navox-api-tests.xml
+            /tmp/navox-connector-measurements.json
+          if-no-files-found: error
+          retention-days: 30
       - run: uv run alembic upgrade head --sql > /tmp/navox-schema.sql
         working-directory: services/api
       - name: Verify required schema tables
         run: |
-          for table in users workspaces workspace_memberships plans plan_steps actions approvals workflow_refs audit_events proactive_preferences proactive_signals briefing_snapshots people person_identities operational_observations observation_evidence intelligence_feedback; do
+          for table in users workspaces workspace_memberships plans plan_steps plan_sources actions approvals workflow_refs audit_events proactive_preferences proactive_signals briefing_snapshots people person_identities person_identity_sources operational_observations observation_evidence intelligence_feedback intelligence_source_receipts gmail_sync_plans connector_definitions connector_connections connector_resources connector_subscriptions connector_event_receipts connector_sync_runs connector_sync_receipts; do
             grep -F "CREATE TABLE $table" /tmp/navox-schema.sql
           done
           grep -F "client_type" /tmp/navox-schema.sql
+          grep -F "ADD COLUMN expiration_confirmed_at TIMESTAMP WITH TIME ZONE" /tmp/navox-schema.sql
           grep -F "uq_person_identities_workspace_type_value" /tmp/navox-schema.sql
           grep -F "uq_observation_evidence_observation_source_hash" /tmp/navox-schema.sql
+
+      - name: Verify connector checkpoint migrations on disposable PostgreSQL
+        working-directory: services/api
+        env:
+          DATABASE_URL: postgresql+asyncpg://navox:navox@localhost:5432/navox_recovery
+        run: |
+          uv run alembic upgrade head
+          uv run alembic downgrade 0015_spec_003_connectors
+          uv run alembic upgrade head
+      - name: Verify connector recovery and revocation with real PostgreSQL sessions
+        working-directory: services/api
+        env:
+          NAVOX_CONNECTOR_TEST_DSN: postgresql+asyncpg://navox:navox@localhost:5432/navox_recovery
+        run: >-
+          uv run pytest tests/test_connector_sync_recovery.py
+          tests/test_google_calendar_connector.py tests/test_google_gmail_connector.py
+          tests/test_connection_management.py
 
   dependency-security:
     name: Dependency security
@@ -388,5 +436,13 @@ jobs:
             --request POST \
             http://localhost:8000/api/v1/auth/logout
           test "$(curl --silent --output /dev/null --write-out "%{http_code}" --cookie /tmp/navox-session.cookie http://localhost:8000/api/v1/auth/me)" = "401"
+      - name: Verify SPEC-002 through Temporal and PostgreSQL with provider fixtures
+        run: |
+          docker compose run --rm --no-deps -T \
+            --volume "$PWD/services/api/integration:/app/integration:ro" \
+            api uv run --no-sync python -m integration.intelligence_temporal_smoke
+      - name: Capture service diagnostics on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=300 api worker postgres
       - if: always()
         run: docker compose down --volumes --remove-orphans

@@ -3,7 +3,12 @@
 import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, time, timedelta
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+_DAY_EXPRESSION = (
+    r"(?:by |on )?(?:\d{4}-\d{2}-\d{2}|today|tomorrow|"
+    r"(?:this )?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))"
+)
 
 
 @dataclass(frozen=True)
@@ -43,6 +48,20 @@ def resolve_temporal(
             return TemporalResolution(original, instant, instant, instant, "explicit_offset", 1)
     except ValueError:
         pass
+    # An explicit zone in the source takes precedence over the workspace zone.
+    # Ambiguous abbreviations (for example CST) are deliberately not guessed.
+    qualifier = re.search(
+        r"\s+(UTC|GMT|(?:[A-Za-z_]+/)+[A-Za-z_+\-]+)\s*$", expression.strip(), re.IGNORECASE
+    )
+    if qualifier:
+        try:
+            zone_name = qualifier.group(1)
+            zone = ZoneInfo(zone_name.upper() if zone_name.upper() in {"UTC", "GMT"} else zone_name)
+        except ZoneInfoNotFoundError:
+            return TemporalResolution(original, method="unresolved_timezone", confidence=0.5)
+        text = text[: qualifier.start()].rstrip()
+    if re.search(r"\b(or|between)\b", text):
+        return TemporalResolution(original, method="unresolved", confidence=0.5)
     local_now = occurred_at.astimezone(zone)
     day: date | None = None
     method = "explicit_date"
@@ -67,6 +86,11 @@ def resolve_temporal(
         return TemporalResolution(original, method="unresolved", confidence=0.5)
     clock = re.search(r"(?:\bat\s+|[tT])(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b", text)
     if clock:
+        if not re.fullmatch(_DAY_EXPRESSION, text[: clock.start()].strip()) or text[
+            clock.end() :
+        ].strip(" .,"):
+            # Consume the full expression: qualifications cannot silently disappear.
+            return TemporalResolution(original, method="unresolved", confidence=0.5)
         hour, minute = int(clock.group(1)), int(clock.group(2) or 0)
         meridiem = clock.group(3)
         if meridiem:
@@ -75,10 +99,13 @@ def resolve_temporal(
             hour = hour % 12 + (12 if meridiem == "pm" else 0)
         if hour > 23 or minute > 59:
             return TemporalResolution(original, method="unresolved", confidence=0.5)
-        local = datetime.combine(day, time(hour, minute))
+        ambiguous_clock = not meridiem and clock.group(2) is None and 1 <= hour <= 12
+        hours = (hour % 12, hour % 12 + 12) if ambiguous_clock else (hour,)
         possibilities = sorted(
             {
                 aware.astimezone(UTC)
+                for possible_hour in hours
+                for local in (datetime.combine(day, time(possible_hour, minute)),)
                 for fold in (0, 1)
                 if (aware := local.replace(tzinfo=zone, fold=fold))
                 .astimezone(UTC)
@@ -89,6 +116,14 @@ def resolve_temporal(
         )
         if not possibilities:
             return TemporalResolution(original, method="nonexistent_local_time", confidence=0.5)
+        if ambiguous_clock:
+            return TemporalResolution(
+                original,
+                possibilities[0],
+                possibilities[-1],
+                method="ambiguous_clock",
+                confidence=0.7,
+            )
         if len(possibilities) == 2:
             return TemporalResolution(
                 original,
@@ -99,6 +134,12 @@ def resolve_temporal(
             )
         instant = possibilities[0]
         return TemporalResolution(original, instant, instant, instant, method, 0.98)
+    if not (
+        re.fullmatch(_DAY_EXPRESSION, text.rstrip(" .,"))
+        or re.fullmatch(r"(?:before )?(?:today|tomorrow)'s (?:meeting|review)", text.rstrip(" .,"))
+    ):
+        # A known day with unknown remaining text is not an understood date window.
+        return TemporalResolution(original, method="unresolved", confidence=0.5)
     start = datetime.combine(day, time.min, zone).astimezone(UTC)
     end = datetime.combine(day + timedelta(days=1), time.min, zone).astimezone(UTC)
     return TemporalResolution(original, start, end, method=f"{method}_window", confidence=0.9)

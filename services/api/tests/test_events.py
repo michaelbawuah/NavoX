@@ -1,7 +1,7 @@
 import base64
 import json
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
@@ -14,7 +14,7 @@ from navox.api import events
 from navox.api.main import app
 from navox.core.settings import Settings, get_settings
 from navox.db.base import Base
-from navox.db.models import Connection, IncomingEvent
+from navox.db.models import Connection, IncomingEvent, ProviderEventSubscription
 from navox.db.session import get_database_session
 from navox.events.processor import IncomingEventProcessor
 
@@ -163,6 +163,44 @@ async def test_channel_notification_with_an_invalid_token_is_rejected(
     assert response.status_code == 401
     async with session_factory() as session:
         assert list(await session.scalars(select(IncomingEvent))) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expired", [True, False])
+async def test_calendar_notification_enforces_stored_channel_expiry(
+    event_test_environment: tuple[AsyncClient, async_sessionmaker[AsyncSession]],
+    expired: bool,
+) -> None:
+    client, session_factory = event_test_environment
+    _, channel_id, channel_token = await seed_google_connection(
+        client, session_factory, source="calendar"
+    )
+    assert channel_id is not None and channel_token is not None
+    async with session_factory() as session:
+        subscription = await session.scalar(
+            select(ProviderEventSubscription).where(
+                ProviderEventSubscription.channel_id == channel_id
+            )
+        )
+        assert subscription is not None
+        subscription.expires_at = datetime.now(UTC) + timedelta(minutes=-5 if expired else 5)
+        await session.commit()
+
+    response = await client.post(
+        "/api/v1/events/calendar",
+        headers={
+            "X-Goog-Channel-ID": channel_id,
+            "X-Goog-Channel-Token": channel_token,
+            "X-Goog-Resource-ID": "google-resource-123",
+            "X-Goog-Resource-State": "exists",
+            "X-Goog-Message-Number": "43",
+        },
+    )
+
+    assert response.status_code == (401 if expired else 200)
+    async with session_factory() as session:
+        stored = list(await session.scalars(select(IncomingEvent)))
+        assert len(stored) == (0 if expired else 1)
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,6 @@
 """Deterministic ranking of stored facts, never an execution or permission decision."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from math import isfinite
 from uuid import UUID
@@ -14,6 +14,7 @@ from navox.db.models import (
     Objective,
     ProactiveSignal,
 )
+from navox.intelligence.email_focus import email_holds
 
 FEATURE_WEIGHTS = {
     "urgency": 0.23,
@@ -57,6 +58,12 @@ def band_for(score: int) -> str:
     return "SUPPRESS"
 
 
+def email_intent(commitment: Commitment) -> str | None:
+    relevance = (commitment.intelligence_metadata or {}).get("email_relevance")
+    intent = relevance.get("intent") if isinstance(relevance, dict) else None
+    return intent if isinstance(intent, str) else None
+
+
 @dataclass(frozen=True)
 class AttentionResult:
     score: int
@@ -66,6 +73,7 @@ class AttentionResult:
     reasons: tuple[str, ...]
     suggested_capability: str | None
     suppressed: bool = False
+    email_hold_reason: str | None = None
 
 
 def temporal_boundary(commitment: Commitment) -> tuple[datetime | None, bool]:
@@ -147,6 +155,13 @@ def score_commitment(
     adjustment = max(-0.05, min(0.05, float(learned))) if isinstance(learned, (int, float)) else 0.0
     score = max(0, min(100, raw_score + round(adjustment * 100)))
     capability: str | None = "commitment.handle"
+    intent = email_intent(commitment)
+    if intent == "reply_required":
+        reasons.append("Reply requested in email")
+    elif intent == "important_alert":
+        reasons.append("Important email alert")
+        if confidence >= 0.9 and commitment.status != "candidate":
+            score = max(score, 70)
     if commitment.priority >= 4:
         reasons.append(
             "You marked this as high priority"
@@ -252,6 +267,9 @@ async def workspace_attention(
     for signal in signals:
         if signal.commitment_id is not None:
             by_commitment.setdefault(signal.commitment_id, []).append(signal)
+    held = await email_holds(
+        database, user_id=user_id, workspace_id=workspace_id, commitments=commitments, now=current
+    )
     results: dict[UUID, AttentionResult] = {}
     # Duplicate suppression uses explicit canonical state, never fuzzy title guesses.
     for commitment in commitments:
@@ -276,6 +294,16 @@ async def workspace_attention(
                 for signal in own_signals
             ),
         )
+        if commitment.id in held and not result.suppressed:
+            result = replace(
+                result,
+                score=0,
+                band="SUPPRESS",
+                suppressed=True,
+                suggested_capability=None,
+                reasons=(held[commitment.id],),
+                email_hold_reason=held[commitment.id],
+            )
         results[commitment.id] = result
     return commitments, results
 

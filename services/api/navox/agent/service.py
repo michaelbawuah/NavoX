@@ -8,6 +8,7 @@ from navox.agent.audit import add_audit_event
 from navox.agent.context import ContextBuilder
 from navox.agent.contracts import get_action_contract
 from navox.agent.planner import MAX_PLAN_STEPS, DeterministicPlanner
+from navox.agent.provenance import record_plan_sources
 from navox.db.models import Commitment, Plan, PlanStep, User
 
 HANDLEABLE_STATUSES = {"confirmed", "waiting", "attention"}
@@ -70,7 +71,7 @@ class BoundedAgentService:
             )
             return existing, existing_steps, False
 
-        user = await database.scalar(select(User).where(User.id == user_id))
+        user = await database.scalar(select(User).where(User.id == user_id).with_for_update())
         if user is None:
             raise AgentPlanNotFoundError("User not found")
         if user.agent_paused:
@@ -117,6 +118,12 @@ class BoundedAgentService:
         )
         database.add(plan)
         await database.flush()
+
+        await record_plan_sources(
+            database,
+            plan,
+            {commitment.id, *(relation.commitment_id for relation in context.relations)},
+        )
 
         steps: list[PlanStep] = []
         for sequence, planned in enumerate(draft.steps, start=1):

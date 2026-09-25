@@ -16,6 +16,7 @@ from navox.db.models import (
     Objective,
     ProactivePreference,
     ProactiveSignal,
+    Workspace,
 )
 from navox.intelligence.attention import workspace_attention
 
@@ -262,11 +263,20 @@ async def default_preference(
     user_id: UUID,
     workspace_id: UUID,
 ) -> ProactivePreference:
+    # API requests and several lifecycle activities evaluate the same workspace.
+    # Hold one workspace lock until the caller commits, before reading either
+    # preferences or signals, so concurrent evaluators cannot insert duplicates.
+    # NO KEY UPDATE still permits unrelated inserts referencing this workspace.
+    await database.scalar(
+        select(Workspace.id).where(Workspace.id == workspace_id).with_for_update(key_share=True)
+    )
     existing = await database.scalar(
-        select(ProactivePreference).where(
+        select(ProactivePreference)
+        .where(
             ProactivePreference.user_id == user_id,
             ProactivePreference.workspace_id == workspace_id,
         )
+        .execution_options(populate_existing=True)
     )
     if existing is not None:
         return existing
@@ -404,10 +414,12 @@ async def evaluate_workspace(
     )
     existing_signals = list(
         await database.scalars(
-            select(ProactiveSignal).where(
+            select(ProactiveSignal)
+            .where(
                 ProactiveSignal.user_id == user_id,
                 ProactiveSignal.workspace_id == workspace_id,
             )
+            .execution_options(populate_existing=True)
         )
     )
     signal_by_fingerprint = {signal.fingerprint: signal for signal in existing_signals}
@@ -432,6 +444,8 @@ async def evaluate_workspace(
 
     for commitment in commitments:
         if not active_commitment(commitment, current_time):
+            continue
+        if intelligence_scores[commitment.id].email_hold_reason:
             continue
         if not should_have_signal(commitment, current_time):
             continue
@@ -601,7 +615,8 @@ async def visible_signals(
     user_id: UUID,
     workspace_id: UUID,
 ) -> list[ProactiveSignal]:
-    return list(
+    _, attention = await workspace_attention(database, user_id=user_id, workspace_id=workspace_id)
+    signals = list(
         await database.scalars(
             select(ProactiveSignal)
             .where(
@@ -613,6 +628,12 @@ async def visible_signals(
             .order_by(ProactiveSignal.attention_score.desc(), ProactiveSignal.created_at)
         )
     )
+    return [
+        signal
+        for signal in signals
+        if signal.commitment_id is None
+        or (signal.commitment_id in attention and not attention[signal.commitment_id].suppressed)
+    ]
 
 
 def briefing_hash(signals: list[ProactiveSignal]) -> str:
@@ -715,6 +736,9 @@ async def next_meeting_prep(
     now: datetime | None = None,
 ) -> MeetingPrep | None:
     current_time = aware(now or datetime.now(UTC))
+    _, attention = await workspace_attention(
+        database, user_id=user_id, workspace_id=workspace_id, now=current_time
+    )
     meetings = list(
         await database.scalars(
             select(Commitment)
@@ -735,6 +759,7 @@ async def next_meeting_prep(
             if item.due_at is not None
             and aware(item.due_at) >= current_time
             and active_commitment(item, current_time)
+            and not attention[item.id].suppressed
         ),
         None,
     )
@@ -761,6 +786,7 @@ async def next_meeting_prep(
     related_rows = tuple(
         (item.id, item.title, item.status)
         for item in sorted(related, key=lambda value: value.title.casefold())
+        if item.id in attention and not attention[item.id].email_hold_reason
     )
     minutes_until = max(
         0,

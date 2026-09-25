@@ -10,12 +10,18 @@ from xml.etree import ElementTree
 from navox.evaluation.runner import load_json, project_root
 
 
-def build_report(junit_path: Path, gates_path: Path) -> dict[str, Any]:
+def build_report(
+    junit_path: Path, gates_path: Path, *, classname_prefix: str | None = None
+) -> dict[str, Any]:
     gates = load_json(gates_path)
     root = ElementTree.parse(junit_path).getroot()
     results: dict[str, str] = {}
     passed = failed = skipped = 0
     for case in root.iter("testcase"):
+        if classname_prefix is not None and not case.get("classname", "").startswith(
+            classname_prefix
+        ):
+            continue
         name = case.attrib.get("name", "")
         if case.find("failure") is not None or case.find("error") is not None:
             outcome = "failed"

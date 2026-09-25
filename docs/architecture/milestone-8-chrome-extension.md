@@ -11,16 +11,21 @@ The extension supports sign-in, dynamic Today state, proactive briefing state,
 bounded operational questions, explicit Handle this for saved commitments,
 plan progress, and review of approval-bound actions.
 
-The extension does not read arbitrary page content, inject content scripts,
-capture browsing history, inspect tabs, or execute provider actions outside the
-existing NavoX API.
+SPEC-003 later adds a visible Save page note action. It reads only the selected
+active tab's title and site origin after the user opens the extension and chooses
+the page, then sends that data and the user's written note only after a second
+explicit Save action. It never reads page text or browsing history, and it does
+not transmit or store the selected tab's URL path, query, or fragment.
+It does not inject content scripts or execute provider actions outside the API.
 
 ## Chrome permissions
 
-The initial extension requests only `sidePanel`, `storage`, and one
-build-time API origin in `host_permissions`.
+The current extension requests `sidePanel`, `storage`, `activeTab`, and one
+build-time API origin in `host_permissions`. `activeTab` grants temporary
+selected-tab title and URL access after the user invokes the extension. The
+Save flow discards the path, query, and fragment before any network request.
 
-There is no `tabs`, `activeTab`, `scripting`, `cookies`,
+There is no broad `tabs`, `scripting`, `cookies`,
 `webRequest`, or broad `<all_urls>` permission.
 
 Chrome's official documentation defines the Manifest V3 Side Panel API,
@@ -28,6 +33,7 @@ extension storage API, and host permissions for cross-origin fetch:
 - https://developer.chrome.com/docs/extensions/reference/api/sidePanel
 - https://developer.chrome.com/docs/extensions/reference/api/storage
 - https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions
+- https://developer.chrome.com/docs/extensions/develop/concepts/activeTab
 
 ## Authentication
 
@@ -58,7 +64,8 @@ or Temporal.
 
 ## Safety invariants
 
-- no page-content capture in Milestone 8;
+- no page-content or browsing-history capture; SPEC-003 sends only a chosen
+  page title, site origin and user-written note after visible confirmation;
 - no arbitrary browser/computer control;
 - no new provider scopes;
 - no provider credentials in extension storage;

@@ -3,9 +3,9 @@
   "name": "NavoX",
   "short_name": "NavoX",
   "version": "0.8.0",
-  "description": "Your NavoX operational briefing, bounded plans, and approvals in Chrome.",
+  "description": "Your NavoX operational briefing, approvals, and explicitly saved page notes in Chrome.",
   "minimum_chrome_version": "116",
-  "permissions": ["sidePanel", "storage"],
+  "permissions": ["sidePanel", "storage", "activeTab"],
   "host_permissions": ["__NAVOX_API_HOST__/*"],
   "background": {
     "service_worker": "service-worker.js",

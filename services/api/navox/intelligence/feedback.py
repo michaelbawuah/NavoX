@@ -53,13 +53,17 @@ async def record_feedback(
     current = now or datetime.now(UTC)
     # The workspace row exists before first feedback. Lock it to serialize both
     # first preference creation and request replay across concurrent workers.
-    await database.scalar(select(Workspace).where(Workspace.id == workspace_id).with_for_update())
+    await database.scalar(
+        select(Workspace).where(Workspace.id == workspace_id).with_for_update(key_share=True)
+    )
     commitment = await database.scalar(
-        select(Commitment).where(
+        select(Commitment)
+        .where(
             Commitment.id == target_id,
             Commitment.workspace_id == workspace_id,
             Commitment.user_id == user_id,
         )
+        .with_for_update(key_share=True)
     )
     if commitment is None:
         raise FeedbackTargetNotFound("Commitment not found")

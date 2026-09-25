@@ -5,6 +5,7 @@ import {
   manifestFor,
   normalizeOrigin,
 } from "../scripts/build-lib.mjs";
+import { pageNoteImport, pageSelection } from "../src/capture.js";
 import {
   actionSummary,
   flattenSignals,
@@ -18,7 +19,7 @@ import {
 
 const template = JSON.stringify({
   manifest_version: 3,
-  permissions: ["sidePanel", "storage"],
+  permissions: ["sidePanel", "storage", "activeTab"],
   host_permissions: ["__NAVOX_API_HOST__/*"],
   side_panel: { default_path: "sidepanel.html" },
 });
@@ -32,7 +33,7 @@ test("build accepts HTTPS or local HTTP API origins only", () => {
 
 test("manifest remains permission minimal", () => {
   const manifest = manifestFor(template, "http://localhost:8000");
-  assert.deepEqual(manifest.permissions, ["sidePanel", "storage"]);
+  assert.deepEqual(manifest.permissions, ["sidePanel", "storage", "activeTab"]);
   assert.deepEqual(manifest.host_permissions, ["http://localhost:8000/*"]);
 
   const unsafe = JSON.stringify({
@@ -41,6 +42,35 @@ test("manifest remains permission minimal", () => {
     host_permissions: ["__NAVOX_API_HOST__/*"],
   });
   assert.throws(() => manifestFor(unsafe, "https://api.example.com"), /Forbidden/);
+});
+
+test("page note selects only visible site origin, title, and user-written text", () => {
+  const selection = pageSelection({
+    url: "https://example.org/private/path?token=SECRET-QUERY#SECRET-FRAGMENT",
+    title: "Submit the report",
+  });
+  assert.deepEqual(selection, { origin: "https://example.org", title: "Submit the report" });
+  const command = pageNoteImport(selection, "Submit by Friday.");
+  assert.equal(command.format, "json");
+  assert.equal(command.name, "Page note: example.org");
+  assert.deepEqual(JSON.parse(command.content), [{
+    id: "https://example.org",
+    title: "Submit the report",
+    description: "Submit by Friday.",
+    url: "https://example.org",
+  }]);
+  assert.doesNotMatch(JSON.stringify(command), /SECRET|private\/path/);
+  const longHost = `https://${"a".repeat(55)}.${"b".repeat(55)}.example.org`;
+  assert.ok(pageNoteImport({ origin: longHost, title: "Task" }, "Review this").name.length <= 120);
+});
+
+test("page note rejects inaccessible pages and missing user confirmation text", () => {
+  for (const url of ["chrome://settings", "http://example.org", "https://user:pass@example.org"]) {
+    assert.throws(() => pageSelection({ url, title: "Private" }), /HTTPS|saved/);
+  }
+  assert.throws(() => pageSelection({ url: "https://example.org", title: "" }), /title/);
+  assert.throws(() => pageNoteImport({ origin: "https://example.org", title: "Task" }, ""), /note/);
+  assert.throws(() => pageNoteImport({ origin: "https://example.org", title: "Task" }, "x".repeat(2001)), /2,000/);
 });
 
 test("build rejects remote and dynamic executable code", () => {

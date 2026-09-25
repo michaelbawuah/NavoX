@@ -10,6 +10,16 @@ from navox.approvals.activities import (
     execute_approved_action_activity,
     mark_execution_uncertain_activity,
 )
+from navox.connectors.activities import (
+    connector_disconnect_activity,
+    connector_event_reconciliation_activity,
+    connector_health_activity,
+    connector_reconciliation_activity,
+    connector_subscription_activity,
+    connector_subscription_reconciliation_activity,
+    connector_sync_activity,
+    legacy_google_watch_cleanup_activity,
+)
 from navox.core.settings import get_settings
 from navox.intelligence.activities import (
     intelligence_workspaces_activity,
@@ -26,6 +36,14 @@ from navox.proactive.activities import (
     record_scheduled_briefing_activity,
 )
 from navox.workflows.approved_action import ApprovedActionWorkflow
+from navox.workflows.connectors import (
+    ConnectorDisconnectWorkflow,
+    ConnectorHealthWorkflow,
+    ConnectorIncrementalSyncWorkflow,
+    ConnectorInitialSyncWorkflow,
+    ConnectorReconciliationWorkflow,
+    ConnectorSubscriptionWorkflow,
+)
 from navox.workflows.foundation import FoundationHeartbeatWorkflow
 from navox.workflows.handle_commitment import HandleCommitmentWorkflow
 from navox.workflows.intelligence import (
@@ -51,6 +69,12 @@ async def main() -> None:
         client,
         task_queue=settings.temporal_task_queue,
         workflows=[
+            ConnectorInitialSyncWorkflow,
+            ConnectorIncrementalSyncWorkflow,
+            ConnectorReconciliationWorkflow,
+            ConnectorSubscriptionWorkflow,
+            ConnectorHealthWorkflow,
+            ConnectorDisconnectWorkflow,
             ProcessSourceEventWorkflow,
             ReevaluateCommitmentWorkflow,
             AttentionEvaluationWorkflow,
@@ -66,6 +90,14 @@ async def main() -> None:
             DailyBriefingWorkflow,
         ],
         activities=[
+            connector_sync_activity,
+            connector_health_activity,
+            connector_reconciliation_activity,
+            connector_subscription_activity,
+            connector_subscription_reconciliation_activity,
+            connector_event_reconciliation_activity,
+            connector_disconnect_activity,
+            legacy_google_watch_cleanup_activity,
             intelligence_workspaces_activity,
             process_source_activity,
             refresh_intelligence_activity,
@@ -85,14 +117,24 @@ async def main() -> None:
     )
     async with worker:
         if settings.ai_provider != "disabled":
-            try:
-                await client.start_workflow(
+            for workflow_run, workflow_id in (
+                (
                     IntelligenceReconciliationWorkflow.run,
-                    id="navox-intelligence-reconciliation-v1",
-                    task_queue=settings.temporal_task_queue,
-                )
-            except WorkflowAlreadyStartedError:
-                pass
+                    "navox-intelligence-reconciliation-v1",
+                ),
+                (
+                    ConnectorReconciliationWorkflow.run,
+                    "navox-connector-reconciliation-v1",
+                ),
+            ):
+                try:
+                    await client.start_workflow(
+                        workflow_run,
+                        id=workflow_id,
+                        task_queue=settings.temporal_task_queue,
+                    )
+                except WorkflowAlreadyStartedError:
+                    pass
         await asyncio.Event().wait()
 
 

@@ -16,7 +16,6 @@
 
 .heading,
 .actions,
-.contextLine,
 .formRow {
   display: flex;
   flex-wrap: wrap;
@@ -68,6 +67,56 @@
   gap: 0.5rem;
   color: #94acc7;
   font-size: 0.64rem;
+}
+.syncSources {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: 0.85rem;
+  align-items: start;
+}
+.syncSource,
+.syncReadout {
+  display: grid;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.recheck {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgb(145 168 207 / 14%);
+}
+.recheckList {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  max-height: 28rem;
+  overflow-y: auto;
+}
+.recheckItem {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.7rem;
+  border: 1px solid rgb(145 168 207 / 14%);
+  border-radius: 0.5rem;
+  min-width: 0;
+}
+.recheckTitle {
+  display: flex;
+  align-items: start;
+  gap: 0.5rem;
+  overflow-wrap: anywhere;
+}
+.recheckTitle input {
+  flex: 0 0 auto;
+  accent-color: #61dfc4;
+}
+.syncReadout {
+  border-left: 2px solid rgb(97 223 196 / 28%);
+  padding-left: 0.6rem;
 }
 .actions button,
 .secondary {
@@ -132,49 +181,130 @@
   line-height: 1.5;
 }
 .context {
-  margin-bottom: 1rem;
+  width: min(100%, 23rem);
+  justify-self: end;
+  padding: 1.35rem;
+  border-color: rgb(132 190 207 / 24%);
+  background:
+    radial-gradient(ellipse at top right, rgb(97 223 196 / 9%), transparent 65%),
+    linear-gradient(145deg, #111f35, #0a1222);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 16%);
 }
-.contextLine {
+.contextHeading {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  color: #78d8c3;
 }
-.contextLine > div {
-  display: grid;
-  gap: 0.25rem;
+.contextDate {
+  margin: 0.6rem 0 0;
+  color: #e9f0fc;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.5;
 }
 .contextLabel {
   color: #78d8c3;
-  font-size: 0.59rem;
+  font-size: 0.65rem;
   font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
+}
+.timeReadout {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 1.1rem;
+}
+.clockLabel {
+  color: #9eb1c9;
+  font-size: 0.68rem;
 }
 .context time {
-  font-size: 0.92rem;
+  color: #f5f8ff;
+  font-size: clamp(1.65rem, 2.7vw, 2.25rem);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.035em;
+  line-height: 1.2;
+}
+.timezone {
+  overflow-wrap: anywhere;
+  color: #9eb1c9;
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+.weather {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 1.1rem;
+  padding-top: 1.1rem;
+  border-top: 1px solid rgb(145 168 207 / 16%);
+}
+.weatherMain {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.weatherIcon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 2.75rem;
+  height: 2.75rem;
+  border: 1px solid rgb(97 223 196 / 19%);
+  border-radius: 0.85rem;
+  background: rgb(97 223 196 / 7%);
+  color: #8be7d0;
+}
+.weatherReading {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.weatherReading strong {
+  color: #eef4ff;
+  font-size: 1.2rem;
   font-variant-numeric: tabular-nums;
 }
-.timezone,
-.weather span,
-.weather small {
-  color: #8da1bd;
-  font-size: 0.65rem;
+.weatherReading span,
+.weatherLocation {
+  color: #a8bad1;
+  font-size: 0.73rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
-.weather strong {
-  font-size: 1.1rem;
+.weatherMeta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
 }
-
+.weatherMeta small,
+.weatherMeta a {
+  font-size: 0.64rem;
+  line-height: 1.5;
+}
+.weatherMeta small {
+  color: #95aac5;
+}
 .weather a {
   color: #9bcebf;
-  font-size: 0.6rem;
 }
 .settings {
-  margin-top: 0.8rem;
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgb(145 168 207 / 16%);
+}
+.settings summary {
+  padding-block: 0.25rem;
+  color: #b2c7de;
+  font-size: 0.74rem;
 }
 .preferences {
   display: grid;
   gap: 0.7rem;
   margin-top: 0.85rem;
-  max-width: 30rem;
+  min-width: 0;
 }
 .preferences label {
   display: grid;
@@ -226,5 +356,9 @@
   }
   .heading {
     align-items: start;
+  }
+  .context {
+    justify-self: start;
+    padding: 1.1rem;
   }
 }

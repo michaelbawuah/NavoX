@@ -1,0 +1,26 @@
+{
+  "id": "navox-issues",
+  "config": {
+    "display_name": "NavoX GitHub issues",
+    "provider": "github_issues",
+    "base_url": "https://api.github.com",
+    "auth": "bearer",
+    "endpoints": [
+      {
+        "name": "issues",
+        "path": "/repos/michaelbawuah/NavoX/issues",
+        "capability": "development.issues.read",
+        "resource_type": "development.issue",
+        "id_field": "id",
+        "subject_field": "title",
+        "content_field": "body",
+        "occurred_at_field": "updated_at",
+        "source_url_field": "html_url",
+        "status_field": "state",
+        "page_size_param": "per_page",
+        "page_size": 10,
+        "static_params": {"state": "open", "sort": "updated", "direction": "desc"}
+      }
+    ]
+  }
+}

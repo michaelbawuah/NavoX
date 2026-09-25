@@ -8,13 +8,14 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
+from navox.agent.audit import add_audit_event
 from navox.api.auth import CurrentAccountDependency, DatabaseSession
 from navox.api.commitments import (
     CommitmentResponse,
     current_workspace_commitment,
     response_from_commitment,
 )
-from navox.db.models import Commitment, CommitmentSource
+from navox.db.models import Commitment, CommitmentSource, Workspace
 
 router = APIRouter(prefix="/commitments", tags=["commitments"])
 CommitmentType = Literal["deadline", "meeting", "follow_up", "promise", "renewal", "task"]
@@ -128,6 +129,11 @@ async def transition_commitment(
     completed_at: datetime | None = None,
     waiting_since: datetime | None = None,
 ) -> CommitmentResponse:
+    await database.scalar(
+        select(Workspace)
+        .where(Workspace.id == current_account.workspace.id)
+        .with_for_update(key_share=True)
+    )
     result = await database.execute(
         update(Commitment)
         .where(
@@ -153,6 +159,66 @@ async def transition_commitment(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Commitment must be in one of these states: {allowed}",
         )
+    add_audit_event(
+        database,
+        user_id=current_account.user.id,
+        workspace_id=current_account.workspace.id,
+        event_type="commitment.state_changed",
+        entity_type="commitment",
+        entity_id=commitment.id,
+        actor_type="user",
+        actor_id=str(current_account.user.id),
+        metadata={"status": target_status},
+    )
+    await database.commit()
+    return response_from_commitment(commitment)
+
+
+@router.post("/{commitment_id}/dismiss", response_model=CommitmentResponse)
+async def dismiss_ai_commitment(
+    commitment_id: UUID,
+    current_account: CurrentAccountDependency,
+    database: DatabaseSession,
+) -> CommitmentResponse:
+    """The owner can explicitly reject an unwanted active AI-created item."""
+    result = await database.execute(
+        update(Commitment)
+        .where(
+            Commitment.id == commitment_id,
+            Commitment.workspace_id == current_account.workspace.id,
+            Commitment.user_id == current_account.user.id,
+            Commitment.created_by == "ai",
+            Commitment.status.in_(
+                (
+                    "candidate",
+                    "confirmed",
+                    "attention",
+                    "upcoming",
+                    "waiting",
+                    "waiting_on_external",
+                )
+            ),
+        )
+        .values(status="rejected")
+        .returning(Commitment)
+    )
+    commitment = result.scalar_one_or_none()
+    if commitment is None:
+        existing = await current_workspace_commitment(commitment_id, current_account, database)
+        if existing.created_by == "ai" and existing.status == "rejected":
+            return response_from_commitment(existing)
+        raise HTTPException(409, "Only active AI-created items can be marked as not a task")
+    add_audit_event(
+        database,
+        user_id=current_account.user.id,
+        workspace_id=current_account.workspace.id,
+        event_type="commitment.dismissed",
+        entity_type="commitment",
+        entity_id=commitment.id,
+        actor_type="user",
+        actor_id=str(current_account.user.id),
+        metadata={"reason": "not_a_task"},
+    )
     await database.commit()
     return response_from_commitment(commitment)
 

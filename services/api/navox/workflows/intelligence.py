@@ -1,8 +1,9 @@
+import asyncio
 from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ActivityError
+from temporalio.exceptions import ActivityError, is_cancelled_exception
 
 with workflow.unsafe.imports_passed_through():
     from navox.intelligence.activities import (
@@ -21,7 +22,8 @@ class ProcessSourceEventWorkflow:
         count = await workflow.execute_activity(
             process_source_activity,
             payload,
-            start_to_close_timeout=timedelta(minutes=10),
+            start_to_close_timeout=timedelta(hours=2),
+            heartbeat_timeout=timedelta(seconds=60),
             retry_policy=RetryPolicy(initial_interval=timedelta(seconds=10), maximum_attempts=3),
         )
         await workflow.execute_child_workflow(
@@ -36,7 +38,8 @@ async def refresh(payload: WorkspaceWork) -> int:
     return await workflow.execute_activity(
         refresh_intelligence_activity,
         payload,
-        start_to_close_timeout=timedelta(seconds=60),
+        start_to_close_timeout=timedelta(minutes=5),
+        heartbeat_timeout=timedelta(seconds=60),
         retry_policy=RetryPolicy(maximum_attempts=3),
     )
 
@@ -78,6 +81,59 @@ class FeedbackLearningWorkflow:
         )
 
 
+async def _refresh_workspace(workspace: WorkspaceWork) -> None:
+    try:
+        await workflow.execute_child_workflow(
+            ReevaluateCommitmentWorkflow.run,
+            workspace,
+            id=f"intelligence-state:{workflow.uuid4()}",
+        )
+    except Exception as error:
+        if is_cancelled_exception(error):
+            raise
+        workflow.logger.warning("Workspace refresh deferred")
+
+
+async def _process_pending(payload: SourceWork) -> None:
+    try:
+        await workflow.execute_child_workflow(
+            ProcessSourceEventWorkflow.run,
+            payload,
+            id=f"intelligence-reconcile:{workflow.uuid4()}",
+        )
+    except Exception as error:
+        if is_cancelled_exception(error):
+            raise
+        workflow.logger.warning("Intelligence batch deferred to next reconciliation")
+
+
+async def _pending_sources() -> list[SourceWork]:
+    return await workflow.execute_activity(
+        pending_intelligence_activity,
+        start_to_close_timeout=timedelta(minutes=10),
+        heartbeat_timeout=timedelta(seconds=60),
+        retry_policy=RetryPolicy(maximum_attempts=3),
+    )
+
+
+async def _reconcile_batch(workspaces: list[WorkspaceWork], pending: list[SourceWork]) -> None:
+    # A slow account may consume one slot, but must not block every other account.
+    semaphore = asyncio.Semaphore(4)
+
+    async def refresh_one(workspace: WorkspaceWork) -> None:
+        async with semaphore:
+            await _refresh_workspace(workspace)
+
+    async def process_one(payload: SourceWork) -> None:
+        async with semaphore:
+            await _process_pending(payload)
+
+    await asyncio.gather(
+        *(refresh_one(workspace) for workspace in workspaces),
+        *(process_one(payload) for payload in pending),
+    )
+
+
 @workflow.defn
 class IntelligenceReconciliationWorkflow:
     @workflow.run
@@ -89,32 +145,17 @@ class IntelligenceReconciliationWorkflow:
                     start_to_close_timeout=timedelta(seconds=30),
                     retry_policy=RetryPolicy(maximum_attempts=3),
                 )
-                for workspace in workspaces:
-                    try:
-                        await workflow.execute_child_workflow(
-                            ReevaluateCommitmentWorkflow.run,
-                            workspace,
-                            id=f"intelligence-state:{workflow.uuid4()}",
-                        )
-                    except Exception:
-                        workflow.logger.warning("Workspace refresh deferred")
-                pending = await workflow.execute_activity(
-                    pending_intelligence_activity,
-                    start_to_close_timeout=timedelta(minutes=5),
-                    retry_policy=RetryPolicy(maximum_attempts=3),
-                )
-                for payload in pending:
-                    try:
-                        await workflow.execute_child_workflow(
-                            ProcessSourceEventWorkflow.run,
-                            payload,
-                            id=f"intelligence-reconcile:{workflow.uuid4()}",
-                        )
-                    except Exception:
-                        workflow.logger.warning(
-                            "Intelligence batch deferred to next reconciliation"
-                        )
-            except ActivityError:
+                if workflow.patched("intelligence-reconciliation-concurrency-v1"):
+                    await _reconcile_batch(workspaces, await _pending_sources())
+                else:
+                    # Preserve command order while replaying pre-upgrade histories.
+                    for workspace in workspaces:
+                        await _refresh_workspace(workspace)
+                    for payload in await _pending_sources():
+                        await _process_pending(payload)
+            except ActivityError as error:
+                if is_cancelled_exception(error):
+                    raise
                 workflow.logger.warning("Intelligence reconciliation temporarily unavailable")
             await workflow.sleep(timedelta(minutes=1))
         workflow.continue_as_new()

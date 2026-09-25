@@ -18,7 +18,7 @@ const webOrigin = normalizeOrigin(
 );
 const template = await readFile(resolve(root, "manifest.template.json"), "utf8");
 const manifest = manifestFor(template, apiOrigin);
-const sourceNames = ["presentation.js", "service-worker.js", "sidepanel.js"];
+const sourceNames = ["presentation.js", "capture.js", "service-worker.js", "sidepanel.js"];
 const sourceFiles = await Promise.all(
   sourceNames.map(async (name) => [
     name,

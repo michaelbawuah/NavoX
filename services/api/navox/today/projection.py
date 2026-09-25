@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -12,7 +13,12 @@ from navox.db.models import (
     ObservationEvidence,
     OperationalObservation,
 )
-from navox.intelligence.attention import AttentionResult, score_commitment, workspace_attention
+from navox.intelligence.attention import (
+    AttentionResult,
+    email_intent,
+    score_commitment,
+    workspace_attention,
+)
 
 ACTIVE_STATUSES = {
     "candidate",
@@ -35,6 +41,8 @@ class TodaySource:
     external_resource_id: str | None
     evidence_locator: dict[str, object] | None = None
     observed_at: datetime | None = None
+    evidence_id: UUID | None = None
+    connection_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +75,7 @@ class TodayProjection:
     renewals: tuple[TodayItem, ...]
     waiting_on: tuple[TodayItem, ...]
     completed_recently: tuple[TodayItem, ...]
+    set_aside: tuple[TodayItem, ...] = ()
 
 
 def validated_timezone(name: str) -> ZoneInfo:
@@ -167,7 +176,11 @@ async def build_today_projection(
     active = [
         commitment
         for commitment in commitments
-        if active_at(commitment, current_time) and not attention_results[commitment.id].suppressed
+        if active_at(commitment, current_time)
+        and (
+            not attention_results[commitment.id].suppressed
+            or attention_results[commitment.id].email_hold_reason
+        )
     ]
     completed_cutoff = current_time - timedelta(days=7)
     completed_recently = [
@@ -211,6 +224,7 @@ async def build_today_projection(
             if observation_ids
             else []
         )
+        seen_evidence: set[tuple[object, ...]] = set()
         for source in sources:
             evidence = next(
                 (
@@ -227,6 +241,20 @@ async def build_today_projection(
             locator = None
             if evidence and evidence.evidence_locator:
                 locator = bounded_locator(evidence.evidence_locator)
+            spans = locator.get("spans") if locator else None
+            if evidence and evidence.source_hash and isinstance(spans, list) and spans:
+                key = (
+                    source.commitment_id,
+                    source.connection_id,
+                    source.provider,
+                    source.source_type,
+                    source.external_resource_id,
+                    evidence.source_hash,
+                    tuple(sorted({json.dumps(span, sort_keys=True) for span in spans})),
+                )
+                if key in seen_evidence:
+                    continue
+                seen_evidence.add(key)
             source_map.setdefault(source.commitment_id, []).append(
                 TodaySource(
                     provider=source.provider,
@@ -234,10 +262,13 @@ async def build_today_projection(
                     external_resource_id=source.external_resource_id,
                     evidence_locator=locator,
                     observed_at=evidence.observed_at if evidence else None,
+                    evidence_id=evidence.id if evidence else None,
+                    connection_id=source.connection_id,
                 )
             )
 
     items: list[tuple[Commitment, TodayItem]] = []
+    set_aside: list[TodayItem] = []
     for commitment in active:
         result = attention_results[commitment.id]
         items.append(
@@ -245,7 +276,9 @@ async def build_today_projection(
                 commitment,
                 TodayItem(
                     id=commitment.id,
-                    type=commitment.commitment_type,
+                    type="alert"
+                    if email_intent(commitment) == "important_alert"
+                    else commitment.commitment_type,
                     title=commitment.title,
                     description=commitment.description,
                     status=commitment.status,
@@ -257,12 +290,16 @@ async def build_today_projection(
                     reasons=result.reasons,
                     factors=result.factors,
                     band=result.band,
-                    category=category_for(commitment, result, current_time, timezone),
+                    category="SET_ASIDE"
+                    if result.email_hold_reason
+                    else category_for(commitment, result, current_time, timezone),
                     suggested_capability=result.suggested_capability,
                     sources=tuple(source_map.get(commitment.id, [])),
                 ),
             )
         )
+        if result.email_hold_reason:
+            set_aside.append(items.pop()[1])
 
     attention = sorted(
         (
@@ -326,4 +363,5 @@ async def build_today_projection(
         renewals=tuple(renewals),
         waiting_on=tuple(waiting),
         completed_recently=tuple(completed_items),
+        set_aside=tuple(sorted(set_aside, key=lambda item: item.title.casefold())),
     )

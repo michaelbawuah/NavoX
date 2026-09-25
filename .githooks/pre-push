@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Opt in with: git config core.hooksPath .githooks
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+bash "$root/scripts/check-api.sh"

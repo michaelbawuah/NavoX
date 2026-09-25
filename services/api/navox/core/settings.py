@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, JsonValue, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
@@ -25,10 +25,18 @@ class Settings(BaseSettings):
     session_cookie_name: str = "navox_session"
     session_ttl_hours: int = Field(default=168, ge=1, le=720)
     extension_session_ttl_hours: int = Field(default=72, ge=1, le=168)
+    canvas_base_url: str = ""
+    canvas_oauth_client_id: str = ""
+    canvas_oauth_client_secret: SecretStr | None = None
+    canvas_oauth_redirect_uri: str = "http://localhost:8000/api/v1/connectors/canvas-lms/callback"
     google_oauth_client_id: str = ""
     google_oauth_client_secret: SecretStr | None = None
     google_oauth_redirect_uri: str = "http://localhost:8000/api/v1/connections/google/callback"
     google_token_encryption_key: SecretStr | None = None
+    connector_secret_encryption_key: SecretStr | None = None
+    # Deployment-operator reviewed configurations. Users cannot supply network targets.
+    generic_rest_connectors: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=20)
+    mcp_servers: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=20)
     google_gmail_push_subscription: str = ""
     google_gmail_watch_topic: str = ""
     google_calendar_push_url: str = ""
@@ -38,6 +46,7 @@ class Settings(BaseSettings):
     ai_provider: str = "disabled"
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-5.6-luna"
+    openai_read_timeout_seconds: float = Field(default=120.0, ge=1.0, le=300.0, allow_inf_nan=False)
     commitment_moderate_confidence_threshold: float = Field(default=0.65, ge=0.0, lt=1.0)
     commitment_high_confidence_threshold: float = Field(default=0.85, gt=0.0, le=1.0)
 

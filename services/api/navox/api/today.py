@@ -23,6 +23,8 @@ class TodaySourceResponse(BaseModel):
     external_resource_id: str | None
     evidence_locator: dict[str, object] | None = None
     observed_at: str | None = None
+    evidence_id: UUID | None = None
+    connection_id: UUID | None = None
 
 
 class TodayItemResponse(BaseModel):
@@ -53,6 +55,7 @@ class TodayResponse(BaseModel):
     renewals: list[TodayItemResponse]
     waiting_on: list[TodayItemResponse]
     completed_recently: list[TodayItemResponse]
+    set_aside: list[TodayItemResponse]
 
 
 QueryIntent = Literal[
@@ -120,6 +123,8 @@ def item_response(item: TodayItem) -> TodayItemResponse:
                 external_resource_id=source.external_resource_id,
                 evidence_locator=source.evidence_locator,
                 observed_at=source.observed_at.isoformat() if source.observed_at else None,
+                evidence_id=source.evidence_id,
+                connection_id=source.connection_id,
             )
             for source in item.sources
         ],
@@ -136,6 +141,7 @@ def projection_response(projection: TodayProjection) -> TodayResponse:
         renewals=[item_response(item) for item in projection.renewals],
         waiting_on=[item_response(item) for item in projection.waiting_on],
         completed_recently=[item_response(item) for item in projection.completed_recently],
+        set_aside=[item_response(item) for item in projection.set_aside],
     )
 
 

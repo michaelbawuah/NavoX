@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-09-23T06:01:05.578298+00:00",
+  "mode": "live_model_smoke",
+  "dataset": "navox-intelligence-smoke-v1",
+  "scope": "AIGateway and extraction validation on built-in synthetic sources only",
+  "planned_cases": 9,
+  "executed_cases": 9,
+  "passed_cases": 9,
+  "failed_cases": 0,
+  "failed_case_ids": [],
+  "skipped_cases": 0,
+  "skipped_case_ids": [],
+  "cases": [
+    {
+      "id": "explicit-request",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 7029
+    },
+    {
+      "id": "explicit-promise",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 7272
+    },
+    {
+      "id": "meeting",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 5639
+    },
+    {
+      "id": "relative-deadline",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 5944
+    },
+    {
+      "id": "explicit-follow-up",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 7601
+    },
+    {
+      "id": "explicit-waiting",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 8425
+    },
+    {
+      "id": "explicit-completion",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 5053
+    },
+    {
+      "id": "informational-newsletter",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 1555
+    },
+    {
+      "id": "untrusted-instructions",
+      "passed": true,
+      "reason": "validated_expected_observations",
+      "duration_ms": 1210
+    }
+  ],
+  "passed": true,
+  "live_google_chain_verified": false,
+  "production_quality_measured": false,
+  "limitations": [
+    "This small smoke set does not measure precision, recall, or production quality.",
+    "No Google account, database, Temporal workflow, or external action is accessed.",
+    "A passing offline run uses authored responses and does not validate a live model."
+  ]
+}
