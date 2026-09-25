@@ -18,8 +18,16 @@ canonical resources, and the runtime must apply the normal capability,
 provenance, tenant, size and content checks before acceptance. No page data or
 browser history should enter a background cursor.
 
-This commit provides the contract and the fail-closed ordinary-sync boundary.
-There is no browser capture API, browser extension capture command, or registered
-browser adapter. A caller cannot activate capture by changing connection config;
-the explicit-consent capture flow needs its own implementation and acceptance
-tests before this connector class can ingest data.
+The Chrome extension also offers an explicit page-note path using the existing
+generic JSON import API. After the user opens NavoX and clicks Choose current
+page, the side panel displays the title and site origin. The user writes a note
+and clicks Save before the service worker requests import preview and confirmation.
+Only the origin, title and note enter an encrypted owner-bound snapshot, then
+the existing connector runtime and SPEC-002 ingestion. The extension never reads
+page body content or browsing history; it removes URL path, query and fragment
+before sending anything. A repeated identical note reuses the import digest.
+
+This is an explicitly selected browser context import. It does not register a
+`BROWSER_ASSISTED` adapter or unlock background browser sync. A dedicated
+browser adapter with a trusted capture API and one-use authorization remains a
+separate future integration; a caller cannot activate it by changing config.

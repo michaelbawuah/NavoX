@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "./config.js";
+import { pageNoteImport } from "./capture.js";
 
 const SESSION_KEY = "navoxExtensionSession";
 
@@ -114,6 +115,25 @@ async function handleMessage(message) {
           timezone: message.timezone,
         }),
       });
+    case "SAVE_PAGE_NOTE": {
+      const command = pageNoteImport(message.selection, message.note);
+      const preview = await api("/connectors/generic-import/preview", {
+        method: "POST",
+        body: JSON.stringify({ format: command.format, content: command.content }),
+      });
+      if (preview.count !== 1 || typeof preview.preview_hash !== "string") {
+        throw new Error("The selected page could not be previewed.");
+      }
+      return api("/connectors/generic-import/connect", {
+        method: "POST",
+        body: JSON.stringify({
+          ...command,
+          preview_hash: preview.preview_hash,
+          request_id: crypto.randomUUID(),
+          confirmed: true,
+        }),
+      });
+    }
     case "HANDLE":
       return api(`/commitments/${message.commitmentId}/handle`, {
         method: "POST",

@@ -46,7 +46,7 @@ jobs:
           const manifest = JSON.parse(
             fs.readFileSync("apps/extension/dist/manifest.json", "utf8"),
           );
-          const expected = ["sidePanel", "storage"];
+          const expected = ["sidePanel", "storage", "activeTab"];
           if (manifest.manifest_version !== 3) throw new Error("Manifest V3 required");
           if (JSON.stringify(manifest.permissions) !== JSON.stringify(expected)) {
             throw new Error("Unexpected extension permissions");
@@ -62,6 +62,7 @@ jobs:
           zip -qr /tmp/navox-chrome-extension.zip .
           unzip -l /tmp/navox-chrome-extension.zip | grep -F manifest.json
           unzip -l /tmp/navox-chrome-extension.zip | grep -F service-worker.js
+          unzip -l /tmp/navox-chrome-extension.zip | grep -F capture.js
           unzip -l /tmp/navox-chrome-extension.zip | grep -F sidepanel.html
 
   api:

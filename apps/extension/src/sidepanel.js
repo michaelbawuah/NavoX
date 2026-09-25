@@ -1,4 +1,5 @@
 import { WEB_APP_URL } from "./config.js";
+import { pageSelection } from "./capture.js";
 import {
   actionSummary,
   deadlineItems,
@@ -20,6 +21,8 @@ const state = {
   error: "",
   query: "",
   queryResult: null,
+  capture: null,
+  captureNote: "",
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
 };
 
@@ -87,7 +90,7 @@ function loginView() {
     element("p", { className: "eyebrow", text: "NavoX side panel" }),
     element("h1", { text: "Your operational state, wherever you work." }),
     element("p", {
-      text: "Sign in to the same NavoX account. The extension does not read the page you are viewing.",
+      text: "Sign in to your NavoX account. A page is selected only when you choose to save a note.",
     }),
   );
   const email = element("input", { type: "email", placeholder: "you@example.com" });
@@ -396,6 +399,73 @@ function queryPanel() {
   return panel;
 }
 
+async function choosePage() {
+  setFeedback();
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    state.capture = pageSelection(tab);
+    state.captureNote = "";
+  } catch (error) {
+    state.capture = null;
+    setFeedback("", error.message);
+  }
+  render();
+}
+
+async function savePageNote() {
+  const selection = state.capture;
+  const note = state.captureNote;
+  state.busy = true;
+  setFeedback();
+  render();
+  try {
+    const result = await send({ type: "SAVE_PAGE_NOTE", selection, note });
+    state.capture = null;
+    state.captureNote = "";
+    setFeedback(
+      result.dispatch_status === "pending"
+        ? "Page note saved. Processing will retry when NavoX is available."
+        : "Page note saved and queued for NavoX.",
+    );
+  } catch (error) {
+    setFeedback("", error.message);
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+function capturePanel() {
+  const panel = element("section", { className: "panel capturePanel" }, [
+    element("p", { className: "eyebrow", text: "Explicit page note" }),
+    element("h2", { className: "panelTitle", text: "Save a note about this page" }),
+    element("p", {
+      className: "headline",
+      text: "Choose the active HTTPS page, review its title and site, then write what NavoX should remember. Page text and browsing history are never read.",
+    }),
+    button("Choose current page", () => void choosePage()),
+  ]);
+  if (!state.capture) return panel;
+  panel.append(
+    element("strong", { text: state.capture.title }),
+    element("p", { className: "empty", text: state.capture.origin }),
+  );
+  const note = document.createElement("textarea");
+  note.placeholder = "What action or detail should NavoX remember?";
+  note.maxLength = 2000;
+  note.value = state.captureNote;
+  note.addEventListener("input", () => { state.captureNote = note.value; });
+  panel.append(
+    note,
+    element("p", {
+      className: "empty",
+      text: "Only the site origin, page title, and your note will be saved. Review before continuing.",
+    }),
+    button("Save this page note", () => void savePageNote(), "primary"),
+  );
+  return panel;
+}
+
 async function decideAction(action, decision) {
   state.busy = true;
   setFeedback();
@@ -494,6 +564,7 @@ function dashboardView() {
   container.append(
     intro,
     queryPanel(),
+    capturePanel(),
     deadlinePanel(data.today),
     proactivePanel(data.briefing),
     todayPanel(data.today),
@@ -514,7 +585,7 @@ function dashboardView() {
     button("Sign out of extension", () => void logout(), "quietButton"),
     element("p", {
       className: "empty",
-      text: "This extension does not read the page you are viewing. Provider actions still use NavoX server-side policy and approval.",
+      text: "Page notes require your explicit save action. NavoX never reads page text or history; provider actions still use server-side policy and approval.",
     }),
   );
   container.append(footer);

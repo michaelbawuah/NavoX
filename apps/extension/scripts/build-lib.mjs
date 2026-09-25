@@ -1,5 +1,4 @@
 const FORBIDDEN_PERMISSIONS = new Set([
-  "activeTab",
   "cookies",
   "debugger",
   "declarativeNetRequest",
@@ -36,6 +35,9 @@ export function manifestFor(template, apiOrigin) {
     if (FORBIDDEN_PERMISSIONS.has(permission)) {
       throw new Error(`Forbidden extension permission: ${permission}`);
     }
+  }
+  if (JSON.stringify(manifest.permissions) !== JSON.stringify(["sidePanel", "storage", "activeTab"])) {
+    throw new Error("Extension permissions must match the reviewed page-note boundary");
   }
   const hosts = manifest.host_permissions ?? [];
   if (hosts.length !== 1 || hosts[0].includes("<all_urls>") || hosts[0].includes("*://*")) {
