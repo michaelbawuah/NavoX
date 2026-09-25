@@ -427,7 +427,15 @@ async def renew_source_watch(
             )
             response.raise_for_status()
             data = response.json()
-        expiration = datetime.fromtimestamp(int(data["expiration"]) / 1000, UTC)
+        raw_expiration = data.get("expiration") if isinstance(data, dict) else None
+        if (
+            not isinstance(raw_expiration, str)
+            or not raw_expiration.isascii()
+            or not raw_expiration.isdecimal()
+            or len(raw_expiration) > 16
+        ):
+            raise ValueError("Invalid provider lease")
+        expiration = datetime.fromtimestamp(int(raw_expiration) / 1000, UTC)
         if expiration <= datetime.now(UTC):
             raise ValueError("Expired provider lease")
         # Disconnect can race the provider call. Never resurrect a cancelled
@@ -435,16 +443,25 @@ async def renew_source_watch(
         await database.refresh(subscription)
         await database.refresh(connection)
         was_cancelled = subscription.status != "active" or connection.status != "active"
-        subscription.expires_at = expiration
         if source == "calendar":
             resource_id = data.get("resourceId")
             if not isinstance(resource_id, str) or not resource_id:
                 raise ValueError("Missing watch resource")
             subscription.resource_id = resource_id
+        subscription.expires_at = expiration
+        subscription.expiration_confirmed_at = datetime.now(UTC)
         if was_cancelled:
             subscription.status = "cancel_pending"
         await database.commit()
-    except (httpx.HTTPError, ValueError, KeyError, TypeError, GoogleSourceError) as error:
+    except (
+        httpx.HTTPError,
+        ValueError,
+        KeyError,
+        TypeError,
+        OverflowError,
+        OSError,
+        GoogleSourceError,
+    ) as error:
         await database.rollback()
         await database.refresh(subscription)
         if subscription.status == "active":

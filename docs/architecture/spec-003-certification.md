@@ -35,20 +35,39 @@ operational behavior that cannot be inferred from a manifest.
 | Event subscription lifecycle | `test_connector_subscriptions.py` | Fenced registration, renewal, cancellation, and cleanup retries are fixture exercised; no production adapter implements these provider event contracts yet. |
 | Authenticated event ingress | `test_connector_events.py`, `test_events.py` | The generic receiver bounds streamed bodies, checks owner/subscription/event authority, requires an adapter verifier, and stores a locator/hash for deduplicated targeted sync. Fixtures cover signature failures, conflicting replay, revocation, sanitized verifier errors, and dispatch outage reconciliation. The Google event tests cover the separate legacy ingress. No registered production universal adapter currently supplies `verify_event`; this is not live webhook acceptance. |
 | Disconnect and learned-data deletion | `test_connection_management.py` | Tests cover source-bound commitment recomputation, person identity source support, event receipt/snapshot removal, and 409 responses for ambiguous legacy or partial provenance. Automatic deletion intentionally stops when it cannot prove ownership; it does not certify erasure of every historical or external provider copy. |
-| Legacy Google watch retirement | `test_connection_management.py` | Calendar and Drive channel-scoped stops, disconnected-account checks, durable retries, and credential retention are fixture tested. Gmail mailbox-wide stop is intentionally disabled; its watch remains pending until verified expiry or coordinated manual cleanup. A remote Google stop has not been verified here. |
-| Browser-assisted contract | `test_connector_contracts.py`, `test_connector_runtime.py` | A scoped one-shot HTTPS capture request is defined and ordinary sync denies browser-assisted adapters, including persisted consent flags. The user gesture, capture endpoint and browser integration are not shipped. |
+| Legacy Google watch retirement | `test_connection_management.py`, `test_intelligence_ingestion.py` | Calendar and Drive channel-scoped stops, disconnected-account checks, durable retries, and credential retention are fixture tested. Gmail/Calendar/Drive watches can retire after provider-confirmed expiry plus a five-minute grace period without OAuth or HTTP; provisional and pre-migration deadlines cannot authorize retirement. Tests cover malformed provider leases, registration/disconnect and cleanup/reconnect races, ownership, and deletion after retirement. A remote Google stop has not been verified here. |
+| Browser-assisted contract | `test_connector_contracts.py`, `test_connector_runtime.py`, extension tests | A scoped one-shot HTTPS capture request is defined and ordinary sync denies browser-assisted adapters, including persisted consent flags. The extension offers explicit title/origin/note import through the managed JSON import path. A dedicated browser capture endpoint and registered adapter are not shipped. |
 
-The numerical SPEC-003 targets, including OAuth refresh success ≥99%, health
-accuracy ≥98%, incremental correctness ≥99%, event deduplication ≥99.9%,
-stable identity ≥99.9%, and replay duplication <1%, require a representative
-denominator and measured production or staged provider runs. A passing fixture
-suite establishes correctness for its named cases; it is not a statistical
-estimate of these rates. The completion gate also requires live authorized
-Google and Canvas checks, a live unknown REST or MCP service, safe lifecycle
-verification (including real Google watch retirement and a registered provider
-event verifier), and confirmation that SPEC-002 regressions remain zero on the
-full API/hosted gates. Reviewed REST/MCP configuration and owner consent have
-fixture-backed setup paths; the tests do not establish provider interoperability
-or safe semantics for a real MCP tool. Record live results with the exact commit,
-environment, sample size, numerator, denominator, and failure examples before
-declaring M8 complete.
+## Scope of the original completion gate
+
+The original specification requests the **browser-assisted contract** in
+implementation item 16. That contract and the explicit-action boundary are
+implemented. A dedicated general browser adapter is further implementation,
+not an additional mandatory completion condition for this release.
+
+The Must list allows a live/mock unknown-service demonstration, but mandatory
+demonstration D explicitly requests an **unknown live service**. Use the stricter
+requirement for final acceptance. Demonstrations A/B/C do not explicitly require
+live Google or institution-enabled Canvas accounts; their functional evidence
+is the existing provider-fixture path through the runtime, SPEC-002 and Today.
+Live provider suitability remains unverified. A new universal production webhook
+adapter is not separately enumerated as a completion condition: Google retains
+its existing authenticated ingress and targeted source workflows. Enabling any
+additional event provider still requires its actual verifier and integration
+evidence.
+
+The numerical targets, including OAuth refresh success ≥99%, health accuracy
+≥98%, incremental correctness ≥99%, event deduplication ≥99.9%, stable identity
+≥99.9%, and replay duplication <1%, need explicit samples, numerators and
+denominators. The specification does not label every metric a production rate.
+Fixture/staged measurements must identify their scenarios and cannot be
+presented as measured production rates. Test totals alone are not denominators
+for each of these metrics.
+
+Still required: record demonstration D using the live acceptance command in
+`spec-003-portability-acceptance.md`; assemble the metric-specific evidence;
+resolve or explicitly review lifecycle limitations for ambiguous historical
+provenance and unconfirmed old watches; retain zero accepted SPEC-002 regressions
+on the full API/hosted gates. Record the exact commit, environment, sample size,
+numerator, denominator and failures. A live result from one service establishes
+that interoperability case, not safe semantics for every REST or MCP endpoint.

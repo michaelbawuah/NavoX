@@ -54,6 +54,7 @@ render_schema() {
     }
   done
   grep -F 'client_type' "$reports/schema.sql" >/dev/null || return 1
+  grep -F 'ADD COLUMN expiration_confirmed_at TIMESTAMP WITH TIME ZONE' "$reports/schema.sql" >/dev/null || return 1
   grep -F 'uq_person_identities_workspace_type_value' "$reports/schema.sql" >/dev/null || return 1
   grep -F 'uq_observation_evidence_observation_source_hash' "$reports/schema.sql" >/dev/null || return 1
 }

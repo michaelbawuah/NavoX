@@ -173,6 +173,10 @@ class ProviderEventSubscription(Base):
     channel_token_hash: Mapped[str] = mapped_column(String(64))
     resource_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Provisional registration deadlines are not evidence of provider expiration.
+    expiration_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     status: Mapped[str] = mapped_column(String(32), default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

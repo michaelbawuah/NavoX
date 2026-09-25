@@ -740,6 +740,7 @@ async def test_watch_renewal_stores_lease_and_does_not_repeat_unexpired_watch(
     subscription = await database.scalar(select(ProviderEventSubscription))
     assert subscription is not None and subscription.status == "active"
     assert subscription.channel_token_hash != "watch-token"
+    assert subscription.expiration_confirmed_at is not None
     assert await database.scalar(select(func.count()).select_from(IntelligenceCursor)) == 0
 
 
@@ -771,6 +772,81 @@ async def test_failed_watch_registration_does_not_create_valid_lease(
         )
     subscription = await database.scalar(select(ProviderEventSubscription))
     assert subscription is not None and subscription.status == "failed"
+    assert subscription.expiration_confirmed_at is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expiration", [None, True, 1.25, "-1", "9" * 30, "1", "NaN"])
+async def test_watch_never_confirms_a_malformed_or_expired_provider_lease(
+    database: AsyncSession, monkeypatch: pytest.MonkeyPatch, expiration: Any
+) -> None:
+    connection = await connection_fixture(database)
+
+    async def token(*_: Any, **__: Any) -> str:
+        return "watch-token"
+
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(ingestion, "access_token_for_connection", token)
+    monkeypatch.setattr(
+        ingestion.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_client(
+            **kwargs,
+            transport=httpx.MockTransport(
+                lambda _: httpx.Response(200, json={"expiration": expiration})
+            ),
+        ),
+    )
+    with pytest.raises(GoogleSourceError, match="registration failed"):
+        await ingestion.renew_source_watch(
+            database,
+            connection_id=connection.id,
+            source="gmail",
+            settings=Settings(google_gmail_watch_topic="projects/test/topics/navox"),
+        )
+    subscription = await database.scalar(select(ProviderEventSubscription))
+    assert subscription is not None and subscription.status == "failed"
+    assert subscription.expiration_confirmed_at is None
+
+
+@pytest.mark.asyncio
+async def test_watch_disconnect_during_registration_preserves_confirmed_expiry(
+    database: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connection = await connection_fixture(database)
+
+    async def token(*_: Any, **__: Any) -> str:
+        return "watch-token"
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        subscription = await database.scalar(select(ProviderEventSubscription))
+        assert subscription is not None and subscription.expiration_confirmed_at is None
+        connection.status = "disconnected"
+        subscription.status = "cancel_pending"
+        await database.commit()
+        return httpx.Response(
+            200,
+            json={
+                "expiration": str(int((datetime.now(UTC) + timedelta(days=6)).timestamp() * 1000))
+            },
+        )
+
+    original_client = httpx.AsyncClient
+    monkeypatch.setattr(ingestion, "access_token_for_connection", token)
+    monkeypatch.setattr(
+        ingestion.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_client(**kwargs, transport=httpx.MockTransport(handler)),
+    )
+    assert not await ingestion.renew_source_watch(
+        database,
+        connection_id=connection.id,
+        source="gmail",
+        settings=Settings(google_gmail_watch_topic="projects/test/topics/navox"),
+    )
+    subscription = await database.scalar(select(ProviderEventSubscription))
+    assert subscription is not None and subscription.status == "cancel_pending"
+    assert subscription.expiration_confirmed_at is not None
 
 
 @pytest.mark.asyncio

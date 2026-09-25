@@ -103,6 +103,7 @@ jobs:
             grep -F "CREATE TABLE $table" /tmp/navox-schema.sql
           done
           grep -F "client_type" /tmp/navox-schema.sql
+          grep -F "ADD COLUMN expiration_confirmed_at TIMESTAMP WITH TIME ZONE" /tmp/navox-schema.sql
           grep -F "uq_person_identities_workspace_type_value" /tmp/navox-schema.sql
           grep -F "uq_observation_evidence_observation_source_hash" /tmp/navox-schema.sql
 

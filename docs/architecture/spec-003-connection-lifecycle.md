@@ -10,12 +10,22 @@ be recalled or that a remote OAuth token has been revoked at the provider.
 Repeated command IDs are idempotent; a disconnected account cannot resume.
 
 The legacy Google watch cleanup worker retries Calendar and Drive channel
-stops with their exact channel and resource IDs and records cancellation only
-after Google confirms it. Gmail's stop API affects the whole mailbox, including
-a newer connection. Gmail channels therefore remain `cancel_pending`; the
-encrypted cleanup credential and delete-data 409 remain until a separately
-verified expiry or coordinated manual cleanup. The worker never calls Gmail
-mailbox-wide stop automatically.
+stops with their exact channel and resource IDs. It can also retire Gmail,
+Calendar and Drive watches five minutes after a provider-confirmed expiry,
+without reading an OAuth credential or making a provider request. Registration
+records `expiration_confirmed_at` only after a successful, validated provider
+response. The temporary ten-minute registration deadline cannot authorize
+expiry cleanup. Google's [Gmail watch response contract](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users/watch)
+defines `expiration` as the time notifications stop.
+
+Expiry retirement checks the disconnected owner and workspace and conditionally
+matches the claimed row, confirmation and expiry, so a concurrent reconnect or
+renewal cannot reuse stale authority. It unblocks delete-data once all remaining
+subscriptions have retired; deletion then removes the retained encrypted cleanup
+credential. The migration leaves existing confirmation fields empty because old
+deadlines may be provisional. Those rows still require separately verified
+cleanup. Gmail's stop API affects the whole mailbox, including a newer connection,
+so the worker never calls mailbox-wide stop automatically.
 
 `POST /api/v1/connections/{id}/delete-data` requires prior disconnect. It
 deletes this connection's evidence, receipts, canonical resources, encrypted

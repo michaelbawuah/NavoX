@@ -776,6 +776,204 @@ async def test_gmail_cleanup_never_uses_account_wide_stop(env, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["gmail", "calendar", "drive"])
+async def test_confirmed_expired_google_watch_allows_deletion_without_oauth(
+    env, monkeypatch, source
+):
+    from navox.connectors import google_watch_cleanup as cleanup
+
+    now = datetime.now(UTC)
+    async with env.factory() as db:
+        channel = ProviderEventSubscription(
+            connection_id=env.id,
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            provider="google",
+            source=source,
+            channel_id=f"expired-{uuid4()}",
+            channel_token_hash="f" * 64,
+            expires_at=now - timedelta(minutes=10),
+            expiration_confirmed_at=now - timedelta(days=6),
+            status="active",
+        )
+        db.add(channel)
+        await db.commit()
+        subscription_id = channel.id
+    result = await env.client.request("DELETE", f"/api/v1/connections/{env.id}", json=command())
+    assert result.status_code == 200 and not result.json()["can_delete_data"]
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("Expiry cleanup must not consume credentials or call Google")
+
+    monkeypatch.setattr(cleanup, "access_token_for_watch_cleanup", forbidden)
+    monkeypatch.setattr(cleanup.httpx, "AsyncClient", forbidden)
+    async with env.factory() as db:
+        assert subscription_id in await cleanup.due_google_watches(db)
+        assert await cleanup.cancel_google_watch(
+            db, subscription_id=subscription_id, settings=env.settings
+        )
+        await db.refresh(channel := await db.get(ProviderEventSubscription, subscription_id))
+        assert channel.status == "cancelled"
+        assert not await cleanup.cancel_google_watch(
+            db, subscription_id=subscription_id, settings=env.settings
+        )
+    deleted = await env.client.post(f"/api/v1/connections/{env.id}/delete-data", json=command())
+    assert deleted.status_code == 200, deleted.text
+    async with env.factory() as db:
+        assert await db.get(ProviderEventSubscription, subscription_id) is None
+        assert await db.get(ConnectionCredential, env.credential_id) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case", ["provisional", "future", "grace", "invalid", "reconnected", "wrong_owner"]
+)
+async def test_gmail_expiry_cleanup_requires_confirmed_owned_disconnected_watch(
+    env, monkeypatch, case
+):
+    from navox.connectors import google_watch_cleanup as cleanup
+
+    now = datetime.now(UTC)
+    async with env.factory() as db:
+        channel = ProviderEventSubscription(
+            connection_id=env.id,
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            provider="google",
+            source="gmail",
+            channel_id=f"pending-{uuid4()}",
+            channel_token_hash="f" * 64,
+            expires_at=now - timedelta(minutes=10),
+            expiration_confirmed_at=now - timedelta(days=6),
+            status="cancel_pending",
+        )
+        account = await db.get(Connection, env.id)
+        account.status = "active" if case == "reconnected" else "disconnected"
+        if case == "provisional":
+            channel.expiration_confirmed_at = None
+        elif case == "future":
+            channel.expires_at = now + timedelta(days=1)
+        elif case == "grace":
+            channel.expires_at = now - timedelta(minutes=1)
+        elif case == "invalid":
+            channel.expiration_confirmed_at = now
+        elif case == "wrong_owner":
+            other = User(email=f"other-{uuid4()}@example.org")
+            db.add(other)
+            await db.flush()
+            channel.user_id = other.id
+        db.add(channel)
+        await db.commit()
+        subscription_id = channel.id
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("Unsafe Gmail cleanup must not use credentials or HTTP")
+
+    monkeypatch.setattr(cleanup, "access_token_for_watch_cleanup", forbidden)
+    monkeypatch.setattr(cleanup.httpx, "AsyncClient", forbidden)
+    async with env.factory() as db:
+        assert subscription_id not in await cleanup.due_google_watches(db)
+        assert not await cleanup.cancel_google_watch(
+            db, subscription_id=subscription_id, settings=env.settings
+        )
+        await db.refresh(channel := await db.get(ProviderEventSubscription, subscription_id))
+        assert channel.status == "cancel_pending"
+
+
+@pytest.mark.asyncio
+async def test_expiry_cleanup_rechecks_reconnect_at_retirement(env, monkeypatch):
+    from navox.connectors import google_watch_cleanup as cleanup
+
+    async with env.factory() as db:
+        account = await db.get(Connection, env.id)
+        account.status = "disconnected"
+        channel = ProviderEventSubscription(
+            connection_id=env.id,
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            provider="google",
+            source="gmail",
+            channel_id=f"race-{uuid4()}",
+            channel_token_hash="f" * 64,
+            expires_at=datetime.now(UTC) - timedelta(minutes=10),
+            expiration_confirmed_at=datetime.now(UTC) - timedelta(days=6),
+            status="cancel_pending",
+        )
+        db.add(channel)
+        await db.commit()
+        subscription_id = channel.id
+
+    async with env.factory() as db:
+        original_scalar = db.scalar
+        calls = 0
+
+        async def reconnect_before_retirement(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                async with env.factory() as concurrent:
+                    account = await concurrent.get(Connection, env.id)
+                    account.status = "active"
+                    await concurrent.commit()
+            return await original_scalar(*args, **kwargs)
+
+        monkeypatch.setattr(db, "scalar", reconnect_before_retirement)
+        assert not await cleanup.cancel_google_watch(
+            db, subscription_id=subscription_id, settings=env.settings
+        )
+    async with env.factory() as db:
+        assert (await db.get(ProviderEventSubscription, subscription_id)).status == "cancel_pending"
+        assert (await db.get(Connection, env.id)).status == "active"
+
+
+@pytest.mark.asyncio
+async def test_expiring_old_gmail_claim_keeps_newer_watch_and_deletion_blocked(env, monkeypatch):
+    from navox.connectors import google_watch_cleanup as cleanup
+
+    now = datetime.now(UTC)
+    async with env.factory() as db:
+        account = await db.get(Connection, env.id)
+        account.status = "disconnected"
+        watches = []
+        for expired in (True, False):
+            watch = ProviderEventSubscription(
+                connection_id=env.id,
+                user_id=env.user_id,
+                workspace_id=env.workspace_id,
+                provider="google",
+                source="gmail",
+                channel_id=f"renewal-{uuid4()}",
+                channel_token_hash="f" * 64,
+                expires_at=now - timedelta(minutes=10) if expired else now + timedelta(days=6),
+                expiration_confirmed_at=now - timedelta(days=6),
+                status="cancelling" if expired else "cancel_pending",
+                updated_at=now - timedelta(minutes=3),
+            )
+            db.add(watch)
+            watches.append(watch)
+        await db.commit()
+        old_id, new_id = (watch.id for watch in watches)
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("Expiry cleanup must not touch a mailbox-wide Google watch")
+
+    monkeypatch.setattr(cleanup, "access_token_for_watch_cleanup", forbidden)
+    monkeypatch.setattr(cleanup.httpx, "AsyncClient", forbidden)
+    async with env.factory() as db:
+        assert await cleanup.due_google_watches(db) == [old_id]
+        assert await cleanup.cancel_google_watch(db, subscription_id=old_id, settings=env.settings)
+        assert not await cleanup.cancel_google_watch(
+            db, subscription_id=new_id, settings=env.settings
+        )
+    deleted = await env.client.post(f"/api/v1/connections/{env.id}/delete-data", json=command())
+    assert deleted.status_code == 409
+    async with env.factory() as db:
+        assert (await db.get(ProviderEventSubscription, old_id)).status == "cancelled"
+        assert (await db.get(ProviderEventSubscription, new_id)).status == "cancel_pending"
+        assert await db.get(ConnectionCredential, env.credential_id) is not None
+
+
+@pytest.mark.asyncio
 async def test_internal_disconnect_keeps_cancelled_channels_retired(env, monkeypatch):
     from navox.connectors import activities
 

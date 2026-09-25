@@ -9,7 +9,7 @@ import json
 import os
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -216,7 +216,7 @@ async def portable(tmp_path, request):
     extractor = OperationalExtractor(model)
     runtime = ConnectorRuntime(registry, secret_broker=broker, retain_canonical_content=False)
 
-    async def sync(*, policy=None, user_id=None, workspace_id=None):
+    async def sync(*, policy=None, user_id=None, workspace_id=None, request_id=None):
         async with factory() as db:
             row = await db.get(ConnectorConnection, ids[0])
 
@@ -234,7 +234,7 @@ async def portable(tmp_path, request):
                 connection_id=ids[0],
                 user_id=user_id or ids[1],
                 workspace_id=workspace_id or ids[2],
-                request_id=uuid4(),
+                request_id=request_id or uuid4(),
                 policy_allowed={CAPABILITY} if policy is None else policy,
                 consume=consume,
                 consumer_version=extractor.extractor_version,
@@ -248,6 +248,7 @@ async def portable(tmp_path, request):
             model=model,
             calls=calls,
             provider=provider,
+            registry=registry,
         )
     finally:
         await engine.dispose()
@@ -338,3 +339,124 @@ async def test_unknown_service_cannot_grant_model_write_authority(portable):
         assert await db.scalar(select(func.count()).select_from(Approval)) == 0
         row = await db.get(ConnectorConnection, portable.ids[0])
         assert row.authorized_capabilities == [CAPABILITY]
+
+
+def acceptance_setup(monkeypatch, portable):
+    from navox.evaluation import connector_live
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW
+
+    monkeypatch.setattr(connector_live, "datetime", Clock)
+    monkeypatch.setattr(connector_live, "build_connector_registry", lambda _: portable.registry)
+    monkeypatch.setattr(connector_live, "get_session_factory", lambda: portable.factory)
+    monkeypatch.setattr(connector_live, "get_settings", lambda: Settings(_env_file=None))
+    return connector_live
+
+
+@pytest.mark.asyncio
+async def test_live_acceptance_command_links_its_own_run_to_today_and_redacts_report(
+    portable, monkeypatch
+):
+    connector_live = acceptance_setup(monkeypatch, portable)
+    dispatched = []
+
+    async def dispatch(payload, *, settings):
+        dispatched.append(payload)
+        await portable.sync(request_id=UUID(payload.request_id))
+        return "test-workflow"
+
+    async def result():
+        return 1
+
+    async def connect(_):
+        return SimpleNamespace(get_workflow_handle=lambda _: SimpleNamespace(result=result))
+
+    monkeypatch.setattr(connector_live, "dispatch_connector_sync", dispatch)
+    monkeypatch.setattr(connector_live, "Client", SimpleNamespace(connect=connect))
+    request_id = uuid4()
+    report = await connector_live.run_live_acceptance(portable.ids[0], request_id=request_id)
+    assert len(dispatched) == 1 and dispatched[0].request_id == str(request_id)
+    assert report["passed"] is True and report["today_matches"] == 1
+    assert report["resources_seen"] == 1 and report["accepted_receipts"] == 1
+    assert all(report["checks"].values())
+    assert TOKEN not in json.dumps(report)
+    assert "Please submit" not in json.dumps(report)
+    assert "portable.example.invalid" not in json.dumps(report)
+    with pytest.raises(connector_live.LiveAcceptanceError, match="fresh_request_id"):
+        await connector_live.run_live_acceptance(portable.ids[0], request_id=request_id)
+    assert len(dispatched) == 1
+
+
+@pytest.mark.asyncio
+async def test_live_acceptance_rejects_old_today_results_without_new_run_receipts(
+    portable, monkeypatch
+):
+    connector_live = acceptance_setup(monkeypatch, portable)
+    await portable.sync()
+    request_id = uuid4()
+    async with portable.factory() as db:
+        db.add(
+            ConnectorSyncRun(
+                connector_connection_id=portable.ids[0],
+                workspace_id=portable.ids[2],
+                request_id=request_id,
+                status="completed",
+                fetch_complete=True,
+                resource_count=0,
+            )
+        )
+        await db.commit()
+        report = await connector_live.inspect_run(
+            db,
+            connection_id=portable.ids[0],
+            request_id=request_id,
+            settings=Settings(_env_file=None),
+        )
+    assert report["passed"] is False and report["today_matches"] == 0
+    assert report["checks"]["source_linked_results_in_today"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["paused", "wrong_workspace", "first_party", "approval_removed"])
+async def test_live_acceptance_checks_current_approval_before_dispatch(portable, monkeypatch, case):
+    connector_live = acceptance_setup(monkeypatch, portable)
+    async with portable.factory() as db:
+        connection = await db.get(ConnectorConnection, portable.ids[0])
+        if case == "paused":
+            connection.status = "PAUSED"
+        elif case == "wrong_workspace":
+            connection.workspace_id = portable.ids[3]
+        elif case == "first_party":
+            connection.provider = "google"
+        else:
+            monkeypatch.setattr(
+                connector_live, "build_connector_registry", lambda _: ConnectorRegistry()
+            )
+        await db.commit()
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Invalid acceptance target must not dispatch provider I/O")
+
+    monkeypatch.setattr(connector_live, "dispatch_connector_sync", forbidden)
+    with pytest.raises(connector_live.LiveAcceptanceError):
+        await connector_live.run_live_acceptance(portable.ids[0], request_id=uuid4())
+    assert not portable.calls and not portable.model.calls
+
+
+def test_live_acceptance_cli_does_not_print_exception_credentials(monkeypatch, capsys):
+    import sys
+
+    from navox.evaluation import connector_live
+
+    async def failed(*args, **kwargs):
+        raise RuntimeError("postgresql://secret:password@database/private")
+
+    monkeypatch.setattr(sys, "argv", ["connector_live", "--connection-id", str(uuid4()), "--live"])
+    monkeypatch.setattr(connector_live, "run_live_acceptance", failed)
+    assert connector_live.main() == 1
+    report = capsys.readouterr().out
+    assert json.loads(report)["error"] == "live_run_unavailable"
+    assert "password" not in report and "secret" not in report

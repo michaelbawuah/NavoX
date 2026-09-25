@@ -51,3 +51,50 @@ independent acceptance evidence.
 
 A passing suite is evidence for these named behaviors only; it is not a declaration
 that SPEC-003 is complete.
+
+## Live demonstration command
+
+The operator command below uses an existing owner-authorized Generic REST or MCP
+connection. Set up that connection using the reviewed deployment configuration
+and Connected Apps flow first. Select a service containing an actionable item
+that should appear in Today. The API and Temporal worker must run the same
+reviewed revision and operator configuration, with a configured AI provider.
+Record `git rev-parse HEAD` for that deployment alongside the resulting report.
+
+List candidate connection IDs in the running app:
+
+```bash
+docker compose exec -T api uv run --no-sync python -m navox.evaluation.connector_live --list
+```
+
+Then run the chosen connection (replace the UUID):
+
+```bash
+docker compose exec -T api uv run --no-sync python -m navox.evaluation.connector_live \
+  --connection-id 00000000-0000-0000-0000-000000000000 --live \
+  > spec-003-live-portability.json
+```
+
+`--live` starts a real manual sync and can consume provider/model quota and add
+the source's normal derived results to Today. It uses the deployed Temporal
+workflow, production connector registry, existing grants and Secret Broker. It
+does not create a connection or grant new permissions. The runner checks current
+owner/membership, connection state and operator-approved manifest before dispatch
+and again before collecting evidence. The default wait is 300 seconds; use
+`--timeout-seconds` from 30 to 1800 if necessary. A timeout ends the wait only:
+the durable sync may continue. Its request ID is included in the error result.
+
+A passing result requires this new run to complete, observe resources, record
+canonical acceptance receipts for the SPEC-002 consumer, and link at least one
+of those receipts' results to Today with this connection's evidence. Old Today
+cards alone cannot pass the gate. An informational-only source or an empty
+incremental page will fail the demonstration without fabricating a task; use a
+new connection or a real new actionable item for the demonstration.
+
+The JSON contains identifiers, a manifest digest, counts and individual checks.
+It omits titles, bodies, URLs, credentials and provider error text. Exit status
+is nonzero if execution fails or any gate fails. This single run does not claim
+the numerical reliability targets or production-wide security certification.
+Tests of the command use provider/model fixtures and are not live acceptance
+results themselves. Keep the report and deployment revision together when
+recording demonstration D.

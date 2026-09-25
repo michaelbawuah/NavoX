@@ -12,7 +12,19 @@ SCRIPT = ROOT / "scripts/check-api.sh"
 
 @pytest.mark.parametrize(
     "failed_stage",
-    ["", "sync", "lint", "format", "mypy", "revision", "pytest", "alembic", "evaluation", "schema"],
+    [
+        "",
+        "sync",
+        "lint",
+        "format",
+        "mypy",
+        "revision",
+        "pytest",
+        "alembic",
+        "evaluation",
+        "schema",
+        "watch_schema",
+    ],
 )
 def test_api_preflight_blocks_failures_and_runs_remaining_gates(
     tmp_path: Path, failed_stage: str
@@ -56,6 +68,9 @@ if [ "$stage" = alembic ]; then
     printf 'CREATE TABLE %s (\\n' "$table"
   done
   printf '%s\\n' client_type
+  if [ "$PREFLIGHT_TEST_FAILURE" != watch_schema ]; then
+    printf '%s\\n' 'ADD COLUMN expiration_confirmed_at TIMESTAMP WITH TIME ZONE'
+  fi
   printf '%s\\n' uq_person_identities_workspace_type_value
   printf '%s\\n' uq_observation_evidence_observation_source_hash
 fi
