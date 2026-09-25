@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import and_, or_, select, update
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
@@ -17,6 +17,7 @@ from navox.connectors.contracts import (
     ConnectorRuntimeError,
     EventSubscriptionConnector,
 )
+from navox.connectors.google_watch_cleanup import cancel_google_watch, due_google_watches
 from navox.connectors.intelligence import ingest_connector_resource
 from navox.connectors.jobs import (
     ConnectorDisconnectWork,
@@ -32,6 +33,7 @@ from navox.core.settings import get_settings
 from navox.db.models import (
     ConnectorConnection,
     ConnectorDefinition,
+    ConnectorEventReceipt,
     ConnectorSubscription,
     ConnectorSyncRun,
     User,
@@ -378,6 +380,94 @@ async def connector_subscription_activity(payload: ConnectorHealthWork) -> str:
 
 
 @activity.defn
+async def connector_event_reconciliation_activity() -> int:
+    """Retry persisted, verified delivery locators after dispatch outages."""
+    from fastapi import HTTPException
+
+    from navox.api.connector_events import authority
+    from navox.connectors.dispatcher import dispatch_connector_sync
+
+    settings = get_settings()
+    registry = build_connector_registry(settings)
+    dispatched = 0
+    scanned = 0
+    cursor: tuple[datetime, UUID] | None = None
+    while scanned < 1000:
+        async with get_session_factory()() as database:
+            query = select(ConnectorEventReceipt.id, ConnectorEventReceipt.received_at).where(
+                ConnectorEventReceipt.status == "pending"
+            )
+            if cursor is not None:
+                query = query.where(
+                    or_(
+                        ConnectorEventReceipt.received_at > cursor[0],
+                        and_(
+                            ConnectorEventReceipt.received_at == cursor[0],
+                            ConnectorEventReceipt.id > cursor[1],
+                        ),
+                    )
+                )
+            pending = (
+                await database.execute(
+                    query.order_by(
+                        ConnectorEventReceipt.received_at, ConnectorEventReceipt.id
+                    ).limit(min(100, 1000 - scanned))
+                )
+            ).all()
+        if not pending:
+            break
+        for receipt_id, received_at in pending:
+            cursor = received_at, receipt_id
+            scanned += 1
+            try:
+                async with get_session_factory()() as database:
+                    receipt = await database.get(ConnectorEventReceipt, receipt_id)
+                    if receipt is None or receipt.status != "pending":
+                        continue
+                    try:
+                        connection, _, subscription = await authority(
+                            database,
+                            registry,
+                            subscription_id=receipt.subscription_id,
+                            provider=receipt.provider,
+                        )
+                        if (
+                            receipt.connector_connection_id != connection.id
+                            or receipt.workspace_id != connection.workspace_id
+                            or receipt.user_id != connection.user_id
+                            or receipt.event_type != subscription.subscription_key
+                        ):
+                            raise HTTPException(401, "Unverified connector event")
+                    except HTTPException:
+                        # Revoked authority cannot become valid by retrying the
+                        # same event; retain its locator for audit, not dispatch.
+                        receipt.status = "invalidated"
+                        await database.commit()
+                        continue
+                    payload = ConnectorSyncWork(
+                        connection_id=str(connection.id),
+                        workspace_id=str(connection.workspace_id),
+                        user_id=str(connection.user_id),
+                        request_id=str(receipt.id),
+                        trigger="event",
+                    )
+                    await database.commit()
+                await dispatch_connector_sync(payload, settings=settings)
+                async with get_session_factory()() as database:
+                    receipt = await database.get(ConnectorEventReceipt, receipt_id)
+                    if receipt is not None and receipt.status == "pending":
+                        receipt.status = "dispatched"
+                        receipt.dispatched_at = datetime.now(UTC)
+                        await database.commit()
+                        dispatched += 1
+            except Exception:
+                # Queue outages retain the receipt; keyset pagination still
+                # lets later valid deliveries run in this reconciliation pass.
+                continue
+    return dispatched
+
+
+@activity.defn
 async def connector_subscription_reconciliation_activity() -> list[ConnectorHealthWork]:
     """Find due leases without inventing event support for a manifest-only adapter."""
     registry = build_connector_registry(get_settings())
@@ -603,3 +693,18 @@ async def connector_disconnect_activity(payload: ConnectorDisconnectWork) -> str
         )
         await database.commit()
         return "DISCONNECTED"
+
+
+@activity.defn
+async def legacy_google_watch_cleanup_activity() -> int:
+    """Bound each reconciliation pass; unsuccessful stops remain durable."""
+    async with get_session_factory()() as database:
+        due = await due_google_watches(database)
+    count = 0
+    for subscription_id in due:
+        async with get_session_factory()() as database:
+            if await cancel_google_watch(
+                database, subscription_id=subscription_id, settings=get_settings()
+            ):
+                count += 1
+    return count

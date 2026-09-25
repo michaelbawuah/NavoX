@@ -24,6 +24,7 @@ from navox.db.models import (
     OperationalObservation,
     Person,
     PersonIdentity,
+    PersonIdentitySource,
     User,
     WorkspaceMembership,
 )
@@ -111,8 +112,16 @@ def _identity_value(identity: SourceIdentity) -> str:
 
 
 async def resolve_identity(
-    database: AsyncSession, *, workspace_id: UUID, identity: SourceIdentity
+    database: AsyncSession,
+    *,
+    workspace_id: UUID,
+    identity: SourceIdentity,
+    connection_id: UUID | None = None,
 ) -> UUID:
+    if connection_id is not None:
+        source_connection = await database.get(Connection, connection_id)
+        if source_connection is None or source_connection.workspace_id != workspace_id:
+            raise PermissionError("Identity source is outside its workspace")
     value = _identity_value(identity)
     identity_type = identity.identity_type
     if identity_type != "email" and identity.provider:
@@ -133,6 +142,7 @@ async def resolve_identity(
         )
         if person is None:
             raise ValueError("Identity points outside its workspace")
+        await _attach_identity_source(database, existing, connection_id)
         return person.id
     person_id = _stable_id("person", workspace_id, identity_type, value)
     # Savepoint handles the same stable identity arriving on two connections.
@@ -157,6 +167,7 @@ async def resolve_identity(
                     identity_type=identity_type,
                     identity_value=value,
                     confidence=Decimal("1"),
+                    source_attributed=connection_id is not None,
                 )
             )
             await database.flush()
@@ -170,8 +181,39 @@ async def resolve_identity(
         )
         if existing is None:
             raise
+        await _attach_identity_source(database, existing, connection_id)
         return UUID(str(existing.person_id))
+    if connection_id is not None:
+        identity_row = await database.scalar(
+            select(PersonIdentity).where(
+                PersonIdentity.workspace_id == workspace_id,
+                PersonIdentity.identity_type == identity_type,
+                PersonIdentity.identity_value == value,
+            )
+        )
+        if identity_row is None:
+            raise RuntimeError("Created identity is missing")
+        await _attach_identity_source(database, identity_row, connection_id)
     return person_id
+
+
+async def _attach_identity_source(
+    database: AsyncSession, identity: PersonIdentity, connection_id: UUID | None
+) -> None:
+    if connection_id is None:
+        return
+    key = (identity.id, connection_id)
+    if await database.get(PersonIdentitySource, key) is not None:
+        return
+    from sqlalchemy.exc import IntegrityError
+
+    try:
+        async with database.begin_nested():
+            database.add(PersonIdentitySource(identity_id=identity.id, connection_id=connection_id))
+            await database.flush()
+    except IntegrityError:
+        if await database.get(PersonIdentitySource, key) is None:
+            raise
 
 
 async def _record_observation(
@@ -533,7 +575,10 @@ async def resolve_extraction(
     ambiguous_names: set[str] = set()
     for identity in identities:
         identity_person_id = await resolve_identity(
-            database, workspace_id=document.workspace_id, identity=identity
+            database,
+            workspace_id=document.workspace_id,
+            identity=identity,
+            connection_id=connection.id,
         )
         resolved_people[_identity_value(identity)] = identity_person_id
         if identity.display_name:
@@ -563,6 +608,7 @@ async def resolve_extraction(
                         identity_value=identity_key,
                         display_name=mention.name,
                     ),
+                    connection_id=connection.id,
                 )
                 resolved_people[identity_key] = mentioned_person_id
                 # Body-only identities do not establish unambiguous name aliases.

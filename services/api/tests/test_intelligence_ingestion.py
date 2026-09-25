@@ -774,6 +774,42 @@ async def test_failed_watch_registration_does_not_create_valid_lease(
 
 
 @pytest.mark.asyncio
+async def test_watch_registration_failure_preserves_disconnect_cleanup_state(
+    database: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connection = await connection_fixture(database)
+
+    async def token(*_: Any, **__: Any) -> str:
+        return "watch-token"
+
+    original_authorize = ingestion.authorized_connection
+    calls = 0
+
+    async def disconnect_before_registration(session: AsyncSession, connection_id, source):
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            channel = await session.scalar(select(ProviderEventSubscription))
+            assert channel is not None
+            channel.status = "cancel_pending"
+            await session.commit()
+            raise GoogleSourceAuthorizationError("Disconnected during watch registration")
+        return await original_authorize(session, connection_id, source)
+
+    monkeypatch.setattr(ingestion, "access_token_for_connection", token)
+    monkeypatch.setattr(ingestion, "authorized_connection", disconnect_before_registration)
+    with pytest.raises(GoogleSourceError, match="registration failed"):
+        await ingestion.renew_source_watch(
+            database,
+            connection_id=connection.id,
+            source="calendar",
+            settings=Settings(google_calendar_push_url="https://navox.test/events"),
+        )
+    subscription = await database.scalar(select(ProviderEventSubscription))
+    assert subscription is not None and subscription.status == "cancel_pending"
+
+
+@pytest.mark.asyncio
 async def test_watch_renewal_checks_read_permission_before_token_refresh(
     database: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,

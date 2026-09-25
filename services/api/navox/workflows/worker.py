@@ -12,11 +12,13 @@ from navox.approvals.activities import (
 )
 from navox.connectors.activities import (
     connector_disconnect_activity,
+    connector_event_reconciliation_activity,
     connector_health_activity,
     connector_reconciliation_activity,
     connector_subscription_activity,
     connector_subscription_reconciliation_activity,
     connector_sync_activity,
+    legacy_google_watch_cleanup_activity,
 )
 from navox.core.settings import get_settings
 from navox.intelligence.activities import (
@@ -93,7 +95,9 @@ async def main() -> None:
             connector_reconciliation_activity,
             connector_subscription_activity,
             connector_subscription_reconciliation_activity,
+            connector_event_reconciliation_activity,
             connector_disconnect_activity,
+            legacy_google_watch_cleanup_activity,
             intelligence_workspaces_activity,
             process_source_activity,
             refresh_intelligence_activity,

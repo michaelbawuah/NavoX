@@ -28,8 +28,30 @@ async def access_token_for_connection(
     connection: Connection,
     settings: Settings,
 ) -> str:
-    if connection.provider != "google" or connection.status != "active":
-        raise GoogleAccessTokenError("Google connection is not active")
+    return await _access_token(database, connection=connection, settings=settings, status="active")
+
+
+async def access_token_for_watch_cleanup(
+    database: AsyncSession,
+    *,
+    connection: Connection,
+    settings: Settings,
+) -> str:
+    """Only the watch retirement worker uses a disconnected account's token."""
+    return await _access_token(
+        database, connection=connection, settings=settings, status="disconnected"
+    )
+
+
+async def _access_token(
+    database: AsyncSession,
+    *,
+    connection: Connection,
+    settings: Settings,
+    status: str,
+) -> str:
+    if connection.provider != "google" or connection.status != status:
+        raise GoogleAccessTokenError("Google connection is unavailable")
     if connection.credential_reference is None:
         raise GoogleAccessTokenError("Google credential is unavailable")
     credential = await database.get(ConnectionCredential, connection.credential_reference)
@@ -49,7 +71,9 @@ async def access_token_for_connection(
         "refresh_token": refresh_token,
     }
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(
+            timeout=10.0, trust_env=False, follow_redirects=False
+        ) as client:
             response = await client.post(GOOGLE_TOKEN_ENDPOINT, data=payload)
             response.raise_for_status()
             response_data = response.json()

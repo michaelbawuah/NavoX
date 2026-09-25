@@ -43,9 +43,9 @@ render_schema() {
     users workspaces workspace_memberships plans
     plan_steps actions approvals workflow_refs
     audit_events proactive_preferences proactive_signals briefing_snapshots
-    people person_identities operational_observations observation_evidence
+    people person_identities person_identity_sources operational_observations observation_evidence
     intelligence_feedback intelligence_source_receipts gmail_sync_plans connector_definitions
-    connector_connections connector_resources connector_subscriptions connector_sync_runs connector_sync_receipts connector_import_snapshots
+    connector_connections connector_resources connector_subscriptions connector_event_receipts connector_sync_runs connector_sync_receipts connector_import_snapshots
   )
   for table in "${tables[@]}"; do
     grep -F "CREATE TABLE $table (" "$reports/schema.sql" >/dev/null || {

@@ -22,6 +22,7 @@ uv run --no-sync pytest -q --junitxml="$report" \
   tests/test_connector_generic_api.py \
   tests/test_connector_mcp.py \
   tests/test_connector_subscriptions.py \
+  tests/test_connector_events.py \
   tests/test_connector_portability.py \
   tests/test_connector_google_bridge.py \
   tests/test_google_calendar_connector.py \

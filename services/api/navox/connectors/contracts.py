@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Literal, Protocol, runtime_checkable
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -325,6 +326,41 @@ class EventSubscriptionConnector(Protocol):
     async def subscribe(self, request: EventSubscriptionRequest) -> EventSubscriptionResult: ...
 
     async def unsubscribe(self, request: EventSubscriptionRequest) -> None: ...
+
+
+class EventDeliveryRequest(BaseModel):
+    """Untrusted delivery; only a built-in verifier may authenticate it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    subscription_external_id: str = Field(min_length=1, max_length=512)
+    headers: Mapping[str, str]
+    body: bytes = Field(max_length=65_536)
+
+
+class VerifiedEventDelivery(BaseModel):
+    """Locator-only result after verifying signature and subscription binding."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    subscription_external_id: str = Field(min_length=1, max_length=512)
+    external_event_id: str = Field(min_length=1, max_length=512)
+    external_resource_id: str | None = Field(default=None, max_length=512)
+
+
+@runtime_checkable
+class EventDeliveryVerifier(Protocol):
+    """Optional trusted adapter interface; manifest events alone do not enable ingress.
+
+    Implementations must validate an authentic provider signature and bind its
+    signed channel identity and external_event_id to the returned locators.
+    A delivery ID taken from an unsigned header enables unlimited replay.
+    """
+
+    @property
+    def delivery_headers(self) -> frozenset[str]: ...
+
+    async def verify_event(self, request: EventDeliveryRequest) -> VerifiedEventDelivery: ...
 
 
 @runtime_checkable

@@ -8,11 +8,13 @@ from temporalio.exceptions import ActivityError, is_cancelled_exception
 with workflow.unsafe.imports_passed_through():
     from navox.connectors.activities import (
         connector_disconnect_activity,
+        connector_event_reconciliation_activity,
         connector_health_activity,
         connector_reconciliation_activity,
         connector_subscription_activity,
         connector_subscription_reconciliation_activity,
         connector_sync_activity,
+        legacy_google_watch_cleanup_activity,
     )
     from navox.connectors.jobs import (
         ConnectorDisconnectWork,
@@ -140,6 +142,18 @@ class ConnectorReconciliationWorkflow:
                     )
                     await asyncio.gather(
                         *(_run_subscription(item, semaphore) for item in subscriptions)
+                    )
+                if workflow.patched("legacy-google-watch-cleanup-v1"):
+                    await workflow.execute_activity(
+                        legacy_google_watch_cleanup_activity,
+                        start_to_close_timeout=timedelta(minutes=4),
+                        retry_policy=RetryPolicy(maximum_attempts=2),
+                    )
+                if workflow.patched("connector-event-receipts-v1"):
+                    await workflow.execute_activity(
+                        connector_event_reconciliation_activity,
+                        start_to_close_timeout=timedelta(minutes=2),
+                        retry_policy=RetryPolicy(maximum_attempts=3),
                     )
             except ActivityError as error:
                 if is_cancelled_exception(error):

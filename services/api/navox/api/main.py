@@ -8,6 +8,7 @@ from navox.api.canvas import router as canvas_router
 from navox.api.commitment_actions import router as commitment_actions_router
 from navox.api.commitments import router as commitments_router
 from navox.api.connections import router as connections_router
+from navox.api.connector_events import router as connector_events_router
 from navox.api.connector_management import router as connector_management_router
 from navox.api.events import router as events_router
 from navox.api.generic_rest import router as generic_rest_router
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(connections_router, prefix="/api/v1")
     app.include_router(connector_management_router, prefix="/api/v1")
+    app.include_router(connector_events_router, prefix="/api/v1")
     app.include_router(commitments_router, prefix="/api/v1")
     app.include_router(commitment_actions_router, prefix="/api/v1")
     app.include_router(today_router, prefix="/api/v1")

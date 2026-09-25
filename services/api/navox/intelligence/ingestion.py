@@ -415,10 +415,13 @@ async def renew_source_watch(
         }
     )
     endpoint = f"{GMAIL_ROOT}/watch" if source == "gmail" else f"{CALENDAR_ROOT}/watch"
+    was_cancelled = False
     try:
         # Pause or revocation after the pre-registration commit still fails closed.
         await authorized_connection(database, connection_id, source)
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(
+            timeout=20.0, trust_env=False, follow_redirects=False
+        ) as client:
             response = await client.post(
                 endpoint, headers={"Authorization": f"Bearer {token}"}, json=payload
             )
@@ -427,15 +430,25 @@ async def renew_source_watch(
         expiration = datetime.fromtimestamp(int(data["expiration"]) / 1000, UTC)
         if expiration <= datetime.now(UTC):
             raise ValueError("Expired provider lease")
+        # Disconnect can race the provider call. Never resurrect a cancelled
+        # channel; preserve its provider identifier for the cleanup worker.
+        await database.refresh(subscription)
+        await database.refresh(connection)
+        was_cancelled = subscription.status != "active" or connection.status != "active"
         subscription.expires_at = expiration
         if source == "calendar":
             resource_id = data.get("resourceId")
             if not isinstance(resource_id, str) or not resource_id:
                 raise ValueError("Missing watch resource")
             subscription.resource_id = resource_id
+        if was_cancelled:
+            subscription.status = "cancel_pending"
         await database.commit()
     except (httpx.HTTPError, ValueError, KeyError, TypeError, GoogleSourceError) as error:
-        subscription.status = "failed"
+        await database.rollback()
+        await database.refresh(subscription)
+        if subscription.status == "active":
+            subscription.status = "failed"
         await database.commit()
         raise GoogleSourceError("Google watch registration failed") from error
-    return True
+    return not was_cancelled

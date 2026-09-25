@@ -37,10 +37,17 @@ Without that setting, it uses temporary SQLite databases.
 
 HTTP responses and model proposals are fixtures. This is the configured mock
 unknown-service demonstration, not a live public endpoint or model-quality
-benchmark. It does not enable REST onboarding, MCP, unrestricted network access,
-third-party code execution, or writes. Domain/DNS protections, generic-provider
-setup, event subscription lifecycle, safe learned-data deletion, and the remaining
-SPEC-003 acceptance requirements need their own implementation and validation.
+benchmark. Separate code now supplies operator-reviewed REST configuration and
+owner-consented setup, reviewed MCP read setup, bounded outbound requests,
+authenticated event ingress for adapters that implement verification, and
+owner-scoped disconnect/deletion. See `spec-003-generic-rest-onboarding.md`,
+`spec-003-mcp-read.md`, and `spec-003-certification.md` for those distinct fixture
+checks and their limits. This portability test does not exercise those setup,
+webhook, or cleanup paths, nor does it authorize arbitrary domains, third-party
+code execution, or writes. No shipped universal adapter currently implements
+event verification. Live unknown-service ingestion, real provider behavior,
+Google watch retirement, and numerical reliability/security targets still need
+independent acceptance evidence.
 
 A passing suite is evidence for these named behaviors only; it is not a declaration
 that SPEC-003 is complete.

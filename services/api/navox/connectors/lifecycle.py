@@ -24,6 +24,7 @@ from navox.db.models import (
     Connection,
     ConnectionCredential,
     ConnectorConnection,
+    ConnectorEventReceipt,
     ConnectorImportSnapshot,
     ConnectorResource,
     ConnectorSubscription,
@@ -38,7 +39,9 @@ from navox.db.models import (
     OAuthAuthorizationAttempt,
     ObservationEvidence,
     OperationalObservation,
+    Person,
     PersonIdentity,
+    PersonIdentitySource,
     Plan,
     ProactiveSignal,
     ProviderEventSubscription,
@@ -365,6 +368,35 @@ async def delete_learned_data(
         )
         if other:
             raise HTTPException(409, "Shared connection provenance needs manual review")
+        # Source edges have independent foreign keys, not a composite tenant key.
+        # Refuse malformed edges before removing any source or learned record.
+        foreign_commitment = await database.scalar(
+            select(CommitmentSource.id)
+            .outerjoin(Commitment, Commitment.id == CommitmentSource.commitment_id)
+            .where(
+                CommitmentSource.connection_id.in_(provenance_ids),
+                (Commitment.id.is_(None))
+                | (Commitment.workspace_id != workspace_id)
+                | (Commitment.user_id != user_id),
+            )
+            .limit(1)
+        )
+        foreign_observation = await database.scalar(
+            select(ObservationEvidence.id)
+            .outerjoin(
+                OperationalObservation,
+                OperationalObservation.id == ObservationEvidence.observation_id,
+            )
+            .where(
+                ObservationEvidence.connection_id.in_(provenance_ids),
+                (OperationalObservation.id.is_(None))
+                | (OperationalObservation.workspace_id != workspace_id)
+                | (OperationalObservation.user_id != user_id),
+            )
+            .limit(1)
+        )
+        if foreign_commitment is not None or foreign_observation is not None:
+            raise HTTPException(409, "Source provenance needs manual review")
     source_ids = (
         list(
             await database.scalars(
@@ -398,21 +430,48 @@ async def delete_learned_data(
         else []
     )
     observation_ids = {observation_id for observation_id, _, _ in evidence}
-    # The old identity table records a provider but no connection. Removing or
-    # preserving an identity attached to this source could erase someone else's
-    # evidence or retain private facts. Backfill provenance before that cleanup.
+    # Identity edges record every connection that supplied a newly resolved
+    # identity. Pre-migration identities remain ambiguous, even if a later
+    # connection supplied the same email, and require a reviewed deletion.
     people_ids = {
         person_id
         for _, subject, object_ in evidence
         for person_id in (subject, object_)
         if person_id
     }
-    if people_ids:
+    identity_ids = (
+        set(
+            await database.scalars(
+                select(PersonIdentitySource.identity_id).where(
+                    PersonIdentitySource.connection_id.in_(provenance_ids)
+                )
+            )
+        )
+        if provenance_ids
+        else set()
+    )
+    identities = (
+        list(
+            await database.scalars(
+                select(PersonIdentity).where(
+                    PersonIdentity.workspace_id == workspace_id,
+                    (PersonIdentity.id.in_(identity_ids))
+                    | (PersonIdentity.person_id.in_(people_ids)),
+                )
+            )
+        )
+        if identity_ids or people_ids
+        else []
+    )
+    if any(not identity.source_attributed for identity in identities):
+        raise HTTPException(409, "Person identity provenance needs manual review")
+    if people_ids - {identity.person_id for identity in identities}:
         raise HTTPException(409, "Person identity provenance needs manual review")
     if provenance_ids and await database.scalar(
         select(PersonIdentity.id)
         .where(
             PersonIdentity.workspace_id == workspace_id,
+            PersonIdentity.source_attributed.is_(False),
             PersonIdentity.provider.in_(
                 {row.provider for row in rows} | ({account.provider} if account else set())
             ),
@@ -497,7 +556,12 @@ async def delete_learned_data(
                 observation_id = None
             if observation_id:
                 candidate = await database.get(OperationalObservation, observation_id)
-                if candidate and candidate.status == "ACTIVE":
+                if (
+                    candidate
+                    and candidate.workspace_id == workspace_id
+                    and candidate.user_id == user_id
+                    and candidate.status == "ACTIVE"
+                ):
                     break
                 candidate = None
         if candidate is None:
@@ -551,6 +615,51 @@ async def delete_learned_data(
             )
     if provenance_ids:
         await database.execute(
+            delete(PersonIdentitySource).where(
+                PersonIdentitySource.connection_id.in_(provenance_ids)
+            )
+        )
+        await database.flush()
+    for identity in identities:
+        if identity.id not in identity_ids:
+            continue
+        if not await database.scalar(
+            select(PersonIdentitySource.identity_id)
+            .where(PersonIdentitySource.identity_id == identity.id)
+            .limit(1)
+        ):
+            await database.delete(identity)
+    await database.flush()
+    for person_id in people_ids | {identity.person_id for identity in identities}:
+        person = await database.scalar(
+            select(Person).where(Person.id == person_id, Person.workspace_id == workspace_id)
+        )
+        if person is None:
+            continue
+        surviving = await database.scalar(
+            select(PersonIdentity)
+            .where(PersonIdentity.person_id == person_id)
+            .order_by(PersonIdentity.identity_type, PersonIdentity.identity_value)
+            .limit(1)
+        )
+        if surviving:
+            # A display name may have come from the erased source. Use only an
+            # identity still supported by another authorized connection.
+            person.canonical_name = surviving.identity_value
+        elif await database.scalar(
+            select(OperationalObservation.id)
+            .where(
+                (OperationalObservation.subject_person_id == person_id)
+                | (OperationalObservation.object_person_id == person_id)
+            )
+            .limit(1)
+        ):
+            raise HTTPException(409, "Surviving person provenance needs manual review")
+        else:
+            await database.delete(person)
+    await database.flush()
+    if provenance_ids:
+        await database.execute(
             delete(GmailRecheck).where(GmailRecheck.connection_id.in_(provenance_ids))
         )
         for model in (
@@ -573,7 +682,12 @@ async def delete_learned_data(
                 )
             )
         )
-        for connector_model in (ConnectorResource, ConnectorSubscription, ConnectorSyncRun):
+        for connector_model in (
+            ConnectorResource,
+            ConnectorEventReceipt,
+            ConnectorSubscription,
+            ConnectorSyncRun,
+        ):
             await database.execute(
                 delete(connector_model).where(
                     connector_model.connector_connection_id.in_(connector_ids)
@@ -617,7 +731,14 @@ async def delete_learned_data(
                 await database.delete(credential)
     # Audit entries emitted by an erased source may contain source hashes or
     # identifiers. Keep only content-free lifecycle replay receipts.
-    audit_entities = {*provenance_ids, *connector_ids, *affected, *observation_ids}
+    audit_entities = {
+        *provenance_ids,
+        *connector_ids,
+        *affected,
+        *observation_ids,
+        *people_ids,
+        *identity_ids,
+    }
     if audit_entities:
         await database.execute(
             delete(AuditEvent).where(

@@ -22,7 +22,9 @@ from navox.connectors.authorization import ConnectorAccessDenied, owned_connecto
 from navox.core.settings import Settings
 from navox.db.models import AuditEvent, Connection, ConnectionCredential, ConnectorConnection
 
-LEASE_PURPOSES = frozenset({"sync.read", "health.read", "events.manage", "events.cleanup"})
+LEASE_PURPOSES = frozenset(
+    {"sync.read", "health.read", "events.manage", "events.cleanup", "events.verify"}
+)
 LEASE_TTL_SECONDS = 300.0
 MAX_SECRET_BYTES = 65_536
 _KEY_PRIMARY = "connector-v2:primary"

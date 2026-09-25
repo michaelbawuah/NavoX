@@ -9,7 +9,7 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 import pytest
 import pytest_asyncio
 from cryptography.fernet import Fernet
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport, AsyncClient, MockTransport, Request, Response
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -28,6 +28,7 @@ from navox.db.models import (
     ConnectionCredential,
     ConnectorConnection,
     ConnectorDefinition,
+    ConnectorEventReceipt,
     ConnectorImportSnapshot,
     ConnectorResource,
     ConnectorSubscription,
@@ -37,12 +38,15 @@ from navox.db.models import (
     OperationalObservation,
     Person,
     PersonIdentity,
+    PersonIdentitySource,
     ProviderEventSubscription,
     User,
     Workspace,
     WorkspaceMembership,
 )
 from navox.db.session import get_database_session
+from navox.intelligence.contracts import SourceIdentity
+from navox.intelligence.resolution import resolve_identity
 from navox.providers.google_sources import CALENDAR_READ_SCOPE, GMAIL_READ_SCOPE
 
 
@@ -626,6 +630,152 @@ async def test_already_cancelled_legacy_channel_does_not_reopen_cleanup(env):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "source, endpoint, scope",
+    [
+        ("calendar", "GOOGLE_CALENDAR_STOP", CALENDAR_READ_SCOPE),
+        ("drive", "GOOGLE_DRIVE_STOP", "https://www.googleapis.com/auth/drive.readonly"),
+    ],
+)
+async def test_legacy_channel_retired_only_after_confirmed_provider_stop(
+    env, monkeypatch, source, endpoint, scope
+):
+    from navox.connectors import google_watch_cleanup as cleanup
+
+    async with env.factory() as db:
+        account = await db.get(Connection, env.id)
+        account.granted_scopes = list(account.granted_scopes) + [scope]
+        row = ProviderEventSubscription(
+            connection_id=env.id,
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            provider="google",
+            source=source,
+            channel_id=f"channel-{uuid4()}",
+            channel_token_hash="f" * 64,
+            resource_id="resource-sentinel",
+            status="active",
+        )
+        db.add(row)
+        await db.commit()
+        subscription_id = row.id
+    disconnected = await env.client.request(
+        "DELETE", f"/api/v1/connections/{env.id}", json=command()
+    )
+    assert disconnected.status_code == 200
+
+    async def token(*args, **kwargs):
+        return "ACCESS-TOKEN-SENTINEL"
+
+    monkeypatch.setattr(cleanup, "access_token_for_watch_cleanup", token)
+    requests: list[Request] = []
+    succeed = False
+
+    def respond(request: Request) -> Response:
+        requests.append(request)
+        assert request.url == getattr(cleanup, endpoint)
+        assert request.headers["Authorization"] == "Bearer ACCESS-TOKEN-SENTINEL"
+        assert request.content == (
+            b'{"id":"' + channel_id.encode() + b'","resourceId":"resource-sentinel"}'
+        )
+        return Response(204 if succeed else 503)
+
+    client_type = AsyncClient
+    monkeypatch.setattr(
+        cleanup.httpx,
+        "AsyncClient",
+        lambda **kwargs: client_type(transport=MockTransport(respond)),
+    )
+    async with env.factory() as db:
+        channel_id = (await db.get(ProviderEventSubscription, subscription_id)).channel_id
+        assert not await cleanup.cancel_google_watch(
+            db, subscription_id=subscription_id, settings=env.settings
+        )
+        assert (await db.get(ProviderEventSubscription, subscription_id)).status == "cancel_pending"
+        assert (await db.get(Connection, env.id)).credential_reference == env.credential_id
+    succeed = True
+    async with env.factory() as db:
+        assert await cleanup.cancel_google_watch(
+            db, subscription_id=subscription_id, settings=env.settings
+        )
+        assert (await db.get(ProviderEventSubscription, subscription_id)).status == "cancelled"
+    assert len(requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_legacy_google_watch_missing_resource_stays_pending_without_token_use(
+    env, monkeypatch
+):
+    from navox.connectors import google_watch_cleanup as cleanup
+
+    async with env.factory() as db:
+        row = ProviderEventSubscription(
+            connection_id=env.id,
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            provider="google",
+            source="calendar",
+            channel_id=f"channel-{uuid4()}",
+            channel_token_hash="f" * 64,
+            resource_id=None,
+            status="active",
+        )
+        db.add(row)
+        await db.commit()
+        subscription_id = row.id
+    disconnected = await env.client.request(
+        "DELETE", f"/api/v1/connections/{env.id}", json=command()
+    )
+    assert disconnected.status_code == 200
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("Missing watch resource must not consume a credential")
+
+    monkeypatch.setattr(cleanup, "access_token_for_watch_cleanup", forbidden)
+    async with env.factory() as db:
+        assert not await cleanup.cancel_google_watch(
+            db, subscription_id=subscription_id, settings=env.settings
+        )
+        assert (await db.get(ProviderEventSubscription, subscription_id)).status == "cancel_pending"
+
+
+@pytest.mark.asyncio
+async def test_gmail_cleanup_never_uses_account_wide_stop(env, monkeypatch):
+    from navox.connectors import google_watch_cleanup as cleanup
+
+    async with env.factory() as db:
+        channel = ProviderEventSubscription(
+            connection_id=env.id,
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            provider="google",
+            source="gmail",
+            channel_id=f"gmail-{uuid4()}",
+            channel_token_hash="f" * 64,
+            status="active",
+        )
+        db.add(channel)
+        await db.commit()
+        subscription_id = channel.id
+    disconnected = await env.client.request(
+        "DELETE", f"/api/v1/connections/{env.id}", json=command()
+    )
+    assert disconnected.status_code == 200
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("Gmail cleanup must never consume a credential or call stop")
+
+    monkeypatch.setattr(cleanup, "access_token_for_watch_cleanup", forbidden)
+    monkeypatch.setattr(cleanup.httpx, "AsyncClient", forbidden)
+    async with env.factory() as db:
+        assert subscription_id not in await cleanup.due_google_watches(db)
+        assert not await cleanup.cancel_google_watch(
+            db, subscription_id=subscription_id, settings=env.settings
+        )
+        assert (await db.get(ProviderEventSubscription, subscription_id)).status == "cancel_pending"
+
+
+@pytest.mark.asyncio
 async def test_internal_disconnect_keeps_cancelled_channels_retired(env, monkeypatch):
     from navox.connectors import activities
 
@@ -740,6 +890,71 @@ async def test_delete_data_requires_disconnect_and_removes_unshared_learned_fact
         assert await db.get(OperationalObservation, observation_id) is None
         assert await db.get(Commitment, card_id) is None
         assert (await db.get(Connection, env.id)).granted_scopes == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target_type", ["commitment", "observation"])
+@pytest.mark.parametrize("scope", ["workspace", "user"])
+async def test_delete_data_rejects_foreign_provenance_target(env, target_type, scope):
+    async with env.factory() as db:
+        foreign_user = User(email=f"foreign-{uuid4()}@example.com")
+        db.add(foreign_user)
+        if scope == "workspace":
+            foreign_workspace = Workspace(name="Foreign workspace")
+            db.add(foreign_workspace)
+        await db.flush()
+        workspace_id = foreign_workspace.id if scope == "workspace" else env.workspace_id
+        if target_type == "commitment":
+            target = Commitment(
+                workspace_id=workspace_id,
+                user_id=foreign_user.id,
+                commitment_type="task",
+                title="Foreign private card",
+                dedupe_key=f"foreign-{uuid4()}",
+                created_by="ai",
+            )
+        else:
+            target = OperationalObservation(
+                workspace_id=workspace_id,
+                user_id=foreign_user.id,
+                observation_type="request",
+                action_text="Foreign private observation",
+                confidence=Decimal("0.950"),
+                extractor_version="test",
+            )
+        db.add(target)
+        await db.flush()
+        if target_type == "commitment":
+            source = CommitmentSource(
+                commitment_id=target.id,
+                connection_id=env.id,
+                provider="google",
+                source_type="gmail_message",
+                external_resource_id="malformed-cross-scope-edge",
+            )
+        else:
+            source = ObservationEvidence(
+                observation_id=target.id,
+                connection_id=env.id,
+                provider="google",
+                source_type="gmail_message",
+                external_resource_id="malformed-cross-scope-edge",
+                observed_at=datetime.now(UTC),
+            )
+        db.add(source)
+        await db.commit()
+        target_id, source_id = target.id, source.id
+
+    disconnected = await env.client.request(
+        "DELETE", f"/api/v1/connections/{env.id}", json=command()
+    )
+    assert disconnected.status_code == 200, disconnected.text
+    rejected = await env.client.post(f"/api/v1/connections/{env.id}/delete-data", json=command())
+    assert rejected.status_code == 409, rejected.text
+    async with env.factory() as db:
+        assert await db.get(type(target), target_id) is not None
+        assert await db.get(type(source), source_id) is not None
+        assert (await db.get(Connection, env.id)).external_account_id == "account"
 
 
 @pytest.mark.asyncio
@@ -872,6 +1087,134 @@ async def test_delete_data_fails_closed_for_unattributed_person_identity(env):
 
 
 @pytest.mark.asyncio
+async def test_later_source_does_not_backfill_legacy_identity_provenance(env):
+    async with env.factory() as db:
+        person = Person(workspace_id=env.workspace_id, canonical_name="Unknown original source")
+        db.add(person)
+        await db.flush()
+        identity = PersonIdentity(
+            workspace_id=env.workspace_id,
+            person_id=person.id,
+            provider="google",
+            identity_type="email",
+            identity_value="legacy@example.com",
+        )
+        db.add(identity)
+        await db.flush()
+        resolved = await resolve_identity(
+            db,
+            workspace_id=env.workspace_id,
+            identity=SourceIdentity(
+                identity_type="email", identity_value="legacy@example.com", provider="google"
+            ),
+            connection_id=env.id,
+        )
+        assert resolved == person.id
+        assert not identity.source_attributed
+        assert await db.get(PersonIdentitySource, (identity.id, env.id)) is not None
+        await db.commit()
+
+    await env.client.request("DELETE", f"/api/v1/connections/{env.id}", json=command())
+    response = await env.client.post(f"/api/v1/connections/{env.id}/delete-data", json=command())
+    assert response.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_delete_data_erases_identity_only_after_last_source_is_removed(env):
+    async with env.factory() as db:
+        survivor = Connection(
+            user_id=env.user_id,
+            workspace_id=env.workspace_id,
+            provider="google",
+            external_account_id="surviving-identity-source",
+            status="active",
+            granted_scopes=[],
+        )
+        db.add(survivor)
+        await db.flush()
+        survivor_id = survivor.id
+        person_id = await resolve_identity(
+            db,
+            workspace_id=env.workspace_id,
+            identity=SourceIdentity(
+                identity_type="email",
+                identity_value="shared.person@example.com",
+                display_name="Name from deleted source",
+                provider="google",
+            ),
+            connection_id=env.id,
+        )
+        same = await resolve_identity(
+            db,
+            workspace_id=env.workspace_id,
+            identity=SourceIdentity(
+                identity_type="email",
+                identity_value="SHARED.PERSON@example.com",
+                display_name="Name from surviving source",
+                provider="google",
+            ),
+            connection_id=survivor_id,
+        )
+        assert same == person_id
+        identity = await db.scalar(
+            select(PersonIdentity).where(PersonIdentity.person_id == person_id)
+        )
+        assert identity is not None and identity.source_attributed
+        identity_id = identity.id
+        for connection_id in (env.id, survivor_id):
+            observation = OperationalObservation(
+                workspace_id=env.workspace_id,
+                user_id=env.user_id,
+                observation_type="request",
+                subject_person_id=person_id,
+                confidence=Decimal("0.950"),
+                extractor_version="test",
+            )
+            db.add(observation)
+            await db.flush()
+            db.add(
+                ObservationEvidence(
+                    observation_id=observation.id,
+                    connection_id=connection_id,
+                    provider="google",
+                    source_type="gmail_message",
+                    external_resource_id=str(observation.id),
+                    observed_at=datetime.now(UTC),
+                )
+            )
+        await db.commit()
+
+    await env.client.request("DELETE", f"/api/v1/connections/{env.id}", json=command())
+    first = await env.client.post(f"/api/v1/connections/{env.id}/delete-data", json=command())
+    assert first.status_code == 200, first.text
+    async with env.factory() as db:
+        person = await db.get(Person, person_id)
+        assert person is not None and person.canonical_name == "shared.person@example.com"
+        assert await db.get(PersonIdentity, identity_id) is not None
+        support = list(
+            await db.scalars(
+                select(PersonIdentitySource).where(PersonIdentitySource.identity_id == identity_id)
+            )
+        )
+        assert len(support) == 1 and support[0].connection_id == survivor_id
+        assert (
+            await db.scalar(
+                select(OperationalObservation.id).where(
+                    OperationalObservation.subject_person_id == person_id
+                )
+            )
+            is not None
+        )
+
+    await env.client.request("DELETE", f"/api/v1/connections/{survivor_id}", json=command())
+    last = await env.client.post(f"/api/v1/connections/{survivor_id}/delete-data", json=command())
+    assert last.status_code == 200, last.text
+    async with env.factory() as db:
+        assert await db.get(PersonIdentity, identity_id) is None
+        assert await db.get(Person, person_id) is None
+
+
+@pytest.mark.asyncio
 async def test_disconnect_delete_data_erases_import_snapshot_and_source_audit(env):
     async with env.factory() as db:
         definition = ConnectorDefinition(
@@ -899,8 +1242,27 @@ async def test_disconnect_delete_data_erases_import_snapshot_and_source_audit(en
         )
         db.add(row)
         await db.flush()
+        retired_subscription = ConnectorSubscription(
+            connector_connection_id=row.id,
+            subscription_key="imports.changed",
+            external_id="retired-channel",
+            status="cancelled",
+        )
+        db.add(retired_subscription)
+        await db.flush()
         db.add_all(
             [
+                ConnectorEventReceipt(
+                    subscription_id=retired_subscription.id,
+                    connector_connection_id=row.id,
+                    workspace_id=env.workspace_id,
+                    user_id=env.user_id,
+                    provider="import",
+                    event_type="imports.changed",
+                    external_event_id="sensitive-event-locator",
+                    payload_hash="0" * 64,
+                    status="dispatched",
+                ),
                 ConnectorImportSnapshot(
                     connection_id=row.id,
                     workspace_id=env.workspace_id,
@@ -930,6 +1292,14 @@ async def test_disconnect_delete_data_erases_import_snapshot_and_source_audit(en
     assert "private filename" not in second.text
     async with env.factory() as db:
         assert await db.get(ConnectorImportSnapshot, identifier) is None
+        assert (
+            await db.scalar(
+                select(ConnectorEventReceipt.id).where(
+                    ConnectorEventReceipt.connector_connection_id == identifier
+                )
+            )
+            is None
+        )
         row = await db.get(ConnectorConnection, identifier)
         assert row.display_name is None and row.config == {}
         assert row.external_account_id == f"deleted:{identifier}"

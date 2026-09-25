@@ -260,7 +260,22 @@ class PersonIdentity(Base):
     identity_type: Mapped[str] = mapped_column(String(64), index=True)
     identity_value: Mapped[str] = mapped_column(String(512), index=True)
     confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), default=Decimal("1.000"))
+    # Existing rows cannot be assigned to a connection from their provider alone.
+    source_attributed: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PersonIdentitySource(Base):
+    """A connection that supplied an identity, without retaining source content."""
+
+    __tablename__ = "person_identity_sources"
+
+    identity_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("person_identities.id", ondelete="CASCADE"), primary_key=True
+    )
+    connection_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("connections.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
 
 
 class OperationalObservation(Base):
@@ -1047,6 +1062,39 @@ class ConnectorSubscription(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class ConnectorEventReceipt(Base):
+    """Authenticated event locator and durable targeted-sync dispatch outbox."""
+
+    __tablename__ = "connector_event_receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "subscription_id", "external_event_id", name="uq_connector_event_delivery"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    subscription_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("connector_subscriptions.id", ondelete="CASCADE"), index=True
+    )
+    connector_connection_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("connector_connections.id", ondelete="CASCADE"), index=True
+    )
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))
+    provider: Mapped[str] = mapped_column(String(64))
+    event_type: Mapped[str] = mapped_column(String(160))
+    external_event_id: Mapped[str] = mapped_column(String(512))
+    external_resource_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ConnectorSyncRun(Base):
