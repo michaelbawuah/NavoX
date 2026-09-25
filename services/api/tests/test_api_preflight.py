@@ -21,6 +21,7 @@ SCRIPT = ROOT / "scripts/check-api.sh"
         "revision",
         "pytest",
         "measurements",
+        "subscription_measurements",
         "alembic",
         "evaluation",
         "schema",
@@ -46,6 +47,7 @@ case "$*" in
   *'ScriptDirectory.from_config'*) stage=revision ;;
   *'pytest'*) stage=pytest ;;
   *'navox.evaluation.connector_metrics '*) stage=measurements ;;
+  *'navox.evaluation.subscription_metrics '*) stage=subscription_measurements ;;
   *'alembic '*) stage=alembic ;;
   *'navox.evaluation '*) stage=evaluation ;;
 esac
@@ -62,6 +64,8 @@ if [ "$stage" = alembic ]; then
     connector_connections connector_resources connector_subscriptions
     connector_event_receipts connector_sync_runs
     connector_sync_receipts connector_import_snapshots
+    merchants merchant_aliases recurring_obligations recurring_obligation_evidence
+    obligation_price_history cancellation_attempts cancellation_evidence subscription_events
   )
   for table in "${tables[@]}"; do
     if [ "$PREFLIGHT_TEST_FAILURE" = schema ]; then
@@ -103,10 +107,11 @@ fi
     if failed_stage == "sync":
         assert commands.splitlines() == ["sync --locked --all-groups"]
     else:
-        assert len(commands.splitlines()) == 9
+        assert len(commands.splitlines()) == 10
         assert "ScriptDirectory.from_config" in commands
         assert "python -m pytest" in commands
         assert "python -m navox.evaluation.connector_metrics" in commands
+        assert "python -m navox.evaluation.subscription_metrics" in commands
         assert "python -m navox.evaluation --fail-on-gate" in commands
         assert "python -m mypy navox" in commands
     assert ("API preflight PASSED" in completed.stdout) is (not failed_stage)

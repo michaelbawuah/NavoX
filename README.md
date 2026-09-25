@@ -24,6 +24,20 @@ configuration, read-scope consent, scan boundaries and live-validation steps.
 The authoritative architecture remains
 [ SPEC-002 ](docs/architecture/SPEC-002-navox-operational-intelligence.md).
 
+## SPEC-004 Subscriptions
+
+The authenticated [Subscriptions dashboard](http://localhost:3000/subscriptions)
+tracks known recurring costs, evidence, renewals, trials and price changes. Manual
+entries and authorized connector evidence share the existing Today attention
+system. Costs stay separate by currency; Keep, Review Later and corrections retain
+their provenance.
+
+Reviewed provider capabilities can execute cancellation after an exact R4
+confirmation. A submitted request remains pending until independently verified.
+Provider profiles are disabled by default; unsupported services show an honest
+manual fallback. See [SPEC-004 implementation and acceptance](docs/architecture/spec-004-subscriptions.md)
+for setup, the disposable Temporal demonstration and live-validation boundaries.
+
 ## Repository layout
 
 ```text

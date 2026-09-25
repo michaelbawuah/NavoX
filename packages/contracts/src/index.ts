@@ -27,3 +27,5 @@ export interface GoogleConnection {
   last_checked_at: string | null;
   last_error: string | null;
 }
+
+export type * from "./subscriptions";

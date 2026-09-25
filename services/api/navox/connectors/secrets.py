@@ -23,7 +23,16 @@ from navox.core.settings import Settings
 from navox.db.models import AuditEvent, Connection, ConnectionCredential, ConnectorConnection
 
 LEASE_PURPOSES = frozenset(
-    {"sync.read", "health.read", "events.manage", "events.cleanup", "events.verify"}
+    {
+        "sync.read",
+        "health.read",
+        "events.manage",
+        "events.cleanup",
+        "events.verify",
+        "subscription.inspect",
+        "subscription.cancel",
+        "subscription.verify",
+    }
 )
 LEASE_TTL_SECONDS = 300.0
 MAX_SECRET_BYTES = 65_536

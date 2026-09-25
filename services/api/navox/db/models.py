@@ -1207,3 +1207,260 @@ class ConnectorImportSnapshot(Base):
     record_count: Mapped[int] = mapped_column()
     encrypted_payload: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Merchant(Base):
+    __tablename__ = "merchants"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "user_id", "normalized_name", name="uq_merchant_owner_name"
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    canonical_name: Mapped[str] = mapped_column(String(256))
+    normalized_name: Mapped[str] = mapped_column(String(256))
+    website_domain: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    merchant_metadata: Mapped[dict[str, object]] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class MerchantAlias(Base):
+    __tablename__ = "merchant_aliases"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "user_id", "alias", "alias_type", name="uq_merchant_alias_owner"
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    merchant_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("merchants.id", ondelete="CASCADE"), index=True
+    )
+    alias: Mapped[str] = mapped_column(String(512))
+    alias_type: Mapped[str] = mapped_column(String(32))
+    confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), default=Decimal("1.000"))
+
+
+class RecurringObligation(Base):
+    __tablename__ = "recurring_obligations"
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    merchant_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("merchants.id", ondelete="CASCADE"), index=True
+    )
+    obligation_type: Mapped[str] = mapped_column(String(32), default="SUBSCRIPTION")
+    name: Mapped[str] = mapped_column(String(256))
+    plan_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="CANDIDATE", index=True)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), default=Decimal("1.000"))
+    billing_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    billing_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    billing_interval: Mapped[str] = mapped_column(String(16), default="UNKNOWN")
+    interval_count: Mapped[int] = mapped_column(default=1)
+    next_renewal_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    trial_ends_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    trial_conversion_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    trial_conversion_interval: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    trial_conversion_interval_count: Mapped[int] = mapped_column(default=1)
+    auto_renew: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revision: Mapped[int] = mapped_column(default=1)
+    review_state: Mapped[str] = mapped_column(String(32), default="UNREVIEWED")
+    kept_cycle_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    review_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_identity: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+    cancellation_connection_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("connections.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    cancellation_external_resource_id: Mapped[str | None] = mapped_column(
+        String(512), nullable=True
+    )
+    obligation_metadata: Mapped[dict[str, object]] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RecurringObligationEvidence(Base):
+    __tablename__ = "recurring_obligation_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "user_id", "dedupe_key", name="uq_obligation_evidence_owner_dedupe"
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    obligation_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("recurring_obligations.id", ondelete="CASCADE"), index=True
+    )
+    evidence_type: Mapped[str] = mapped_column(String(40))
+    source_type: Mapped[str] = mapped_column(String(64))
+    connection_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("connections.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    external_resource_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    dedupe_key: Mapped[str] = mapped_column(String(64))
+    merchant_text: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    plan_text: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    billing_interval: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    interval_count: Mapped[int] = mapped_column(default=1)
+    effective_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    renewal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), default=Decimal("1.000"))
+    evidence_metadata: Mapped[dict[str, object]] = mapped_column("metadata", JSON, default=dict)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class ObligationPriceHistory(Base):
+    __tablename__ = "obligation_price_history"
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    obligation_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("recurring_obligations.id", ondelete="CASCADE"), index=True
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    currency: Mapped[str] = mapped_column(String(3))
+    billing_interval: Mapped[str] = mapped_column(String(16))
+    interval_count: Mapped[int] = mapped_column(default=1)
+    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    effective_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    evidence_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("recurring_obligation_evidence.id", ondelete="CASCADE"), index=True
+    )
+
+
+class CancellationAttempt(Base):
+    __tablename__ = "cancellation_attempts"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "user_id", "request_id", name="uq_cancellation_owner_request"
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    obligation_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("recurring_obligations.id", ondelete="CASCADE"), index=True
+    )
+    method: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(32), default="REQUESTED", index=True)
+    action_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("actions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    approval_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("approvals.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    request_id: Mapped[UUID] = mapped_column(Uuid)
+    payload_hash: Mapped[str] = mapped_column(String(64))
+    preview: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    provider_state_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    obligation_revision: Mapped[int] = mapped_column(default=1)
+    verification_status: Mapped[str] = mapped_column(String(32), default="NOT_VERIFIED")
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    attempt_metadata: Mapped[dict[str, object]] = mapped_column("metadata", JSON, default=dict)
+
+
+class CancellationEvidence(Base):
+    __tablename__ = "cancellation_evidence"
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    cancellation_attempt_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("cancellation_attempts.id", ondelete="CASCADE"), index=True
+    )
+    evidence_type: Mapped[str] = mapped_column(String(40))
+    connection_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("connections.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    external_resource_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    verification_status: Mapped[str] = mapped_column(String(32))
+    confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), default=Decimal("1.000"))
+    evidence_metadata: Mapped[dict[str, object]] = mapped_column("metadata", JSON, default=dict)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class SubscriptionEvent(Base):
+    __tablename__ = "subscription_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "user_id", "dedupe_key", name="uq_subscription_event_owner_dedupe"
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    obligation_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("recurring_obligations.id", ondelete="CASCADE"), index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(64))
+    dedupe_key: Mapped[str] = mapped_column(String(128))
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+    commitment_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("commitments.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    delivery_state: Mapped[str] = mapped_column(String(32), default="PENDING", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

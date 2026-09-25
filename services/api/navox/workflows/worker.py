@@ -35,6 +35,13 @@ from navox.proactive.activities import (
     prepare_meeting_activity,
     record_scheduled_briefing_activity,
 )
+from navox.subscriptions.activities import (
+    cancellation_state_activity,
+    execute_cancellation_activity,
+    pending_subscriptions_activity,
+    reevaluate_subscription_activity,
+    verify_cancellation_activity,
+)
 from navox.workflows.approved_action import ApprovedActionWorkflow
 from navox.workflows.connectors import (
     ConnectorDisconnectWorkflow,
@@ -60,6 +67,17 @@ from navox.workflows.proactive import (
     FollowUpWorkflow,
     MeetingPreparationWorkflow,
 )
+from navox.workflows.subscriptions import (
+    CancellationContradictionWorkflow,
+    CancelSubscriptionWorkflow,
+    DiscoverRecurringObligationWorkflow,
+    PriceChangeWorkflow,
+    ReevaluateRecurringObligationWorkflow,
+    RenewalLifecycleWorkflow,
+    SubscriptionReconciliationWorkflow,
+    TrialLifecycleWorkflow,
+    VerifyCancellationWorkflow,
+)
 
 
 async def main() -> None:
@@ -69,6 +87,15 @@ async def main() -> None:
         client,
         task_queue=settings.temporal_task_queue,
         workflows=[
+            DiscoverRecurringObligationWorkflow,
+            ReevaluateRecurringObligationWorkflow,
+            RenewalLifecycleWorkflow,
+            TrialLifecycleWorkflow,
+            PriceChangeWorkflow,
+            CancelSubscriptionWorkflow,
+            VerifyCancellationWorkflow,
+            CancellationContradictionWorkflow,
+            SubscriptionReconciliationWorkflow,
             ConnectorInitialSyncWorkflow,
             ConnectorIncrementalSyncWorkflow,
             ConnectorReconciliationWorkflow,
@@ -90,6 +117,11 @@ async def main() -> None:
             DailyBriefingWorkflow,
         ],
         activities=[
+            reevaluate_subscription_activity,
+            cancellation_state_activity,
+            execute_cancellation_activity,
+            verify_cancellation_activity,
+            pending_subscriptions_activity,
             connector_sync_activity,
             connector_health_activity,
             connector_reconciliation_activity,
@@ -116,6 +148,15 @@ async def main() -> None:
         ],
     )
     async with worker:
+        # Manual lifecycle facts and confirmed cancellation recovery work without AI.
+        try:
+            await client.start_workflow(
+                SubscriptionReconciliationWorkflow.run,
+                id="navox-subscription-reconciliation-v1",
+                task_queue=settings.temporal_task_queue,
+            )
+        except WorkflowAlreadyStartedError:
+            pass
         if settings.ai_provider != "disabled":
             for workflow_run, workflow_id in (
                 (
