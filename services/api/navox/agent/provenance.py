@@ -94,10 +94,11 @@ async def erase_source_plans(
         raise HTTPException(409, "Plans or actions require a reviewed deletion")
     plans = list(
         await database.scalars(
-            select(Plan)
-            .join(PlanSource, PlanSource.plan_id == Plan.id)
-            .where(PlanSource.connection_id.in_(connection_ids))
-            .distinct()
+            select(Plan).where(
+                Plan.id.in_(
+                    select(PlanSource.plan_id).where(PlanSource.connection_id.in_(connection_ids))
+                )
+            )
         )
     )
     if any((p.workspace_id, p.user_id) != (workspace_id, user_id) for p in plans):
