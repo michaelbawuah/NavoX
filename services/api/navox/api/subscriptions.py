@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
 from navox.api.connector_management import require_origin
+from navox.connectors import stripe_subscription
 from navox.connectors.contracts import ConnectorRuntimeError
 from navox.connectors.subscription_cancellation import (
     available_cancellation_profiles,
@@ -48,6 +49,47 @@ from navox.subscriptions.schemas import (
 )
 
 router = APIRouter(tags=["subscriptions"])
+
+
+@router.get("/subscriptions/stripe-sandbox")
+async def stripe_sandbox_availability(
+    account: CurrentAccountDependency, settings: SettingsDependency
+) -> dict[str, bool]:
+    del account
+    return {"enabled": stripe_subscription.enabled(settings)}
+
+
+@router.post("/subscriptions/stripe-sandbox", response_model=SubscriptionRead, status_code=201)
+async def connect_stripe_sandbox(
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> SubscriptionRead:
+    require_origin(request, settings.web_origin)
+    if (
+        request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        != "application/json"
+    ):
+        raise HTTPException(415, "Use an application/json request")
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > 20_000:
+            raise HTTPException(413, "Stripe sandbox setup request is too large")
+        body.extend(chunk)
+    try:
+        command = stripe_subscription.StripeSandboxConnect.model_validate_json(body)
+    except (ValueError, UnicodeError):
+        # FastAPI's default validation errors may echo a secret-bearing body.
+        raise HTTPException(422, "Invalid Stripe sandbox setup request") from None
+    try:
+        row = await stripe_subscription.connect(
+            database, settings, command, workspace_id=account.workspace.id, user_id=account.user.id
+        )
+    except ConnectorRuntimeError as error:
+        raise provider_failure(error) from None
+    await schedule_reconciliation(settings)
+    return service.to_subscription_read(row)
 
 
 class CancellationGrant(BaseModel):

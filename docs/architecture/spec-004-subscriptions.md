@@ -47,8 +47,9 @@ this action.
 Before submission, the engine commits an `IN_PROGRESS` execution fence and
 consumes the approval. A timeout, lost response or worker interruption directs
 recovery to independent reads; it never blindly resubmits. Temporal submission
-activities have one attempt. Idempotency keys and provider revision preconditions
-also bind the exact provider write.
+activities have one attempt. Reviewed generic profiles additionally bind the
+provider write with idempotency keys and revision preconditions. The restricted
+Stripe sandbox adapter has the API limitations described below.
 
 Submission is not success. `CANCELLED` requires fresh independent provider-state
 evidence for the dispatched account/subscription, with cancelled state and
@@ -98,13 +99,70 @@ exact-action review.
 
 The capability uses the existing connector ownership checks, capability gateway,
 secret broker and approved HTTPS transport. Responses are bounded and sanitized;
-redirects and credential-bearing response data are rejected. No new dependency
-or merchant-specific branch is introduced.
+redirects and credential-bearing response data are rejected. Generic profiles
+require no merchant-specific code or new dependency.
 
 The disposable provider protocol is executable in
 `services/api/integration/subscription_temporal_smoke.py`. Its `.example` domain
 and synthetic credentials are fixtures, not a real service configuration. A live
 merchant integration requires review of that merchant's actual supported API.
+
+## Native Stripe sandbox acceptance
+
+`STRIPE_SANDBOX_ENABLED` defaults to `false`; production environments always
+disable it. This adapter supports one explicitly selected disposable subscription
+per connection. It accepts only `rk_test_` or `sk_test_` keys and requires both the
+subscription and price to have `livemode=false`. It does not enumerate customers,
+subscriptions or accounts, and cannot route credentials to another origin.
+
+Local setup:
+
+1. Check out the SPEC-004 branch, set `STRIPE_SANDBOX_ENABLED=true` in `.env`,
+   and run `docker compose up -d --build` so API and worker load the same setting.
+2. In the same Stripe sandbox as the test subscription, create a restricted key
+   with account read and subscription write permissions. Copy the subscription's
+   `sub_...` ID from its details. Do not paste API keys into chat, shell history
+   or committed configuration.
+3. Open NavoX `/subscriptions`, choose **Connect Stripe sandbox**, and enter the
+   ID and key in the password field. Confirm the connection permission.
+4. Open the imported **Sandbox:** record, review cancellation, and check the
+   inspected amount, renewal, account, customer and immediate cancellation effect.
+   Confirm that exact preview. Wait for independent verification and inspect the
+   same subscription in Stripe for its canceled status.
+
+The initial profile requires an active, single-item, fixed-price USD subscription
+with automatic collection and licensed recurring usage. Taxes, discounts,
+fractional unit prices, trials, schedules, pending changes and complex billing
+are rejected. The imported record is provider-derived, retains its connector
+provenance and is removed by connector data erasure. Sandbox costs and canceled
+renewals are excluded from spending and prevented-renewal totals.
+
+Credentials are encrypted by the existing secret broker and bound to the owner,
+authenticated account, customer, subscription and credential version. Connection
+consent is separate from exact cancellation approval. The API reads the selected
+subscription again immediately before dispatch. A full snapshot fingerprint
+invalidates a preview when the observed state changes. Independent verification
+reads the authenticated account and selected subscription after the write.
+
+The fixed origin is `https://api.stripe.com`, pinned to Stripe API version
+`2026-08-26.dahlia`. The adapter retrieves `/v1/account` and
+`/v1/subscriptions/{id}`, then uses **DELETE** on the latter with
+`invoice_now=false` and `prorate=false`. It requests no final invoice, proration
+or refund; existing invoices and pending items are not removed. Merchant access
+and fees remain explicit unknowns.
+
+Stripe does not document an atomic revision precondition for this cancellation,
+and DELETE ignores idempotency keys. The adapter therefore does not invent
+`If-Match` or `Idempotency-Key` guarantees. The durable NavoX submission fence
+prevents retries after ambiguous results, but cannot remove a state-change race
+between the last read and DELETE. This limitation is shown in the preview and
+keeps the adapter sandbox-only. A real-money integration needs a separate review.
+
+Protocol references: [retrieve](https://docs.stripe.com/api/subscriptions/retrieve),
+[cancel](https://docs.stripe.com/api/subscriptions/cancel),
+[idempotency](https://docs.stripe.com/api/idempotent_requests),
+[versioning](https://docs.stripe.com/api/versioning), and
+[restricted keys](https://docs.stripe.com/keys/restricted-api-keys).
 
 ## API and storage
 
@@ -147,7 +205,10 @@ lifecycle, API and erasure tests against disposable PostgreSQL schemas. Compose
 CI exercises real API authentication, connector grant, exact preview approval,
 Temporal execution, independent verification and the prevented-renewal metric
 against a disposable provider. It verifies one provider write and an independent
-post-write read. Existing SPEC-002 and SPEC-003 checks remain required.
+post-write read. A separate native Stripe scenario exercises its actual HTTP
+method, account binding, approval, Temporal dispatch and metric exclusion, with
+only Stripe HTTPS responses replaced by fixtures. This is not evidence of a
+request reaching Stripe. Existing SPEC-002 and SPEC-003 checks remain required.
 
 Live mailbox precision/recall targets and a real disposable merchant cancellation
 must be measured separately. No live subscription is cancelled by these tests.

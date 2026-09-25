@@ -193,6 +193,8 @@ async def subscription_summary(
     unknown = 0
     known = 0
     for row in rows:
+        if row.obligation_metadata.get("stripe_sandbox") is True:
+            continue
         if (
             row.status not in {"ACTIVE", "TRIAL", "CANCEL_PENDING", "CANCELLATION_REQUESTED"}
             or row.review_state == "NOT_MINE"

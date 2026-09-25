@@ -70,6 +70,8 @@ async def prevented_renewals(
             target = preview.target
         except ValidationError:
             continue
+        if preview.payload.get("sandbox") is True:
+            continue
         economics = preview.economics or target
         renewal = economics.next_renewal_at
         if (

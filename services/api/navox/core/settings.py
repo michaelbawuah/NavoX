@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     subscription_cancellation_profiles: list[dict[str, JsonValue]] = Field(
         default_factory=list, max_length=20, repr=False
     )
+    # Explicit opt-in: Stripe's sandbox API has no atomic revision precondition.
+    stripe_sandbox_enabled: bool = False
     google_gmail_push_subscription: str = ""
     google_gmail_watch_topic: str = ""
     google_calendar_push_url: str = ""

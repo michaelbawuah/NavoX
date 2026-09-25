@@ -42,6 +42,7 @@ from navox.subscriptions.cancellation_contracts import (
     CancellationSubmission,
     CancellationTarget,
     CancellationVerification,
+    CancelSubscriptionCapability,
 )
 
 CAPABILITY = "subscription.cancel"
@@ -481,7 +482,7 @@ async def resolve_subscription_cancellation(
     target: CancellationTarget,
     *,
     transport: httpx.AsyncBaseTransport | None = None,
-) -> ReviewedRESTCancellation | None:
+) -> CancelSubscriptionCapability | None:
     """No operator profile or explicit grant means no executable cancellation method."""
     if (
         target.connection_id is None
@@ -505,6 +506,17 @@ async def resolve_subscription_cancellation(
     )
     if len(connections) != 1:
         return None
+    if connections[0].provider == "stripe_sandbox":
+        from navox.connectors.stripe_subscription import StripeSandboxCancellation
+
+        stripe = StripeSandboxCancellation(
+            database, settings, connections[0].id, target, transport=transport
+        )
+        try:
+            await stripe.authorize()
+        except ConnectorRuntimeError:
+            return None
+        return stripe
     candidates: list[ReviewedRESTCancellation] = []
     for profile in profiles:
         if not profile.enabled or profile.merchant_domain != target.merchant_domain:

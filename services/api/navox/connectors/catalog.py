@@ -38,6 +38,13 @@ def build_connector_registry(settings: Settings) -> ConnectorRegistry:
         return StoredImportConnector(config, secrets, reader=ImportSnapshotReader(settings))
 
     registry.register(IMPORT_MANIFEST, imported)
+    if settings.stripe_sandbox_enabled and settings.app_environment.casefold() not in {
+        "prod",
+        "production",
+    }:
+        from navox.connectors.stripe_sandbox import MANIFEST, StripeSandboxConnector
+
+        registry.register(MANIFEST, StripeSandboxConnector)
     for approved in approved_generic_connectors(settings):
 
         def generic(

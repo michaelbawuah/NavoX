@@ -22,6 +22,7 @@ import {
   subscriptionRequest,
 } from "../lib/subscriptions";
 import { CancellationReview } from "./cancellation-review";
+import { StripeSandboxConnect } from "./stripe-sandbox-connect";
 import { SubscriptionDetails } from "./subscription-details";
 import { SubscriptionEditor } from "./subscription-editor";
 import styles from "./subscriptions-dashboard.module.css";
@@ -70,6 +71,8 @@ export function SubscriptionsDashboard() {
   const [attemptError, setAttemptError] = useState("");
   const [busy, setBusy] = useState(false);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [stripeEnabled, setStripeEnabled] = useState(false);
+  const [stripeOpen, setStripeOpen] = useState(false);
   const mutating = useRef(false);
   const requestNumber = useRef(0);
   const detailNumber = useRef(0);
@@ -104,7 +107,17 @@ export function SubscriptionsDashboard() {
 
   useEffect(() => {
     void load();
+    let active = true;
+    void subscriptionRequest<{ enabled: boolean }>(
+      apiBase,
+      "/subscriptions/stripe-sandbox",
+    )
+      .then((value) => {
+        if (active) setStripeEnabled(value.enabled);
+      })
+      .catch(() => {});
     return () => {
+      active = false;
       requestNumber.current++;
       detailNumber.current++;
     };
@@ -438,6 +451,13 @@ export function SubscriptionsDashboard() {
           + Add subscription
         </button>
       </header>
+      {stripeEnabled && (
+        <div className={styles.actions}>
+          <button type="button" onClick={() => setStripeOpen(true)}>
+            Connect Stripe sandbox
+          </button>
+        </div>
+      )}
       {error && (
         <div className={styles.error} role="alert">
           {error}{" "}
@@ -794,6 +814,19 @@ export function SubscriptionsDashboard() {
           item={editor.item}
           onSave={save}
           onClose={() => setEditor(null)}
+        />
+      )}
+      {stripeOpen && (
+        <StripeSandboxConnect
+          apiBase={apiBase}
+          onClose={() => setStripeOpen(false)}
+          onConnected={() => {
+            setStripeOpen(false);
+            setNotice(
+              "Sandbox subscription connected. Open its record to review cancellation.",
+            );
+            void load();
+          }}
         />
       )}
       {detail && (

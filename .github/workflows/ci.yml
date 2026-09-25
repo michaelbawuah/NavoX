@@ -157,7 +157,7 @@ jobs:
           tests/test_subscriptions_registry.py tests/test_subscriptions_discovery.py
           tests/test_subscription_cancellation.py tests/test_subscription_provider_capability.py
           tests/test_subscription_lifecycle.py tests/test_subscription_provenance.py
-          tests/test_subscriptions_api.py
+          tests/test_subscriptions_api.py tests/test_stripe_sandbox.py
 
   dependency-security:
     name: Dependency security
@@ -464,6 +464,11 @@ jobs:
           docker compose run --rm --no-deps -T \
             --volume "$PWD/services/api/integration:/app/integration:ro" \
             api uv run --no-sync python -m integration.subscription_temporal_smoke
+      - name: Verify native Stripe sandbox adapter through API, Temporal and PostgreSQL
+        run: |
+          docker compose run --rm --no-deps -T \
+            --volume "$PWD/services/api/integration:/app/integration:ro" \
+            api uv run --no-sync python -m integration.stripe_subscription_temporal_smoke
       - name: Capture service diagnostics on failure
         if: failure()
         run: docker compose logs --no-color --tail=300 api worker postgres
