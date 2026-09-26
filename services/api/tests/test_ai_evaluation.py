@@ -1,6 +1,7 @@
 import json
 from argparse import Namespace
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from pydantic import SecretStr, ValidationError
@@ -24,8 +25,10 @@ from navox.ai.foundation.contracts import (
     Sensitivity,
     Usage,
 )
+from navox.ai.foundation.persistence import canonical, digest
 from navox.ai.foundation.registry import ModelDefinition, ModelRef
 from navox.ai.manage import main
+from navox.ai.prompts import EXTRACTION_PROMPT, EXTRACTION_SCHEMA
 from navox.ai.routing import PolicyRules
 from navox.evaluation.intelligence_smoke import OfflineSmokeProvider
 
@@ -102,6 +105,11 @@ async def test_identical_spec002_corpus_measured_without_promoting_authored_resp
         row.passed and row.schema_validated and row.provider_succeeded for row in report.cases
     )
     assert report.reserved_cost <= Decimal("2")
+    assert report.prompt == EXTRACTION_PROMPT and report.output_schema == EXTRACTION_SCHEMA
+    assert all(
+        request.prompt_ref == EXTRACTION_PROMPT and request.schema_ref == EXTRACTION_SCHEMA
+        for request in adapter.calls
+    )
     assert not report.production_quality_measured
     assert "Please send the budget" not in report.model_dump_json()
     with pytest.raises(ValueError, match="Authored fixture"):
@@ -273,7 +281,8 @@ async def test_diagnostics_preserve_policy_budget_and_secret_boundaries(failure)
 
 
 @pytest.mark.asyncio
-async def test_old_extraction_rubric_remains_readable_but_cannot_qualify_current_model():
+@pytest.mark.parametrize("version", ["v1", "v2"])
+async def test_old_extraction_rubric_remains_readable_but_cannot_qualify_current_model(version):
     report = await evaluate_extraction(
         adapter=CorpusFixtureAdapter(Provider.OPENAI),
         registry=catalog_template(),
@@ -285,13 +294,86 @@ async def test_old_extraction_rubric_remains_readable_but_cannot_qualify_current
     )
     assert report.evidence().quality == 1
     previous = report.model_dump(mode="json")
-    previous["corpus_version"] = "spec005-extraction-smoke.v1"
+    previous["corpus_version"] = f"spec005-extraction-smoke.{version}"
+    previous["prompt"] = {"name": "commitment_extraction", "version": "v1"}
     for case in previous["cases"]:
         case.pop("validation_code")
         case.pop("outcome_reason")
     historical = EvaluationReport.model_validate(previous)
     with pytest.raises(ValueError, match="current extraction rubric"):
         historical.evidence()
+    historical_payload = historical.model_dump(mode="json")
+    historical_payload["corpus_version"] = report.corpus_version
+    with pytest.raises(ValueError, match="prompt and schema version"):
+        EvaluationReport.model_validate(historical_payload).evidence()
+
+
+def test_new_extraction_prompt_preserves_published_v1_prompt_and_schema():
+    catalog = catalog_template()
+    previous = next(p for p in catalog.prompts if p.reference == EXTRACTION_SCHEMA)
+    schema = next(s for s in catalog.schemas if s.reference == EXTRACTION_SCHEMA)
+    assert (
+        digest(canonical(previous))
+        == "7194d527891262a021b985597806bac16a6a6576e6a530afa7618130a0befd42"
+    )
+    assert (
+        digest(canonical(schema))
+        == "3b9ac726a3cb65dcfe630e11d51d6a4359ea2ed1732ba6c8358c73ed6489f066"
+    )
+    current = next(p for p in catalog.prompts if p.reference == EXTRACTION_PROMPT)
+    assert current.output_schema == schema.reference
+    assert current.instructions != previous.instructions
+
+
+@pytest.mark.asyncio
+async def test_legacy_catalog_requires_explicit_prompt_publication_before_provider_calls():
+    catalog = catalog_template()
+    historical = catalog.model_copy(
+        update={"prompts": tuple(p for p in catalog.prompts if p.reference != EXTRACTION_PROMPT)}
+    )
+    adapter = CorpusFixtureAdapter(Provider.OPENAI)
+    with pytest.raises(ValueError, match="Publish the current extraction prompt"):
+        await evaluate_extraction(
+            adapter=adapter,
+            registry=historical,
+            model=model_for(Provider.OPENAI),
+            policy=policy_for(Provider.OPENAI),
+            profile=Profile.EXTRACTION_HIGH_ACCURACY,
+            max_cost=Decimal("2"),
+            mode="offline_fixture",
+        )
+    assert not adapter.calls
+
+
+REJECTED_CAPTURES = json.loads(
+    (Path(__file__).parent / "fixtures/spec005_r2_rejected_extractions.json").read_text()
+)["cases"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("capture", REJECTED_CAPTURES, ids=lambda c: c["id"])
+async def test_captured_ungrounded_outputs_still_fail_under_new_prompt(capture):
+    class CapturedAdapter(CorpusFixtureAdapter):
+        async def execute(self, request):
+            response = await super().execute(request)
+            return response.model_copy(
+                update={"output": JSONDocument(text=json.dumps(capture["proposal"]))}
+            )
+
+    adapter = CapturedAdapter(Provider(capture["provider"]))
+    report = await diagnose_extraction(
+        adapter=adapter,
+        registry=catalog_template(),
+        model=model_for(adapter.provider),
+        policy=policy_for(adapter.provider),
+        profile=Profile.EXTRACTION_HIGH_ACCURACY,
+        max_cost=Decimal("2"),
+        case_ids=(capture["case_id"],),
+        mode="offline_fixture",
+    )
+    measured = report.cases[0].measurement
+    assert measured.provider_succeeded and not measured.schema_validated and not measured.passed
+    assert measured.validation_code == capture["validation_code"]
 
 
 def test_diagnostic_cli_requires_file_before_loading_configuration(monkeypatch, capsys):

@@ -285,6 +285,50 @@ source, prompt, response, email body or credential. Costs use catalog estimates,
 not billing reconciliation. Scoped summaries preserve unknown costs. Operational
 trace-coverage percentages need measurement over a real acceptance run.
 
+## Extraction follow-up from the September 26 live comparison
+
+The owner-provided revision-2 archive (`20260926T151025Z`) has paired full
+measurement reports and failure captures. All model/catalog/corpus/timestamp
+bindings and captured source payloads were checked; rejected proposals reproduce
+the reported evidence-validation failures locally.
+
+| Model | Passed / planned | Provider responses | Finding |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.6 Luna | 32 / 33 | 33 | A valid direct request was scored against only the assigned-obligation label. |
+| Gemini 3.5 Flash-Lite | 29 / 33 | 33 | Three grounding failures and an owner promise misclassified as a state update. |
+| Claude Haiku 4.5 | 8 / 33 | 33 | Mostly metadata-only person names with unrelated citations, plus missed or misclassified facts. |
+| Grok 4.7 | 11 / 33 | 13 | The same request-label mismatch, then a response cost above its reservation; 20 cases skipped. |
+
+None of these runs was recorded as qualifying evidence. Their historical scores
+remain unchanged. At the owner's request, Grok is excluded from further live
+qualification and is to be removed from the active deployment catalog, including
+its profile assignments. Registry history and reports remain available for audit;
+removing a model disables its projected provider/model rows. Adapter code alone
+does not authorize any provider requests.
+
+The registered gateway now requests `commitment_extraction@v2`, which reuses the
+unchanged `commitment_extraction@v1` output schema. The new prompt puts an ordered
+evidence-first workflow before the existing extraction rules: empty optional
+arrays, distinct operational observations, per-item citations and conservative
+handling of header identities. Published v1 prompt/schema bytes are preserved.
+The legacy explicit-OpenAI extraction path is unchanged. Existing deployments
+must explicitly publish the new prompt before running registered evaluations;
+missing prompt configuration is rejected before any provider call.
+
+Extraction rubric `spec005-extraction-smoke.v3` accepts either `direct_request`
+or `assigned_obligation` for the directly addressed lab-upload request, matching
+the existing prompt and application policy. This is a single-case ambiguity;
+bulk group-work classification, alert/state intent checks and all production
+grounding validators retain their existing requirements. Captures now list the
+accepted basis alternatives. Historical v1/v2 reports remain readable but cannot
+be relabeled or reused as current qualification evidence.
+
+Five synthetic rejected proposals are retained as offline rejection regressions.
+Fixture tests cannot establish that the new prompt improves live model quality.
+The three remaining providers need fresh bounded diagnostics and complete
+extraction/drafting evaluations after the next catalog publication. All traffic
+and shadow assignments remain at zero until separate qualification and promotion.
+
 ## Official API references
 
 Recheck before registering or changing a live model:

@@ -132,14 +132,13 @@ async def test_automatic_ingestion_traces_both_resources_without_holding_authori
         )
         db.add(connection)
         await RegistryStore(db).publish(catalog, expected_revision=0)
-        reference = next(
-            p.reference for p in catalog.prompts if p.reference.name == "commitment_extraction"
-        )
+        from navox.ai.prompts import EXTRACTION_PROMPT, EXTRACTION_SCHEMA
+
         evidence = EvaluationEvidence(
             profile=profile,
             task_type=TaskType.EXTRACT,
-            prompt=reference,
-            output_schema=reference,
+            prompt=EXTRACTION_PROMPT,
+            output_schema=EXTRACTION_SCHEMA,
             quality=1,
             reliability=1,
             p95_latency_ms=100,
@@ -154,7 +153,7 @@ async def test_automatic_ingestion_traces_both_resources_without_holding_authori
                 model_digest=digest(canonical(model)),
                 registry_revision=1,
                 task_type=TaskType.EXTRACT.value,
-                prompt="commitment_extraction@v1",
+                prompt="commitment_extraction@v2",
                 schema="commitment_extraction@v1",
                 profile=profile.value,
                 evidence=evidence.model_dump_json(),

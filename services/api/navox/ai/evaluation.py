@@ -32,6 +32,7 @@ from navox.ai.foundation.contracts import (
 from navox.ai.foundation.persistence import canonical, digest, model_key
 from navox.ai.foundation.registry import ModelDefinition, RegistrySnapshot
 from navox.ai.gateway import minimized_source_payload
+from navox.ai.prompts import EXTRACTION_PROMPT, EXTRACTION_SCHEMA
 from navox.ai.routing import EvaluationEvidence, PolicyRules, reserve_cost
 from navox.ai.validation import OutputRejected, validate_output
 from navox.evaluation.intelligence_smoke import (
@@ -48,9 +49,8 @@ from navox.intelligence.extraction import (
     OperationalExtraction,
 )
 
-CORPUS: Literal["spec005-extraction-smoke.v2"] = "spec005-extraction-smoke.v2"
+CORPUS: Literal["spec005-extraction-smoke.v3"] = "spec005-extraction-smoke.v3"
 CASES_TO_RUN = (*CASES, *EMAIL_TRIAGE_CASES)
-REFERENCE = VersionedRef(name="commitment_extraction", version="v1")
 
 
 class CaseMeasurement(Contract):
@@ -72,9 +72,11 @@ class EvaluationReport(Contract):
     model_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
     provider: Provider
     profile: Profile
-    prompt: VersionedRef = REFERENCE
-    output_schema: VersionedRef = REFERENCE
-    corpus_version: Literal["spec005-extraction-smoke.v1", "spec005-extraction-smoke.v2"] = CORPUS
+    prompt: VersionedRef = EXTRACTION_PROMPT
+    output_schema: VersionedRef = EXTRACTION_SCHEMA
+    corpus_version: Literal[
+        "spec005-extraction-smoke.v1", "spec005-extraction-smoke.v2", "spec005-extraction-smoke.v3"
+    ] = CORPUS
     evaluated_at: datetime
     max_cost: Decimal = Field(gt=0, le=10)
     reserved_cost: Decimal = Field(ge=0)
@@ -90,7 +92,7 @@ class EvaluationReport(Contract):
             raise ValueError("Complete fixed corpus coverage is required")
         if self.profile not in {Profile.EXTRACTION_FAST, Profile.EXTRACTION_HIGH_ACCURACY}:
             raise ValueError("This corpus qualifies extraction profiles only")
-        if self.prompt != REFERENCE or self.output_schema != REFERENCE:
+        if self.prompt != EXTRACTION_PROMPT or self.output_schema != EXTRACTION_SCHEMA:
             raise ValueError("The corpus prompt and schema version do not match")
         latencies = sorted(c.latency_ms for c in self.cases)
         safety = next(c for c in self.cases if c.id == "untrusted-instructions")
@@ -114,6 +116,7 @@ class ExtractionDiagnosticCase(Contract):
     expected_types: tuple[str, ...]
     expected_email_intent: str | None
     expected_email_basis: str | None
+    expected_email_bases: tuple[str, ...] = ()
     source: JSONDocument = Field(repr=False)
     proposal: JSONDocument | None = Field(default=None, repr=False)
 
@@ -127,7 +130,7 @@ class ExtractionDiagnosticReport(Contract):
     model_id: str
     model_digest: str
     profile: Profile
-    corpus_version: Literal["spec005-extraction-smoke.v2"] = CORPUS
+    corpus_version: Literal["spec005-extraction-smoke.v2", "spec005-extraction-smoke.v3"] = CORPUS
     evaluated_at: datetime
     max_cost: Decimal
     reserved_cost: Decimal
@@ -158,8 +161,8 @@ class _EvaluationGateway:
     ) -> ModelExtractionResponse:
         # This private gateway is used solely by the fixed synthetic corpus below.
         # It is never exposed as a feature gateway or an HTTP endpoint.
-        prompt = next(p for p in self.registry.prompts if p.reference == REFERENCE)
-        schema = next(s for s in self.registry.schemas if s.reference == REFERENCE)
+        prompt = next(p for p in self.registry.prompts if p.reference == EXTRACTION_PROMPT)
+        schema = next(s for s in self.registry.schemas if s.reference == EXTRACTION_SCHEMA)
         text = json.dumps(
             {
                 "sources": [
@@ -207,8 +210,8 @@ class _EvaluationGateway:
                     instructions=prompt.instructions,
                     context=JSONDocument(text=text),
                     output_schema=schema.document,
-                    prompt_ref=REFERENCE,
-                    schema_ref=REFERENCE,
+                    prompt_ref=EXTRACTION_PROMPT,
+                    schema_ref=EXTRACTION_SCHEMA,
                     max_output_tokens=maximum_output,
                 )
             )
@@ -273,6 +276,11 @@ def _evaluation_gateway(
     secrets: tuple[SecretStr, ...] = (),
     capture_proposals: bool = False,
 ) -> _EvaluationGateway:
+    if not any(
+        p.reference == EXTRACTION_PROMPT and p.output_schema == EXTRACTION_SCHEMA
+        for p in registry.prompts
+    ) or not any(s.reference == EXTRACTION_SCHEMA for s in registry.schemas):
+        raise ValueError("Publish the current extraction prompt before evaluation")
     required = {Capability.TEXT, Capability.STRUCTURED_OUTPUT}
     if (
         profile not in {Profile.EXTRACTION_FAST, Profile.EXTRACTION_HIGH_ACCURACY}
@@ -328,6 +336,7 @@ def _diagnostic_cases(
             expected_types=tuple(sorted(case.accepted_types)),
             expected_email_intent=case.email_intent,
             expected_email_basis=case.email_basis,
+            expected_email_bases=tuple(sorted(case.accepted_email_bases)),
             source=JSONDocument(
                 text=minimized_source_payload(
                     source_for(case, index),

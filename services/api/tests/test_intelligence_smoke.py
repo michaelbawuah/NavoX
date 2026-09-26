@@ -383,6 +383,32 @@ async def test_outage_alert_requires_grounded_issue_not_an_invented_remedy(varia
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case_id,basis,expected",
+    [
+        ("assigned-task", "direct_request", True),
+        ("assigned-task", "assigned_obligation", True),
+        ("assigned-task", "commitment_progress", False),
+        ("assigned-task", "security_risk", False),
+        ("group-course-deadline", "direct_request", False),
+        ("group-course-deadline", "assigned_obligation", True),
+    ],
+)
+async def test_direct_request_scoring_matches_policy_without_broadening_bulk_mail(
+    case_id, basis, expected
+):
+    class BasisProvider(OfflineSmokeProvider):
+        async def generate_json(self, **kwargs):
+            response = await super().generate_json(**kwargs)
+            response.data["observations"][0]["email_relevance"]["basis"] = basis
+            return response
+
+    case = next(case for case in EMAIL_TRIAGE_CASES if case.id == case_id)
+    report = await run_smoke(AIGateway(BasisProvider()), mode="offline_fixture", cases=(case,))
+    assert report["passed"] is expected
+
+
+@pytest.mark.asyncio
 async def test_assigned_work_still_requires_an_explicit_action():
     class MissingAction(OfflineSmokeProvider):
         async def generate_json(self, **kwargs):

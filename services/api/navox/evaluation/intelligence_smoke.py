@@ -40,6 +40,13 @@ class SmokeCase:
     bulk_mail: bool = False
     sent: bool = False
     subject: str = "Synthetic NavoX smoke case"
+    alternative_email_bases: frozenset[str] = frozenset()
+
+    @property
+    def accepted_email_bases(self) -> frozenset[str]:
+        if self.email_basis is None:
+            return frozenset()
+        return frozenset({self.email_basis}) | self.alternative_email_bases
 
 
 CASES = (
@@ -105,6 +112,7 @@ def email_case(
     bulk_mail: bool = False,
     sent: bool = False,
     subject: str = "Synthetic email relevance case",
+    alternative_bases: frozenset[str] = frozenset(),
 ) -> SmokeCase:
     accepted = (
         frozenset({"request", "task", "deadline", "follow_up"})
@@ -122,6 +130,7 @@ def email_case(
         bulk_mail=bulk_mail,
         sent=sent,
         subject=subject,
+        alternative_email_bases=alternative_bases,
     )
 
 
@@ -138,6 +147,8 @@ EMAIL_TRIAGE_CASES = (
         "Please upload your completed lab report to the course portal by Friday.",
         intent="action_required",
         basis="assigned_obligation",
+        # This is also an explicit direct request under the published prompt/policy.
+        alternative_bases=frozenset({"direct_request"}),
     ),
     email_case(
         "group-course-deadline",
@@ -450,7 +461,7 @@ async def run_smoke(
                     and (bool(item.action_text) or item.observation_type == "alert")
                     and item.email_relevance is not None
                     and item.email_relevance.intent == case.email_intent
-                    and item.email_relevance.basis == case.email_basis
+                    and item.email_relevance.basis in case.accepted_email_bases
                     for item in filtered.observations
                 )
             if not passed:
