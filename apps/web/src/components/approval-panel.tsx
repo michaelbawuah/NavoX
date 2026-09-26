@@ -57,6 +57,7 @@ interface ExternalAction {
     subject?: string;
     body_text?: string;
     post_send_state?: string;
+    draft_id?: string;
   };
   payload_hash: string;
   result: {
@@ -165,10 +166,11 @@ export function ApprovalPanel({
       if (!response.ok) {
         return;
       }
-      const actions = (await response.json()) as ExternalAction[];
-      setRecentActions(
-        actions.filter((action) => action.action_type === "gmail.send"),
+      const actions = ((await response.json()) as ExternalAction[]).filter(
+        (action) =>
+          action.action_type === "gmail.send" && !action.payload.draft_id,
       );
+      setRecentActions(actions);
       setActiveAction((current) => {
         if (current) {
           return actions.find((action) => action.id === current.id) ?? current;

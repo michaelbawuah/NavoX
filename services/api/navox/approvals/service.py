@@ -95,12 +95,17 @@ async def scoped_action(
     user_id: UUID,
     workspace_id: UUID,
 ) -> Action:
+    # Shared lock order with send consumption, draft edits and source deletion.
+    await database.scalar(select(User).where(User.id == user_id).with_for_update())
     action = await database.scalar(
-        select(Action).where(
+        select(Action)
+        .where(
             Action.id == action_id,
             Action.user_id == user_id,
             Action.workspace_id == workspace_id,
         )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     if action is None:
         raise ApprovalNotFoundError("Action not found")
@@ -138,6 +143,7 @@ class ApprovalService:
         workspace_id: UUID,
         commitment_id: UUID,
         request: PrepareGmailSendRequest,
+        commit: bool = True,
     ) -> tuple[Action, Approval, bool]:
         existing_plan = await database.scalar(
             select(Plan).where(
@@ -308,7 +314,10 @@ class ApprovalService:
             actor_id=str(user_id),
         )
         try:
-            await database.commit()
+            if commit:
+                await database.commit()
+            else:
+                await database.flush()
         except IntegrityError:
             await database.rollback()
             existing_plan = await database.scalar(
@@ -346,6 +355,8 @@ class ApprovalService:
         user_id: UUID,
         workspace_id: UUID,
         request_id: UUID,
+        expected_payload_hash: str | None = None,
+        draft_version: int | None = None,
     ) -> tuple[Action, Approval]:
         action = await scoped_action(
             database,
@@ -353,6 +364,12 @@ class ApprovalService:
             user_id=user_id,
             workspace_id=workspace_id,
         )
+        if action.payload.get("draft_id") is not None:
+            from navox.communication.service import check_draft_approval
+
+            await check_draft_approval(
+                database, action, version=draft_version, payload_hash=expected_payload_hash
+            )
         if action.action_type == "subscription.cancel":
             raise ApprovalConflictError(
                 "Subscription cancellation requires its exact R4 preview confirmation"
@@ -394,6 +411,12 @@ class ApprovalService:
         if approval.action_payload_hash != action.payload_hash:
             raise ApprovalConflictError("Action changed since approval was prepared")
 
+        if action.payload.get("draft_id") is not None:
+            from navox.communication.service import approve_draft_binding
+
+            await approve_draft_binding(
+                database, action, version=draft_version, payload_hash=expected_payload_hash
+            )
         approval.status = "approved"
         approval.approved_at = now
         approval.decision_request_id = request_id
@@ -499,6 +522,8 @@ class ApprovalService:
         )
         if action.action_type != "gmail.send":
             raise ApprovalConflictError("Only Gmail send actions can be edited here")
+        if action.payload.get("draft_id") is not None:
+            raise ApprovalConflictError("Edit this email through its versioned communication draft")
         approval = await latest_approval(database, action.id)
         if approval is None:
             raise ApprovalNotFoundError("Approval not found")

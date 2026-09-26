@@ -20,7 +20,11 @@ from navox.ai.openai_provider import AIProviderError
 from navox.core.settings import Settings
 from navox.intelligence.contracts import SourceDocument, SourceIdentity
 from navox.intelligence.email_relevance import filter_email_extraction
-from navox.intelligence.extraction import InvalidOperationalExtraction, OperationalExtractor
+from navox.intelligence.extraction import (
+    InvalidOperationalExtraction,
+    OperationalExtractionGateway,
+    OperationalExtractor,
+)
 
 
 @dataclass(frozen=True)
@@ -405,7 +409,7 @@ def base_report(mode: str, cases: tuple[SmokeCase, ...] = CASES) -> dict[str, An
 
 
 async def run_smoke(
-    gateway: AIGateway,
+    gateway: OperationalExtractionGateway,
     *,
     mode: Literal["offline_fixture", "live_model_smoke"],
     cases: tuple[SmokeCase, ...] = CASES,

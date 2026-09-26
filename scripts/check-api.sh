@@ -52,6 +52,10 @@ render_schema() {
     connector_connections connector_resources connector_subscriptions connector_event_receipts connector_sync_runs connector_sync_receipts connector_import_snapshots
     merchants merchant_aliases recurring_obligations recurring_obligation_evidence
     obligation_price_history cancellation_attempts cancellation_evidence subscription_events
+    ai_registry_revisions ai_registry_state ai_providers ai_models ai_model_capabilities
+    ai_profiles ai_profile_assignments ai_prompts ai_schemas ai_routing_policies
+    ai_provider_health ai_evaluation_runs ai_task_runs communication_drafts
+    communication_draft_versions assistant_sessions assistant_turns
   )
   for table in "${tables[@]}"; do
     grep -F "CREATE TABLE $table (" "$reports/schema.sql" >/dev/null || {

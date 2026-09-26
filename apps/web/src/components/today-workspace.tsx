@@ -14,7 +14,9 @@ import {
   todayFilters,
   todaySections,
 } from "../lib/today-sections";
+import { AISettings } from "./ai-settings";
 import { ApprovalPanel } from "./approval-panel";
+import { CommunicationDrafts } from "./communication-drafts";
 import { ConnectionsPanel } from "./connections-panel";
 import { DismissCommitment } from "./dismiss-commitment";
 import {
@@ -1124,6 +1126,12 @@ export function TodayWorkspace({
             </details>
             <details className={styles.toolDisclosure}>
               <summary>Email actions</summary>
+              <CommunicationDrafts
+                commitments={approvalCommitments}
+                connections={connections}
+                paused={agentPaused}
+                onStateChanged={refreshToday}
+              />
               <ApprovalPanel
                 agentPaused={agentPaused}
                 commitments={approvalCommitments}
@@ -1141,6 +1149,7 @@ export function TodayWorkspace({
           <summary>
             Connected understanding · read access and advanced sync
           </summary>
+          <AISettings />
           <IntelligenceControls
             connections={connections}
             paused={agentPaused}

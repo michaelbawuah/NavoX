@@ -60,6 +60,8 @@ class EditGmailSendRequest(BaseModel):
 
 class ApprovalDecisionRequest(BaseModel):
     request_id: UUID
+    expected_payload_hash: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    draft_version: int | None = Field(default=None, ge=1)
 
 
 class StoredGmailSendPayload(BaseModel):
@@ -69,3 +71,6 @@ class StoredGmailSendPayload(BaseModel):
     subject: str = Field(min_length=1, max_length=256)
     body_text: str = Field(min_length=1, max_length=50_000)
     post_send_state: PostSendState
+    draft_id: UUID | None = None
+    draft_version: int | None = None
+    draft_payload_hash: str | None = None

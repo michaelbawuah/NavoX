@@ -11,7 +11,15 @@ from navox.agent.hashing import action_security_hash
 from navox.approvals.schemas import StoredGmailSendPayload
 from navox.approvals.service import ApprovalService, latest_approval, plan_for_action
 from navox.core.settings import Settings
-from navox.db.models import Action, Approval, Commitment, Connection, User, WorkflowRef
+from navox.db.models import (
+    Action,
+    Approval,
+    Commitment,
+    Connection,
+    User,
+    WorkflowRef,
+    WorkspaceMembership,
+)
 from navox.providers.google_gmail import (
     GmailGateway,
     GmailProviderError,
@@ -276,6 +284,8 @@ async def execute_approved_gmail_send(
             reason="sender_connection_mismatch",
         )
 
+    prepared_payload_hash = action.payload_hash
+
     # Token refresh is side-effect free with respect to email sending and occurs
     # before consuming the one-time approval.
     try:
@@ -297,8 +307,13 @@ async def execute_approved_gmail_send(
     # Serialize the approval-consumption boundary. Only one concurrent caller can
     # move this action from approved -> executing.
     async with database.begin():
+        # Owner first, then action and draft: matches editing and source deletion.
+        await database.scalar(select(User).where(User.id == action.user_id).with_for_update())
         locked_action = await database.scalar(
-            select(Action).where(Action.id == action_id).with_for_update()
+            select(Action)
+            .where(Action.id == action_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if locked_action is None:
             return "missing"
@@ -321,17 +336,52 @@ async def execute_approved_gmail_send(
         if locked_approval.status != "approved" or locked_approval.consumed_at is not None:
             return locked_approval.status
 
+        # Refresh can narrow the grant, and a disconnect may have won the race
+        # while the token request was in flight. Recheck before consuming approval.
+        current_connection = await database.scalar(
+            select(Connection)
+            .where(Connection.id == payload.connection_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if (
+            current_connection is None
+            or current_connection.status != "active"
+            or current_connection.provider != "google"
+            or (current_connection.workspace_id, current_connection.user_id)
+            != (locked_action.workspace_id, locked_action.user_id)
+            or GMAIL_SEND_SCOPE not in current_connection.granted_scopes
+            or current_connection.external_email != str(payload.sender).casefold()
+            or await database.get(
+                WorkspaceMembership,
+                (locked_action.workspace_id, locked_action.user_id),
+                populate_existing=True,
+            )
+            is None
+        ):
+            locked_action.status = "blocked"
+            locked_action.policy_reason = "gmail_send_authority_changed"
+            return "blocked"
+
         locked_hash = action_security_hash(
             provider=locked_action.provider,
             action_type=locked_action.action_type,
             payload=locked_action.payload,
         )
         if (
-            locked_hash != locked_action.payload_hash
+            locked_action.payload_hash != prepared_payload_hash
+            or locked_hash != locked_action.payload_hash
             or locked_approval.action_payload_hash != locked_action.payload_hash
         ):
             locked_action.status = "blocked"
             locked_action.policy_reason = "approval_payload_hash_mismatch"
+            return "blocked"
+
+        from navox.communication.service import valid_draft_binding
+
+        if not await valid_draft_binding(database, locked_action, approved=True):
+            locked_action.status = "blocked"
+            locked_action.policy_reason = "draft_version_changed"
             return "blocked"
 
         user = await database.scalar(
@@ -409,6 +459,12 @@ async def execute_approved_gmail_send(
         "thread_id": receipt.thread_id,
         "verification": contract.verification_method,
     }
+    if payload.draft_id is not None:
+        from navox.db.communications import CommunicationDraft
+
+        draft = await database.get(CommunicationDraft, payload.draft_id)
+        if draft is not None:
+            draft.status = "sent"
     approval.status = "consumed"
     plan, step = await plan_for_action(database, action)
     step.status = "completed"
