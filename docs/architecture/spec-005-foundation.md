@@ -32,7 +32,9 @@ production-quality claim.
   add provider grants. NavoX-owned session/turn references work across providers;
   this is session infrastructure, not the SPEC-008 NavoXbot interface.
 - An operator CLI for catalog/policy publication, measured synthetic extraction
-  evaluations, explicit rollout changes and rollback. It never sends email.
+  and reviewed communication evaluations, explicit rollout changes and rollback.
+  Drafting uses 16 fixed cases and an exact-artifact review of grounding, user
+  instructions, preserved edits and action claims. It never sends email.
 
 See [the gateway operator guide](spec-005-gateway.md) for activation, boundaries,
 evaluation limits and rollback instructions.
@@ -71,12 +73,12 @@ superseded and are not release evidence.
 1. Review exact current model IDs, capabilities, prices and provider contract
    behavior, then measure all four real providers on the same approved corpus.
    No live provider calls or real email sends were performed during this draft.
-2. Extend evaluation ingestion beyond the synthetic extraction smoke report.
-   Production extraction precision/recall and task-specific planning, drafting
-   grounding, edit preservation and assistant quality need reviewed corpora and
-   rubrics. The smoke score is not those measurements. Communication and other
-   profiles have no CLI qualification path yet; keep their traffic disabled
-   rather than inserting invented scores.
+2. Run and review the fixed extraction and drafting evaluations on the actual
+   providers. The drafting CLI now accepts a complete output-bound review, but
+   its regression fixtures do not establish live grounding or edit preservation.
+   Production extraction precision/recall and general planning/assistant quality
+   require further domain-specific corpora and rubrics. Keep unqualified tasks
+   disabled rather than inserting invented scores.
 3. Complete domain contracts/integration for features using the generic planning,
    meeting, assistant and ranking prompt registrations. Those are templates, not
    evidence that those product flows exist.

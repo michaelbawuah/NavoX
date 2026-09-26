@@ -62,6 +62,7 @@ class EvaluationEvidence(Contract):
     safety_passed: bool
     evaluated_at: datetime
     corpus_version: Annotated[str, Field(min_length=1, max_length=128)]
+    review_artifact_digest: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")] | None = None
 
     @field_validator("evaluated_at")
     @classmethod

@@ -16,6 +16,7 @@ from navox.ai.runtime import GatewayRuntime
 from navox.approvals.service import ApprovalNotFoundError, ApprovalPermissionError
 from navox.communication.schemas import DraftContent
 from navox.communication.service import authorize_source
+from navox.communication.validation import generated_draft
 from navox.connectors.builtin.google import (
     ensure_google_connector_connection,
     google_canonical_resource,
@@ -23,7 +24,6 @@ from navox.connectors.builtin.google import (
 from navox.core.settings import Settings
 from navox.db.communications import CommunicationDraft
 from navox.db.models import Commitment, CommitmentSource
-from navox.intelligence.extraction import INSTRUCTION_LIKE_MARKERS
 from navox.intelligence.ingestion import authorized_connection
 from navox.intelligence.source_cooldown import source_retry_after
 from navox.providers.google_oauth import access_token_for_connection
@@ -114,12 +114,7 @@ async def generate_content(
         )
 
     def validate(output: Any) -> None:
-        if not isinstance(output, dict):
-            raise ValueError("Draft must be an object")
-        content = DraftContent(to=[recipient], subject=output["subject"], body=output["body"])
-        text = (content.subject + "\n" + content.body).casefold()
-        if any(marker in text for marker in INSTRUCTION_LIKE_MARKERS):
-            raise ValueError("Draft contains an instruction-like proposal")
+        generated_draft(output, recipient=recipient)
 
     result = await runtime.execute(
         task,
@@ -133,7 +128,7 @@ async def generate_content(
     await authorize_source(database, scope)
     output = json.loads(result.output.text)
     return (
-        DraftContent(to=[recipient], subject=output["subject"], body=output["body"]),
+        generated_draft(output, recipient=recipient),
         result,
         connection_id,
     )

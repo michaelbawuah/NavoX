@@ -13,10 +13,12 @@ from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
 
+from pydantic import TypeAdapter
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.ai.catalog import catalog_template
+from navox.ai.communication_evaluation import DraftingEvaluationReport, evaluate_communication
 from navox.ai.configured import configured_adapters
 from navox.ai.context import reject_credentials
 from navox.ai.control import record_evaluation, record_healthy_probe, set_rollout, set_weights
@@ -89,6 +91,12 @@ async def publish_policy(
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     if args.command == "template":
         return cast(dict[str, Any], json.loads(canonical(catalog_template())))
+    if (
+        args.command == "evaluate"
+        and args.corpus == "communication"
+        and (args.output is None or args.profile != Profile.ASSISTANT_INTERACTIVE.value)
+    ):
+        raise ValueError("Draft evaluation requires ASSISTANT_INTERACTIVE and an output file")
     settings = Settings()
     factory = get_session_factory()
     async with factory() as database:
@@ -133,7 +141,9 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 ],
             }
         if args.command == "record-evaluation":
-            report = EvaluationReport.model_validate_json(read_file(args.file))
+            report: EvaluationReport | DraftingEvaluationReport = TypeAdapter(
+                EvaluationReport | DraftingEvaluationReport
+            ).validate_json(read_file(args.file))
             row = await record_evaluation(
                 database,
                 model_id=report.model_id,
@@ -193,6 +203,17 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 )
                 await database.commit()
                 return {"model": args.model, "health": "HEALTHY", "traffic_enabled": False}
+            if args.corpus == "communication":
+                draft_report = await evaluate_communication(
+                    adapter=adapter,
+                    registry=registry,
+                    model=model,
+                    policy=PolicyRules.model_validate(settings.ai_provider_policy),
+                    max_cost=args.max_cost,
+                    mode="live_provider",
+                    secrets=configured_secrets(settings),
+                )
+                return draft_report.model_dump(mode="json")
             report = await evaluate_extraction(
                 adapter=adapter,
                 registry=registry,
@@ -223,7 +244,9 @@ def main(argv: list[str] | None = None) -> int:
     ):
         command = commands.add_parser(name)
         command.add_argument(
-            "--output", type=Path, help="Write a content-free JSON report or catalog"
+            "--output",
+            type=Path,
+            help="Write a JSON catalog/report; drafting reports include synthetic candidates",
         )
         if name in {"publish", "policy", "record-evaluation", "weights"}:
             command.add_argument("--file", type=Path, required=True)
@@ -244,6 +267,9 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--live", action="store_true")
         if name == "evaluate":
             command.add_argument(
+                "--corpus", choices=["extraction", "communication"], default="extraction"
+            )
+            command.add_argument(
                 "--max-cost",
                 type=Decimal,
                 required=True,
@@ -255,6 +281,19 @@ def main(argv: list[str] | None = None) -> int:
         serialized = json.dumps(report, indent=2) + "\n"
         if args.output:
             args.output.write_text(serialized, encoding="utf-8")
+        if report.get("report_type") == "communication_drafting":
+            print(
+                json.dumps(
+                    {
+                        "model_id": report["model_id"],
+                        "cases": len(report["cases"]),
+                        "schema_validated": sum(c["schema_validated"] for c in report["cases"]),
+                        "requires_human_review": True,
+                        "traffic_promoted": False,
+                    }
+                )
+            )
+            return 0 if all(c["schema_validated"] for c in report["cases"]) else 1
         print(serialized, end="")
         return (
             1 if args.command == "evaluate" and not all(c["passed"] for c in report["cases"]) else 0

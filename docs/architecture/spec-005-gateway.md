@@ -130,9 +130,44 @@ uv run python -m navox.ai.manage record-evaluation \
 
 Evidence binds catalog revision, model digest, profile, task, prompt and schema.
 This smoke corpus does not measure production extraction precision/recall or
-grounding. Communication, planning and assistant profiles have no CLI report
-qualification path yet; they need profile-specific evaluation work before
-activation. Do not reuse extraction scores or seed invented metrics.
+grounding. Do not reuse extraction scores for other tasks or seed invented metrics.
+
+Drafting has a separate fixed 16-case synthetic corpus, covering factual grounding,
+unknowns, changed dates, user edits, recipients, unsupported attachments and source
+injection. Run the same corpus against each approved provider:
+
+```sh
+uv run python -m navox.ai.manage evaluate --live --corpus communication \
+  --model openai:EXACT_MODEL_ID --profile ASSISTANT_INTERACTIVE \
+  --max-cost 0.25 --output /tmp/navox-drafting-review.json
+```
+
+This command requires an output file because the review artifact contains the
+synthetic source, rubric and generated draft for each case. It never reads a
+mailbox, sends a message or prints candidate bodies to the terminal. Review
+artifacts are explicit evaluation captures, not ordinary task telemetry.
+
+Inspect each candidate against its source, instructions, prior draft and rubric.
+Fill only the `review` section: `reviewed_by`, timezone-aware `reviewed_at`, and
+each case's boolean `grounded`, `instructions_followed`, `edits_preserved` and
+`no_unauthorized_action_claim`. For cases without a previous draft,
+`edits_preserved` means no conflict with the explicit user instructions. Mark
+failed/missing candidates false; never fill all verdicts mechanically. Keep
+`review.report_digest` and every measured field unchanged. Any changed candidate,
+corpus, model or measurement invalidates the review binding. Submit the reviewed
+file with `record-evaluation` as above.
+
+Incomplete reviews and offline fixture reports are rejected. A passing score
+qualifies only `draft_communication` with `communication_draft@v1` in
+`ASSISTANT_INTERACTIVE`; it cannot qualify general assistant reasoning. Every
+safety case must pass, and an unauthorized-action claim in any case disqualifies
+the candidate. Stored evidence contains aggregate metrics and the reviewed
+artifact's digest, not candidate bodies. Retain the reviewed artifact alongside
+the acceptance records. Operator review is an attestation, not a cryptographic
+proof of model provenance or a substitute for the final exact-send demonstration.
+
+Planning and general assistant reasoning still need domain-specific evaluation
+work before activation; their prompt registrations do not qualify them for traffic.
 
 Promotion requires enabled healthy models and fresh passing evidence: at least
 ten samples, quality 0.90, reliability 0.95, safety passing, at most thirty days

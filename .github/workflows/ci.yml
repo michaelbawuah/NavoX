@@ -161,6 +161,7 @@ jobs:
           tests/test_ai_registry.py tests/test_ai_context.py tests/test_ai_runtime.py
           tests/test_ai_control.py tests/test_ai_sessions_tools.py tests/test_communication_drafts.py
           tests/test_ai_settings.py tests/test_ai_feature_ingestion.py
+          tests/test_ai_communication_evaluation.py
 
   dependency-security:
     name: Dependency security
