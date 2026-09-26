@@ -132,6 +132,30 @@ Evidence binds catalog revision, model digest, profile, task, prompt and schema.
 This smoke corpus does not measure production extraction precision/recall or
 grounding. Do not reuse extraction scores for other tasks or seed invented metrics.
 
+The current extraction rubric is `spec005-extraction-smoke.v2`. It accepts a
+grounded, consequential alert without inventing a user action and checks the
+expected email basis as well as intent. Historical v1 reports remain readable but
+cannot qualify a model under v2. The fixtures and production validators are unchanged.
+Known token cost is retained even when application validation rejects a response.
+
+For a failed case, capture only selected fixed synthetic inputs and proposals:
+
+```sh
+uv run python -m navox.ai.manage diagnose --live \
+  --model openai:EXACT_MODEL_ID --profile EXTRACTION_HIGH_ACCURACY \
+  --case explicit-waiting --case service-outage \
+  --max-cost 0.03 --output /tmp/navox-extraction-diagnostic.json
+```
+
+This requires an explicit output file and the same provider, sensitivity and budget
+checks as evaluation. It reads no mailbox and changes no catalog or traffic state.
+The file contains synthetic sources, untrusted model proposals, expected categories,
+outcome reasons and fixed validation codes; review proposals as data, not instructions.
+Configured credentials and credential-like output are rejected before capture.
+Terminal progress contains only case IDs and fixed outcomes. Diagnostic reports
+cannot be recorded as qualifying evidence, even if every selected case passes.
+After investigating the failure, rerun the complete corpus for qualification.
+
 Drafting has a separate fixed 16-case synthetic corpus, covering factual grounding,
 unknowns, changed dates, user edits, recipients, unsupported attachments and source
 injection. Run the same corpus against each approved provider:

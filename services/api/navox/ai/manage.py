@@ -8,6 +8,7 @@ it never reads user sources, sends email, or changes a model's traffic share.
 import argparse
 import asyncio
 import json
+import sys
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
@@ -22,7 +23,12 @@ from navox.ai.communication_evaluation import DraftingEvaluationReport, evaluate
 from navox.ai.configured import configured_adapters
 from navox.ai.context import reject_credentials
 from navox.ai.control import record_evaluation, record_healthy_probe, set_rollout, set_weights
-from navox.ai.evaluation import EvaluationReport, evaluate_extraction
+from navox.ai.evaluation import (
+    CASES_TO_RUN,
+    EvaluationReport,
+    diagnose_extraction,
+    evaluate_extraction,
+)
 from navox.ai.features import configured_secrets
 from navox.ai.foundation.contracts import Profile
 from navox.ai.foundation.persistence import RegistryConflict, RegistryStore, canonical, digest
@@ -97,6 +103,8 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         and (args.output is None or args.profile != Profile.ASSISTANT_INTERACTIVE.value)
     ):
         raise ValueError("Draft evaluation requires ASSISTANT_INTERACTIVE and an output file")
+    if args.command == "diagnose" and args.output is None:
+        raise ValueError("Synthetic diagnostics require an explicit output file")
     settings = Settings()
     factory = get_session_factory()
     async with factory() as database:
@@ -174,7 +182,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             )
             await database.commit()
             return {"weights_updated": True}
-        if args.command in {"evaluate", "probe"}:
+        if args.command in {"evaluate", "probe", "diagnose"}:
             if not args.live:
                 raise ValueError("Use --live to explicitly authorize provider requests")
             model = next(
@@ -203,6 +211,20 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 )
                 await database.commit()
                 return {"model": args.model, "health": "HEALTHY", "traffic_enabled": False}
+            if args.command == "diagnose":
+                diagnostic = await diagnose_extraction(
+                    adapter=adapter,
+                    registry=registry,
+                    model=model,
+                    policy=PolicyRules.model_validate(settings.ai_provider_policy),
+                    profile=Profile(args.profile),
+                    max_cost=args.max_cost,
+                    case_ids=tuple(args.case),
+                    mode="live_provider",
+                    secrets=configured_secrets(settings),
+                    progress=_progress,
+                )
+                return diagnostic.model_dump(mode="json")
             if args.corpus == "communication":
                 draft_report = await evaluate_communication(
                     adapter=adapter,
@@ -223,6 +245,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 max_cost=args.max_cost,
                 mode="live_provider",
                 secrets=configured_secrets(settings),
+                progress=_progress,
             )
             return report.model_dump(mode="json")
         raise ValueError("Unknown operator command")
@@ -241,6 +264,7 @@ def main(argv: list[str] | None = None) -> int:
         "weights",
         "evaluate",
         "probe",
+        "diagnose",
     ):
         command = commands.add_parser(name)
         command.add_argument(
@@ -252,9 +276,9 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--file", type=Path, required=True)
         if name in {"publish", "policy", "rollout", "weights", "probe"}:
             command.add_argument("--expected-revision", type=int, required=True)
-        if name in {"rollout", "weights", "evaluate"}:
+        if name in {"rollout", "weights", "evaluate", "diagnose"}:
             command.add_argument("--profile", choices=[p.value for p in Profile], required=True)
-        if name in {"rollout", "evaluate", "probe"}:
+        if name in {"rollout", "evaluate", "probe", "diagnose"}:
             command.add_argument("--model", required=True, help="provider:exact-model-id")
         if name == "policy":
             command.add_argument("--workspace-id", type=UUID, required=True)
@@ -263,12 +287,17 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--expected-percent", type=int, required=True)
             command.add_argument("--percent", type=int, required=True)
             command.add_argument("--shadow", action="store_true")
-        if name in {"evaluate", "probe"}:
+        if name in {"evaluate", "probe", "diagnose"}:
             command.add_argument("--live", action="store_true")
         if name == "evaluate":
             command.add_argument(
                 "--corpus", choices=["extraction", "communication"], default="extraction"
             )
+        if name == "diagnose":
+            command.add_argument(
+                "--case", action="append", choices=[c.id for c in CASES_TO_RUN], required=True
+            )
+        if name in {"evaluate", "diagnose"}:
             command.add_argument(
                 "--max-cost",
                 type=Decimal,
@@ -281,6 +310,22 @@ def main(argv: list[str] | None = None) -> int:
         serialized = json.dumps(report, indent=2) + "\n"
         if args.output:
             args.output.write_text(serialized, encoding="utf-8")
+        if report.get("report_type") == "extraction_diagnostic":
+            measurements = [case["measurement"] for case in report["cases"]]
+            print(
+                json.dumps(
+                    {
+                        "model_id": report["model_id"],
+                        "cases": len(measurements),
+                        "passed": sum(case["passed"] for case in measurements),
+                        "failed_case_ids": [
+                            case["id"] for case in measurements if not case["passed"]
+                        ],
+                        "qualifies_for_promotion": False,
+                    }
+                )
+            )
+            return 0 if all(case["passed"] for case in measurements) else 1
         if report.get("report_type") == "communication_drafting":
             print(
                 json.dumps(
@@ -302,6 +347,10 @@ def main(argv: list[str] | None = None) -> int:
         # Validation/provider/database exceptions can contain configuration or text.
         print(json.dumps({"error": "operator_command_rejected", "command": args.command}))
         return 2
+
+
+def _progress(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":

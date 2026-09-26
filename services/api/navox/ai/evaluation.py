@@ -5,6 +5,7 @@ does not establish production precision/recall or qualify other task profiles.
 """
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 from math import ceil
@@ -12,7 +13,7 @@ from time import monotonic
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, ValidationError
 
 from navox.ai.context import reject_credentials
 from navox.ai.errors import AIProviderError
@@ -33,11 +34,21 @@ from navox.ai.foundation.registry import ModelDefinition, RegistrySnapshot
 from navox.ai.gateway import minimized_source_payload
 from navox.ai.routing import EvaluationEvidence, PolicyRules, reserve_cost
 from navox.ai.validation import OutputRejected, validate_output
-from navox.evaluation.intelligence_smoke import CASES, EMAIL_TRIAGE_CASES, run_smoke
+from navox.evaluation.intelligence_smoke import (
+    CASES,
+    EMAIL_TRIAGE_CASES,
+    SmokeCase,
+    run_smoke,
+    source_for,
+)
 from navox.intelligence.contracts import SourceDocument
-from navox.intelligence.extraction import ModelExtractionResponse, OperationalExtraction
+from navox.intelligence.extraction import (
+    EvidenceValidationError,
+    ModelExtractionResponse,
+    OperationalExtraction,
+)
 
-CORPUS = "spec005-extraction-smoke.v1"
+CORPUS: Literal["spec005-extraction-smoke.v2"] = "spec005-extraction-smoke.v2"
 CASES_TO_RUN = (*CASES, *EMAIL_TRIAGE_CASES)
 REFERENCE = VersionedRef(name="commitment_extraction", version="v1")
 
@@ -50,6 +61,8 @@ class CaseMeasurement(Contract):
     latency_ms: int = Field(ge=0)
     estimated_cost: Decimal | None = Field(default=None, ge=0)
     error_code: str | None = None
+    validation_code: str | None = None
+    outcome_reason: str | None = None
 
 
 class EvaluationReport(Contract):
@@ -61,7 +74,7 @@ class EvaluationReport(Contract):
     profile: Profile
     prompt: VersionedRef = REFERENCE
     output_schema: VersionedRef = REFERENCE
-    corpus_version: Literal["spec005-extraction-smoke.v1"] = "spec005-extraction-smoke.v1"
+    corpus_version: Literal["spec005-extraction-smoke.v1", "spec005-extraction-smoke.v2"] = CORPUS
     evaluated_at: datetime
     max_cost: Decimal = Field(gt=0, le=10)
     reserved_cost: Decimal = Field(ge=0)
@@ -71,6 +84,8 @@ class EvaluationReport(Contract):
     def evidence(self) -> EvaluationEvidence:
         if self.mode != "live_provider":
             raise ValueError("Authored fixture output cannot qualify a live model")
+        if self.corpus_version != CORPUS:
+            raise ValueError("Run the current extraction rubric before qualifying a model")
         if tuple(c.id for c in self.cases) != tuple(c.id for c in CASES_TO_RUN):
             raise ValueError("Complete fixed corpus coverage is required")
         if self.profile not in {Profile.EXTRACTION_FAST, Profile.EXTRACTION_HIGH_ACCURACY}:
@@ -94,6 +109,32 @@ class EvaluationReport(Contract):
         )
 
 
+class ExtractionDiagnosticCase(Contract):
+    measurement: CaseMeasurement
+    expected_types: tuple[str, ...]
+    expected_email_intent: str | None
+    expected_email_basis: str | None
+    source: JSONDocument = Field(repr=False)
+    proposal: JSONDocument | None = Field(default=None, repr=False)
+
+
+class ExtractionDiagnosticReport(Contract):
+    """Explicit synthetic captures, never acceptable as model qualification evidence."""
+
+    report_type: Literal["extraction_diagnostic"] = "extraction_diagnostic"
+    mode: Literal["live_diagnostic", "offline_diagnostic"]
+    registry_revision: int
+    model_id: str
+    model_digest: str
+    profile: Profile
+    corpus_version: Literal["spec005-extraction-smoke.v2"] = CORPUS
+    evaluated_at: datetime
+    max_cost: Decimal
+    reserved_cost: Decimal
+    cases: tuple[ExtractionDiagnosticCase, ...]
+    qualifies_for_promotion: Literal[False] = False
+
+
 class _EvaluationGateway:
     def __init__(
         self,
@@ -102,11 +143,15 @@ class _EvaluationGateway:
         model: ModelDefinition,
         max_cost: Decimal,
         secrets: tuple[SecretStr, ...],
+        *,
+        capture_proposals: bool = False,
     ) -> None:
         self.adapter, self.registry, self.model = adapter, registry, model
         self.max_cost, self.secrets = max_cost, secrets
         self.reserved = Decimal(0)
         self.measurements: dict[str, dict[str, Any]] = {}
+        self.capture_proposals = capture_proposals
+        self.proposals: dict[str, JSONDocument] = {}
 
     async def extract_operational(
         self, document: SourceDocument, *, owner_email: str | None = None
@@ -173,19 +218,30 @@ class _EvaluationGateway:
             ):
                 raise OutputRejected("Unexpected provider result")
             measurement["provider_succeeded"] = True
-
-            def semantic(value: Any) -> None:
-                parsed = OperationalExtraction.model_validate(value).reanchor_unique_evidence(
-                    document
-                )
-                parsed.validate_evidence(document)
-
-            validate_output(result.output, schema.document, semantic)
-            measurement["schema_validated"] = True
+            # A rejected candidate still consumed tokens. Preserve known usage costs.
             cost = self.adapter.estimate_cost(result.model, result.usage)
             measurement["estimated_cost"] = cost
             if cost is not None and cost > reservation:
                 raise AIProviderError("Provider usage exceeded reservation", code="budget_exceeded")
+            if self.capture_proposals:
+                reject_credentials(result.output.text, self.secrets)
+                self.proposals[document.external_id] = result.output
+
+            def semantic(value: Any) -> None:
+                try:
+                    parsed = OperationalExtraction.model_validate(value).reanchor_unique_evidence(
+                        document
+                    )
+                    parsed.validate_evidence(document)
+                except EvidenceValidationError as error:
+                    measurement["validation_code"] = error.code
+                    raise
+                except ValidationError:
+                    measurement["validation_code"] = "schema_invalid"
+                    raise
+
+            validate_output(result.output, schema.document, semantic)
+            measurement["schema_validated"] = True
             return ModelExtractionResponse(
                 output=json.loads(result.output.text),
                 provider=self.adapter.provider.value,
@@ -193,6 +249,7 @@ class _EvaluationGateway:
             )
         except OutputRejected:
             measurement["error_code"] = "validation_failed"
+            measurement.setdefault("validation_code", "schema_invalid")
             raise
         except AIProviderError:
             measurement["error_code"] = "budget_exceeded"
@@ -205,7 +262,7 @@ class _EvaluationGateway:
             measurement["latency_ms"] = max(0, int((monotonic() - started) * 1000))
 
 
-async def evaluate_extraction(
+def _evaluation_gateway(
     *,
     adapter: AIProviderAdapter,
     registry: RegistrySnapshot,
@@ -213,9 +270,9 @@ async def evaluate_extraction(
     policy: PolicyRules,
     profile: Profile,
     max_cost: Decimal,
-    mode: Literal["live_provider", "offline_fixture"],
     secrets: tuple[SecretStr, ...] = (),
-) -> EvaluationReport:
+    capture_proposals: bool = False,
+) -> _EvaluationGateway:
     required = {Capability.TEXT, Capability.STRUCTURED_OUTPUT}
     if (
         profile not in {Profile.EXTRACTION_FAST, Profile.EXTRACTION_HIGH_ACCURACY}
@@ -229,17 +286,20 @@ async def evaluate_extraction(
         or not Decimal(0) < max_cost <= min(Decimal(10), policy.max_cost)
     ):
         raise ValueError("Synthetic provider evaluation is not authorized for this configuration")
-    gateway = _EvaluationGateway(adapter, registry, model, max_cost, secrets)
-    measured = await run_smoke(
-        gateway,
-        mode="live_model_smoke" if mode == "live_provider" else "offline_fixture",
-        cases=CASES_TO_RUN,
+    return _EvaluationGateway(
+        adapter, registry, model, max_cost, secrets, capture_proposals=capture_proposals
     )
+
+
+def _measurements(
+    gateway: _EvaluationGateway, measured: dict[str, Any], cases: tuple[SmokeCase, ...]
+) -> tuple[CaseMeasurement, ...]:
     outcomes = {row["id"]: row for row in measured["cases"]}
-    cases = tuple(
+    return tuple(
         CaseMeasurement(
             id=case.id,
             passed=outcomes.get(case.id, {}).get("passed", False),
+            outcome_reason=outcomes.get(case.id, {}).get("reason", "not_executed"),
             **gateway.measurements.get(
                 case.id,
                 {
@@ -250,7 +310,36 @@ async def evaluate_extraction(
                 },
             ),
         )
-        for case in CASES_TO_RUN
+        for case in cases
+    )
+
+
+async def evaluate_extraction(
+    *,
+    adapter: AIProviderAdapter,
+    registry: RegistrySnapshot,
+    model: ModelDefinition,
+    policy: PolicyRules,
+    profile: Profile,
+    max_cost: Decimal,
+    mode: Literal["live_provider", "offline_fixture"],
+    secrets: tuple[SecretStr, ...] = (),
+    progress: Callable[[str], None] | None = None,
+) -> EvaluationReport:
+    gateway = _evaluation_gateway(
+        adapter=adapter,
+        registry=registry,
+        model=model,
+        policy=policy,
+        profile=profile,
+        max_cost=max_cost,
+        secrets=secrets,
+    )
+    measured = await run_smoke(
+        gateway,
+        mode="live_model_smoke" if mode == "live_provider" else "offline_fixture",
+        cases=CASES_TO_RUN,
+        progress=progress,
     )
     return EvaluationReport(
         mode=mode,
@@ -262,5 +351,67 @@ async def evaluate_extraction(
         evaluated_at=datetime.now(UTC),
         max_cost=max_cost,
         reserved_cost=gateway.reserved,
+        cases=_measurements(gateway, measured, CASES_TO_RUN),
+    )
+
+
+async def diagnose_extraction(
+    *,
+    adapter: AIProviderAdapter,
+    registry: RegistrySnapshot,
+    model: ModelDefinition,
+    policy: PolicyRules,
+    profile: Profile,
+    max_cost: Decimal,
+    case_ids: tuple[str, ...],
+    mode: Literal["live_provider", "offline_fixture"],
+    secrets: tuple[SecretStr, ...] = (),
+    progress: Callable[[str], None] | None = None,
+) -> ExtractionDiagnosticReport:
+    known = {case.id for case in CASES_TO_RUN}
+    if not case_ids or len(set(case_ids)) != len(case_ids) or not set(case_ids) <= known:
+        raise ValueError("Select unique case IDs from the fixed synthetic corpus")
+    cases = tuple(case for case in CASES_TO_RUN if case.id in case_ids)
+    gateway = _evaluation_gateway(
+        adapter=adapter,
+        registry=registry,
+        model=model,
+        policy=policy,
+        profile=profile,
+        max_cost=max_cost,
+        secrets=secrets,
+        capture_proposals=True,
+    )
+    measured = await run_smoke(
+        gateway,
+        mode="live_model_smoke" if mode == "live_provider" else "offline_fixture",
         cases=cases,
+        progress=progress,
+    )
+    measurements = _measurements(gateway, measured, cases)
+    return ExtractionDiagnosticReport(
+        mode="live_diagnostic" if mode == "live_provider" else "offline_diagnostic",
+        registry_revision=registry.revision,
+        model_id=model_key(model.reference),
+        model_digest=digest(canonical(model)),
+        profile=profile,
+        evaluated_at=datetime.now(UTC),
+        max_cost=max_cost,
+        reserved_cost=gateway.reserved,
+        cases=tuple(
+            ExtractionDiagnosticCase(
+                measurement=measurement,
+                expected_types=tuple(sorted(case.accepted_types)),
+                expected_email_intent=case.email_intent,
+                expected_email_basis=case.email_basis,
+                source=JSONDocument(
+                    text=minimized_source_payload(
+                        source_for(case, index),
+                        owner_email="owner@example.com" if case.gmail else None,
+                    )
+                ),
+                proposal=gateway.proposals.get(case.id),
+            )
+            for index, (case, measurement) in enumerate(zip(cases, measurements, strict=True))
+        ),
     )

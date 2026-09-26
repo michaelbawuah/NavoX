@@ -385,7 +385,7 @@ def base_report(mode: str, cases: tuple[SmokeCase, ...] = CASES) -> dict[str, An
         "schema_version": 1,
         "generated_at": datetime.now(UTC).isoformat(),
         "mode": mode,
-        "dataset": "navox-email-triage-smoke-v1"
+        "dataset": "navox-email-triage-smoke-v2"
         if any(case.gmail for case in cases)
         else "navox-intelligence-smoke-v1",
         "scope": "AIGateway, extraction validation and email surfacing policy on synthetic sources",
@@ -443,10 +443,14 @@ async def run_smoke(
                 else not observed
             )
             if case.email_intent:
+                # A consequential alert can describe the issue without inventing a remedy.
+                # The surfacing policy above still requires a useful, body-grounded title.
                 passed = passed and all(
-                    bool(item.action_text and item.object_text)
+                    bool(item.object_text)
+                    and (bool(item.action_text) or item.observation_type == "alert")
                     and item.email_relevance is not None
                     and item.email_relevance.intent == case.email_intent
+                    and item.email_relevance.basis == case.email_basis
                     for item in filtered.observations
                 )
             if not passed:

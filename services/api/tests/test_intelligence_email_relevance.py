@@ -379,7 +379,7 @@ def test_email_triage_suite_offline_is_bounded_and_keeps_core_suite_separate(mon
     assert main(["--offline", "--suite", "email-triage"]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["planned_cases"] == report["passed_cases"] == 24
-    assert report["dataset"] == "navox-email-triage-smoke-v1"
+    assert report["dataset"] == "navox-email-triage-smoke-v2"
     assert report["production_quality_measured"] is False
     assert all(case.content not in json.dumps(report) for case in EMAIL_TRIAGE_CASES)
     assert main(["--suite", "email-triage", "--case", "failed-payment"]) == 0
