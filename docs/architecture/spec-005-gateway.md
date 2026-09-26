@@ -156,6 +156,25 @@ Terminal progress contains only case IDs and fixed outcomes. Diagnostic reports
 cannot be recorded as qualifying evidence, even if every selected case passes.
 After investigating the failure, rerun the complete corpus for qualification.
 
+For intermittent failures, capture rejected proposals from the same full evaluation
+instead of trying to reproduce them in a second provider call:
+
+```sh
+uv run python -m navox.ai.manage evaluate --live \
+  --model openai:EXACT_MODEL_ID --profile EXTRACTION_HIGH_ACCURACY \
+  --max-cost 0.25 --output /tmp/navox-ai-evaluation.json \
+  --diagnostic-output /tmp/navox-ai-failures.json
+```
+
+The two paths must identify different files. This performs the normal 33 calls
+once, under the same total budget and validation rules. The ordinary evaluation
+report and terminal contain measurements only. The separate diagnostic file holds
+only failed cases and any credential-screened synthetic proposals available for
+them; a provider failure may have no proposal. Both reports share the evaluation
+timestamp and model/catalog binding. If every case passes, the diagnostic has an
+empty `cases` array. It never qualifies a model, replaces a failing score, records
+evidence or enables traffic. It is opt-in; default evaluation retains no proposals.
+
 Drafting has a separate fixed 16-case synthetic corpus, covering factual grounding,
 unknowns, changed dates, user edits, recipients, unsupported attachments and source
 injection. Run the same corpus against each approved provider:

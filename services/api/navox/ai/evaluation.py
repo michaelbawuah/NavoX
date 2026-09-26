@@ -314,6 +314,33 @@ def _measurements(
     )
 
 
+def _diagnostic_cases(
+    gateway: _EvaluationGateway,
+    cases: tuple[SmokeCase, ...],
+    measurements: tuple[CaseMeasurement, ...],
+    *,
+    failures_only: bool = False,
+) -> tuple[ExtractionDiagnosticCase, ...]:
+    # Enumerate before filtering so each captured source matches its actual run.
+    return tuple(
+        ExtractionDiagnosticCase(
+            measurement=measurement,
+            expected_types=tuple(sorted(case.accepted_types)),
+            expected_email_intent=case.email_intent,
+            expected_email_basis=case.email_basis,
+            source=JSONDocument(
+                text=minimized_source_payload(
+                    source_for(case, index),
+                    owner_email="owner@example.com" if case.gmail else None,
+                )
+            ),
+            proposal=gateway.proposals.get(case.id),
+        )
+        for index, (case, measurement) in enumerate(zip(cases, measurements, strict=True))
+        if not failures_only or not measurement.passed
+    )
+
+
 async def evaluate_extraction(
     *,
     adapter: AIProviderAdapter,
@@ -325,6 +352,7 @@ async def evaluate_extraction(
     mode: Literal["live_provider", "offline_fixture"],
     secrets: tuple[SecretStr, ...] = (),
     progress: Callable[[str], None] | None = None,
+    failure_capture: Callable[[ExtractionDiagnosticReport], None] | None = None,
 ) -> EvaluationReport:
     gateway = _evaluation_gateway(
         adapter=adapter,
@@ -334,6 +362,7 @@ async def evaluate_extraction(
         profile=profile,
         max_cost=max_cost,
         secrets=secrets,
+        capture_proposals=failure_capture is not None,
     )
     measured = await run_smoke(
         gateway,
@@ -341,7 +370,7 @@ async def evaluate_extraction(
         cases=CASES_TO_RUN,
         progress=progress,
     )
-    return EvaluationReport(
+    report = EvaluationReport(
         mode=mode,
         registry_revision=registry.revision,
         model_id=model_key(model.reference),
@@ -353,6 +382,21 @@ async def evaluate_extraction(
         reserved_cost=gateway.reserved,
         cases=_measurements(gateway, measured, CASES_TO_RUN),
     )
+    if failure_capture is not None:
+        failure_capture(
+            ExtractionDiagnosticReport(
+                mode="live_diagnostic" if mode == "live_provider" else "offline_diagnostic",
+                registry_revision=report.registry_revision,
+                model_id=report.model_id,
+                model_digest=report.model_digest,
+                profile=report.profile,
+                evaluated_at=report.evaluated_at,
+                max_cost=report.max_cost,
+                reserved_cost=report.reserved_cost,
+                cases=_diagnostic_cases(gateway, CASES_TO_RUN, report.cases, failures_only=True),
+            )
+        )
+    return report
 
 
 async def diagnose_extraction(
@@ -398,20 +442,5 @@ async def diagnose_extraction(
         evaluated_at=datetime.now(UTC),
         max_cost=max_cost,
         reserved_cost=gateway.reserved,
-        cases=tuple(
-            ExtractionDiagnosticCase(
-                measurement=measurement,
-                expected_types=tuple(sorted(case.accepted_types)),
-                expected_email_intent=case.email_intent,
-                expected_email_basis=case.email_basis,
-                source=JSONDocument(
-                    text=minimized_source_payload(
-                        source_for(case, index),
-                        owner_email="owner@example.com" if case.gmail else None,
-                    )
-                ),
-                proposal=gateway.proposals.get(case.id),
-            )
-            for index, (case, measurement) in enumerate(zip(cases, measurements, strict=True))
-        ),
+        cases=_diagnostic_cases(gateway, cases, measurements),
     )

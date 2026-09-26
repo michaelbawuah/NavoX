@@ -26,6 +26,7 @@ from navox.ai.control import record_evaluation, record_healthy_probe, set_rollou
 from navox.ai.evaluation import (
     CASES_TO_RUN,
     EvaluationReport,
+    ExtractionDiagnosticReport,
     diagnose_extraction,
     evaluate_extraction,
 )
@@ -105,6 +106,16 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("Draft evaluation requires ASSISTANT_INTERACTIVE and an output file")
     if args.command == "diagnose" and args.output is None:
         raise ValueError("Synthetic diagnostics require an explicit output file")
+    diagnostic_output: Path | None = getattr(args, "diagnostic_output", None)
+    if diagnostic_output is not None:
+        if args.command != "evaluate" or args.corpus != "extraction" or args.output is None:
+            raise ValueError("Failure capture requires extraction evaluation and an output file")
+        if args.output.resolve() == diagnostic_output.resolve() or (
+            args.output.exists()
+            and diagnostic_output.exists()
+            and args.output.samefile(diagnostic_output)
+        ):
+            raise ValueError("Evaluation and diagnostic files must be different")
     settings = Settings()
     factory = get_session_factory()
     async with factory() as database:
@@ -236,6 +247,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     secrets=configured_secrets(settings),
                 )
                 return draft_report.model_dump(mode="json")
+            diagnostics: list[ExtractionDiagnosticReport] = []
             report = await evaluate_extraction(
                 adapter=adapter,
                 registry=registry,
@@ -246,7 +258,12 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 mode="live_provider",
                 secrets=configured_secrets(settings),
                 progress=_progress,
+                failure_capture=diagnostics.append if diagnostic_output is not None else None,
             )
+            if diagnostic_output is not None:
+                diagnostic_output.write_text(
+                    diagnostics[0].model_dump_json(indent=2) + "\n", encoding="utf-8"
+                )
             return report.model_dump(mode="json")
         raise ValueError("Unknown operator command")
 
@@ -292,6 +309,11 @@ def main(argv: list[str] | None = None) -> int:
         if name == "evaluate":
             command.add_argument(
                 "--corpus", choices=["extraction", "communication"], default="extraction"
+            )
+            command.add_argument(
+                "--diagnostic-output",
+                type=Path,
+                help="Separately capture failed synthetic extraction proposals from this run",
             )
         if name == "diagnose":
             command.add_argument(

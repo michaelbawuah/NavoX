@@ -1,4 +1,5 @@
 import json
+from argparse import Namespace
 from decimal import Decimal
 
 import pytest
@@ -9,6 +10,7 @@ from navox.ai.catalog import catalog_template
 from navox.ai.evaluation import (
     CASES_TO_RUN,
     EvaluationReport,
+    ExtractionDiagnosticReport,
     diagnose_extraction,
     evaluate_extraction,
 )
@@ -361,3 +363,224 @@ def test_diagnostic_cli_keeps_candidates_in_explicit_file_and_only_prints_summar
     output = capsys.readouterr().out
     assert "synthetic candidate text" not in output
     assert json.loads(output)["qualifies_for_promotion"] is False
+
+
+class WaitingFailureAdapter(CorpusFixtureAdapter):
+    def __init__(self, *, credential=False):
+        super().__init__(Provider.OPENAI)
+        self.credential = credential
+        self.rejected_output = None
+
+    async def execute(self, request):
+        result = await super().execute(request)
+        document = json.loads(request.context.text)["sources"][0]["document"]
+        if document["external_id"] != "explicit-waiting":
+            return result
+        value = json.loads(result.output.text)
+        value["unsupported_field"] = (
+            "test-protected-value" if self.credential else "captured synthetic rejected proposal"
+        )
+        self.rejected_output = JSONDocument(text=json.dumps(value))
+        return result.model_copy(update={"output": self.rejected_output})
+
+
+@pytest.mark.asyncio
+async def test_full_evaluation_captures_the_same_failed_response_without_retrying_or_rescoring():
+    adapter = WaitingFailureAdapter()
+    captures = []
+    report = await evaluate_extraction(
+        adapter=adapter,
+        registry=catalog_template(),
+        model=model_for(Provider.OPENAI),
+        policy=policy_for(Provider.OPENAI),
+        profile=Profile.EXTRACTION_HIGH_ACCURACY,
+        max_cost=Decimal("2"),
+        mode="offline_fixture",
+        failure_capture=captures.append,
+    )
+    assert len(adapter.calls) == len(CASES_TO_RUN) == len(report.cases)
+    assert sum(case.passed for case in report.cases) == len(CASES_TO_RUN) - 1
+    assert len(captures) == 1
+    capture = captures[0]
+    assert len(capture.cases) == 1
+    case = capture.cases[0]
+    measurement = next(row for row in report.cases if row.id == "explicit-waiting")
+    assert case.measurement == measurement
+    assert not measurement.passed and measurement.validation_code == "schema_invalid"
+    assert case.proposal == adapter.rejected_output
+    request = next(
+        call
+        for call in adapter.calls
+        if json.loads(call.context.text)["sources"][0]["document"]["external_id"]
+        == "explicit-waiting"
+    )
+    assert (
+        json.loads(case.source.text) == json.loads(request.context.text)["sources"][0]["document"]
+    )
+    assert capture.evaluated_at == report.evaluated_at
+    assert capture.model_digest == report.model_digest
+    assert capture.registry_revision == report.registry_revision
+    assert capture.reserved_cost == report.reserved_cost <= report.max_cost
+    assert not capture.qualifies_for_promotion
+    assert "captured synthetic rejected proposal" not in report.model_dump_json()
+    assert "captured synthetic rejected proposal" in capture.model_dump_json()
+    with pytest.raises(ValidationError):
+        EvaluationReport.model_validate_json(capture.model_dump_json())
+
+
+@pytest.mark.asyncio
+async def test_successful_full_evaluation_emits_an_empty_failure_capture():
+    adapter = CorpusFixtureAdapter(Provider.OPENAI)
+    captures = []
+    report = await evaluate_extraction(
+        adapter=adapter,
+        registry=catalog_template(),
+        model=model_for(Provider.OPENAI),
+        policy=policy_for(Provider.OPENAI),
+        profile=Profile.EXTRACTION_HIGH_ACCURACY,
+        max_cost=Decimal("2"),
+        mode="offline_fixture",
+        failure_capture=captures.append,
+    )
+    assert all(case.passed for case in report.cases)
+    assert len(adapter.calls) == len(CASES_TO_RUN)
+    assert len(captures) == 1 and captures[0].cases == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["permission", "budget", "credential"])
+async def test_full_evaluation_capture_preserves_policy_budget_and_credential_boundaries(failure):
+    adapter = WaitingFailureAdapter(credential=failure == "credential")
+    captures = []
+    kwargs = dict(
+        adapter=adapter,
+        registry=catalog_template(),
+        model=model_for(Provider.OPENAI),
+        policy=PolicyRules() if failure == "permission" else policy_for(Provider.OPENAI),
+        profile=Profile.EXTRACTION_HIGH_ACCURACY,
+        max_cost=Decimal("0.000001") if failure == "budget" else Decimal("2"),
+        mode="offline_fixture",
+        secrets=(SecretStr("test-protected-value"),),
+        failure_capture=captures.append,
+    )
+    if failure == "permission":
+        with pytest.raises(ValueError, match="not authorized"):
+            await evaluate_extraction(**kwargs)
+        assert not adapter.calls and not captures
+        return
+    report = await evaluate_extraction(**kwargs)
+    assert len(captures) == 1
+    assert "test-protected-value" not in report.model_dump_json()
+    assert "test-protected-value" not in captures[0].model_dump_json()
+    assert all(case.proposal is None for case in captures[0].cases)
+    assert not all(case.passed for case in report.cases)
+    if failure == "budget":
+        assert not adapter.calls and report.reserved_cost == 0
+
+
+@pytest.mark.parametrize("invalid", ["missing", "same", "symlink", "hardlink", "communication"])
+def test_failure_capture_cli_rejects_invalid_paths_or_corpus_before_configuration(
+    invalid, monkeypatch, tmp_path, capsys
+):
+    from navox.ai import manage
+
+    called = []
+
+    def forbidden():
+        called.append(True)
+        raise AssertionError("Configuration must not be loaded")
+
+    monkeypatch.setattr(manage, "Settings", forbidden)
+    output = tmp_path / "evaluation.json"
+    diagnostic = tmp_path / "failures.json"
+    output.write_text("existing evaluation")
+    if invalid == "same":
+        diagnostic = output
+    elif invalid == "symlink":
+        diagnostic.symlink_to(output)
+    elif invalid == "hardlink":
+        diagnostic.hardlink_to(output)
+    arguments = [
+        "evaluate",
+        "--live",
+        "--model",
+        "openai:fixture",
+        "--profile",
+        "EXTRACTION_HIGH_ACCURACY",
+        "--max-cost",
+        "0.25",
+        "--diagnostic-output",
+        str(diagnostic),
+    ]
+    if invalid != "missing":
+        arguments.extend(["--output", str(output)])
+    if invalid == "communication":
+        arguments.extend(["--corpus", "communication", "--profile", "ASSISTANT_INTERACTIVE"])
+    assert main(arguments) == 2
+    assert not called
+    assert output.read_text() == "existing evaluation"
+    assert "operator_command_rejected" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_cli_failure_capture_writes_only_the_separate_file_and_keeps_traffic_disabled(
+    ai_database, monkeypatch, tmp_path, capsys
+):
+    from sqlalchemy import func, select
+
+    from navox.ai import manage
+    from navox.ai.foundation.persistence import RegistryStore
+    from navox.core.settings import Settings
+    from navox.db.ai_registry import AIEvaluationRun, AIProfileAssignment
+
+    model = model_for(Provider.OPENAI)
+    template = catalog_template()
+    snapshot = template.model_copy(
+        update={
+            "models": (model,),
+            "profiles": tuple(
+                profile.model_copy(update={"assignments": (model.reference,)})
+                if profile.profile == Profile.EXTRACTION_HIGH_ACCURACY
+                else profile
+                for profile in template.profiles
+            ),
+        }
+    )
+    async with ai_database() as db:
+        await RegistryStore(db).publish(snapshot, expected_revision=0)
+        await db.commit()
+    settings = Settings(
+        _env_file=None,
+        app_environment="test",
+        ai_provider_policy=policy_for(Provider.OPENAI).model_dump(mode="json"),
+    )
+    adapter = WaitingFailureAdapter()
+    monkeypatch.setattr(manage, "Settings", lambda: settings)
+    monkeypatch.setattr(manage, "get_session_factory", lambda: ai_database)
+    monkeypatch.setattr(manage, "configured_adapters", lambda *_: {Provider.OPENAI: adapter})
+    diagnostic = tmp_path / "failures.json"
+    result = await manage.run(
+        Namespace(
+            command="evaluate",
+            corpus="extraction",
+            live=True,
+            model="openai:fixture-corpus-model",
+            profile="EXTRACTION_HIGH_ACCURACY",
+            max_cost=Decimal("2"),
+            output=tmp_path / "evaluation.json",
+            diagnostic_output=diagnostic,
+        )
+    )
+    capture = ExtractionDiagnosticReport.model_validate_json(diagnostic.read_text())
+    assert len(capture.cases) == 1 and not capture.cases[0].measurement.passed
+    assert capture.cases[0].proposal == adapter.rejected_output
+    assert len(result["cases"]) == len(adapter.calls) == len(CASES_TO_RUN)
+    assert "captured synthetic rejected proposal" not in json.dumps(result)
+    terminal = capsys.readouterr()
+    assert "captured synthetic rejected proposal" not in terminal.out + terminal.err
+    async with ai_database() as db:
+        assert await db.scalar(select(func.count()).select_from(AIEvaluationRun)) == 0
+        assignment = await db.get(
+            AIProfileAssignment, ("EXTRACTION_HIGH_ACCURACY", "openai:fixture-corpus-model")
+        )
+        assert assignment.rollout_percent == 0 and not assignment.shadow_enabled
