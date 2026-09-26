@@ -1,5 +1,7 @@
 import json
 import logging
+import os
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -76,12 +78,62 @@ def test_cors_preflight_allows_only_declared_api_client_headers() -> None:
     assert "content-type" in allowed
 
 
-def test_production_configuration_requires_https_web_origin() -> None:
+@pytest.fixture
+def isolated_settings_sources(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Keep settings unit tests independent of the developer's real configuration."""
+    for name in tuple(os.environ):
+        if name.casefold() in Settings.model_fields:
+            monkeypatch.delenv(name)
+    env_file = tmp_path / "settings-test.env"
+    env_file.write_text("", encoding="utf-8")
+    monkeypatch.setitem(Settings.model_config, "env_file", env_file)
+    return env_file
+
+
+def test_production_configuration_requires_https_web_origin(
+    isolated_settings_sources: Path,
+) -> None:
     with pytest.raises(ValidationError, match="Production web origin must use HTTPS"):
         Settings(app_environment="production", web_origin="http://navox.example.com")
 
 
-def test_production_google_configuration_requires_https_and_protected_tokens() -> None:
+@pytest.mark.parametrize("credential_source", ["none", "environment", "dotenv", "both"])
+def test_production_google_configuration_requires_https_and_protected_tokens(
+    isolated_settings_sources: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    credential_source: str,
+) -> None:
+    # Synthetic credentials reproduce local config contamination without using real secrets.
+    if credential_source in {"dotenv", "both"}:
+        isolated_settings_sources.write_text(
+            "GOOGLE_OAUTH_CLIENT_SECRET=fixture-dotenv-client-secret\n"
+            "GOOGLE_TOKEN_ENCRYPTION_KEY=fixture-dotenv-encryption-key\n",
+            encoding="utf-8",
+        )
+    if credential_source in {"environment", "both"}:
+        monkeypatch.setenv("GOOGLE_OAUTH_CLIENT_SECRET", "fixture-env-client-secret")
+        monkeypatch.setenv("GOOGLE_TOKEN_ENCRYPTION_KEY", "fixture-env-encryption-key")
+
+    # Confirm that the configured source really supplies credentials when not overridden.
+    if credential_source != "none":
+        loaded = Settings(
+            app_environment="production",
+            web_origin="https://app.navox.example",
+            google_oauth_client_id="client-id",
+            google_oauth_redirect_uri="https://api.navox.example/callback",
+        )
+        expected_source = "env" if credential_source in {"environment", "both"} else "dotenv"
+        assert loaded.google_oauth_client_secret is not None
+        assert loaded.google_token_encryption_key is not None
+        assert (
+            loaded.google_oauth_client_secret.get_secret_value()
+            == f"fixture-{expected_source}-client-secret"
+        )
+        assert (
+            loaded.google_token_encryption_key.get_secret_value()
+            == f"fixture-{expected_source}-encryption-key"
+        )
+
     with pytest.raises(ValidationError, match="Production Google OAuth redirect must use HTTPS"):
         Settings(
             app_environment="production",
@@ -98,5 +150,17 @@ def test_production_google_configuration_requires_https_and_protected_tokens() -
             web_origin="https://app.navox.example",
             google_oauth_client_id="client-id",
             google_oauth_redirect_uri="https://api.navox.example/callback",
+            # Omission permits environment/dotenv lookup; explicit None tests absence.
+            google_oauth_client_secret=None,
             google_token_encryption_key="encryption-key",
+        )
+
+    with pytest.raises(ValidationError, match="Production Google OAuth requires token encryption"):
+        Settings(
+            app_environment="production",
+            web_origin="https://app.navox.example",
+            google_oauth_client_id="client-id",
+            google_oauth_redirect_uri="https://api.navox.example/callback",
+            google_oauth_client_secret="secret",
+            google_token_encryption_key=None,
         )
