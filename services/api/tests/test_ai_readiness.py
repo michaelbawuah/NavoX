@@ -11,7 +11,7 @@ from test_ai_operational_domains import operational_runtime
 
 from navox.ai import readiness
 from navox.ai.catalog import catalog_template
-from navox.ai.domains import Domain, domain_reference
+from navox.ai.domains import Domain, domain_prompt_reference, domain_reference
 from navox.ai.foundation.contracts import Provider, Sensitivity
 from navox.ai.foundation.persistence import RegistryStore, canonical, digest
 from navox.ai.readiness import TraceManifest, inventory, propose_catalog, trace_coverage
@@ -21,7 +21,7 @@ from navox.db.ai_registry import AIEvaluationRun, AIProfileAssignment, AITaskRun
 
 def prior_catalog():
     template = catalog_template()
-    new_refs = {domain_reference(d) for d in Domain}
+    new_refs = {r for d in Domain for r in (domain_reference(d), domain_prompt_reference(d))}
     return template.model_copy(
         update={
             "revision": 4,

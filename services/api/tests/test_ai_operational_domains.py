@@ -16,7 +16,14 @@ from navox.ai.context import ContextDenied
 from navox.ai.control import record_evaluation
 from navox.ai.domain_corpus import CORPORA, FOREIGN, A, B, DomainCase, item
 from navox.ai.domain_evaluation import DomainEvaluationReport, evaluate_domain
-from navox.ai.domains import DOMAIN_TASKS, Domain, DomainInput, domain_reference, validate_domain
+from navox.ai.domains import (
+    DOMAIN_TASKS,
+    Domain,
+    DomainInput,
+    domain_prompt_reference,
+    domain_reference,
+    validate_domain,
+)
 from navox.ai.foundation.adapter import ErrorCode, ProviderResponse
 from navox.ai.foundation.contracts import (
     FinishReason,
@@ -117,7 +124,8 @@ async def test_full_identical_corpora_and_offline_evidence_cannot_qualify(domain
             "expected" not in r.context.text and "rubric" not in r.context.text
             for r in adapter.calls
         )
-        assert report.prompt == report.output_schema == domain_reference(domain)
+        assert report.prompt == domain_prompt_reference(domain)
+        assert report.output_schema == domain_reference(domain)
         assert all(c.estimated_cost == Decimal("0.0003") for c in report.cases)
         envelopes.append([r.context.text for r in adapter.calls])
         with pytest.raises(ValueError, match="Complete live"):
@@ -304,7 +312,7 @@ async def operational_runtime(
                 evidence = EvaluationEvidence(
                     profile=profile,
                     task_type=task,
-                    prompt=ref,
+                    prompt=domain_prompt_reference(domain),
                     output_schema=ref,
                     quality=1,
                     reliability=1,
@@ -689,7 +697,8 @@ async def test_domain_cli_records_full_bound_evidence_without_promoting(
     assert receipt["traffic_promoted"] is False
     async with ai_database() as db:
         rows = list(await db.scalars(select(AIEvaluationRun)))
-        assert len(rows) == 1 and rows[0].prompt == "assistant@v2"
+        assert len(rows) == 1 and rows[0].prompt == "assistant@v3"
+        assert rows[0].schema == "assistant@v2"
         assert "Private saved notes" not in rows[0].evidence
         assert all(a.rollout_percent == 0 for a in await db.scalars(select(AIProfileAssignment)))
         await RegistryStore(db).publish(

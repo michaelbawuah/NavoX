@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from navox.ai.catalog import catalog_template
 from navox.ai.context import reject_credentials
 from navox.ai.control import evaluation_passes
-from navox.ai.domains import DOMAIN_TASKS, Domain, domain_reference
+from navox.ai.domains import DOMAIN_TASKS, Domain, domain_prompt_reference, domain_reference
 from navox.ai.features import configured_secrets
 from navox.ai.foundation.contracts import Contract, Profile, Provider, Sensitivity, TaskType
 from navox.ai.foundation.persistence import RegistryStore, canonical, digest, model_key
@@ -53,7 +53,7 @@ def task_bindings() -> list[tuple[str, Profile, TaskType, str, str]]:
         )
     )
     bindings.extend(
-        (domain.value, *DOMAIN_TASKS[domain], f"{domain.value}@v2", f"{domain.value}@v2")
+        (domain.value, *DOMAIN_TASKS[domain], f"{domain.value}@v3", f"{domain.value}@v2")
         for domain in Domain
     )
     return bindings
@@ -66,7 +66,7 @@ def propose_catalog(
     if not personal_providers.issubset({m.reference.provider for m in current.models}):
         raise ValueError("Personal-data proposal includes an unregistered provider")
     template = catalog_template()
-    references = {domain_reference(d) for d in Domain}
+    references = {ref for d in Domain for ref in (domain_reference(d), domain_prompt_reference(d))}
     prompts = list(current.prompts)
     schemas = list(current.schemas)
     for prompt in template.prompts:

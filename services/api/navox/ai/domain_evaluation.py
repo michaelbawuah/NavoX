@@ -18,7 +18,14 @@ from pydantic import AwareDatetime, Field, SecretStr
 
 from navox.ai.context import reject_credentials
 from navox.ai.domain_corpus import CORPORA, DomainCase, meets_expectation
-from navox.ai.domains import DOMAIN_TASKS, Domain, domain_reference, domain_schema, validate_domain
+from navox.ai.domains import (
+    DOMAIN_TASKS,
+    Domain,
+    domain_prompt_reference,
+    domain_reference,
+    domain_schema,
+    validate_domain,
+)
 from navox.ai.foundation.adapter import AIProviderAdapter, ProviderRequest
 from navox.ai.foundation.contracts import (
     Capability,
@@ -72,8 +79,9 @@ class DomainEvaluationReport(Contract):
             self.mode != "live_provider"
             or self.corpus != corpus
             or self.profile != profile
-            or self.prompt != domain_reference(self.domain)
-            or self.output_schema != self.prompt
+            or self.prompt
+            not in (domain_reference(self.domain), domain_prompt_reference(self.domain))
+            or self.output_schema != domain_reference(self.domain)
             or tuple(c.id for c in self.cases) != tuple(c.id for c in corpus)
             or self.reserved_cost > self.max_cost
             or self.evaluated_at > datetime.now(UTC)
@@ -148,7 +156,8 @@ async def evaluate_domain(
     ):
         raise ValueError("Synthetic operational evaluation is not authorized")
     reference = domain_reference(domain)
-    prompt = next((p for p in registry.prompts if p.reference == reference), None)
+    prompt_ref = domain_prompt_reference(domain)
+    prompt = next((p for p in registry.prompts if p.reference == prompt_ref), None)
     schema = next((s for s in registry.schemas if s.reference == reference), None)
     if (
         prompt is None
@@ -209,7 +218,7 @@ async def evaluate_domain(
                         instructions=prompt.instructions,
                         context=context,
                         output_schema=schema.document,
-                        prompt_ref=reference,
+                        prompt_ref=prompt_ref,
                         schema_ref=reference,
                         max_output_tokens=maximum_output,
                     )
@@ -268,7 +277,7 @@ async def evaluate_domain(
         model_id=model_key(model.reference),
         model_digest=digest(canonical(model)),
         profile=DOMAIN_TASKS[domain][0],
-        prompt=reference,
+        prompt=prompt_ref,
         output_schema=reference,
         corpus=CORPORA[domain],
         evaluated_at=datetime.now(UTC),

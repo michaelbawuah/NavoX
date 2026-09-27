@@ -1,0 +1,34 @@
+{
+  "prompts": {
+    "assistant@v1": "5d2675f07959ce0276e99e4e10558711ae0017c3308008536d5403ebc12fd5ef",
+    "assistant@v2": "a251e8b4ccbad9b34b09f44cbaa9d86607aef0790505015709085923a1ee3e1c",
+    "classification@v1": "e83c38977b6d85b118a81ece39ccdfa9b474cb44a885cc8910ff0b3420fd4c65",
+    "commitment_extraction@v1": "7194d527891262a021b985597806bac16a6a6576e6a530afa7618130a0befd42",
+    "commitment_extraction@v2": "99b35e14a4902793abc2e0360e73aadabbbc16f6ebf722afd8bbd8fc7af8a54f",
+    "communication_draft@v1": "b7cc79e33870b5e48641bc06555d1b412f99d07338d8ee1b692f29446ccb1351",
+    "communication_draft@v2": "e7e97c2ca117ec6b278fbb315bd9a34320a6bffc62d8ed58d8dd91ff33a2675d",
+    "meeting_preparation@v1": "2450cf6adbdb9fbd4e8b71fce0ea9b3b4a2bfacddafb716802318d9215652a2e",
+    "meeting_preparation@v2": "cc9ac11fc5964dca460eb169c5c852162d4cd0f62d77caaa5709c95c4c25570f",
+    "planning@v1": "3a093c78590562049cc5009d4dc4a59ad6efb7e37a680d2b735e5a7d294e0c62",
+    "planning@v2": "793c1f4a76586b2421b795a4f083b0a3f6e25205d69b152e9858f93463f41078",
+    "ranking@v1": "08674a62c87a94ab7df22745621409ca3777a8d6f2a27e56baa9dcbd29d91cd5",
+    "ranking@v2": "ccadb82bf3e4835b3d589f201148d29fbfd6f2b94f6a0b8ffe4e35074fbc7b35",
+    "subscription_extraction@v1": "f7a44c03f7a5958518943981e41eaa5937155b6579edff7e6b4f5ac9bc7d6fc0",
+    "summarization@v1": "0e21b3f659ead1cb4b209b63d0e943f98cdbec2a955f80d3fa13de944b5ca41f"
+  },
+  "schemas": {
+    "assistant@v1": "656f067a1d8874226f992ac6f89f0b2611a7c97425286541e9668d5844b80c33",
+    "assistant@v2": "5955e290b91dc92338a4ca25e1c786718c2d6182d109d8f28284cc8128763afe",
+    "classification@v1": "42d374a49366c4d14ed0383955022ad2fdd086f038965e4339beb1bebed29005",
+    "commitment_extraction@v1": "3b9ac726a3cb65dcfe630e11d51d6a4359ea2ed1732ba6c8358c73ed6489f066",
+    "communication_draft@v1": "a218311abdc0e6531cd4f6d7658a656d87727da52862f82f9480f1fc6741cc83",
+    "meeting_preparation@v1": "dd1844d923c1f334322366896d39c7b01d579820eca530bb38dc9ec0157ecfc6",
+    "meeting_preparation@v2": "e2de9c4fce5fa9d3b7dd62eb23f4184f86723ba01b5ef1a120611171457ea645",
+    "planning@v1": "6f066f0f7b4e264139a514c63cf1be232bb08734b921ac87d4bcc47f0b343c08",
+    "planning@v2": "0917623859629fa2025248d6e5a76f225cd788e1407c6ec2e7f81dee594bf834",
+    "ranking@v1": "d356ca6a31f2cbd020446fe2dbd2f351ffe44e7e39277a1ce66542eb9344d762",
+    "ranking@v2": "e73b457cd8c7681c51bd99bb3f9da0c164ae55b994a4ffc38ef21361d93e2481",
+    "subscription_extraction@v1": "aa904b116714bf2b8ed487a2ccc901f5a0278420722a6d223e0e20afeaed084f",
+    "summarization@v1": "c930eb2e52bdbbd88242760b788367520bf5500f6fcdcaf5db5b44c936a8a56b"
+  }
+}

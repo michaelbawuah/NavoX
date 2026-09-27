@@ -19,6 +19,7 @@ from navox.ai.foundation.adapter import (
 )
 from navox.ai.foundation.contracts import Capability, FinishReason, JSONDocument, Provider, Usage
 from navox.ai.foundation.registry import ModelDefinition
+from navox.ai.provider_schema import claude_output_schema
 
 
 class AdapterFailure(RuntimeError):
@@ -294,7 +295,10 @@ class ClaudeAdapter(HTTPAdapter):
             "max_tokens": request.max_output_tokens,
             "messages": [{"role": "user", "content": request.context.text}],
             "output_config": {
-                "format": {"type": "json_schema", "schema": json.loads(request.output_schema.text)}
+                "format": {
+                    "type": "json_schema",
+                    "schema": claude_output_schema(json.loads(request.output_schema.text)),
+                }
             },
         }
 

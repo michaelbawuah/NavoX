@@ -2,7 +2,14 @@
 
 import json
 
-from navox.ai.domains import Domain, domain_instructions, domain_reference, domain_schema
+from navox.ai.domains import (
+    Domain,
+    domain_instructions,
+    domain_instructions_v3,
+    domain_prompt_reference,
+    domain_reference,
+    domain_schema,
+)
 from navox.ai.foundation.contracts import JSONDocument, VersionedRef
 from navox.ai.foundation.registry import PromptDefinition, SchemaDefinition
 from navox.ai.gateway import OPERATIONAL_EXTRACTION_INSTRUCTIONS, operational_extraction_json_schema
@@ -197,6 +204,13 @@ def builtin_prompts() -> tuple[tuple[PromptDefinition, ...], tuple[SchemaDefinit
                 reference=reference,
                 output_schema=reference,
                 instructions=UNTRUSTED_BOUNDARY + domain_instructions(domain),
+            )
+        )
+        prompts.append(
+            PromptDefinition(
+                reference=domain_prompt_reference(domain),
+                output_schema=reference,
+                instructions=UNTRUSTED_BOUNDARY + domain_instructions_v3(domain),
             )
         )
     return tuple(prompts), tuple(schemas)

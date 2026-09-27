@@ -27,17 +27,14 @@ git rev-parse HEAD > "$output_dir/source-commit.txt"
 docker compose build api
 docker compose run --rm --no-deps -T api uv run --no-sync python -m navox.ai.readiness inventory \
   > "$output_dir/readiness.json"
-expected_digest='3074bfb2edbc8c03a36ef6543ce646928fb9423a6ea5d4a6308b59b8c3e68dc1'
-# Produce both review alternatives without publishing either. The second only
-# proposes model capability ceilings; it does not change operator/user grants.
-for variant in public-only personal-proposal; do
+expected_digest='ea6842e8d6a3b876481b0cdf48a86ede69d83b2fa88948f6ca7251858cefb99f'
+# Preserve the already-approved PERSONAL ceilings. Append only the four v3
+# operational prompts, with their unchanged v2 schemas, for operator review.
+for variant in prompt-proposal; do
   proposal_flags=(--directory /tmp/review-proposal)
-  if [ "$variant" = 'personal-proposal' ]; then
-    proposal_flags+=(--personal-provider openai --personal-provider gemini --personal-provider anthropic)
-  fi
   container_name="$run_id-$variant"
   docker compose run --name "$container_name" --no-deps -T api uv run --no-sync python \
-    -m navox.ai.readiness prepare --expected-revision 4 --expected-digest "$expected_digest" \
+    -m navox.ai.readiness prepare --expected-revision 5 --expected-digest "$expected_digest" \
     "${proposal_flags[@]}" > "$output_dir/$variant.log"
   docker cp "$container_name:/tmp/review-proposal" "$output_dir/$variant"
   docker rm "$container_name" > /dev/null

@@ -12,30 +12,26 @@ Run `bash scripts/spec005-readiness.sh` from a clean, reviewed
 `spec-005-ai-gateway` checkout with Docker/PostgreSQL running. It builds a one-off
 API image, reads the live database and creates a dated Desktop ZIP. It does not
 restart API/worker, publish configuration, call providers or read mailbox bodies.
-The revision/digest check binds the reviewed r4 checkpoint. A different deployment
-state stops preparation; inspect its inventory rather than bypassing the guard.
+The revision/digest check now binds the published r5 PERSONAL checkpoint. A different
+deployment state stops preparation; inspect its inventory rather than bypassing
+the guard. See [the r5 review](spec-005-r5-qualification-review.md) for the actual
+results and approved drafting verdicts.
 
-The archive contains current catalog/qualification inventory and two **unpublished
-alternatives** for r5, both preserving historical prompts and schemas, exact model
-IDs, prices and Grok's removal:
+The archive contains the current inventory and one **unpublished** r6
+`prompt-proposal`: four operational v3 prompts reusing unchanged v2 schemas.
+Existing models, sensitivity ceilings, prices, historical prompts/schemas and
+Grok's removal are preserved. It grants no new data permission or routing.
 
-- `public-only`: appends the four operational v2 contracts and compatible profile
-  assignments. Existing model sensitivity ceilings are preserved.
-- `personal-proposal`: the same changes plus `PERSONAL` in the three existing
-  models' sensitivity ceilings. This is a proposal, not consent or a policy grant.
+Review the proposed definitions before publication. Published versions must never
+be edited in place. After publication, a new registry revision requires fresh
+qualification for every serving binding; do not relabel or carry r5 evidence
+forward. The r5 evidence remains a historical record, including its warnings.
 
-Choose the data boundary before paying for qualification. Real saved-task and
-email contexts have a PERSONAL floor. A PUBLIC-only catalog can qualify synthetic
-cases but cannot serve those real features. If PERSONAL processing is approved,
-review which providers may receive it and the corresponding operator/workspace/
-user policy ceilings. No SENSITIVE or RESTRICTED expansion is proposed. Persisted
-source classifications can require stricter permission and always win.
-
-Select and review **one** catalog, then publish it through the existing CLI using
-the expected current revision. Do not publish both alternatives. Adding contracts
-or changing model ceilings advances the revision and invalidates prior serving
-qualification, while preserving all historical evaluation rows. Finish catalog
-choices before the complete evaluation run to avoid unnecessary repetition.
+The three model ceilings already include PUBLIC and PERSONAL. Runtime still needs
+appropriate operator/workspace/user policy grants, explicit activation and source
+authorization. Persisted source classifications always win. Synthetic qualification
+never reads real personal sources, and no SENSITIVE or RESTRICTED expansion is
+proposed.
 
 ## 2. Run full public synthetic qualification
 
@@ -49,10 +45,10 @@ The evaluator uses registered cost ceilings; it does not reconcile actual billin
 | --- | --- | --- | ---: |
 | extraction | EXTRACTION_HIGH_ACCURACY | commitment_extraction@v2 / @v1 | 33 |
 | communication | ASSISTANT_INTERACTIVE | communication_draft@v2 / @v1 | 16 |
-| planning | PLANNING_HIGH | planning@v2 / @v2 | 12 |
-| meeting_preparation | REASONING_STANDARD | meeting_preparation@v2 / @v2 | 12 |
-| assistant | ASSISTANT_INTERACTIVE | assistant@v2 / @v2 | 12 |
-| ranking | REASONING_STANDARD | ranking@v2 / @v2 | 12 |
+| planning | PLANNING_HIGH | planning@v3 / @v2 | 12 |
+| meeting_preparation | REASONING_STANDARD | meeting_preparation@v3 / @v2 | 12 |
+| assistant | ASSISTANT_INTERACTIVE | assistant@v3 / @v2 | 12 |
+| ranking | REASONING_STANDARD | ranking@v3 / @v2 | 12 |
 
 Example for a registered model, replacing `PROVIDER:MODEL` and the output path:
 
@@ -64,9 +60,7 @@ uv run --no-sync python -m navox.ai.manage evaluate --live \
 ```
 
 Communication additionally requires `--draft-prompt-version v2`. Inspect all 16
-actual candidate drafts and complete the bound human review. Historical r4
-Gemini/Claude 15/16 passes and r3 OpenAI 16/16 remain historical; they are not
-fresh r5 evidence. The four diagnostic fixes are not a full-suite qualification.
+actual candidate drafts and complete the bound human review. Historical r5 reviews remain bound to r5; they are not fresh r6 evidence. The four diagnostic fixes are not a full-suite qualification.
 
 Operational reports capture exact fact selections/tool proposals and score them
 against an independent fixed corpus. `record-evaluation` recomputes those scores;

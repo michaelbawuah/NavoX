@@ -118,6 +118,47 @@ def domain_reference(domain: Domain) -> VersionedRef:
     return VersionedRef(name=domain.value, version="v2")
 
 
+def domain_prompt_reference(domain: Domain) -> VersionedRef:
+    # Keep the v2 output contract; changed instructions get a new immutable binding.
+    return VersionedRef(name=domain.value, version="v3")
+
+
+def domain_instructions_v3(domain: Domain) -> str:
+    return (
+        domain_instructions(domain)
+        + (
+            " When selecting a missing field, add an unknowns entry with only item_id and "
+            "field; never put that null field in facts. The same item/field cannot appear "
+            "in both lists. Do not add a value, reason or explanation to a reference. "
+        )
+        + {
+            Domain.PLANNING: (
+                "Always cite the selected target's title. If its due_at is null, include "
+                "that due_at in unknowns even when preparation can still proceed."
+            ),
+            Domain.MEETING: (
+                "An item is related only when the user or selected meeting explicitly "
+                "links it by its supplied ID or exact title. Similar vocabulary, timing "
+                "or a shared topic does not establish a link. Otherwise related_ids must "
+                "be empty. An unselected upcoming meeting is not automatically related."
+            ),
+            Domain.ASSISTANT: (
+                "This endpoint answers questions about saved facts only. A request to "
+                "send, pay, delete, cancel, mark complete, edit a task, or otherwise change "
+                "state must be declined in full, even when it includes an answerable "
+                "question. For every decline return exactly facts=[], unknowns=[], "
+                "insufficient_context=true. Do not answer an execution request with "
+                "the item's current title/status or treat it as a request for those facts."
+            ),
+            Domain.RANKING: (
+                "For due-date ordering, cite each known due_at in facts and each null "
+                "due_at in unknowns. Still include undated items exactly once, after "
+                "dated items. Never fabricate a date to make ordering easier."
+            ),
+        }[domain]
+    )
+
+
 def domain_schema(domain: Domain) -> JSONDocument:
     return JSONDocument(text=json.dumps(OUTPUT_TYPES[domain].model_json_schema()))
 

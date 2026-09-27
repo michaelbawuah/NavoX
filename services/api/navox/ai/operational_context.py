@@ -16,7 +16,14 @@ from navox.ai.context import (
     context_capabilities,
     reject_credentials,
 )
-from navox.ai.domains import DOMAIN_TASKS, Domain, DomainInput, OperationalItem, domain_reference
+from navox.ai.domains import (
+    DOMAIN_TASKS,
+    Domain,
+    DomainInput,
+    OperationalItem,
+    domain_prompt_reference,
+    domain_reference,
+)
 from navox.ai.foundation.contracts import (
     AITask,
     Capability,
@@ -58,7 +65,7 @@ def operational_task(
             "task_type": task_type,
             "capability_requirements": {Capability.TEXT, Capability.STRUCTURED_OUTPUT},
             "output_schema": domain_reference(domain),
-            "prompt": domain_reference(domain),
+            "prompt": domain_prompt_reference(domain),
             "sensitivity": sensitivity,
             "latency_class": LatencyClass.INTERACTIVE,
             "quality_class": QualityClass.HIGH,
