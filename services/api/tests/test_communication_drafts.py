@@ -76,6 +76,11 @@ class DraftRuntime:
         self.calls = []
 
     async def execute(self, task, *, context_builder, documents, semantic_validator, user_request):
+        from navox.ai.prompts import COMMUNICATION_PROMPT_V2
+
+        assert task.prompt == COMMUNICATION_PROMPT_V2
+        assert task.output_schema.name == "communication_draft"
+        assert task.output_schema.version == "v1"
         context = await context_builder.build(task, documents, user_request=user_request)
         self.calls.append(context)
         output = {"subject": "Friday meeting", "body": "Does Friday work for you?"}

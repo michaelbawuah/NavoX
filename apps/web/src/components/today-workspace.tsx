@@ -24,6 +24,7 @@ import {
   IntelligenceFeedback,
   WorkspaceContext,
 } from "./intelligence-controls";
+import { OperationalAssistance } from "./operational-assistance";
 import { PagedList } from "./paged-list";
 import { ProactivePanel } from "./proactive-panel";
 import { SourceReferences } from "./source-references";
@@ -1123,6 +1124,18 @@ export function TodayWorkspace({
                   </p>
                 )}
               </section>
+            </details>
+            <details className={styles.toolDisclosure}>
+              <summary>Explore your tasks</summary>
+              <OperationalAssistance
+                items={[
+                  ...(today?.needs_attention ?? []),
+                  ...(today?.coming_up ?? []),
+                  ...(today?.waiting_on ?? []),
+                  ...(today?.renewals ?? []),
+                ]}
+                paused={agentPaused}
+              />
             </details>
             <details className={styles.toolDisclosure}>
               <summary>Email actions</summary>

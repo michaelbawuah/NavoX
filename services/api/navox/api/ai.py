@@ -7,6 +7,7 @@ from pydantic import Field
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
+from navox.ai.foundation.persistence import RegistryStore
 from navox.ai.routing import PolicyRules, UserPreferences, preference_scope_key
 from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
 from navox.db.ai_registry import AIRoutingPolicy, AITaskRun
@@ -42,11 +43,27 @@ async def get_preferences(
             allow_fallback=all(r.allow_fallback for r in rules),
         )
     )
+    registry = await RegistryStore(database).load()
+    providers = set()
+    for model in registry.models if registry is not None else ():
+        allowed = set(model.allowed_sensitivities)
+        for ceiling in rules:
+            allowed &= next(
+                (
+                    set(grant.sensitivities)
+                    for grant in ceiling.grants
+                    if grant.provider == model.reference.provider
+                ),
+                set(),
+            )
+        if model.enabled and allowed:
+            providers.add(model.reference.provider.value)
     return {
         "configured": settings.ai_provider == "automatic",
         "revision": row.revision if row else 0,
         "preferred_provider": policy.preferred_provider,
         "allow_fallback": policy.allow_fallback,
+        "available_providers": sorted(providers),
     }
 
 
@@ -120,6 +137,7 @@ async def activity(
         "runs": [
             {
                 "id": str(r.id),
+                "task_id": str(r.task_id),
                 "trace_id": str(r.trace_id),
                 "profile": r.profile,
                 "provider": r.provider,

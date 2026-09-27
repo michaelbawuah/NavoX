@@ -159,3 +159,52 @@ async def test_operator_policy_updates_require_current_revision_and_real_scope(s
                 expected_revision=0,
                 policy=PolicyRules(),
             )
+
+
+@pytest.mark.asyncio
+async def test_provider_choices_follow_active_catalog_and_intersected_sensitivities(
+    subscription_env,
+):
+    from test_ai_evaluation import model_for
+
+    from navox.ai.catalog import catalog_template
+    from navox.ai.foundation.persistence import RegistryStore
+
+    env = subscription_env
+    models = tuple(model_for(p).model_copy(update={"enabled": p != Provider.XAI}) for p in Provider)
+    operator = PolicyRules(
+        grants=tuple(
+            ProviderGrant(
+                provider=p, sensitivities=frozenset({Sensitivity.PUBLIC, Sensitivity.PERSONAL})
+            )
+            for p in Provider
+        )
+    )
+    env.settings.ai_provider_policy = operator.model_dump(mode="json")
+    async with env.factory() as db:
+        await RegistryStore(db).publish(
+            catalog_template().model_copy(update={"models": models}), expected_revision=0
+        )
+        await publish_policy(
+            db,
+            workspace_id=env.workspace_id,
+            user_id=None,
+            expected_revision=0,
+            policy=PolicyRules(
+                grants=(
+                    ProviderGrant(
+                        provider=Provider.OPENAI, sensitivities=frozenset({Sensitivity.PUBLIC})
+                    ),
+                    ProviderGrant(
+                        provider=Provider.GEMINI, sensitivities=frozenset({Sensitivity.PERSONAL})
+                    ),
+                    ProviderGrant(
+                        provider=Provider.XAI, sensitivities=frozenset({Sensitivity.PUBLIC})
+                    ),
+                )
+            ),
+        )
+        await db.commit()
+    response = await env.client.get("/api/v1/ai/settings")
+    assert response.status_code == 200
+    assert response.json()["available_providers"] == ["openai"]

@@ -22,7 +22,7 @@ from navox.ai.foundation.contracts import (
     TaskType,
     VersionedRef,
 )
-from navox.ai.prompts import EXTRACTION_PROMPT
+from navox.ai.prompts import COMMUNICATION_PROMPT_V2, EXTRACTION_PROMPT
 from navox.ai.routing import PolicyRules
 from navox.connectors.builtin.google import google_canonical_resource
 from navox.connectors.contracts import CanonicalResource
@@ -74,6 +74,8 @@ def source_task(
         prompt=(
             EXTRACTION_PROMPT
             if prompt == EXTRACTION_PROMPT.name
+            else COMMUNICATION_PROMPT_V2
+            if prompt == COMMUNICATION_PROMPT_V2.name
             else VersionedRef(name=prompt, version="v1")
         ),
         sensitivity=sensitivity,

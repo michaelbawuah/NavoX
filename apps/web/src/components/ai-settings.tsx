@@ -10,6 +10,7 @@ type Settings = {
   revision: number;
   preferred_provider: string | null;
   allow_fallback: boolean;
+  available_providers: string[];
 };
 type Run = {
   id: string;
@@ -105,10 +106,27 @@ export function AISettings() {
               }
             >
               <option value="">Automatic</option>
-              <option value="openai">Prefer OpenAI</option>
-              <option value="gemini">Prefer Gemini</option>
-              <option value="anthropic">Prefer Claude</option>
-              <option value="xai">Prefer Grok</option>
+              {settings.available_providers.map((provider) => (
+                <option value={provider} key={provider}>
+                  Prefer{" "}
+                  {(
+                    {
+                      openai: "OpenAI",
+                      gemini: "Gemini",
+                      anthropic: "Claude",
+                      xai: "Grok",
+                    } as Record<string, string>
+                  )[provider] ?? provider}
+                </option>
+              ))}
+              {settings.preferred_provider &&
+                !settings.available_providers.includes(
+                  settings.preferred_provider,
+                ) && (
+                  <option value={settings.preferred_provider} disabled>
+                    Saved preference is unavailable
+                  </option>
+                )}
             </select>
           </label>
           <label>

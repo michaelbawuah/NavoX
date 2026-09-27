@@ -1419,3 +1419,24 @@
     margin: 0;
   }
 }
+
+.assistanceSelection {
+  display: grid;
+  gap: 0.65rem;
+  max-height: 18rem;
+  overflow-y: auto;
+  border: 1px solid rgb(142 165 204 / 21%);
+  border-radius: 0.62rem;
+  padding: 0.8rem;
+}
+
+.approvalForm .assistanceSelection label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+}
+
+.approvalForm .assistanceSelection input {
+  flex: 0 0 auto;
+  width: auto;
+}

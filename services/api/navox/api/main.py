@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from navox.api.actions import router as actions_router
 from navox.api.agent import router as agent_router
 from navox.api.ai import router as ai_router
+from navox.api.ai_operations import router as ai_operations_router
 from navox.api.auth import router as auth_router
 from navox.api.canvas import router as canvas_router
 from navox.api.commitment_actions import router as commitment_actions_router
@@ -67,6 +68,7 @@ def create_app() -> FastAPI:
     app.include_router(connector_events_router, prefix="/api/v1")
     app.include_router(commitments_router, prefix="/api/v1")
     app.include_router(communication_router, prefix="/api/v1")
+    app.include_router(ai_operations_router, prefix="/api/v1")
     app.include_router(commitment_actions_router, prefix="/api/v1")
     app.include_router(today_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")

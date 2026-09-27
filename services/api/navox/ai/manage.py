@@ -23,6 +23,8 @@ from navox.ai.communication_evaluation import DraftingEvaluationReport, evaluate
 from navox.ai.configured import configured_adapters
 from navox.ai.context import reject_credentials
 from navox.ai.control import record_evaluation, record_healthy_probe, set_rollout, set_weights
+from navox.ai.domain_evaluation import DomainEvaluationReport, evaluate_domain
+from navox.ai.domains import DOMAIN_TASKS, Domain
 from navox.ai.evaluation import (
     CASES_TO_RUN,
     EvaluationReport,
@@ -103,7 +105,18 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     if (draft_version is not None or draft_interval != 0) and (
         args.command != "evaluate" or args.corpus != "communication"
     ):
-        raise ValueError("Draft prompt selection and pacing require the communication corpus")
+        if (
+            draft_version is not None
+            or args.command != "evaluate"
+            or args.corpus not in {d.value for d in Domain}
+        ):
+            raise ValueError(
+                "Draft prompt selection requires communication; pacing requires a supported corpus"
+            )
+    if args.command == "evaluate" and args.corpus in {d.value for d in Domain}:
+        domain = Domain(args.corpus)
+        if args.output is None or args.profile != DOMAIN_TASKS[domain][0].value:
+            raise ValueError("Operational evaluation requires its exact profile and an output file")
     if (
         args.command == "evaluate"
         and args.corpus == "communication"
@@ -166,9 +179,11 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 ],
             }
         if args.command == "record-evaluation":
-            report: EvaluationReport | DraftingEvaluationReport = TypeAdapter(
-                EvaluationReport | DraftingEvaluationReport
-            ).validate_json(read_file(args.file))
+            report: EvaluationReport | DraftingEvaluationReport | DomainEvaluationReport = (
+                TypeAdapter(
+                    EvaluationReport | DraftingEvaluationReport | DomainEvaluationReport
+                ).validate_json(read_file(args.file))
+            )
             row = await record_evaluation(
                 database,
                 model_id=report.model_id,
@@ -257,6 +272,19 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     minimum_start_interval_seconds=draft_interval,
                 )
                 return draft_report.model_dump(mode="json")
+            if args.corpus in {d.value for d in Domain}:
+                domain_report = await evaluate_domain(
+                    domain=Domain(args.corpus),
+                    adapter=adapter,
+                    registry=registry,
+                    model=model,
+                    policy=PolicyRules.model_validate(settings.ai_provider_policy),
+                    max_cost=args.max_cost,
+                    mode="live_provider",
+                    secrets=configured_secrets(settings),
+                    minimum_start_interval_seconds=draft_interval,
+                )
+                return domain_report.model_dump(mode="json")
             diagnostics: list[ExtractionDiagnosticReport] = []
             report = await evaluate_extraction(
                 adapter=adapter,
@@ -318,7 +346,9 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--live", action="store_true")
         if name == "evaluate":
             command.add_argument(
-                "--corpus", choices=["extraction", "communication"], default="extraction"
+                "--corpus",
+                choices=["extraction", "communication", *(d.value for d in Domain)],
+                default="extraction",
             )
             command.add_argument(
                 "--diagnostic-output",
@@ -334,7 +364,7 @@ def main(argv: list[str] | None = None) -> int:
                 "--minimum-start-interval-seconds",
                 type=float,
                 default=0,
-                help="Communication request pacing, 0–60 seconds, excluded from latency",
+                help="Communication/operational pacing, 0–60 seconds, excluded from latency",
             )
         if name == "diagnose":
             command.add_argument(

@@ -3,13 +3,20 @@
 import json
 import re
 from collections.abc import Mapping
+from typing import Protocol
 from uuid import UUID
 
 from pydantic import Field, SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from navox.ai.foundation.contracts import AITask, Contract, JSONDocument, Sensitivity
+from navox.ai.foundation.contracts import (
+    AITask,
+    ContextReference,
+    Contract,
+    JSONDocument,
+    Sensitivity,
+)
 from navox.ai.gateway import minimized_source_payload
 from navox.connectors.authorization import owned_connector
 from navox.connectors.builtin.google import GOOGLE_CONNECTOR_KEY
@@ -88,6 +95,16 @@ class MinimizedContext(Contract):
     content: JSONDocument = Field(repr=False)
 
 
+class AuthorizedContext(Protocol):
+    async def build(
+        self,
+        task: AITask,
+        documents: Mapping[UUID, SourceDocument],
+        *,
+        user_request: str = "",
+    ) -> MinimizedContext: ...
+
+
 class ContextBuilder:
     def __init__(
         self,
@@ -106,6 +123,128 @@ class ContextBuilder:
         # This avoids persisting message bodies before a fenced sync consumer runs.
         # These are never accepted from HTTP clients, model output or source metadata.
         self.fetched_sources = {r.resource_id: r.model_copy(deep=True) for r in fetched_sources}
+
+    async def authorize_resource(
+        self, task: AITask, reference: ContextReference
+    ) -> tuple[ConnectorResource, str | None, UUID]:
+        """Authorize source metadata; this does not authorize an arbitrary source body."""
+        user = await self.database.get(User, task.user_id, populate_existing=True)
+        member = await self.database.get(
+            WorkspaceMembership, (task.workspace_id, task.user_id), populate_existing=True
+        )
+        if (
+            user is None
+            or user.agent_paused
+            or member is None
+            or (reference.workspace_id, reference.user_id) != (task.workspace_id, task.user_id)
+        ):
+            raise ContextDenied("Context access denied")
+        resource = await self.database.scalar(
+            select(ConnectorResource)
+            .where(
+                ConnectorResource.id == reference.source_id,
+            )
+            .execution_options(populate_existing=True)
+        )
+        fetched = self.fetched_sources.get(reference.source_id)
+        if resource is not None and (
+            resource.workspace_id != task.workspace_id
+            or resource.connector_connection_id != reference.connection_id
+            or resource.deleted
+        ):
+            raise ContextDenied("Registered context source is unavailable")
+        if fetched is not None:
+            if (
+                fetched.workspace_id != task.workspace_id
+                or fetched.connector_connection_id != reference.connection_id
+                or fetched.canonical.get("status") == "deleted"
+            ):
+                raise ContextDenied("Fetched context source binding failed")
+            if resource is not None and (
+                resource.provider != fetched.provider
+                or resource.resource_type != fetched.resource_type
+                or resource.external_id != fetched.external_id
+                or utc(resource.retrieved_at) > utc(fetched.retrieved_at)
+                or (
+                    resource.source_updated_at is not None
+                    and (
+                        fetched.updated_at is None
+                        or utc(resource.source_updated_at) > utc(fetched.updated_at)
+                    )
+                )
+            ):
+                raise ContextDenied("Fetched source was superseded")
+            resource = ConnectorResource(
+                id=fetched.resource_id,
+                workspace_id=fetched.workspace_id,
+                connector_connection_id=fetched.connector_connection_id,
+                provider=fetched.provider,
+                resource_type=fetched.resource_type,
+                external_id=fetched.external_id,
+                external_parent_id=fetched.external_parent_id,
+                canonical=fetched.canonical,
+                provider_metadata=fetched.provider_metadata,
+                source_url=fetched.source_url,
+                source_created_at=fetched.created_at,
+                source_updated_at=fetched.updated_at,
+                retrieved_at=fetched.retrieved_at,
+                deleted=False,
+            )
+        if resource is None:
+            raise ContextDenied("Registered context source is unavailable")
+        connector = await owned_connector(
+            self.database,
+            connection_id=reference.connection_id,
+            workspace_id=task.workspace_id,
+            user_id=task.user_id,
+            require_active=True,
+            lock_connection=False,
+        )
+        if connector.provider != resource.provider:
+            raise ContextDenied("Source provider binding failed")
+        definition = await self.database.get(
+            ConnectorDefinition, connector.connector_definition_id, populate_existing=True
+        )
+        required = self.capability_map.get(
+            (definition.connector_key, resource.resource_type) if definition else ("", "")
+        )
+        if (
+            not required
+            or not required.issubset(connector.authorized_capabilities)
+            or not required.issubset(connector.provider_capabilities)
+        ):
+            raise ContextDenied("Source read capability is unavailable")
+        owner_email: str | None = user.email
+        if connector.legacy_connection_id:
+            legacy = await self.database.get(
+                Connection, connector.legacy_connection_id, populate_existing=True
+            )
+            if (
+                legacy is None
+                or legacy.status != "active"
+                or (legacy.workspace_id, legacy.user_id) != (task.workspace_id, task.user_id)
+            ):
+                raise ContextDenied("Source connection is unavailable")
+            if legacy.provider == "google":
+                owner_email = legacy.external_email
+                source = (
+                    "gmail" if resource.resource_type == "communication.message" else "calendar"
+                )
+                if SOURCE_SCOPES[source] not in legacy.granted_scopes:
+                    raise ContextDenied("Source read capability was revoked")
+        # The connector config is server-managed; source metadata cannot lower
+        # classification. Unclassified imported personal data has a PERSONAL floor.
+        classification = connector.config.get("ai_sensitivity", "PERSONAL")
+        if not isinstance(classification, str):
+            raise ContextDenied("Source classification is invalid")
+        sensitivity = Sensitivity(classification)
+        if sensitivity.rank < Sensitivity.PERSONAL.rank:
+            sensitivity = Sensitivity.PERSONAL
+        if reference.sensitivity != sensitivity or task.sensitivity.rank < sensitivity.rank:
+            raise ContextDenied("Source classification changed or was downgraded")
+        if resource.canonical.get("status") == "deleted":
+            raise ContextDenied("Context source is deleted")
+        return resource, owner_email, connector.legacy_connection_id or connector.id
 
     async def build(
         self,
@@ -128,109 +267,7 @@ class ContextBuilder:
             raise ContextDenied("Context selection does not match the task")
         sources: list[dict[str, object]] = []
         for reference in task.context_references:
-            resource = await self.database.scalar(
-                select(ConnectorResource)
-                .where(
-                    ConnectorResource.id == reference.source_id,
-                )
-                .execution_options(populate_existing=True)
-            )
-            fetched = self.fetched_sources.get(reference.source_id)
-            if resource is not None and (
-                resource.workspace_id != task.workspace_id
-                or resource.connector_connection_id != reference.connection_id
-                or resource.deleted
-            ):
-                raise ContextDenied("Registered context source is unavailable")
-            if fetched is not None:
-                if (
-                    fetched.workspace_id != task.workspace_id
-                    or fetched.connector_connection_id != reference.connection_id
-                    or fetched.canonical.get("status") == "deleted"
-                ):
-                    raise ContextDenied("Fetched context source binding failed")
-                if resource is not None and (
-                    resource.provider != fetched.provider
-                    or resource.resource_type != fetched.resource_type
-                    or resource.external_id != fetched.external_id
-                    or utc(resource.retrieved_at) > utc(fetched.retrieved_at)
-                    or (
-                        resource.source_updated_at is not None
-                        and (
-                            fetched.updated_at is None
-                            or utc(resource.source_updated_at) > utc(fetched.updated_at)
-                        )
-                    )
-                ):
-                    raise ContextDenied("Fetched source was superseded")
-                resource = ConnectorResource(
-                    id=fetched.resource_id,
-                    workspace_id=fetched.workspace_id,
-                    connector_connection_id=fetched.connector_connection_id,
-                    provider=fetched.provider,
-                    resource_type=fetched.resource_type,
-                    external_id=fetched.external_id,
-                    external_parent_id=fetched.external_parent_id,
-                    canonical=fetched.canonical,
-                    provider_metadata=fetched.provider_metadata,
-                    source_url=fetched.source_url,
-                    source_created_at=fetched.created_at,
-                    source_updated_at=fetched.updated_at,
-                    retrieved_at=fetched.retrieved_at,
-                    deleted=False,
-                )
-            if resource is None:
-                raise ContextDenied("Registered context source is unavailable")
-            connector = await owned_connector(
-                self.database,
-                connection_id=reference.connection_id,
-                workspace_id=task.workspace_id,
-                user_id=task.user_id,
-                require_active=True,
-                lock_connection=False,
-            )
-            if connector.provider != resource.provider:
-                raise ContextDenied("Source provider binding failed")
-            definition = await self.database.get(
-                ConnectorDefinition, connector.connector_definition_id, populate_existing=True
-            )
-            required = self.capability_map.get(
-                (definition.connector_key, resource.resource_type) if definition else ("", "")
-            )
-            if (
-                not required
-                or not required.issubset(connector.authorized_capabilities)
-                or not required.issubset(connector.provider_capabilities)
-            ):
-                raise ContextDenied("Source read capability is unavailable")
-            owner_email: str | None = user.email
-            if connector.legacy_connection_id:
-                legacy = await self.database.get(
-                    Connection, connector.legacy_connection_id, populate_existing=True
-                )
-                if (
-                    legacy is None
-                    or legacy.status != "active"
-                    or (legacy.workspace_id, legacy.user_id) != (task.workspace_id, task.user_id)
-                ):
-                    raise ContextDenied("Source connection is unavailable")
-                if legacy.provider == "google":
-                    owner_email = legacy.external_email
-                    source = (
-                        "gmail" if resource.resource_type == "communication.message" else "calendar"
-                    )
-                    if SOURCE_SCOPES[source] not in legacy.granted_scopes:
-                        raise ContextDenied("Source read capability was revoked")
-            # The connector config is server-managed; source metadata cannot lower
-            # classification. Unclassified imported personal data has a PERSONAL floor.
-            classification = connector.config.get("ai_sensitivity", "PERSONAL")
-            if not isinstance(classification, str):
-                raise ContextDenied("Source classification is invalid")
-            sensitivity = Sensitivity(classification)
-            if sensitivity.rank < Sensitivity.PERSONAL.rank:
-                sensitivity = Sensitivity.PERSONAL
-            if reference.sensitivity != sensitivity or task.sensitivity.rank < sensitivity.rank:
-                raise ContextDenied("Source classification changed or was downgraded")
+            resource, owner_email, provenance_id = await self.authorize_resource(task, reference)
             document = SourceDocument.model_validate(documents[reference.source_id])
             if (document.workspace_id, document.provider, document.external_id) != (
                 resource.workspace_id,
@@ -254,13 +291,17 @@ class ContextBuilder:
                         "canonical": resource.canonical,
                         "provider_metadata": resource.provider_metadata,
                         "source_url": resource.source_url,
-                        "created_at": resource.source_created_at,
-                        "updated_at": resource.source_updated_at,
-                        "retrieved_at": resource.retrieved_at,
+                        "created_at": utc(resource.source_created_at)
+                        if resource.source_created_at
+                        else None,
+                        "updated_at": utc(resource.source_updated_at)
+                        if resource.source_updated_at
+                        else None,
+                        "retrieved_at": utc(resource.retrieved_at),
                     }
                 )
                 registered = canonical_resource_to_source_document(
-                    stored, provenance_connection_id=connector.legacy_connection_id or connector.id
+                    stored, provenance_connection_id=provenance_id
                 )
                 source_hash = source_document_hash(registered)
             if not isinstance(source_hash, str) or source_document_hash(document) != source_hash:

@@ -30,9 +30,18 @@ production-quality claim.
   validation rather than disappearing. Drafts follow source deletion controls.
 - Advanced provider preferences and scoped usage summaries. Preferences cannot
   add provider grants. NavoX-owned session/turn references work across providers;
-  this is session infrastructure, not the SPEC-008 NavoXbot interface.
+  the selected-state assistant uses those sessions across real API turns. The
+  future SPEC-008 NavoXbot conversation interface remains separate.
+- Typed v2 planning, meeting preparation, assistant and ranking contracts,
+  authenticated selected-state APIs and a Today entry point. Models select saved
+  facts, bounded preparation tools and advisory ordering; NavoX renders the saved
+  values. No state mutation or tool execution occurs. All imported source edges
+  require current authorization without rehydrating email bodies. Each domain
+  has an independent fixed 12-case quality/safety corpus.
 - An operator CLI for catalog/policy publication, measured synthetic extraction
-  and reviewed communication evaluations, explicit rollout changes and rollback.
+  and reviewed communication evaluations, operational evaluations, explicit
+  rollout changes and rollback. Read-only readiness exports propose catalog
+  changes without publishing; trace coverage uses an explicit request manifest.
   Drafting uses 16 fixed cases and an exact-artifact review of grounding, user
   instructions, preserved edits and action claims. It never sends email.
 
@@ -54,7 +63,7 @@ gateways. They do not prove that a live model generates a correct answer.
 | F: editing invalidates the old approval | `test_communication_drafts.py`, web draft tests |
 | G: source instructions cannot expand policy/context | `test_ai_context.py`, `test_ai_sessions_tools.py` |
 | H: total failure produces no fabricated result/action | `test_ai_runtime.py` |
-| I: two providers share one NavoX session | `test_ai_sessions_tools.py` |
+| I: two providers share one NavoX session | `test_ai_sessions_tools.py`, `test_ai_operational_domains.py` |
 
 `test_ai_feature_ingestion.py` also exercises two resources through the actual
 connector runtime, automatic feature adapter, validator, durable task traces and
@@ -68,26 +77,47 @@ real-session boundary tests and Compose/Temporal integration. The PR records the
 results for its exact head; the original isolated foundation draft's tests are
 superseded and are not release evidence.
 
+## Owner-provided live checkpoint
+
+The latest reviewed receipt is catalog r4 (digest
+`3074bfb2edbc8c03a36ef6543ce646928fb9423a6ea5d4a6308b59b8c3e68dc1`).
+Grok is absent at the owner's request. The three remaining models have PUBLIC-only
+sensitivity ceilings; all nine assignments are at zero traffic with shadow off.
+
+Gemini and Claude each have recorded r4 `communication_draft@v2` evidence at
+15/16 (93.75%) with all seven safety cases passing. The retained failures are
+Gemini's preserve-uncertainty edit and Claude's preserve-budget-edit greeting.
+These satisfy the existing 90% drafting quality floor for that exact binding.
+OpenAI's r3 16/16 drafting and prior extraction evidence remain historical.
+This checkpoint does not establish personal-data serving or general reasoning.
+
+Application drafting now requests v2 with the unchanged v1 output schema. The
+four new operational prompt/schema registrations require a subsequent catalog
+publication. Neither publishing new source code nor preparing a catalog proposal
+modifies the live database. A new catalog revision invalidates old serving
+evidence; it never relabels prior scores or deletes their history.
+
 ## Still required before SPEC-005 sign-off
 
-1. Review exact current model IDs, capabilities, prices and provider contract
-   behavior, then measure all four real providers on the same approved corpus.
-   No live provider calls or real email sends were performed during this draft.
-2. Run and review the fixed extraction and drafting evaluations on the actual
-   providers. The drafting CLI now accepts a complete output-bound review, but
-   its regression fixtures do not establish live grounding or edit preservation.
-   Production extraction precision/recall and general planning/assistant quality
-   require further domain-specific corpora and rubrics. Keep unqualified tasks
-   disabled rather than inserting invented scores.
-3. Complete domain contracts/integration for features using the generic planning,
-   meeting, assistant and ranking prompt registrations. Those are templates, not
-   evidence that those product flows exist.
-4. Demonstrate the versioned email workflow on an explicitly approved test
-   mailbox through Temporal, and run an observed canary/rollback exercise.
-5. Measure SPEC-005 trace coverage and security/quality targets over the approved
-   acceptance runs. Passing behavioral tests does not establish a production
-   percentage, security certification or full completion.
+1. Review the final catalog and approved data boundaries before rerunning paid
+   qualification. The current PUBLIC-only model ceilings cannot serve real saved
+   tasks or email. PERSONAL proposals are review artifacts, not permission grants.
+2. Run the complete public corpora on the final catalog and record exact-bound
+   passing evidence for each enabled task. Drafting requires human review of the
+   actual 16 new candidates. Keep unqualified model/task combinations disabled.
+   The new operational suites measure bounded fixture relevance, grounding,
+   preparation-tool choice and ordering, not general production reasoning quality.
+3. Observe A–I on the approved deployment, including real provider fallback,
+   session continuity and the versioned test-email workflow through Temporal.
+   An exact test send requires separate approval of the final recipient/content.
+4. Run an explicitly approved, observed canary and rollback. Measure trace
+   coverage and the remaining security/quality acceptance targets over recorded
+   requests. Green local tests and CI alone do not prove live acceptance.
+5. Retain receipts and owner acceptance with the exact source head, complete
+   local gates and all six hosted CI jobs. Keep PR #15 draft until those records
+   support completion.
 
-Keep PR #15 draft and unmerged until those acceptance gaps are resolved. The
-default remains `AI_PROVIDER=disabled`; a configured legacy deployment keeps its
-existing `openai` behavior until the operator explicitly switches it.
+The [final acceptance procedure](spec-005-live-acceptance.md) contains the ordered
+steps, corpus/profile mapping, review-only export command and measurement format.
+The default remains `AI_PROVIDER=disabled`; a legacy deployment keeps its existing
+`openai` behavior until the operator explicitly switches it.

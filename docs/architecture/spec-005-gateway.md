@@ -28,10 +28,10 @@ an empty reviewable catalog:
 uv run python -m navox.ai.manage template --output /tmp/navox-ai-catalog.json
 ```
 
-The template contains extraction and reply-draft prompt/schema contracts and all
-logical profiles. Other domain prompts are preliminary grounded-answer templates
-requiring feature-specific contracts/review. It contains no models, assignments,
-prices or provider grants.
+The template contains extraction, reply-draft and typed v2 operational
+prompt/schema contracts plus all logical profiles. Historical generic v1 domain
+registrations remain immutable. It contains no models, assignments, prices or
+provider grants. Registration alone never qualifies a model for traffic.
 
 Add exact model definitions and compatible profile assignments to the JSON after
 reviewing current official model IDs, token limits, capabilities and USD token
@@ -132,10 +132,10 @@ Evidence binds catalog revision, model digest, profile, task, prompt and schema.
 This smoke corpus does not measure production extraction precision/recall or
 grounding. Do not reuse extraction scores for other tasks or seed invented metrics.
 
-The current extraction rubric is `spec005-extraction-smoke.v2`. It accepts a
+The current extraction rubric is `spec005-extraction-smoke.v3`. It accepts a
 grounded, consequential alert without inventing a user action and checks the
 expected email basis as well as intent. Historical v1 reports remain readable but
-cannot qualify a model under v2. The fixtures and production validators are unchanged.
+cannot qualify a model under v3. The fixtures and production validators are unchanged.
 Known token cost is retained even when application validation rejects a response.
 
 For a failed case, capture only selected fixed synthetic inputs and proposals:
@@ -201,8 +201,10 @@ the measured request/validation latency, and rate limits stop further calls for
 that model without retrying. No report is automatically reviewed or recorded.
 Published v1 bytes and historical v1 review digests remain unchanged. Adding v2
 advances the catalog revision: prior evaluations remain in the audit history but
-do not qualify traffic under the new revision. The feature's default drafting
-prompt remains v1; evaluating v2 does not switch application traffic.
+do not qualify traffic under the new revision. Application drafting now requests
+v2 explicitly; the CLI retains its historical v1 default, so fresh v2 runs must
+include `--draft-prompt-version v2`. Missing v2 registration or qualification
+fails closed. Source installation does not promote assignments.
 
 This command requires an output file because the review artifact contains the
 synthetic source, rubric and generated draft for each case. It never reads a
@@ -229,8 +231,24 @@ artifact's digest, not candidate bodies. Retain the reviewed artifact alongside
 the acceptance records. Operator review is an attestation, not a cryptographic
 proof of model provenance or a substitute for the final exact-send demonstration.
 
-Planning and general assistant reasoning still need domain-specific evaluation
-work before activation; their prompt registrations do not qualify them for traffic.
+Planning, meeting preparation, assistant reasoning and ranking each have a fixed
+12-case corpus and typed v2 fact-selection contract. Select their exact `--corpus`
+and profile as listed in [the final acceptance procedure](spec-005-live-acceptance.md).
+They evaluate bounded saved-state relevance, missing facts, safe preparation-tool
+selection, ordering and source-injection cases. Structural validity alone is not
+a quality pass. Full reports capture the selections and recompute quality before
+recording; offline fixtures and incomplete suites cannot qualify. These synthetic
+scores are not a general reasoning or production-accuracy benchmark.
+
+The Today “Explore your tasks” panel calls `/api/v1/ai/operations/{domain}` with
+1–12 explicitly selected owned items and a bounded user request. It returns
+resolved saved facts, preparation proposals, meeting briefs or advisory order.
+It never updates saved tasks, creates actions or executes tools. Imported source
+permissions/classification and saved-state fingerprints are rechecked around each
+provider call. Raw email bodies are not fetched by this feature. Provenance that
+cannot be resolved to an active registered source fails closed. Descriptions are
+bounded to their first 2,048 characters; these are saved-state answers, not a
+fresh-source investigation. Existing Handle/Today ordering is unchanged.
 
 Promotion requires enabled healthy models and fresh passing evidence: at least
 ten samples, quality 0.90, reliability 0.95, safety passing, at most thirty days
@@ -295,7 +313,8 @@ unsent history transactionally and refuses to erase an in-flight approved send.
 Completed actions follow existing action retention controls.
 
 Sessions store NavoX-owned IDs and scoped opaque artifact references, not external
-conversation IDs. Appending needs a matching validated successful task. Action
+conversation IDs. The selected-state assistant creates owned sessions and appends only matching
+validated successful tasks, even when the serving provider changes. Action
 references start empty. Future artifact dereferencing needs independent access
 checks; an opaque reference grants no permission.
 
@@ -345,9 +364,12 @@ be relabeled or reused as current qualification evidence.
 
 Five synthetic rejected proposals are retained as offline rejection regressions.
 Fixture tests cannot establish that the new prompt improves live model quality.
-The three remaining providers need fresh bounded diagnostics and complete
-extraction/drafting evaluations after the next catalog publication. All traffic
-and shadow assignments remain at zero until separate qualification and promotion.
+Later owner-provided r3/r4 runs supersede that historical comparison. In the latest
+reviewed r4 receipt, Gemini and Claude each recorded 15/16 v2 drafting with every
+safety case passing; two non-safety failures remain documented. OpenAI r3 evidence
+remains historical. Grok is absent from the active catalog. All nine r4 assignments
+remain at zero with shadow disabled. See the acceptance status for the precise
+checkpoint and the fresh evidence required after the next catalog publication.
 
 ## Official API references
 

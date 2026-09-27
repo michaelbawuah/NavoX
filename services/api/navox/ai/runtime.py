@@ -8,7 +8,7 @@ from time import monotonic
 from typing import Any
 from uuid import UUID, uuid4
 
-from navox.ai.context import ContextBuilder
+from navox.ai.context import AuthorizedContext
 from navox.ai.errors import AIProviderError
 from navox.ai.foundation.adapter import AIProviderAdapter, ErrorCode, ProviderError, ProviderRequest
 from navox.ai.foundation.contracts import (
@@ -43,7 +43,7 @@ class GatewayRuntime:
         self,
         task: AITask,
         *,
-        context_builder: ContextBuilder,
+        context_builder: AuthorizedContext,
         documents: Mapping[UUID, SourceDocument],
         semantic_validator: Callable[[Any], None],
         user_request: str = "",
@@ -100,7 +100,7 @@ class GatewayRuntime:
         self,
         task: AITask,
         *,
-        context_builder: ContextBuilder,
+        context_builder: AuthorizedContext,
         documents: Mapping[UUID, SourceDocument],
         semantic_validator: Callable[[Any], None],
         user_request: str,
