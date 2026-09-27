@@ -8,7 +8,7 @@ import asyncio
 import json
 from datetime import UTC, datetime
 from decimal import Decimal
-from math import ceil
+from math import ceil, isfinite
 from time import monotonic
 from typing import Annotated, Any, Literal
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -32,6 +32,7 @@ from navox.ai.foundation.contracts import (
 from navox.ai.foundation.persistence import canonical, digest, model_key
 from navox.ai.foundation.registry import ModelDefinition, RegistrySnapshot
 from navox.ai.gateway import minimized_source_payload
+from navox.ai.prompts import COMMUNICATION_PROMPT_V2
 from navox.ai.routing import EvaluationEvidence, PolicyRules, reserve_cost
 from navox.ai.validation import OutputRejected, validate_output
 from navox.communication.schemas import DraftContent
@@ -39,6 +40,7 @@ from navox.communication.validation import generated_draft
 from navox.intelligence.contracts import SourceDocument
 
 REFERENCE = VersionedRef(name="communication_draft", version="v1")
+SUPPORTED_PROMPTS = (REFERENCE, COMMUNICATION_PROMPT_V2)
 RECIPIENT = "colleague@example.com"
 Verdict = Annotated[bool, Field(strict=True)] | None
 
@@ -106,7 +108,7 @@ class DraftingEvaluationReport(Contract):
         if (
             self.corpus != DRAFT_CASES
             or tuple(c.id for c in self.cases) != ids
-            or self.prompt != REFERENCE
+            or self.prompt not in SUPPORTED_PROMPTS
             or self.output_schema != REFERENCE
             or self.reserved_cost > self.max_cost
         ):
@@ -205,7 +207,15 @@ async def evaluate_communication(
     max_cost: Decimal,
     mode: Literal["live_provider", "offline_fixture"],
     secrets: tuple[SecretStr, ...] = (),
+    prompt_ref: VersionedRef = REFERENCE,
+    minimum_start_interval_seconds: float = 0,
 ) -> DraftingEvaluationReport:
+    if (
+        prompt_ref not in SUPPORTED_PROMPTS
+        or not isfinite(minimum_start_interval_seconds)
+        or not 0 <= minimum_start_interval_seconds <= 60
+    ):
+        raise ValueError("Unsupported drafting prompt or request interval")
     required = {Capability.TEXT, Capability.STRUCTURED_OUTPUT}
     if (
         model.reference.provider != adapter.provider
@@ -219,11 +229,14 @@ async def evaluate_communication(
         or not Decimal(0) < max_cost <= min(Decimal(10), policy.max_cost)
     ):
         raise ValueError("Synthetic drafting evaluation is not authorized for this configuration")
-    prompt = next(p for p in registry.prompts if p.reference == REFERENCE)
-    schema = next(s for s in registry.schemas if s.reference == REFERENCE)
+    prompt = next((p for p in registry.prompts if p.reference == prompt_ref), None)
+    schema = next((s for s in registry.schemas if s.reference == REFERENCE), None)
+    if prompt is None or schema is None or prompt.output_schema != REFERENCE:
+        raise ValueError("Publish the selected drafting prompt and unchanged schema first")
     reserved = Decimal(0)
     measurements: list[DraftMeasurement] = []
     stop_reason: str | None = None
+    last_start: float | None = None
     for case in DRAFT_CASES:
         context = case_context(case)
         reject_credentials(context.text, secrets)
@@ -255,7 +268,10 @@ async def evaluate_communication(
             continue
         assert reservation is not None  # All cost reservations are checked before network access.
         reserved += reservation
-        started = monotonic()
+        if last_start is not None and minimum_start_interval_seconds:
+            await asyncio.sleep(max(0, last_start + minimum_start_interval_seconds - monotonic()))
+        # Operator pacing is excluded from the measured request/validation latency.
+        last_start = started = monotonic()
         succeeded, validated = False, False
         candidate, cost, error_code = None, None, None
         try:
@@ -267,8 +283,8 @@ async def evaluate_communication(
                         instructions=prompt.instructions,
                         context=context,
                         output_schema=schema.document,
-                        prompt_ref=REFERENCE,
-                        schema_ref=REFERENCE,
+                        prompt_ref=prompt.reference,
+                        schema_ref=schema.reference,
                         max_output_tokens=maximum_output,
                     )
                 )
@@ -302,7 +318,7 @@ async def evaluate_communication(
             error_code = "timeout"
         except Exception as error:
             error_code = adapter.classify_error(error).code.value
-            if error_code in {"authentication", "invalid_request"}:
+            if error_code in {"authentication", "invalid_request", "rate_limit"}:
                 stop_reason = error_code
         measurements.append(
             DraftMeasurement(
@@ -321,6 +337,8 @@ async def evaluate_communication(
         model_id=model_key(model.reference),
         model_digest=digest(canonical(model)),
         provider=adapter.provider,
+        prompt=prompt.reference,
+        output_schema=schema.reference,
         evaluated_at=datetime.now(UTC),
         max_cost=max_cost,
         reserved_cost=reserved,

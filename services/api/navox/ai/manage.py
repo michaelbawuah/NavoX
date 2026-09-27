@@ -31,7 +31,7 @@ from navox.ai.evaluation import (
     evaluate_extraction,
 )
 from navox.ai.features import configured_secrets
-from navox.ai.foundation.contracts import Profile
+from navox.ai.foundation.contracts import Profile, VersionedRef
 from navox.ai.foundation.persistence import RegistryConflict, RegistryStore, canonical, digest
 from navox.ai.foundation.registry import RegistrySnapshot
 from navox.ai.routing import PolicyRules, RoutingWeights
@@ -98,6 +98,12 @@ async def publish_policy(
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     if args.command == "template":
         return cast(dict[str, Any], json.loads(canonical(catalog_template())))
+    draft_version: str | None = getattr(args, "draft_prompt_version", None)
+    draft_interval: float = getattr(args, "minimum_start_interval_seconds", 0)
+    if (draft_version is not None or draft_interval != 0) and (
+        args.command != "evaluate" or args.corpus != "communication"
+    ):
+        raise ValueError("Draft prompt selection and pacing require the communication corpus")
     if (
         args.command == "evaluate"
         and args.corpus == "communication"
@@ -245,6 +251,10 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     max_cost=args.max_cost,
                     mode="live_provider",
                     secrets=configured_secrets(settings),
+                    prompt_ref=VersionedRef(
+                        name="communication_draft", version=draft_version or "v1"
+                    ),
+                    minimum_start_interval_seconds=draft_interval,
                 )
                 return draft_report.model_dump(mode="json")
             diagnostics: list[ExtractionDiagnosticReport] = []
@@ -314,6 +324,17 @@ def main(argv: list[str] | None = None) -> int:
                 "--diagnostic-output",
                 type=Path,
                 help="Separately capture failed synthetic extraction proposals from this run",
+            )
+            command.add_argument(
+                "--draft-prompt-version",
+                choices=["v1", "v2"],
+                help="Published communication prompt version; defaults to v1",
+            )
+            command.add_argument(
+                "--minimum-start-interval-seconds",
+                type=float,
+                default=0,
+                help="Communication request pacing, 0–60 seconds, excluded from latency",
             )
         if name == "diagnose":
             command.add_argument(

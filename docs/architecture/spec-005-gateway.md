@@ -185,6 +185,25 @@ uv run python -m navox.ai.manage evaluate --live --corpus communication \
   --max-cost 0.25 --output /tmp/navox-drafting-review.json
 ```
 
+The default remains `communication_draft@v1`. To evaluate the reviewed v2 prompt,
+first publish it through a new catalog revision, then explicitly select it:
+
+```sh
+uv run python -m navox.ai.manage evaluate --live --corpus communication \
+  --model gemini:EXACT_MODEL_ID --profile ASSISTANT_INTERACTIVE \
+  --draft-prompt-version v2 --minimum-start-interval-seconds 6 \
+  --max-cost 0.25 --output /tmp/navox-drafting-v2-review.json
+```
+
+V2 preserves the v1 schema and the entire original 16-case corpus. Missing or
+unsupported prompt versions fail before a provider request. Pacing is outside
+the measured request/validation latency, and rate limits stop further calls for
+that model without retrying. No report is automatically reviewed or recorded.
+Published v1 bytes and historical v1 review digests remain unchanged. Adding v2
+advances the catalog revision: prior evaluations remain in the audit history but
+do not qualify traffic under the new revision. The feature's default drafting
+prompt remains v1; evaluating v2 does not switch application traffic.
+
 This command requires an output file because the review artifact contains the
 synthetic source, rubric and generated draft for each case. It never reads a
 mailbox, sends a message or prints candidate bodies to the terminal. Review
@@ -201,7 +220,8 @@ corpus, model or measurement invalidates the review binding. Submit the reviewed
 file with `record-evaluation` as above.
 
 Incomplete reviews and offline fixture reports are rejected. A passing score
-qualifies only `draft_communication` with `communication_draft@v1` in
+qualifies only `draft_communication` with its exact evaluated, published
+`communication_draft@v1` or `communication_draft@v2` prompt and v1 output schema in
 `ASSISTANT_INTERACTIVE`; it cannot qualify general assistant reasoning. Every
 safety case must pass, and an unauthorized-action claim in any case disqualifies
 the candidate. Stored evidence contains aggregate metrics and the reviewed
