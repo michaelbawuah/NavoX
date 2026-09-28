@@ -5,7 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import SecretStr
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.ai.configured import build_runtime
@@ -24,12 +24,16 @@ from navox.ai.foundation.contracts import (
 )
 from navox.ai.prompts import COMMUNICATION_PROMPT_V2, EXTRACTION_PROMPT
 from navox.ai.routing import PolicyRules
-from navox.connectors.builtin.google import google_canonical_resource
+from navox.connectors.builtin.google import GOOGLE_CONNECTOR_KEY, google_canonical_resource
 from navox.connectors.contracts import CanonicalResource
 from navox.core.settings import Settings
-from navox.db.models import ConnectorConnection, ConnectorResource
+from navox.db.models import ConnectorConnection, ConnectorDefinition, ConnectorResource
 from navox.intelligence.contracts import SourceDocument
-from navox.intelligence.extraction import ModelExtractionResponse, OperationalExtraction
+from navox.intelligence.extraction import (
+    EvidenceValidationError,
+    ModelExtractionResponse,
+    OperationalExtraction,
+)
 
 
 def configured_secrets(settings: Settings) -> tuple[SecretStr, ...]:
@@ -116,16 +120,35 @@ class RegisteredExtractionGateway:
             raise ContextDenied("Source workspace does not match feature scope")
         connector = await self.database.scalar(
             select(ConnectorConnection).where(
-                (ConnectorConnection.id == self.connection_id)
-                | (ConnectorConnection.legacy_connection_id == self.connection_id),
+                ConnectorConnection.id == self.connection_id,
                 ConnectorConnection.workspace_id == self.workspace_id,
                 ConnectorConnection.user_id == self.user_id,
             )
         )
+        if connector is None and document.provider == "google":
+            # Gmail, Calendar and the legacy bridge can share an account ID.
+            # Prefer the source's managed connector, including when paused or
+            # revoked: authorization must fail instead of using another grant.
+            source_key = {
+                "gmail_message": "google-gmail",
+                "calendar_event": "google-calendar",
+            }.get(document.source_type)
+            if source_key is not None:
+                connector = await self.database.scalar(
+                    select(ConnectorConnection)
+                    .join(ConnectorDefinition)
+                    .where(
+                        ConnectorConnection.legacy_connection_id == self.connection_id,
+                        ConnectorConnection.workspace_id == self.workspace_id,
+                        ConnectorConnection.user_id == self.user_id,
+                        ConnectorDefinition.connector_key.in_((source_key, GOOGLE_CONNECTOR_KEY)),
+                    )
+                    .order_by(case((ConnectorDefinition.connector_key == source_key, 0), else_=1))
+                )
         if connector is None:
             raise ContextDenied("Registered source connection is unavailable")
         fetched = self.fetched_source
-        if document.provider == "google":
+        if fetched is None and document.provider == "google":
             fetched = google_canonical_resource(document, connector_connection_id=connector.id)
         if fetched is not None:
             source_id = fetched.resource_id
@@ -162,7 +185,7 @@ class RegisteredExtractionGateway:
             if document.source_type == "gmail_message" and any(
                 item.email_relevance is None for item in extraction.observations
             ):
-                raise ValueError("Gmail relevance is missing")
+                raise EvidenceValidationError("email_relevance_missing")
 
         result = await runtime.execute(
             task,
