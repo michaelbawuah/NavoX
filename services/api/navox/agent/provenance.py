@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from navox.db.communications import CommunicationDraft, CommunicationDraftVersion
 from navox.db.models import (
     Action,
     Approval,
@@ -105,6 +106,9 @@ async def erase_source_plans(
         raise HTTPException(409, "Plan source provenance needs manual review")
     ids = {p.id for p in plans}
     if not ids:
+        await erase_source_drafts(
+            database, workspace_id=workspace_id, user_id=user_id, connection_ids=connection_ids
+        )
         return
     foreign_source = await database.scalar(
         select(PlanSource.connection_id)
@@ -146,6 +150,9 @@ async def erase_source_plans(
         raise HTTPException(409, "Source action execution must finish before deletion")
     # Explicit ordered deletes also work with SQLite test connections without FK
     # enforcement. Other sources' commitments and independent plans are retained.
+    await erase_source_drafts(
+        database, workspace_id=workspace_id, user_id=user_id, connection_ids=connection_ids
+    )
     await database.execute(delete(Approval).where(Approval.id.in_([a.id for a in approvals])))
     await database.execute(delete(Action).where(Action.id.in_([a.id for a in actions])))
     await database.execute(delete(PlanStep).where(PlanStep.plan_id.in_(ids)))
@@ -171,3 +178,30 @@ async def erase_source_plans(
         )
     )
     await database.execute(delete(Plan).where(Plan.id.in_(ids)))
+
+
+async def erase_source_drafts(
+    database: AsyncSession, *, workspace_id: UUID, user_id: UUID, connection_ids: set[UUID]
+) -> None:
+    drafts = list(
+        await database.scalars(
+            select(CommunicationDraft).where(
+                CommunicationDraft.source_connection_id.in_(connection_ids)
+            )
+        )
+    )
+    if any((d.workspace_id, d.user_id) != (workspace_id, user_id) for d in drafts):
+        raise HTTPException(409, "Draft source provenance needs manual review")
+    for draft in drafts:
+        action = await database.get(Action, draft.action_id) if draft.action_id else None
+        if action is not None and (
+            (action.workspace_id, action.user_id) != (workspace_id, user_id)
+            or action.status
+            not in {"completed", "blocked", "failed", "rejected", "expired", "uncertain"}
+        ):
+            raise HTTPException(409, "Draft send must finish before deleting its source")
+    identifiers = [d.id for d in drafts]
+    await database.execute(
+        delete(CommunicationDraftVersion).where(CommunicationDraftVersion.draft_id.in_(identifiers))
+    )
+    await database.execute(delete(CommunicationDraft).where(CommunicationDraft.id.in_(identifiers)))

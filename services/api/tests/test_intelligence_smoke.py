@@ -12,7 +12,13 @@ from pydantic import SecretStr
 from navox.ai.errors import AIProviderError
 from navox.ai.gateway import AIGateway, StructuredOutputResponse
 from navox.ai.openai_provider import OpenAIResponsesProvider
-from navox.evaluation.intelligence_smoke import CASES, OfflineSmokeProvider, main, run_smoke
+from navox.evaluation.intelligence_smoke import (
+    CASES,
+    EMAIL_TRIAGE_CASES,
+    OfflineSmokeProvider,
+    main,
+    run_smoke,
+)
 from navox.intelligence.extraction import InvalidOperationalExtraction
 
 
@@ -344,3 +350,72 @@ async def test_provider_failure_guidance_overrides_earlier_validation_guidance()
     assert len(progress) == 4
     assert progress[-1] == "[2/9] explicit-promise: failed (provider_request_failed)"
     assert "private" not in json.dumps(report) + " ".join(progress)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "variation,expected",
+    [
+        ("grounded_issue_without_action", True),
+        ("missing_issue", False),
+        ("wrong_basis", False),
+        ("wrong_intent", False),
+    ],
+)
+async def test_outage_alert_requires_grounded_issue_not_an_invented_remedy(variation, expected):
+    class OutageProvider(OfflineSmokeProvider):
+        async def generate_json(self, **kwargs):
+            response = await super().generate_json(**kwargs)
+            candidate = response.data["observations"][0]
+            candidate["action_text"] = None
+            if variation == "missing_issue":
+                candidate["object_text"] = None
+            elif variation == "wrong_basis":
+                candidate["email_relevance"]["basis"] = "security_risk"
+            elif variation == "wrong_intent":
+                candidate["email_relevance"]["intent"] = "action_required"
+            return response
+
+    outage = next(case for case in EMAIL_TRIAGE_CASES if case.id == "service-outage")
+    report = await run_smoke(AIGateway(OutageProvider()), mode="offline_fixture", cases=(outage,))
+    assert report["passed"] is expected
+    assert report["cases"][0]["passed"] is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case_id,basis,expected",
+    [
+        ("assigned-task", "direct_request", True),
+        ("assigned-task", "assigned_obligation", True),
+        ("assigned-task", "commitment_progress", False),
+        ("assigned-task", "security_risk", False),
+        ("group-course-deadline", "direct_request", False),
+        ("group-course-deadline", "assigned_obligation", True),
+    ],
+)
+async def test_direct_request_scoring_matches_policy_without_broadening_bulk_mail(
+    case_id, basis, expected
+):
+    class BasisProvider(OfflineSmokeProvider):
+        async def generate_json(self, **kwargs):
+            response = await super().generate_json(**kwargs)
+            response.data["observations"][0]["email_relevance"]["basis"] = basis
+            return response
+
+    case = next(case for case in EMAIL_TRIAGE_CASES if case.id == case_id)
+    report = await run_smoke(AIGateway(BasisProvider()), mode="offline_fixture", cases=(case,))
+    assert report["passed"] is expected
+
+
+@pytest.mark.asyncio
+async def test_assigned_work_still_requires_an_explicit_action():
+    class MissingAction(OfflineSmokeProvider):
+        async def generate_json(self, **kwargs):
+            response = await super().generate_json(**kwargs)
+            response.data["observations"][0]["action_text"] = None
+            return response
+
+    task = next(case for case in EMAIL_TRIAGE_CASES if case.id == "assigned-task")
+    report = await run_smoke(AIGateway(MissingAction()), mode="offline_fixture", cases=(task,))
+    assert report["passed"] is False

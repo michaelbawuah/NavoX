@@ -53,13 +53,18 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-5.6-luna"
     openai_read_timeout_seconds: float = Field(default=120.0, ge=1.0, le=300.0, allow_inf_nan=False)
+    gemini_api_key: SecretStr | None = None
+    anthropic_api_key: SecretStr | None = None
+    xai_api_key: SecretStr | None = None
+    # Operator ceiling; no grants by default. Workspace/user rules can only narrow it.
+    ai_provider_policy: dict[str, JsonValue] = Field(default_factory=dict, repr=False)
     commitment_moderate_confidence_threshold: float = Field(default=0.65, ge=0.0, lt=1.0)
     commitment_high_confidence_threshold: float = Field(default=0.85, gt=0.0, le=1.0)
 
     @model_validator(mode="after")
     def validate_commitment_confidence_thresholds(self) -> "Settings":
-        if self.ai_provider.casefold().strip() not in {"disabled", "openai"}:
-            raise ValueError("AI_PROVIDER must be disabled or openai")
+        if self.ai_provider.casefold().strip() not in {"disabled", "openai", "automatic"}:
+            raise ValueError("AI_PROVIDER must be disabled, openai, or automatic")
 
         if (
             self.commitment_high_confidence_threshold

@@ -14,7 +14,9 @@ import {
   todayFilters,
   todaySections,
 } from "../lib/today-sections";
+import { AISettings } from "./ai-settings";
 import { ApprovalPanel } from "./approval-panel";
+import { CommunicationDrafts } from "./communication-drafts";
 import { ConnectionsPanel } from "./connections-panel";
 import { DismissCommitment } from "./dismiss-commitment";
 import {
@@ -22,6 +24,7 @@ import {
   IntelligenceFeedback,
   WorkspaceContext,
 } from "./intelligence-controls";
+import { OperationalAssistance } from "./operational-assistance";
 import { PagedList } from "./paged-list";
 import { ProactivePanel } from "./proactive-panel";
 import { SourceReferences } from "./source-references";
@@ -1123,7 +1126,25 @@ export function TodayWorkspace({
               </section>
             </details>
             <details className={styles.toolDisclosure}>
+              <summary>Explore your tasks</summary>
+              <OperationalAssistance
+                items={[
+                  ...(today?.needs_attention ?? []),
+                  ...(today?.coming_up ?? []),
+                  ...(today?.waiting_on ?? []),
+                  ...(today?.renewals ?? []),
+                ]}
+                paused={agentPaused}
+              />
+            </details>
+            <details className={styles.toolDisclosure}>
               <summary>Email actions</summary>
+              <CommunicationDrafts
+                commitments={approvalCommitments}
+                connections={connections}
+                paused={agentPaused}
+                onStateChanged={refreshToday}
+              />
               <ApprovalPanel
                 agentPaused={agentPaused}
                 commitments={approvalCommitments}
@@ -1141,6 +1162,7 @@ export function TodayWorkspace({
           <summary>
             Connected understanding · read access and advanced sync
           </summary>
+          <AISettings />
           <IntelligenceControls
             connections={connections}
             paused={agentPaused}

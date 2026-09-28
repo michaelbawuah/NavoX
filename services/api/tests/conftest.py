@@ -115,3 +115,30 @@ async def subscription_env(monkeypatch):
         async with admin.begin() as connection:
             await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
         await admin.dispose()
+
+
+@pytest_asyncio.fixture
+async def ai_database(tmp_path):
+    from navox.db import models  # noqa: F401
+    from navox.db.base import Base
+
+    dsn = os.environ.get("NAVOX_CONNECTOR_TEST_DSN", f"sqlite+aiosqlite:///{tmp_path}/ai.db")
+    schema = f"ai_registry_{uuid4().hex}"
+    admin = None
+    if dsn.startswith("postgresql"):
+        admin = create_async_engine(dsn)
+        async with admin.begin() as connection:
+            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        engine = create_async_engine(dsn, connect_args={"server_settings": {"search_path": schema}})
+    else:
+        engine = create_async_engine(dsn)
+    async with engine.begin() as connection:
+        if not admin:
+            await connection.execute(text("PRAGMA foreign_keys=ON"))
+        await connection.run_sync(Base.metadata.create_all)
+    yield async_sessionmaker(engine, expire_on_commit=False)
+    await engine.dispose()
+    if admin:
+        async with admin.begin() as connection:
+            await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        await admin.dispose()

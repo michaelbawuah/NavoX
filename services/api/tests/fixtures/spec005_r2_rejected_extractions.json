@@ -1,0 +1,339 @@
+{
+  "origin": "Rejected outputs from the fixed synthetic extraction corpus, 2026-09-26 revision 2. These offline replays assert rejection, not live model quality.",
+  "cases": [
+    {
+      "id": "gemini-meeting",
+      "provider": "gemini",
+      "case_id": "meeting",
+      "validation_code": "temporal_not_grounded",
+      "proposal": {
+        "observations": [
+          {
+            "action_text": "starts",
+            "confidence": 1.0,
+            "email_relevance": null,
+            "evidence": [
+              {
+                "end_char": 59,
+                "source": "content",
+                "start_char": 0,
+                "text": "The research review meeting starts on 2030-04-04 at 14:00."
+              }
+            ],
+            "object_text": "research review meeting",
+            "observation_type": "meeting",
+            "subject_text": "The research review meeting",
+            "temporal_expression": "2030-04-04 at 14:00. taxable income or anything else extra here not needed as literal snippet matches source text formatting restrictions exactly if present elsewhere but here it matches 2030-04-04 at 14:00"
+          }
+        ],
+        "people": [],
+        "relationships": [],
+        "schema_version": "operational-extraction.v2",
+        "temporals": [
+          {
+            "confidence": 1.0,
+            "evidence": [
+              {
+                "end_char": 59,
+                "source": "content",
+                "start_char": 0,
+                "text": "The research review meeting starts on 2030-04-04 at 14:00."
+              }
+            ],
+            "expression": "2030-04-04 at 14:00",
+            "kind": "meeting_start"
+          }
+        ]
+      }
+    },
+    {
+      "id": "gemini-service-outage",
+      "provider": "gemini",
+      "case_id": "service-outage",
+      "validation_code": "temporal_not_grounded",
+      "proposal": {
+        "observations": [
+          {
+            "action_text": "Your home internet service is unavailable",
+            "confidence": 1.0,
+            "email_relevance": {
+              "applies_to_user": true,
+              "basis": "service_disruption",
+              "confidence": 1.0,
+              "intent": "important_alert"
+            },
+            "evidence": [
+              {
+                "end_char": 64,
+                "source": "content",
+                "start_char": 0,
+                "text": "Your home internet service is unavailable due to an outage"
+              }
+            ],
+            "object_text": "home internet service",
+            "observation_type": "alert",
+            "subject_text": "Synthetic email relevance case",
+            "temporal_expression": "tomorrow"
+          }
+        ],
+        "people": [],
+        "relationships": [],
+        "schema_version": "operational-extraction.v2",
+        "temporals": [
+          {
+            "confidence": 1.0,
+            "evidence": [
+              {
+                "end_char": 113,
+                "source": "content",
+                "start_char": 92,
+                "text": "tomorrow"
+              }
+            ],
+            "expression": "tomorrow",
+            "kind": "other"
+          }
+        ]
+      }
+    },
+    {
+      "id": "gemini-sent-request-waiting",
+      "provider": "gemini",
+      "case_id": "sent-request-waiting",
+      "validation_code": "identity_not_grounded",
+      "proposal": {
+        "observations": [
+          {
+            "action_text": "sent",
+            "confidence": 1.0,
+            "email_relevance": {
+              "applies_to_user": true,
+              "basis": "commitment_progress",
+              "confidence": 1.0,
+              "intent": "commitment_update"
+            },
+            "evidence": [
+              {
+                "end_char": 68,
+                "source": "content",
+                "start_char": 0,
+                "text": "I sent the approval request to Maya and am waiting for her response."
+              }
+            ],
+            "object_text": "approval request",
+            "observation_type": "waiting",
+            "subject_text": null,
+            "temporal_expression": null
+          }
+        ],
+        "people": [
+          {
+            "confidence": 1.0,
+            "evidence": [
+              {
+                "end_char": 35,
+                "source": "content",
+                "start_char": 31,
+                "text": "Maya"
+              }
+            ],
+            "identity_type": "email",
+            "identity_value": "maya@example.com",
+            "name": "Maya"
+          }
+        ],
+        "relationships": [
+          {
+            "confidence": 1.0,
+            "evidence": [
+              {
+                "end_char": 68,
+                "source": "content",
+                "start_char": 0,
+                "text": "I sent the approval request to Maya and am waiting for her response."
+              }
+            ],
+            "object_text": "Maya",
+            "relationship_type": "sent_request_to",
+            "subject_text": "I"
+          }
+        ],
+        "schema_version": "operational-extraction.v2",
+        "temporals": []
+      }
+    },
+    {
+      "id": "claude-explicit-follow-up",
+      "provider": "anthropic",
+      "case_id": "explicit-follow-up",
+      "validation_code": "temporal_not_grounded",
+      "proposal": {
+        "observations": [
+          {
+            "action_text": "follow up",
+            "confidence": 0.95,
+            "email_relevance": {
+              "applies_to_user": true,
+              "basis": "direct_request",
+              "confidence": 0.9,
+              "intent": "action_required"
+            },
+            "evidence": [
+              {
+                "end_char": 57,
+                "source": "content",
+                "start_char": 7,
+                "text": "follow up with Maya about the proposal tomorrow"
+              }
+            ],
+            "object_text": "the proposal",
+            "observation_type": "follow_up",
+            "subject_text": null,
+            "temporal_expression": "tomorrow"
+          },
+          {
+            "action_text": "follow up with Maya",
+            "confidence": 0.92,
+            "email_relevance": {
+              "applies_to_user": true,
+              "basis": "direct_request",
+              "confidence": 0.9,
+              "intent": "action_required"
+            },
+            "evidence": [
+              {
+                "end_char": 44,
+                "source": "content",
+                "start_char": 7,
+                "text": "follow up with Maya about the proposal"
+              }
+            ],
+            "object_text": "Maya",
+            "observation_type": "follow_up",
+            "subject_text": null,
+            "temporal_expression": "tomorrow"
+          }
+        ],
+        "people": [
+          {
+            "confidence": 0.95,
+            "evidence": [
+              {
+                "end_char": 39,
+                "source": "content",
+                "start_char": 35,
+                "text": "Maya"
+              }
+            ],
+            "identity_type": null,
+            "identity_value": null,
+            "name": "Maya"
+          }
+        ],
+        "relationships": [
+          {
+            "confidence": 0.9,
+            "evidence": [
+              {
+                "end_char": 57,
+                "source": "content",
+                "start_char": 7,
+                "text": "follow up with Maya about the proposal tomorrow"
+              }
+            ],
+            "object_text": "the proposal",
+            "relationship_type": "follow_up_topic",
+            "subject_text": "Maya"
+          }
+        ],
+        "schema_version": "operational-extraction.v2",
+        "temporals": [
+          {
+            "confidence": 0.85,
+            "evidence": [
+              {
+                "end_char": 57,
+                "source": "content",
+                "start_char": 48,
+                "text": "tomorrow"
+              }
+            ],
+            "expression": "tomorrow",
+            "kind": "follow_up"
+          }
+        ]
+      }
+    },
+    {
+      "id": "claude-reply-needed",
+      "provider": "anthropic",
+      "case_id": "reply-needed",
+      "validation_code": "person_not_grounded",
+      "proposal": {
+        "observations": [
+          {
+            "action_text": "confirm which time works",
+            "confidence": 0.95,
+            "email_relevance": {
+              "applies_to_user": true,
+              "basis": "direct_request",
+              "confidence": 0.95,
+              "intent": "reply_required"
+            },
+            "evidence": [
+              {
+                "end_char": 62,
+                "source": "content",
+                "start_char": 0,
+                "text": "Could you confirm which time works for our project review?"
+              },
+              {
+                "end_char": 104,
+                "source": "content",
+                "start_char": 65,
+                "text": "I need your answer by tomorrow."
+              }
+            ],
+            "object_text": "time for our project review",
+            "observation_type": "request",
+            "subject_text": "Synthetic email relevance case",
+            "temporal_expression": "by tomorrow"
+          }
+        ],
+        "people": [
+          {
+            "confidence": 0.95,
+            "evidence": [
+              {
+                "end_char": 3,
+                "source": "content",
+                "start_char": 0,
+                "text": "Could"
+              }
+            ],
+            "identity_type": null,
+            "identity_value": null,
+            "name": "maya@example.com"
+          }
+        ],
+        "relationships": [],
+        "schema_version": "operational-extraction.v2",
+        "temporals": [
+          {
+            "confidence": 0.95,
+            "evidence": [
+              {
+                "end_char": 104,
+                "source": "content",
+                "start_char": 95,
+                "text": "by tomorrow"
+              }
+            ],
+            "expression": "by tomorrow",
+            "kind": "deadline"
+          }
+        ]
+      }
+    }
+  ]
+}

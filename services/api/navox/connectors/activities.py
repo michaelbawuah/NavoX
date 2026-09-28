@@ -103,7 +103,7 @@ async def connector_sync_activity(payload: ConnectorSyncWork) -> int:
 async def _connector_sync(payload: ConnectorSyncWork) -> int:
     settings = get_settings()
     try:
-        gateway = build_ai_gateway(settings)
+        gateway = build_ai_gateway(settings) if settings.ai_provider != "automatic" else None
     except AIProviderNotConfigured:
         raise _failure("TEMPORARY_FAILURE") from None
 
@@ -139,7 +139,17 @@ async def _connector_sync(payload: ConnectorSyncWork) -> int:
             retain_canonical_content=connection.provider not in {"import", "canvas"},
             page_budget=1000 if connection.provider == "canvas" else 50,
         )
-        extractor = OperationalExtractor(gateway)
+        extractor = OperationalExtractor(
+            gateway
+            if gateway is not None
+            else build_ai_gateway(
+                settings,
+                database=database,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                connection_id=connection_id,
+            )
+        )
 
         # Bind non-optional values before the nested consumer is constructed.
         owned_connection, owner = connection, user
@@ -149,7 +159,18 @@ async def _connector_sync(payload: ConnectorSyncWork) -> int:
                 database,
                 connector_connection=owned_connection,
                 resource=resource,
-                extractor=extractor,
+                extractor=OperationalExtractor(
+                    build_ai_gateway(
+                        settings,
+                        database=database,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        connection_id=connection_id,
+                        fetched_source=resource,
+                    )
+                )
+                if settings.ai_provider == "automatic"
+                else extractor,
                 timezone_name=owner.timezone,
             )
 

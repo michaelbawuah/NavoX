@@ -138,7 +138,17 @@ async def _process_source(payload: SourceWork) -> int:
                 connection_id=connection.id,
                 source=payload.source,
                 settings=settings,
-                extractor=OperationalExtractor(build_ai_gateway(settings)),
+                extractor=OperationalExtractor(
+                    build_ai_gateway(
+                        settings,
+                        database=database,
+                        workspace_id=connection.workspace_id,
+                        user_id=user.id,
+                        connection_id=connection.id,
+                    )
+                    if settings.ai_provider == "automatic"
+                    else build_ai_gateway(settings)
+                ),
             )
             await evaluate_workspace_attention(
                 database, user_id=user.id, workspace_id=connection.workspace_id

@@ -20,7 +20,11 @@ from navox.ai.openai_provider import AIProviderError
 from navox.core.settings import Settings
 from navox.intelligence.contracts import SourceDocument, SourceIdentity
 from navox.intelligence.email_relevance import filter_email_extraction
-from navox.intelligence.extraction import InvalidOperationalExtraction, OperationalExtractor
+from navox.intelligence.extraction import (
+    InvalidOperationalExtraction,
+    OperationalExtractionGateway,
+    OperationalExtractor,
+)
 
 
 @dataclass(frozen=True)
@@ -36,6 +40,13 @@ class SmokeCase:
     bulk_mail: bool = False
     sent: bool = False
     subject: str = "Synthetic NavoX smoke case"
+    alternative_email_bases: frozenset[str] = frozenset()
+
+    @property
+    def accepted_email_bases(self) -> frozenset[str]:
+        if self.email_basis is None:
+            return frozenset()
+        return frozenset({self.email_basis}) | self.alternative_email_bases
 
 
 CASES = (
@@ -101,6 +112,7 @@ def email_case(
     bulk_mail: bool = False,
     sent: bool = False,
     subject: str = "Synthetic email relevance case",
+    alternative_bases: frozenset[str] = frozenset(),
 ) -> SmokeCase:
     accepted = (
         frozenset({"request", "task", "deadline", "follow_up"})
@@ -118,6 +130,7 @@ def email_case(
         bulk_mail=bulk_mail,
         sent=sent,
         subject=subject,
+        alternative_email_bases=alternative_bases,
     )
 
 
@@ -134,6 +147,8 @@ EMAIL_TRIAGE_CASES = (
         "Please upload your completed lab report to the course portal by Friday.",
         intent="action_required",
         basis="assigned_obligation",
+        # This is also an explicit direct request under the published prompt/policy.
+        alternative_bases=frozenset({"direct_request"}),
     ),
     email_case(
         "group-course-deadline",
@@ -381,7 +396,7 @@ def base_report(mode: str, cases: tuple[SmokeCase, ...] = CASES) -> dict[str, An
         "schema_version": 1,
         "generated_at": datetime.now(UTC).isoformat(),
         "mode": mode,
-        "dataset": "navox-email-triage-smoke-v1"
+        "dataset": "navox-email-triage-smoke-v2"
         if any(case.gmail for case in cases)
         else "navox-intelligence-smoke-v1",
         "scope": "AIGateway, extraction validation and email surfacing policy on synthetic sources",
@@ -405,7 +420,7 @@ def base_report(mode: str, cases: tuple[SmokeCase, ...] = CASES) -> dict[str, An
 
 
 async def run_smoke(
-    gateway: AIGateway,
+    gateway: OperationalExtractionGateway,
     *,
     mode: Literal["offline_fixture", "live_model_smoke"],
     cases: tuple[SmokeCase, ...] = CASES,
@@ -439,10 +454,14 @@ async def run_smoke(
                 else not observed
             )
             if case.email_intent:
+                # A consequential alert can describe the issue without inventing a remedy.
+                # The surfacing policy above still requires a useful, body-grounded title.
                 passed = passed and all(
-                    bool(item.action_text and item.object_text)
+                    bool(item.object_text)
+                    and (bool(item.action_text) or item.observation_type == "alert")
                     and item.email_relevance is not None
                     and item.email_relevance.intent == case.email_intent
+                    and item.email_relevance.basis in case.accepted_email_bases
                     for item in filtered.observations
                 )
             if not passed:

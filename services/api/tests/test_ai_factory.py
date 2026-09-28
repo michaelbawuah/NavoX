@@ -36,5 +36,11 @@ def test_openai_provider_is_built_only_behind_gateway() -> None:
 
 
 def test_settings_reject_unknown_ai_provider() -> None:
-    with pytest.raises(ValueError, match="AI_PROVIDER must be disabled or openai"):
+    with pytest.raises(ValueError, match="AI_PROVIDER must be disabled, openai, or automatic"):
         Settings(_env_file=None, ai_provider="unknown")
+
+
+def test_automatic_gateway_requires_authorized_feature_scope() -> None:
+    settings = Settings(_env_file=None, ai_provider="automatic")
+    with pytest.raises(AIProviderNotConfigured, match="authorized feature scope"):
+        build_ai_gateway(settings)

@@ -291,7 +291,17 @@ async def preview_older_item(
     if await source_retry_after(database, connection.id, "gmail"):
         raise unavailable(429, "Gmail is temporarily rate limited. Try again later.")
     try:
-        extractor = OperationalExtractor(build_ai_gateway(settings))
+        extractor = OperationalExtractor(
+            build_ai_gateway(
+                settings,
+                database=database,
+                workspace_id=workspace_id,
+                user_id=connection.user_id,
+                connection_id=connection.id,
+            )
+            if settings.ai_provider == "automatic"
+            else build_ai_gateway(settings)
+        )
     except AIProviderNotConfigured:
         raise unavailable(503, "Configure the AI provider before rechecking Gmail items.") from None
     preview_id = uuid4()

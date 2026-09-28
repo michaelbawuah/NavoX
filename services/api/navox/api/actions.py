@@ -270,6 +270,8 @@ async def approve_action(
             user_id=current_account.user.id,
             workspace_id=current_account.workspace.id,
             request_id=payload.request_id,
+            expected_payload_hash=payload.expected_payload_hash,
+            draft_version=payload.draft_version,
         )
     except (ApprovalNotFoundError, ApprovalConflictError, ApprovalPausedError) as error:
         raise approval_error(error) from error
