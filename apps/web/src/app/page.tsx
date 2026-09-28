@@ -1,7 +1,7 @@
 "use client";
 
 import { type FormEvent, useCallback, useEffect, useState } from "react";
-import { NavoXLanding } from "../components/navox-landing";
+import { NavoXCinematic } from "../components/navox-cinematic";
 import { TodayWorkspace } from "../components/today-workspace";
 import { type Account, authenticate } from "../lib/account-access";
 
@@ -161,12 +161,7 @@ export default function Home() {
   }
 
   return (
-    <NavoXLanding
-      onSignIn={() => {
-        setMode("login");
-        setMessage("");
-      }}
-    >
+    <NavoXCinematic>
       <section
         aria-labelledby="auth-heading"
         className="auth-card access-card"
@@ -269,6 +264,6 @@ export default function Home() {
           Passwords are protected with modern hashing.
         </p>
       </section>
-    </NavoXLanding>
+    </NavoXCinematic>
   );
 }
