@@ -45,3 +45,4 @@ class PrepareDraft(Contract):
     expected_version: int = Field(ge=1)
     connection_id: UUID
     request_id: UUID
+    reply_to_source: bool = False

@@ -418,3 +418,202 @@ async def test_prepare_retry_returns_same_action_and_stale_regeneration_skips_pr
         json={"expected_version": 9, "instructions": "Change the draft"},
     )
     assert response.status_code == 409 and len(runtime.calls) == 1
+
+
+async def configure_reply(monkeypatch):
+    from navox.communication import service
+    from navox.providers.google_gmail import GmailReplyMetadata
+
+    calls = []
+
+    async def token(*args, **kwargs):
+        return "test-access-token"
+
+    async def metadata(self, access_token, *, external_id):
+        assert access_token == "test-access-token"
+        calls.append(external_id)
+        return GmailReplyMetadata(
+            source_message_id=external_id,
+            thread_id="thread-456",
+            source_subject="Friday meeting",
+            in_reply_to="<source@example.com>",
+            references="<parent@example.com> <source@example.com>",
+        )
+
+    monkeypatch.setattr(service, "access_token_for_connection", token)
+    monkeypatch.setattr(service.GoogleSourceGateway, "gmail_reply_metadata", metadata)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_reply_correction_versions_unchanged_body_and_hashes_thread(
+    approval_environment, monkeypatch
+):
+    from navox.agent.hashing import action_security_hash
+    from navox.db.models import Action
+
+    client, factory, settings, draft, connection, runtime = await setup(
+        approval_environment, monkeypatch
+    )
+    reads = await configure_reply(monkeypatch)
+    old = await prepare(client, draft, connection)
+    content = draft["versions"][-1]
+    edit = await client.patch(
+        f"/api/v1/communication-drafts/{draft['id']}",
+        json={
+            "expected_version": 1,
+            "to": content["to"],
+            "subject": content["subject"],
+            "body": content["body"],
+        },
+    )
+    assert edit.status_code == 200, edit.text
+    draft = edit.json()
+    request = {
+        "expected_version": 2,
+        "connection_id": str(connection),
+        "request_id": str(uuid4()),
+        "reply_to_source": True,
+    }
+    response = await client.post(
+        f"/api/v1/communication-drafts/{draft['id']}/prepare", json=request
+    )
+    assert response.status_code == 200, response.text
+    action = response.json()
+    assert action["payload"]["body_text"] == old["payload"]["body_text"]
+    assert action["payload"]["draft_version"] == 2
+    assert action["payload_hash"] != old["payload_hash"]
+    assert action["payload"]["reply"]["source_message_id"] == "fixture-message"
+    assert action["payload"]["reply"]["thread_id"] == "thread-456"
+    assert action["payload_hash"] == action_security_hash(
+        provider="google", action_type="gmail.send", payload=action["payload"]
+    )
+    altered = {
+        **action["payload"],
+        "reply": {**action["payload"]["reply"], "thread_id": "other-thread"},
+    }
+    assert (
+        action_security_hash(provider="google", action_type="gmail.send", payload=altered)
+        != action["payload_hash"]
+    )
+    retry = await client.post(f"/api/v1/communication-drafts/{draft['id']}/prepare", json=request)
+    assert retry.status_code == 200 and retry.json()["id"] == action["id"]
+    request["reply_to_source"] = False
+    assert (
+        await client.post(f"/api/v1/communication-drafts/{draft['id']}/prepare", json=request)
+    ).status_code == 409
+    assert reads == ["fixture-message"]
+    assert (
+        await approve(client, draft, action, expected_payload_hash=old["payload_hash"])
+    ).status_code == 409
+    async with factory() as db:
+        assert (await db.get(Action, UUID(old["id"]))).status == "blocked"
+        approval = await db.scalar(select(Approval).where(Approval.action_id == UUID(old["id"])))
+        assert approval.status == "superseded" and approval.consumed_at is None
+    assert (await approve(client, draft, action)).status_code == 200
+    gateway = FakeGmailGateway()
+    async with factory() as db:
+        assert (
+            await execute_approved_gmail_send(
+                db, action_id=UUID(action["id"]), settings=settings, gateway=gateway
+            )
+            == "completed"
+        )
+    assert len(gateway.calls) == 1 and len(runtime.calls) == 1
+    assert gateway.calls[0].reply.model_dump(mode="json") == action["payload"]["reply"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["subject", "connection", "unavailable"])
+async def test_reply_prepare_fails_without_creating_action(
+    approval_environment, monkeypatch, failure
+):
+    from navox.communication import service
+    from navox.db.models import Action
+    from navox.providers.google_sources import GoogleSourceError
+
+    client, factory, _, draft, connection, _ = await setup(approval_environment, monkeypatch)
+    reads = await configure_reply(monkeypatch)
+    if failure == "subject":
+        response = await client.patch(
+            f"/api/v1/communication-drafts/{draft['id']}",
+            json={
+                "expected_version": 1,
+                "to": ["maya@example.com"],
+                "subject": "Unrelated topic",
+                "body": "Same reply.",
+            },
+        )
+        draft = response.json()
+    elif failure == "connection":
+        connection = uuid4()
+    else:
+
+        async def unavailable(*args, **kwargs):
+            raise GoogleSourceError("unavailable")
+
+        monkeypatch.setattr(service.GoogleSourceGateway, "gmail_reply_metadata", unavailable)
+    response = await client.post(
+        f"/api/v1/communication-drafts/{draft['id']}/prepare",
+        json={
+            "expected_version": draft["current_version"],
+            "connection_id": str(connection),
+            "request_id": str(uuid4()),
+            "reply_to_source": True,
+        },
+    )
+    assert response.status_code == {"subject": 409, "connection": 403, "unavailable": 503}[failure]
+    async with factory() as db:
+        assert await db.scalar(select(Action)) is None
+    if failure == "connection":
+        assert not reads
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["tampered_thread", "source_rebound", "wrong_receipt"])
+async def test_reply_execution_checks_binding_and_receipt(
+    approval_environment, monkeypatch, failure
+):
+    from navox.db.models import Action
+    from navox.providers.google_gmail import GmailSendReceipt
+
+    client, factory, settings, draft, connection, _ = await setup(approval_environment, monkeypatch)
+    await configure_reply(monkeypatch)
+    response = await client.post(
+        f"/api/v1/communication-drafts/{draft['id']}/prepare",
+        json={
+            "expected_version": 1,
+            "connection_id": str(connection),
+            "request_id": str(uuid4()),
+            "reply_to_source": True,
+        },
+    )
+    assert response.status_code == 200, response.text
+    action = response.json()
+    assert (await approve(client, draft, action)).status_code == 200
+    gateway = FakeGmailGateway()
+    if failure == "wrong_receipt":
+        original = gateway.send
+
+        async def wrong_receipt(**kwargs):
+            await original(**kwargs)
+            return GmailSendReceipt(message_id="sent-789", thread_id="wrong-thread")
+
+        monkeypatch.setattr(gateway, "send", wrong_receipt)
+    async with factory() as db:
+        if failure == "tampered_thread":
+            row = await db.get(Action, UUID(action["id"]))
+            row.payload = {
+                **row.payload,
+                "reply": {**row.payload["reply"], "thread_id": "other-thread"},
+            }
+        elif failure == "source_rebound":
+            saved = await db.get(CommunicationDraft, UUID(draft["id"]))
+            row = await db.get(CommitmentSource, UUID(saved.source_reference))
+            row.external_resource_id = "other-source"
+        await db.commit()
+        result = await execute_approved_gmail_send(
+            db, action_id=UUID(action["id"]), settings=settings, gateway=gateway
+        )
+        assert result == ("uncertain" if failure == "wrong_receipt" else "blocked")
+        assert len(gateway.calls) == (1 if failure == "wrong_receipt" else 0)

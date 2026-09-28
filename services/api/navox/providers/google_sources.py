@@ -22,6 +22,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 import httpx
 
 from navox.intelligence.contracts import SourceDocument, SourceIdentity
+from navox.providers.google_gmail import GmailReplyMetadata
 
 GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 CALENDAR_READ_SCOPE = "https://www.googleapis.com/auth/calendar.events.readonly"
@@ -661,6 +662,42 @@ class GoogleSourceGateway:
         ):
             raise GoogleSourceError("Gmail page cursor is invalid", code="google_invalid_response")
         return GmailPage(message_ids, token, next_cursor)
+
+    async def gmail_reply_metadata(
+        self, access_token: str, *, external_id: str
+    ) -> GmailReplyMetadata:
+        """Resolve headers of exactly one source message, without reading its body."""
+        if not external_id or len(external_id) > 512:
+            raise GoogleSourceError("Gmail message ID is invalid")
+        data = await self._gmail_get(
+            access_token,
+            f"messages/{quote(external_id, safe='')}",
+            {"format": "metadata", "fields": "id,threadId,payload/headers"},
+        )
+        try:
+            if data.get("id") != external_id:
+                raise ValueError
+            headers: dict[str, str] = {}
+            for header in data["payload"]["headers"]:
+                name, value = header["name"].lower(), header["value"]
+                if name not in {"message-id", "references", "in-reply-to", "subject"}:
+                    continue
+                if name in headers or not isinstance(value, str):
+                    raise ValueError
+                headers[name] = value
+            message_id = headers["message-id"]
+            references = headers.get("references", headers.get("in-reply-to", ""))
+            return GmailReplyMetadata(
+                source_message_id=external_id,
+                thread_id=data["threadId"],
+                source_subject=headers["subject"],
+                in_reply_to=message_id,
+                references=f"{references} {message_id}" if references else message_id,
+            )
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise GoogleSourceError(
+                "Gmail reply metadata is invalid", code="google_invalid_response"
+            ) from None
 
     async def gmail_metadata(
         self, access_token: str, *, external_id: str, now: datetime

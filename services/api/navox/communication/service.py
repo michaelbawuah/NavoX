@@ -15,6 +15,7 @@ from navox.approvals.service import (
     latest_approval,
 )
 from navox.communication.schemas import DraftContent
+from navox.core.settings import Settings
 from navox.db.communications import CommunicationDraft, CommunicationDraftVersion
 from navox.db.models import (
     Action,
@@ -25,6 +26,9 @@ from navox.db.models import (
     User,
     WorkspaceMembership,
 )
+from navox.providers.google_gmail import GmailReplyMetadata
+from navox.providers.google_oauth import access_token_for_connection
+from navox.providers.google_sources import GoogleSourceGateway
 
 
 async def owned_draft(
@@ -236,6 +240,8 @@ async def prepare_draft(
     expected_version: int,
     connection_id: UUID,
     request_id: UUID,
+    reply_to_source: bool = False,
+    settings: Settings | None = None,
 ) -> Action:
     await authorize_source(database, draft, lock=True)
     refreshed = await database.scalar(
@@ -255,13 +261,40 @@ async def prepare_draft(
             from navox.approvals.service import plan_for_action
 
             plan, _ = await plan_for_action(database, existing)
-            if plan.request_id == request_id and str(existing.payload.get("connection_id")) == str(
-                connection_id
+            if (
+                plan.request_id == request_id
+                and str(existing.payload.get("connection_id")) == str(connection_id)
+                and (existing.payload.get("reply") is not None) == reply_to_source
             ):
                 return existing
         raise ApprovalConflictError("This version already has a prepared send")
     version = await current_version(database, draft)
     content = content_of(version)
+    reply = None
+    if reply_to_source:
+        if settings is None or connection_id != draft.source_connection_id:
+            raise ApprovalPermissionError("Reply must use the authorized source Gmail account")
+        source = await database.get(CommitmentSource, UUID(draft.source_reference or ""))
+        connection = await database.get(Connection, connection_id)
+        if (
+            source is None
+            or source.source_type != "gmail_message"
+            or not source.external_resource_id
+            or connection is None
+        ):
+            raise ApprovalPermissionError("Gmail reply source is unavailable")
+        token = await access_token_for_connection(
+            database, connection=connection, settings=settings
+        )
+        await authorize_source(database, draft)
+        reply = await GoogleSourceGateway().gmail_reply_metadata(
+            token, external_id=source.external_resource_id
+        )
+        await authorize_source(database, draft)
+        if reply.source_message_id != source.external_resource_id:
+            raise ApprovalPermissionError("Gmail reply source changed")
+        if not reply.matches_subject(content.subject):
+            raise ApprovalConflictError("Reply subject must match the source thread")
     action, approval, created = await ApprovalService().prepare_gmail_send(
         database,
         user_id=draft.user_id,
@@ -284,6 +317,8 @@ async def prepare_draft(
         draft_version=draft.current_version,
         draft_payload_hash=version.payload_hash,
     )
+    if reply is not None:
+        payload["reply"] = reply.model_dump(mode="json")
     action.payload = payload
     action.payload_hash = action_security_hash(
         provider="google", action_type="gmail.send", payload=payload
@@ -339,6 +374,20 @@ async def valid_draft_binding(database: AsyncSession, action: Action, *, approve
         or action.payload.get("body_text") != content.body
     ):
         return False
+    if action.payload.get("reply") is not None:
+        try:
+            reply = GmailReplyMetadata.model_validate(action.payload["reply"])
+        except ValueError:
+            return False
+        source = await database.get(CommitmentSource, UUID(draft.source_reference or ""))
+        if (
+            source is None
+            or source.source_type != "gmail_message"
+            or source.external_resource_id != reply.source_message_id
+            or str(draft.source_connection_id) != action.payload.get("connection_id")
+            or not reply.matches_subject(content.subject)
+        ):
+            return False
     return not approved or (
         draft.approved_version == version.version
         and draft.approved_payload_hash == action.payload_hash

@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from navox.providers.google_gmail import GmailReplyMetadata
+
 PostSendState = Literal["waiting", "completed", "unchanged"]
 
 
@@ -74,3 +76,4 @@ class StoredGmailSendPayload(BaseModel):
     draft_id: UUID | None = None
     draft_version: int | None = None
     draft_payload_hash: str | None = None
+    reply: GmailReplyMetadata | None = None

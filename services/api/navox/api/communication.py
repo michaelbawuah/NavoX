@@ -268,11 +268,18 @@ async def prepare(
             expected_version=payload.expected_version,
             connection_id=payload.connection_id,
             request_id=payload.request_id,
+            reply_to_source=payload.reply_to_source,
+            settings=settings,
         )
         await ensure_workflow(dispatcher, database, action, settings)
         return await action_response(database, action)
     except ApprovalServiceError as error:
         raise approval_error(error) from None
+
+    except (GoogleSourceError, GoogleAccessTokenError, TimeoutError):
+        raise HTTPException(
+            503, "Gmail reply metadata is unavailable; your draft is preserved"
+        ) from None
 
 
 @router.post("/{draft_id}/approve", response_model=ActionDetailResponse)
