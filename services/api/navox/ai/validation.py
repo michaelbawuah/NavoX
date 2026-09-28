@@ -8,10 +8,18 @@ from jsonschema import Draft202012Validator, SchemaError, ValidationError
 from referencing.exceptions import Unresolvable
 
 from navox.ai.foundation.contracts import JSONDocument
+from navox.intelligence.extraction import (
+    EvidenceValidationError,
+    extraction_validation_code,
+)
 
 
 class OutputRejected(ValueError):
-    pass
+    def __init__(self, message: str, *, validation_code: str | None = None) -> None:
+        super().__init__(message)
+        self.validation_code = (
+            EvidenceValidationError(validation_code).code if validation_code is not None else None
+        )
 
 
 def compile_schema(document: JSONDocument) -> Draft202012Validator:
@@ -47,6 +55,18 @@ def validate_output(
     try:
         value = json.loads(output.text)
         compile_schema(schema).validate(value)
-        semantic_validator(value)
     except (ValueError, ValidationError, Unresolvable, RecursionError, KeyError, TypeError):
-        raise OutputRejected("AI output failed application validation") from None
+        raise OutputRejected(
+            "AI output failed application validation", validation_code="schema_invalid"
+        ) from None
+    try:
+        semantic_validator(value)
+    except ValueError as error:
+        raise OutputRejected(
+            "AI output failed application validation",
+            validation_code=extraction_validation_code(error),
+        ) from None
+    except (ValidationError, Unresolvable, RecursionError, KeyError, TypeError):
+        raise OutputRejected(
+            "AI output failed application validation", validation_code="validation_failed"
+        ) from None

@@ -286,6 +286,8 @@ class GatewayRuntime:
                         else adapter.classify_error(error)
                     )
                     run.status, run.error_code = "FAILED", detail.code.value
+                    if isinstance(error, OutputRejected) and error.validation_code is not None:
+                        run.error_code = f"{detail.code.value}:{error.validation_code}"
                     if run.estimated_cost is None:
                         all_cost_known = False
                         input_total, output_total = None, None

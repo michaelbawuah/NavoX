@@ -439,9 +439,12 @@ async def execute_approved_gmail_send(
                 to=str(payload.to),
                 subject=payload.subject,
                 body_text=payload.body_text,
+                reply=payload.reply,
             ),
             idempotency_key=action.idempotency_key,
         )
+        if payload.reply is not None and receipt.thread_id != payload.reply.thread_id:
+            raise GmailProviderError("Gmail did not confirm the approved reply thread")
     except GmailProviderError:
         return await mark_execution_uncertain(
             database,

@@ -1,8 +1,10 @@
 """Exercise the automatic gateway inside the real per-resource sync transaction."""
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -26,6 +28,7 @@ from navox.connectors.runtime import ConnectorRuntime
 from navox.core.settings import Settings
 from navox.db.ai_registry import AIEvaluationRun, AIProfileAssignment, AITaskRun
 from navox.db.models import (
+    Connection,
     ConnectorConnection,
     ConnectorDefinition,
     IntelligenceSourceReceipt,
@@ -33,7 +36,136 @@ from navox.db.models import (
     Workspace,
     WorkspaceMembership,
 )
+from navox.intelligence.contracts import SourceDocument
 from navox.intelligence.extraction import OperationalExtraction, OperationalExtractor
+from navox.providers.google_sources import CALENDAR_READ_SCOPE, GMAIL_READ_SCOPE
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source_type", ["gmail_message", "calendar_event"])
+@pytest.mark.parametrize("explicit", [False, True])
+async def test_google_extraction_binds_matching_managed_connector(
+    ai_database, monkeypatch, source_type, explicit
+):
+    from navox.ai.foundation.contracts import JSONDocument
+    from navox.connectors.builtin.google import (
+        ensure_google_connector_connection,
+        google_canonical_resource,
+    )
+    from navox.connectors.builtin.google_calendar import CALENDAR_MANIFEST
+    from navox.connectors.builtin.google_gmail import GMAIL_MANIFEST
+
+    rules = PolicyRules(
+        grants=(
+            ProviderGrant(
+                provider=Provider.OPENAI, sensitivities=frozenset({Sensitivity.PERSONAL})
+            ),
+        )
+    )
+    seen = []
+
+    class CheckingRuntime:
+        store = SimpleNamespace(operator_policy=rules)
+
+        async def execute(self, task, *, context_builder, documents, semantic_validator):
+            context = await context_builder.build(task, documents)
+            assert (
+                json.loads(context.content.text)["sources"][0]["document"]["content"]
+                == "No action is required."
+            )
+            semantic_validator(OperationalExtraction().model_dump(mode="json"))
+            seen.append(task.context_references[0].connection_id)
+            return SimpleNamespace(
+                output=JSONDocument(text=OperationalExtraction().model_dump_json()),
+                provider=Provider.OPENAI,
+                model="fixture",
+            )
+
+    async def runtime(_):
+        return CheckingRuntime()
+
+    monkeypatch.setattr(features, "build_runtime", runtime)
+    async with ai_database() as db:
+        db.add_all(
+            [User(id=USER, email="fixture@example.com"), Workspace(id=WORKSPACE, name="Fixture")]
+        )
+        await db.flush()
+        db.add(WorkspaceMembership(workspace_id=WORKSPACE, user_id=USER))
+        legacy = Connection(
+            user_id=USER,
+            workspace_id=WORKSPACE,
+            provider="google",
+            external_account_id="fixture",
+            granted_scopes=[GMAIL_READ_SCOPE, CALENDAR_READ_SCOPE],
+        )
+        db.add(legacy)
+        await db.flush()
+        # Both source-specific connectors and the bridge share one legacy ID.
+        managed = {}
+        for manifest in (CALENDAR_MANIFEST, GMAIL_MANIFEST):
+            definition = ConnectorDefinition(
+                connector_key=manifest.id,
+                version=manifest.version,
+                display_name=manifest.display_name,
+                connector_class="OAUTH_API",
+                trust_level="NAVOX_FIRST_PARTY",
+                manifest=manifest.model_dump(mode="json", by_alias=True),
+            )
+            db.add(definition)
+            await db.flush()
+            capability = (
+                "calendar.events.read"
+                if manifest.id == "google-calendar"
+                else "communication.messages.read"
+            )
+            row = ConnectorConnection(
+                connector_definition_id=definition.id,
+                legacy_connection_id=legacy.id,
+                user_id=USER,
+                workspace_id=WORKSPACE,
+                provider="google",
+                external_account_id="fixture",
+                authorized_capabilities=[capability],
+                provider_capabilities=[capability],
+                config={},
+            )
+            db.add(row)
+            await db.flush()
+            managed[manifest.id] = row
+        await ensure_google_connector_connection(db, legacy)
+        await db.commit()
+        selected = managed["google-gmail" if source_type == "gmail_message" else "google-calendar"]
+        document = SourceDocument(
+            id=uuid4(),
+            workspace_id=WORKSPACE,
+            provider="google",
+            source_type=source_type,
+            external_id="synthetic-source",
+            subject="Status",
+            content="No action is required.",
+            occurred_at=datetime.now(UTC),
+            retrieved_at=datetime.now(UTC),
+        )
+        resource = google_canonical_resource(document, connector_connection_id=selected.id)
+        gateway = features.RegisteredExtractionGateway(
+            Settings(_env_file=None),
+            db,
+            workspace_id=WORKSPACE,
+            user_id=USER,
+            connection_id=selected.id if explicit else legacy.id,
+            fetched_source=resource if explicit else None,
+        )
+        result = await gateway.extract_operational(document)
+        assert result.provider == "openai"
+        assert seen == [selected.id]
+        # Revoking this connector must not fall back to the still-authorized bridge.
+        selected.authorized_capabilities = []
+        await db.commit()
+        from navox.ai.context import ContextDenied
+
+        with pytest.raises(ContextDenied):
+            await gateway.extract_operational(document)
+        assert seen == [selected.id]
 
 
 class TwoResourceConnector(FixtureConnector):

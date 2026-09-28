@@ -71,6 +71,19 @@ class EvidenceValidationError(ValueError):
         super().__init__(_VALIDATION_MESSAGES[self.code])
 
 
+def extraction_validation_code(error: ValueError) -> str:
+    """Retain only fixed categories, never Pydantic input or exception text."""
+    if isinstance(error, EvidenceValidationError):
+        return error.code if error.code in _VALIDATION_MESSAGES else "validation_failed"
+    if isinstance(error, ValidationError):
+        for detail in error.errors(include_url=False, include_input=False):
+            cause = detail.get("ctx", {}).get("error")
+            if isinstance(cause, EvidenceValidationError):
+                return extraction_validation_code(cause)
+        return "schema_invalid"
+    return "validation_failed"
+
+
 INSTRUCTION_LIKE_MARKERS = (
     "ignore previous instructions",
     "ignore all instructions",
@@ -380,22 +393,10 @@ class OperationalExtractor:
                 item.email_relevance is None for item in extraction.observations
             ):
                 raise EvidenceValidationError("email_relevance_missing")
-        except ValidationError as error:
-            # Pydantic wraps typed field-validator failures; inspect only the error
-            # objects to retain an allowlisted code without returning their input.
-            code = "schema_invalid"
-            for detail in error.errors(include_url=False, include_input=False):
-                cause = detail.get("ctx", {}).get("error")
-                if isinstance(cause, EvidenceValidationError):
-                    code = cause.code
-                    break
-            raise InvalidOperationalExtraction(code=code) from None
-        except EvidenceValidationError as error:
-            raise InvalidOperationalExtraction(code=error.code) from None
-        except ValueError:
+        except ValueError as error:
             # Keep untrusted model/source content out of durable failure records.
             # Provider/network failures remain retryable instead of quarantined.
-            raise InvalidOperationalExtraction() from None
+            raise InvalidOperationalExtraction(code=extraction_validation_code(error)) from None
         return OperationalExtractionResult(
             extraction=extraction,
             extractor_version=self.extractor_version,

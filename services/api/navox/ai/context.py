@@ -47,6 +47,8 @@ def context_capabilities(settings: Settings | None = None) -> dict[tuple[str, st
     mappings = {
         (GOOGLE_CONNECTOR_KEY, "communication.message"): {"communication.messages.read"},
         (GOOGLE_CONNECTOR_KEY, "calendar.event"): {"calendar.events.read"},
+        ("google-gmail", "communication.message"): {"communication.messages.read"},
+        ("google-calendar", "calendar.event"): {"calendar.events.read"},
         ("canvas-lms", "academic.assignment"): {"academic.assignments.read"},
         ("canvas-lms", "academic.announcement"): {"academic.announcements.read"},
         ("canvas-lms", "academic.course"): {"academic.courses.read"},
