@@ -82,3 +82,124 @@ export interface NewsStoryUpdate {
   change_kind: string;
   generated_at: string;
 }
+
+export type NewsFreshness = "REALTIME" | "FRESH" | "RECENT" | "HISTORICAL";
+export type NewsDepth = "QUICK" | "STANDARD" | "DEEP";
+export type NewsIntent =
+  | "CURRENT_NEWS"
+  | "TRENDING"
+  | "X_TRENDS"
+  | "STORY_QUESTION"
+  | "VERIFY_CLAIM"
+  | "TIMELINE"
+  | "BACKGROUND"
+  | "COVERAGE_COMPARISON"
+  | "WHATS_CHANGED"
+  | "DEEP_RESEARCH";
+
+export interface NewsAnswerFact {
+  item_id: string;
+  text: string;
+  source_name: string;
+  source_url: string;
+  source_id: string;
+  status: NewsVerification;
+}
+
+export interface NewsAnswer {
+  id: string;
+  sequence: number;
+  question: string;
+  status: "PROCESSING" | "READY" | "UNAVAILABLE" | "SOURCES_CHANGED";
+  message: string;
+  facts: NewsAnswerFact[];
+  as_of: string;
+  actions_executed: false;
+  retrieval_limited: boolean;
+  source_scope: "owned_permitted_items";
+  freshness: NewsFreshness;
+}
+
+export interface NewsSummaryFact {
+  claim_id: string;
+  text: string;
+  status: NewsVerification;
+  attributed_to: string | null;
+  source_name: string;
+  source_url: string;
+}
+
+export interface NewsSummarySection {
+  heading:
+    | "what_happened"
+    | "why_it_matters"
+    | "what_is_unclear"
+    | "latest_development";
+  facts: NewsSummaryFact[];
+}
+
+export interface NewsStorySummary {
+  status: "READY" | "PENDING" | "UNAVAILABLE" | "SOURCES_CHANGED";
+  headline: string | null;
+  headline_source_url: string | null;
+  headline_attribution: string | null;
+  headline_status: "ATTRIBUTED";
+  sections: NewsSummarySection[];
+  as_of: string | null;
+  actions_executed: false;
+}
+
+export interface NewsTimelineEntry {
+  item_id: string;
+  reported_headline: string;
+  source_name: string;
+  source_url: string;
+  published_at: string;
+  event_started_at: string | null;
+  event_ended_at: string | null;
+  time_basis: "event_time" | "publication_time";
+  attribution_only: true;
+}
+
+export interface NewsTimeline {
+  story_id: string;
+  as_of: string;
+  entries: NewsTimelineEntry[];
+  limited: boolean;
+  explanation: string;
+}
+
+export interface NewsCoverageSource {
+  item_id: string;
+  source_id: string;
+  source_name: string;
+  source_url: string;
+  headline: string;
+  description: string | null;
+  language: string;
+  published_at: string;
+  claims: NewsClaim[];
+}
+
+export interface NewsCoverage {
+  story_id: string;
+  as_of: string;
+  sources: NewsCoverageSource[];
+  limited: boolean;
+  explanation: string;
+}
+
+export interface NewsChangeEntry {
+  version: number;
+  change_kind: string;
+  generated_at: string;
+}
+
+export interface NewsChanges {
+  story_id: string;
+  since_version: number;
+  current_version: number;
+  changes: NewsChangeEntry[];
+  next_version: number | null;
+  history_complete: boolean;
+}

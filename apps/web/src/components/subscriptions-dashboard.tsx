@@ -25,6 +25,7 @@ import { CancellationReview } from "./cancellation-review";
 import { StripeSandboxConnect } from "./stripe-sandbox-connect";
 import { SubscriptionDetails } from "./subscription-details";
 import { SubscriptionEditor } from "./subscription-editor";
+import { SubscriptionsAsk } from "./subscriptions-ask";
 import styles from "./subscriptions-dashboard.module.css";
 
 const apiBase =
@@ -57,6 +58,7 @@ export function SubscriptionsDashboard() {
   const [summary, setSummary] = useState<SubscriptionSummary | null>(null);
   const [prevented, setPrevented] = useState<PreventedRenewals | null>(null);
   const [loading, setLoading] = useState(true);
+  const [queryVersion, setQueryVersion] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [filter, setFilter] = useState<SubscriptionFilter>("All");
@@ -81,6 +83,7 @@ export function SubscriptionsDashboard() {
   const load = useCallback(async () => {
     const sequence = ++requestNumber.current;
     setLoading(true);
+    setQueryVersion((version) => version + 1);
     setError("");
     try {
       const [records, totals, preventedResult] = await Promise.all([
@@ -471,6 +474,11 @@ export function SubscriptionsDashboard() {
           {notice}
         </p>
       )}
+      <SubscriptionsAsk
+        key={queryVersion}
+        apiBase={apiBase}
+        onOpen={(item) => void openDetails(item)}
+      />
       <section
         className={styles.costPanel}
         aria-labelledby="known-cost-heading"

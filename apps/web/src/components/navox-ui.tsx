@@ -1,5 +1,5 @@
 import type { NewsSourceItem, NewsVerification } from "@navox/contracts";
-import type { ReactNode } from "react";
+import type { FormEvent, ReactNode, Ref } from "react";
 import {
   newsStatus,
   newsStatusExplanation,
@@ -53,6 +53,61 @@ export function NavoXPageHeader({
       </div>
       {actions}
     </header>
+  );
+}
+
+export function NavoXAskBox({
+  id,
+  label,
+  value,
+  placeholder,
+  busy = false,
+  hint,
+  maxLength = 200,
+  buttonLabel = "Ask",
+  busyLabel = "Checking…",
+  inputRef,
+  onChange,
+  onSubmit,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  placeholder: string;
+  busy?: boolean;
+  hint?: string;
+  maxLength?: number;
+  buttonLabel?: string;
+  busyLabel?: string;
+  inputRef?: Ref<HTMLInputElement>;
+  onChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <form className={styles.askBox} onSubmit={onSubmit} aria-busy={busy}>
+      <label className={styles.srOnly} htmlFor={id}>
+        {label}
+      </label>
+      <input
+        ref={inputRef}
+        id={id}
+        maxLength={maxLength}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        disabled={busy}
+        aria-describedby={hint ? `${id}-hint` : undefined}
+        required
+      />
+      <button type="submit" disabled={busy || !value.trim()}>
+        {busy ? busyLabel : buttonLabel}
+      </button>
+      {hint && (
+        <p id={`${id}-hint`} className={styles.askHint}>
+          {hint}
+        </p>
+      )}
+    </form>
   );
 }
 

@@ -2,6 +2,7 @@ import type {
   CancellationAttempt,
   RecurringSubscription,
   SubscriptionInput,
+  SubscriptionQueryResult,
 } from "@navox/contracts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -15,7 +16,12 @@ import {
   subscriptionMoney,
 } from "../lib/subscriptions";
 import { CancellationReview } from "./cancellation-review";
+import { NavoXAskBox } from "./navox-ui";
 import { SubscriptionEditor } from "./subscription-editor";
+import {
+  SubscriptionQueryResultView,
+  subscriptionQueryFromQuestion,
+} from "./subscriptions-ask";
 
 const now = Date.parse("2026-09-25T15:00:00Z");
 const item = {
@@ -182,5 +188,97 @@ describe("subscription decisions", () => {
     expect(safeManagementUrl("https://example.test/account")).toBe(
       "https://example.test/account",
     );
+  });
+
+  it("maps plain subscription questions to bounded read-only query intents", () => {
+    expect(
+      subscriptionQueryFromQuestion("Which trials are ending?").intent,
+    ).toBe("TRIALS");
+    expect(
+      subscriptionQueryFromQuestion("What renews next month?").intent,
+    ).toBe("UPCOMING");
+    expect(
+      subscriptionQueryFromQuestion("What is my monthly cost?").intent,
+    ).toBe("SUMMARY");
+    expect(subscriptionQueryFromQuestion("  Notion AI  ")).toMatchObject({
+      intent: "SEARCH",
+      text: "Notion AI",
+      days: 30,
+      currency: null,
+    });
+    expect(subscriptionQueryFromQuestion("What about Notion AI?").text).toBe(
+      "Notion AI",
+    );
+    expect(
+      subscriptionQueryFromQuestion("What subscriptions do I have?").text,
+    ).toBe("");
+  });
+
+  it("honors explicit renewal windows without silently broadening them", () => {
+    expect(subscriptionQueryFromQuestion("What renews in 7 days?").days).toBe(
+      7,
+    );
+    expect(subscriptionQueryFromQuestion("What renews in 2 weeks?").days).toBe(
+      14,
+    );
+    expect(subscriptionQueryFromQuestion("What renews next week?").days).toBe(
+      7,
+    );
+    expect(subscriptionQueryFromQuestion("What renews tomorrow?").days).toBe(1);
+    for (const question of [
+      "Renewals in 0 days",
+      "Renewals in 367 days",
+      "Renewals in 999 weeks",
+    ])
+      expect(() => subscriptionQueryFromQuestion(question)).toThrow("1 to 366");
+  });
+
+  it("renders a shared accessible Ask NavoX control with a disabled empty submit", () => {
+    const html = renderToStaticMarkup(
+      createElement(NavoXAskBox, {
+        id: "subscription-test-question",
+        label: "Ask about subscriptions",
+        value: "",
+        placeholder: "What renews soon?",
+        hint: "Read-only registry question.",
+        onChange: vi.fn(),
+        onSubmit: vi.fn(),
+      }),
+    );
+    expect(html).toContain('for="subscription-test-question"');
+    expect(html).toContain('id="subscription-test-question"');
+    expect(html).toContain("Read-only registry question.");
+    expect(html).toContain(
+      'aria-describedby="subscription-test-question-hint"',
+    );
+    expect(html).toContain('id="subscription-test-question-hint"');
+    expect(html).toMatch(/<button[^>]*disabled=""/);
+  });
+
+  it("renders subscription answers without turning a question into an action", () => {
+    const result: SubscriptionQueryResult = {
+      intent: "UPCOMING",
+      summary: null,
+      subscriptions: [
+        {
+          ...item,
+          name: "Example service",
+          billing_amount: "24.99",
+          billing_currency: "USD",
+        } as RecurringSubscription,
+      ],
+    };
+    const html = renderToStaticMarkup(
+      createElement(SubscriptionQueryResultView, {
+        result,
+        onOpen: vi.fn(),
+      }),
+    );
+    expect(html).toContain("Upcoming renewals");
+    expect(html).toContain("Example service");
+    expect(html).toContain("24.99");
+    expect(html).toContain("Open details");
+    expect(html).not.toContain("Confirm cancellation");
+    expect(html).not.toContain("Cancel subscription");
   });
 });

@@ -14,25 +14,6 @@
   color: #c0d4c5;
   line-height: 1.7;
 }
-.chat form > div {
-  display: flex;
-  gap: 0.75rem;
-  margin-top: 0.75rem;
-}
-.chat input {
-  flex: 1;
-  min-width: 0;
-  padding: 1rem;
-  background: #0b1f13;
-  color: #effbef;
-  font: inherit;
-  border: 1px solid #748c76;
-  border-radius: 0.5rem;
-}
-.chat input:focus-visible {
-  outline: 3px solid #c9f3b7;
-  outline-offset: 4px;
-}
 .chat .progress {
   min-height: 1.4rem;
   margin-bottom: 0;
@@ -66,8 +47,28 @@
   margin: 0.5rem 1rem;
   color: #c0f0cd;
 }
-@media (max-width: 600px) {
-  .chat form > div {
-    flex-direction: column;
-  }
+.facts {
+  margin: 1rem 0 0;
+  padding-left: 1.75rem;
+}
+.fact {
+  padding: 0.75rem 0 1rem 0.25rem;
+}
+.factMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.factMeta a {
+  margin: 0;
+}
+.scopeNote {
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+  color: #b7cdbc;
+}
+.referenceButton {
+  margin-top: 0.75rem;
+  min-height: 44px;
 }

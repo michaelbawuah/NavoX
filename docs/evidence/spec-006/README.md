@@ -132,4 +132,41 @@ Final source preflight: **1952 tests passed**, with three retained warnings; all
 API gates passed. The final source hashes matched the pre-run snapshot. A further
 expiry regression is included in that total. See `retrieval-validation-20260929.json`.
 The new PostgreSQL cases are now part of hosted CI; no local PostgreSQL execution
-or new-head hosted success is claimed for this retrieval batch.
+is claimed for this retrieval batch. GitHub Actions run `36538892681` completed
+successfully on exact head `c465919836845e556bae31d2b6e20ab92f052a97` across
+API quality, Web quality, Chrome extension quality, dependency security,
+evaluation/hardening and Compose integration.
+
+## Morning UI continuation — 29 September 2026
+
+The News interface now renders source-backed summaries and attributed headline labels,
+numbered facts for the latest eligible answer, and on-demand Timeline, Compare sources
+and paginated What changed views. Story/version keys reset cached detail state;
+non-ready answers do not render retained facts. Busy conversations cannot issue a
+numbered follow-up against an older displayed turn. No new external actions are added.
+
+Today, News and Subscriptions share the labeled Ask control with associated help text.
+The read-only subscription query UI uses existing registry endpoints, honors bounded
+renewal windows, distinguishes unknown prices and currencies, indicates truncated
+match lists, aborts obsolete requests and resets when the registry refreshes.
+Existing cancellation and email approval/execution paths are unchanged.
+
+Morning local gates passed: full locked API preflight (1,952 tests, three retained
+deprecation warnings); all workspace lint/typecheck/tests (180 Web tests in 24 files
+and eight extension tests); production build. Nine CSS specificity warnings remain
+(eight pre-existing plus one in the new Ask styling). No checks were weakened.
+Initial formatting and effect-dependency errors are retained in the local logs.
+
+The validation build uses the fixed opt-in NAVOX_ISOLATED_BUILD=1 output directory
+.next/spec006-check, without replacing the running preview's .next build. Next's
+generated declaration imports were restored to their pre-run values afterward;
+final declaration lint/typecheck and whitespace are checked again before publication.
+Owner dotenv reads and outbound networking were denied in the test process.
+
+The attempted standalone synthetic browser-fixture write was blocked and not retried
+or rerouted. New browser interactions, screen-reader checks and measured human task
+completion are therefore NOT claimed. UI implementation and static regressions do
+not close the original usability gate. News-specific model qualification, independent
+clustering/extraction quality, trusted evidence adjudication, authorized X, broader
+fresh-retrieval orchestration, ranking and final A–H acceptance remain outstanding.
+This remains an incomplete SPEC-006 draft; it does not authorize SPEC-007 sign-off.

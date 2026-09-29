@@ -79,6 +79,7 @@
   outline: 2px solid #8bf1d6;
   outline-offset: 3px;
 }
+.askPanel,
 .costPanel,
 .attentionPanel,
 .registry {
@@ -190,6 +191,51 @@
   color: #95a6bf;
   font-size: 0.78rem;
   line-height: 1.65;
+}
+.askPanel {
+  background:
+    radial-gradient(circle at top left, #133b3aaa, transparent 42%), #0d1728;
+}
+.askAnswer {
+  border-top: 1px solid #2a3d50;
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+.askAnswer h3 {
+  color: #e3edf8;
+  font-size: 0.92rem;
+  margin: 0 0 0.8rem;
+}
+.askList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.askList li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  border-top: 1px solid #223148;
+  padding: 0.8rem 0;
+}
+.askList li:first-child {
+  border-top: 0;
+}
+.askList li > div {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.askList strong {
+  color: #dce8f6;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+.askList span {
+  color: #8fa4bd;
+  font-size: 0.7rem;
+  line-height: 1.5;
 }
 .attentionGrid {
   display: grid;
@@ -672,6 +718,14 @@
   }
 }
 @media (max-width: 580px) {
+  .dashboard button,
+  .dialog button,
+  .linkButton,
+  .dashboard input,
+  .dialog input,
+  .dialog select {
+    min-height: 2.75rem;
+  }
   .hero {
     flex-direction: column;
     align-items: flex-start;
@@ -699,6 +753,13 @@
   .toolbar,
   .search {
     width: 100%;
+  }
+  .askList li {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .askList li button {
+    align-self: flex-start;
   }
   .dialog {
     max-height: calc(100dvh - 1rem);

@@ -42,6 +42,48 @@
   letter-spacing: 0.18em;
   font-size: 0.7rem;
 }
+.askBox {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  align-items: center;
+}
+.askBox input {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.75rem;
+  background: #0c1b19;
+  color: #effaf6;
+  border: 1px solid #35564d;
+  border-radius: 0.65rem;
+  padding: 0.75rem 0.9rem;
+  font: inherit;
+}
+.askBox input::placeholder {
+  color: #7e9990;
+}
+.askBox button {
+  min-height: 2.75rem;
+  background: #a2f2da;
+  color: #0b2727;
+  border: 1px solid #a2f2da;
+  border-radius: 0.65rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+.askBox button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.askHint {
+  grid-column: 1 / -1;
+  color: #8ea79f;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  margin: 0;
+}
 .card {
   padding: clamp(1.2rem, 3vw, 2rem);
   background: #10211f;
@@ -171,6 +213,8 @@
   white-space: nowrap;
 }
 .navigation a:focus-visible,
+.askBox input:focus-visible,
+.askBox button:focus-visible,
 .card a:focus-visible,
 .sources a:focus-visible,
 .error button:focus-visible {
@@ -187,7 +231,19 @@
   .navigation {
     gap: 0;
   }
+  .askBox {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .askBox button {
+    justify-self: start;
+  }
+  .navigation a,
+  .error button {
+    min-height: 2.75rem;
+  }
   .navigation a {
+    display: inline-flex;
+    align-items: center;
     padding: 0.7rem 0.8rem;
   }
 }

@@ -1,27 +1,99 @@
 "use client";
 
-import type { NewsAvailability, NewsVerification } from "@navox/contracts";
+import type {
+  NewsAnswer,
+  NewsAvailability,
+  NewsFreshness,
+} from "@navox/contracts";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { newsRequest, newsTime, safeNewsUrl } from "../lib/news";
-import { NavoXStatus } from "./navox-ui";
+import { NavoXAskBox, NavoXStatus } from "./navox-ui";
 import styles from "./news-chat.module.css";
 
-interface NewsAnswer {
-  id: string;
-  question: string;
-  status: "PROCESSING" | "READY" | "UNAVAILABLE" | "SOURCES_CHANGED";
-  message: string;
-  as_of: string;
-  facts: {
-    text: string;
-    source_name: string;
-    source_url: string;
-    source_id: string;
-    status: NewsVerification;
-  }[];
+const freshnessLabels: Record<NewsFreshness, string> = {
+  REALTIME: "Checked for very recent reports",
+  FRESH: "Fresh sources",
+  RECENT: "Recent sources",
+  HISTORICAL: "Historical context",
+};
+
+export function NewsAnswerCard({
+  answer,
+  canReference,
+  onReference,
+}: {
+  answer: NewsAnswer;
+  canReference: boolean;
+  onReference: (position: number) => void;
+}) {
+  return (
+    <article className={styles.answer}>
+      <h3>{answer.question}</h3>
+      <small>
+        Requested {newsTime(answer.as_of)}
+        {answer.status === "READY" && ` · ${freshnessLabels[answer.freshness]}`}
+      </small>
+      <p>{answer.message}</p>
+      {answer.retrieval_limited && answer.status === "READY" && (
+        <p className={styles.scopeNote}>
+          This answer uses a bounded set of currently connected sources.
+        </p>
+      )}
+      {answer.status === "READY" && answer.facts.length > 0 && (
+        <ol className={styles.facts} aria-label="Source-backed answer facts">
+          {answer.facts.map((fact, index) => {
+            const url = safeNewsUrl(fact.source_url);
+            const position = index + 1;
+            return (
+              <li
+                className={styles.fact}
+                key={`${fact.item_id}-${fact.status}-${fact.text}`}
+              >
+                <blockquote>{fact.text}</blockquote>
+                <div className={styles.factMeta}>
+                  <NavoXStatus status={fact.status} />
+                  {url ? (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      referrerPolicy="no-referrer"
+                    >
+                      {fact.source_name} ↗
+                    </a>
+                  ) : (
+                    <span>{fact.source_name}</span>
+                  )}
+                </div>
+                {canReference && answer.status === "READY" && (
+                  <button
+                    type="button"
+                    className={styles.referenceButton}
+                    onClick={() => onReference(position)}
+                    aria-label={`Ask a follow-up about item ${position}`}
+                  >
+                    Ask about #{position}
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </article>
+  );
+}
+
+export function referenceableTurnId(answers: NewsAnswer[]): string | undefined {
+  const latest = answers[answers.length - 1];
+  return latest?.status === "READY" ? latest.id : undefined;
 }
 
 export function NewsChat({ storyId }: { storyId?: string }) {
+  return <NewsChatSession key={storyId ?? "global"} storyId={storyId} />;
+}
+
+function NewsChatSession({ storyId }: { storyId?: string }) {
   const [available, setAvailable] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
@@ -29,6 +101,8 @@ export function NewsChat({ storyId }: { storyId?: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const pending = useRef<AbortController | null>(null);
+  const questionInput = useRef<HTMLInputElement | null>(null);
+
   useEffect(() => {
     const controller = new AbortController();
     void newsRequest<NewsAvailability>("/availability", {
@@ -73,6 +147,8 @@ export function NewsChat({ storyId }: { storyId?: string }) {
             request_id: crypto.randomUUID(),
             question: text,
             intent: storyId ? "STORY_QUESTION" : "CURRENT_NEWS",
+            freshness: "FRESH",
+            depth: "STANDARD",
           }),
         },
       );
@@ -107,6 +183,13 @@ export function NewsChat({ storyId }: { storyId?: string }) {
     }
   }
 
+  const referenceableAnswerId = referenceableTurnId(answers);
+
+  function reference(position: number) {
+    setQuestion(`Tell me more about #${position}`);
+    window.requestAnimationFrame(() => questionInput.current?.focus());
+  }
+
   if (!available) return null;
   return (
     <section className={styles.chat} aria-label="Ask NavoX about the news">
@@ -117,56 +200,27 @@ export function NewsChat({ storyId }: { storyId?: string }) {
           : "Ask about the news. Follow a question wherever it leads."}
       </p>
       {answers.map((answer) => (
-        <article key={answer.id} className={styles.answer}>
-          <h3>{answer.question}</h3>
-          <small>Sources checked {newsTime(answer.as_of)}</small>
-          <p>{answer.message}</p>
-          {answer.facts.map((fact) => {
-            const url = safeNewsUrl(fact.source_url);
-            return (
-              <div
-                className={styles.fact}
-                key={`${fact.source_id}-${fact.status}-${fact.text}`}
-              >
-                <blockquote>{fact.text}</blockquote>
-                <NavoXStatus status={fact.status} />
-                {url ? (
-                  <a
-                    href={url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    referrerPolicy="no-referrer"
-                  >
-                    {fact.source_name} ↗
-                  </a>
-                ) : (
-                  <span>{fact.source_name}</span>
-                )}
-              </div>
-            );
-          })}
-        </article>
+        <NewsAnswerCard
+          key={answer.id}
+          answer={answer}
+          canReference={!busy && answer.id === referenceableAnswerId}
+          onReference={reference}
+        />
       ))}
       {error && <p role="alert">{error}</p>}
-      <form onSubmit={ask}>
-        <label htmlFor="news-question">
-          {storyId ? "Ask about this story" : "Ask a news question"}
-        </label>
-        <div>
-          <input
-            id="news-question"
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
-            maxLength={2000}
-            placeholder="What changed, and what is still unclear?"
-            required
-            disabled={busy}
-          />
-          <button type="submit" disabled={busy || !question.trim()}>
-            Ask NavoX
-          </button>
-        </div>
-      </form>
+      <NavoXAskBox
+        id="news-question"
+        label={storyId ? "Ask about this story" : "Ask a news question"}
+        value={question}
+        placeholder="What changed, and what is still unclear?"
+        busy={busy}
+        maxLength={2000}
+        buttonLabel="Ask NavoX"
+        inputRef={questionInput}
+        onChange={setQuestion}
+        onSubmit={ask}
+        hint="Answers are grounded in the currently available NavoX news sources."
+      />
       <p role="status" className={styles.progress}>
         {busy ? "Checking the sources…" : ""}
       </p>

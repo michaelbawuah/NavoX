@@ -7,15 +7,9 @@ import type {
   NewsPreferences,
   NewsSourceOption,
   NewsStory,
-  NewsStoryUpdate,
 } from "@navox/contracts";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
-import {
-  NewsRequestError,
-  newsRequest,
-  newsTime,
-  newsUpdateLabels,
-} from "../lib/news";
+import { NewsRequestError, newsRequest, newsTime } from "../lib/news";
 import {
   NavoXCard,
   NavoXEmptyState,
@@ -28,6 +22,7 @@ import {
 } from "./navox-ui";
 import { NewsChat } from "./news-chat";
 import styles from "./news-workspace.module.css";
+import { StoryIntelligence } from "./story-intelligence";
 
 const categories: [NewsCategory, string][] = [
   ["world", "World"],
@@ -436,7 +431,9 @@ export function NewsWorkspace() {
 export function NewsStoryWorkspace({ storyId }: { storyId: string }) {
   const [story, setStory] = useState<NewsStory | null>(null);
   const [claims, setClaims] = useState<NewsClaim[]>([]);
-  const [updates, setUpdates] = useState<NewsStoryUpdate[]>([]);
+  const [availability, setAvailability] = useState<NewsAvailability | null>(
+    null,
+  );
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -449,7 +446,7 @@ export function NewsStoryWorkspace({ storyId }: { storyId: string }) {
     setError("");
     setStory(null);
     setClaims([]);
-    setUpdates([]);
+    setAvailability(null);
     void Promise.all([
       newsRequest<NewsStory>(`/stories/${request.storyId}`, {
         signal: controller.signal,
@@ -457,15 +454,15 @@ export function NewsStoryWorkspace({ storyId }: { storyId: string }) {
       newsRequest<NewsClaim[]>(`/stories/${request.storyId}/claims`, {
         signal: controller.signal,
       }),
-      newsRequest<NewsStoryUpdate[]>(`/stories/${request.storyId}/updates`, {
+      newsRequest<NewsAvailability>("/availability", {
         signal: controller.signal,
-      }),
+      }).catch(() => null),
     ])
-      .then(([item, evidence, history]) => {
+      .then(([item, evidence, available]) => {
         if (!controller.signal.aborted) {
           setStory(item);
           setClaims(evidence);
-          setUpdates(history);
+          setAvailability(available);
         }
       })
       .catch((reason) => {
@@ -549,6 +546,7 @@ export function NewsStoryWorkspace({ storyId }: { storyId: string }) {
             <p role="status" className={styles.notice}>
               {notice}
             </p>
+            <StoryIntelligence story={story} availability={availability} />
             <NewsChat storyId={storyId} />
             <section className={styles.detailSection}>
               <h2>What we know</h2>
@@ -575,21 +573,6 @@ export function NewsStoryWorkspace({ storyId }: { storyId: string }) {
               <h2>Original reporting</h2>
               <NavoXSourceList sources={story.sources} />
             </section>
-            <details className={styles.detailSection}>
-              <summary>What changed</summary>
-              <ol>
-                {updates.map((update) => (
-                  <li key={update.version}>
-                    <time dateTime={update.generated_at}>
-                      {newsTime(update.generated_at)}
-                    </time>
-                    <p>
-                      {newsUpdateLabels[update.change_kind] ?? "Story updated"}
-                    </p>
-                  </li>
-                ))}
-              </ol>
-            </details>
             <details className={styles.detailSection}>
               <summary>More about this story</summary>
               <p>Last checked {newsTime(story.retrieved_at)}.</p>
