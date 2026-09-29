@@ -147,3 +147,16 @@ async def test_summary_endpoint_reports_unavailable_without_generation(subscript
     assert missing.status_code == 404
     env.settings.news_feed_enabled = False
     assert (await env.client.get(f"/api/v1/news/stories/{story.id}/summary")).status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_trending_endpoint_returns_permitted_story_without_fake_scores(subscription_env):
+    env = subscription_env
+    story, _ = await setup_story(env)
+    response = await env.client.get("/api/v1/news/trending")
+    assert response.status_code == 200
+    result = response.json()
+    assert [row["id"] for row in result] == [str(story.id)]
+    assert "importance_score" not in result[0]
+    assert "trend_score" not in result[0]
+    assert result[0]["verification_status"] == "UNCONFIRMED"

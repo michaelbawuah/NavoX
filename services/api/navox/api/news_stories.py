@@ -16,6 +16,7 @@ from navox.db.session import get_session_factory
 from navox.news.clustering import search_terms
 from navox.news.contracts import Category, Contract, NewsError, NewsItemRead, stored_utc
 from navox.news.evidence import ClaimRead, claim_views
+from navox.news.ranking import observed_trend_signals
 from navox.news.registry import catalog
 from navox.news.research import ChangesRead, CoverageRead, TimelineRead, changes, coverage, timeline
 from navox.news.stories import StoryRead, StoryUpdate, owned_story, story_view
@@ -117,12 +118,17 @@ async def feed(
             query.order_by(NewsStory.last_updated_at.desc(), NewsStory.id).limit(100)
         )
         results = []
+        trend_keys = {}
         for story in rows:
             pref = await database.get(NewsStoryPreference, story.id)
             if (pref and pref.dismissed) or (mode == "saved" and not (pref and pref.saved)):
                 continue
             try:
-                results.append(await story_view(database, story, definitions, now=now))
+                view = await story_view(database, story, definitions, now=now)
+                results.append(view)
+                if mode == "trending":
+                    signals = await observed_trend_signals(database, story, view.sources, now=now)
+                    trend_keys[view.id] = signals.sort_key
             except NewsError:
                 continue
         if mode == "for-you":
@@ -139,8 +145,10 @@ async def feed(
                 ),
                 reverse=True,
             )
-        # Baseline lists use publication/update recency; calibrated importance/trend ranking
-        # is introduced only with its evaluation, not an invented certainty score.
+        elif mode == "trending":
+            results.sort(key=lambda story: trend_keys[story.id])
+        # Top remains recency-based until broader importance signals are evaluated.
+        # Trending uses only observed activity and source independence, never a truth score.
         return results[:50]
     except NewsError as error:
         raise news_failure(error) from None
@@ -152,6 +160,13 @@ async def top(
     account: CurrentAccountDependency, database: DatabaseSession, settings: SettingsDependency
 ) -> list[StoryRead]:
     return await feed("top", account, database, settings)
+
+
+@router.get("/trending")
+async def trending(
+    account: CurrentAccountDependency, database: DatabaseSession, settings: SettingsDependency
+) -> list[StoryRead]:
+    return await feed("trending", account, database, settings)
 
 
 @router.get("/for-you")
