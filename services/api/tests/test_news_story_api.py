@@ -69,14 +69,16 @@ async def test_feed_preferences_saves_and_revocation(subscription_env):
     assert (await env.client.get(path + "/updates?since_version=1")).json() == []
     response = await env.client.patch(
         "/api/v1/news/preferences",
-        json={"topics": ["space"], "categories": ["science"]},
+        json={"topics": ["space"], "entities": ["NASA"], "categories": ["science"]},
         headers=env.headers,
     )
     assert response.json()["topics"] == ["space"]
+    assert response.json()["entities"] == ["NASA"]
     response = await env.client.patch(
         "/api/v1/news/preferences", json={"region": "us"}, headers=env.headers
     )
     assert response.json()["topics"] == ["space"] and response.json()["region"] == "us"
+    assert response.json()["entities"] == ["NASA"]
     assert (
         await env.client.patch(
             "/api/v1/news/preferences", json={"political_profile": "inferred"}, headers=env.headers

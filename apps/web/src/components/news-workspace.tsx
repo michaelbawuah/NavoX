@@ -10,6 +10,7 @@ import type {
 } from "@navox/contracts";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { NewsRequestError, newsRequest, newsTime } from "../lib/news";
+import { parseFollowedLabels } from "../lib/news-preferences";
 import { FollowedStoryUpdates } from "./followed-story-updates";
 import {
   NavoXCard,
@@ -239,10 +240,8 @@ export function NewsWorkspace() {
         method: "PATCH",
         body: JSON.stringify({
           categories: data.getAll("category"),
-          topics: String(data.get("topics") ?? "")
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean),
+          topics: parseFollowedLabels(data.get("topics")),
+          entities: parseFollowedLabels(data.get("entities")),
         }),
       });
       setPreferences(result);
@@ -375,6 +374,20 @@ export function NewsWorkspace() {
                   />
                   <p>
                     Separate topics with commas. These choices shape For you.
+                  </p>
+                  <label htmlFor="news-entities">
+                    People, organizations and places you follow
+                  </label>
+                  <input
+                    id="news-entities"
+                    name="entities"
+                    defaultValue={preferences.entities.join(", ")}
+                    maxLength={1000}
+                    placeholder="NASA, Nvidia, Ghana, Ithaca"
+                  />
+                  <p>
+                    Add only the entities you choose. NavoX does not infer a
+                    sensitive political profile.
                   </p>
                   <button disabled={busy === "preferences"} type="submit">
                     Save interests
