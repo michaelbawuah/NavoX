@@ -369,6 +369,9 @@ class NewsConversationTurn(Base):
     # Store selections and provenance IDs only. Every display reloads current source rights.
     selection: Mapped[dict[str, object] | None] = mapped_column(JSON)
     source_snapshot: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
+    retrieval_plan: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    retrieval_metadata: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     context_digest: Mapped[str | None] = mapped_column(String(64))
     trace_id: Mapped[UUID | None] = mapped_column(Uuid)
     failure_code: Mapped[str | None] = mapped_column(String(64))

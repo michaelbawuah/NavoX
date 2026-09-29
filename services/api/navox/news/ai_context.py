@@ -158,8 +158,19 @@ class NewsContext:
                 or membership.item_revision != view.revision
             ):
                 raise ContextDenied("News story membership changed")
-            if membership is not None:
-                cluster_ids.add(membership.cluster_id)
+            if membership is None or membership.item_revision != view.revision:
+                raise ContextDenied("News story membership changed")
+            try:
+                await owned_story(
+                    database,
+                    membership.cluster_id,
+                    workspace_id=self.workspace_id,
+                    user_id=self.user_id,
+                    lock=lock,
+                )
+            except NewsError:
+                raise ContextDenied("News story is unavailable") from None
+            cluster_ids.add(membership.cluster_id)
         # Every selected claim must originate in the explicitly selected item set.
         rows = await database.scalars(
             select(NewsClaim)

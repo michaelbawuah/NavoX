@@ -78,6 +78,7 @@ ERROR_CODES = frozenset(
         "story_unavailable",
         "refresh_too_soon",
         "invalid_evidence",
+        "invalid_reference",
         "unsupported_claim",
         "stale_evidence",
         "conversation_unavailable",

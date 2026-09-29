@@ -17,6 +17,7 @@ from navox.news.clustering import search_terms
 from navox.news.contracts import Category, Contract, NewsError, NewsItemRead, stored_utc
 from navox.news.evidence import ClaimRead, claim_views
 from navox.news.registry import catalog
+from navox.news.research import ChangesRead, CoverageRead, TimelineRead, changes, coverage, timeline
 from navox.news.stories import StoryRead, StoryUpdate, owned_story, story_view
 from navox.news.synthesis import StorySummary, summary_view
 
@@ -295,3 +296,80 @@ async def story_summary(
         )
     except NewsError as error:
         raise news_failure(error) from None
+
+
+@router.get("/stories/{story_id}/timeline")
+async def story_timeline(
+    story_id: UUID,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    limit: int = Query(default=50, ge=1, le=100),
+) -> "TimelineRead":
+    require_feed(settings)
+    if not settings.news_deep_research_enabled:
+        raise HTTPException(503, "Story timelines are not available yet.")
+    try:
+        return await timeline(
+            database,
+            story_id,
+            catalog(settings),
+            workspace_id=account.workspace.id,
+            user_id=account.user.id,
+            now=datetime.now(UTC),
+            limit=limit,
+        )
+    except NewsError as error:
+        raise news_failure(error) from None
+
+
+@router.get("/stories/{story_id}/coverage")
+async def story_coverage(
+    story_id: UUID,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    limit: int = Query(default=50, ge=1, le=100),
+) -> "CoverageRead":
+    require_feed(settings)
+    if not settings.news_coverage_comparison_enabled:
+        raise HTTPException(503, "Source comparison is not available yet.")
+    try:
+        return await coverage(
+            database,
+            story_id,
+            catalog(settings),
+            workspace_id=account.workspace.id,
+            user_id=account.user.id,
+            now=datetime.now(UTC),
+            limit=limit,
+        )
+    except NewsError as error:
+        raise news_failure(error) from None
+
+
+@router.get("/stories/{story_id}/changes")
+async def story_changes(
+    story_id: UUID,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    since_version: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+) -> "ChangesRead":
+    require_feed(settings)
+    try:
+        return await changes(
+            database,
+            story_id,
+            catalog(settings),
+            workspace_id=account.workspace.id,
+            user_id=account.user.id,
+            now=datetime.now(UTC),
+            since_version=since_version,
+            limit=limit,
+        )
+    except NewsError as error:
+        raise news_failure(error) from None
+    except ValueError:
+        raise HTTPException(422, "Choose a valid story version and limit.") from None

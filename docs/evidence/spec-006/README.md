@@ -106,3 +106,30 @@ credentials or owner databases. A separate temporary PostgreSQL container is use
 for news regressions and migration upgrade/downgrade/upgrade. All safety and
 quality gates remain required, including a negative test for a missing new table.
 The old persistence-installer branch and its failures are not mixed into this result.
+
+## Unattended retrieval continuation — 29 September 2026
+
+The next batch adds bounded, owned query retrieval, explicit prior-answer numbering,
+per-turn option persistence and a single-attempt generation reservation. Source
+policies are checked before text matching; publication and cached answers recheck
+current source revisions and story availability. Timeline, source comparison and
+paginated change endpoints read existing evidence without generating new prose.
+
+This is lexical retrieval over connected records, not unrestricted web research or
+measured semantic retrieval. Stale-source refresh identifiers are prepared, but the
+automatic refresh scheduling integration is not registered in this batch. Related
+story search, calibrated trend/importance ranking and the broader product refresh
+remain open. Existing live acceptance gaps above are not waived.
+
+The 26 new retrieval/research regression cases pass in an offline process that
+cannot open the owner's environment files or make outbound connections. The first
+full preflight had 1,948 passing tests but failed formatting and whitespace due to
+an extra trailing blank line in the workflow file; it is retained as a failed run.
+That formatting issue was corrected, and source permission-before-search cases
+were added. The final full gate must be rerun for the final source tree.
+
+Final source preflight: **1952 tests passed**, with three retained warnings; all locked
+API gates passed. The final source hashes matched the pre-run snapshot. A further
+expiry regression is included in that total. See `retrieval-validation-20260929.json`.
+The new PostgreSQL cases are now part of hosted CI; no local PostgreSQL execution
+or new-head hosted success is claimed for this retrieval batch.

@@ -188,3 +188,25 @@ async def news_intelligence_activity(payload: NewsSourceWork) -> int:
         )
         published += result == "READY"
     return published
+
+
+@activity.defn
+async def prepare_news_conversation_activity(payload: NewsConversationWork) -> list[NewsSourceWork]:
+    """Return at most four already-owned sources; queries never enter Temporal history."""
+    from navox.news.conversation_retrieval import refresh_work_for_turn
+
+    settings = get_settings()
+    if not settings.news_feed_enabled or not settings.news_chat_enabled:
+        return []
+    async with get_session_factory()() as database:
+        try:
+            return await refresh_work_for_turn(
+                database,
+                settings,
+                UUID(payload.turn_id),
+                workspace_id=UUID(payload.workspace_id),
+                user_id=UUID(payload.user_id),
+                now=datetime.now(UTC),
+            )
+        except (NewsError, ValueError):
+            return []

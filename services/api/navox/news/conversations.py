@@ -4,8 +4,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID
 
-from pydantic import Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from navox.ai.configured import build_runtime
@@ -15,27 +14,20 @@ from navox.ai.features import configured_secrets
 from navox.ai.runtime import GatewayUnavailable
 from navox.core.settings import Settings
 from navox.db.models import User, WorkspaceMembership
-from navox.db.news import NewsClaim, NewsConversation, NewsConversationTurn, NewsItem, NewsStoryItem
+from navox.db.news import NewsClaim, NewsConversation, NewsConversationTurn, NewsStoryItem
 from navox.news.ai_context import NewsContext, run_news_task
 from navox.news.ai_contracts import CONVERSATION, NewsSelection
-from navox.news.clustering import search_terms
 from navox.news.contracts import Contract, NewsError, Verification, stored_utc
+from navox.news.conversation_retrieval import retrieve_for_turn, turn_plan
 from navox.news.evidence import evaluate_claim, permitted_summary_item, quote_at
+from navox.news.questions import Question as Question
 from navox.news.registry import catalog
+from navox.news.retrieval import Freshness
 from navox.news.stories import owned_story
-
-Intent = Literal[
-    "CURRENT_NEWS", "STORY_QUESTION", "VERIFY_CLAIM", "TIMELINE", "BACKGROUND", "WHATS_CHANGED"
-]
-
-
-class Question(Contract):
-    request_id: UUID
-    question: str = Field(min_length=1, max_length=2000)
-    intent: Intent = "CURRENT_NEWS"
 
 
 class AnswerFact(Contract):
+    item_id: UUID
     text: str
     source_name: str
     source_url: str
@@ -52,6 +44,9 @@ class AnswerRead(Contract):
     facts: tuple[AnswerFact, ...] = ()
     as_of: datetime
     actions_executed: Literal[False] = False
+    retrieval_limited: bool = True
+    source_scope: Literal["owned_permitted_items"] = "owned_permitted_items"
+    freshness: Freshness = Freshness.FRESH
 
 
 async def owned_conversation(
@@ -129,7 +124,7 @@ async def begin_question(
         )
     )
     if existing is not None:
-        if existing.question != question.question or existing.intent != question.intent:
+        if existing.question != question.question or turn_plan(existing) != question.plan:
             raise NewsError("source_changed")
         return existing, False
     pending = await database.scalar(
@@ -165,6 +160,8 @@ async def begin_question(
         intent=question.intent,
         status="PROCESSING",
         source_snapshot={},
+        retrieval_plan=question.plan.model_dump(mode="json"),
+        retrieval_metadata={},
         created_at=now,
         expires_at=now + timedelta(days=7),
     )
@@ -172,50 +169,6 @@ async def begin_question(
     database.add(row)
     await database.flush()
     return row, True
-
-
-async def retrieve(
-    database: AsyncSession,
-    conversation: NewsConversation,
-    turn: NewsConversationTurn,
-    *,
-    now: datetime,
-) -> tuple[tuple[UUID, ...], tuple[str, ...]]:
-    prior = list(
-        await database.scalars(
-            select(NewsConversationTurn)
-            .where(
-                NewsConversationTurn.conversation_id == conversation.id,
-                NewsConversationTurn.sequence < turn.sequence,
-                NewsConversationTurn.expires_at > now,
-            )
-            .order_by(NewsConversationTurn.sequence.desc())
-            .limit(4)
-        )
-    )
-    previous_ids = list(prior[0].source_snapshot) if prior else []
-    query = select(NewsItem).where(
-        NewsItem.workspace_id == conversation.workspace_id,
-        NewsItem.user_id == conversation.user_id,
-        NewsItem.expires_at > now,
-    )
-    if conversation.story_id is not None:
-        query = query.join(NewsStoryItem, NewsStoryItem.news_item_id == NewsItem.id).where(
-            NewsStoryItem.cluster_id == conversation.story_id
-        )
-    rows = list(
-        await database.scalars(query.order_by(NewsItem.published_at.desc(), NewsItem.id).limit(200))
-    )
-    terms = search_terms(turn.question)
-    rows.sort(
-        key=lambda item: (
-            str(item.id) in previous_ids,
-            len(search_terms(item.headline + " " + (item.description or "")) & terms),
-            stored_utc(item.published_at),
-        ),
-        reverse=True,
-    )
-    return tuple(item.id for item in rows[:12]), tuple(item.question for item in reversed(prior))
 
 
 async def finish_question(
@@ -228,7 +181,11 @@ async def finish_question(
 ) -> None:
     async with factory() as database:
         turn = await database.get(NewsConversationTurn, turn_id)
-        if turn is None or turn.status != "PROCESSING":
+        if (
+            turn is None
+            or turn.status != "PROCESSING"
+            or stored_utc(turn.expires_at) <= datetime.now(UTC)
+        ):
             return
         conversation = await owned_conversation(
             database,
@@ -236,26 +193,69 @@ async def finish_question(
             workspace_id=workspace_id,
             user_id=user_id,
             now=datetime.now(UTC),
+            lock=True,
         )
-        item_ids, previous = await retrieve(database, conversation, turn, now=datetime.now(UTC))
-        question, intent = turn.question, turn.intent
+        await database.refresh(turn)
+        if turn.status != "PROCESSING" or turn.processing_started_at is not None:
+            return
+        # Reserve exactly one model attempt even when a workflow is delivered twice.
+        reserved = await database.scalar(
+            update(NewsConversationTurn)
+            .where(
+                NewsConversationTurn.id == turn.id,
+                NewsConversationTurn.processing_started_at.is_(None),
+                NewsConversationTurn.status == "PROCESSING",
+            )
+            .values(processing_started_at=datetime.now(UTC))
+            .returning(NewsConversationTurn.id)
+        )
+        if reserved is None:
+            return
+        await database.commit()
     result = None
     selection = None
     snapshot_digest = None
+    context: NewsContext | None = None
     snapshot: dict[str, int] = {}
+    metadata: dict[str, object] = {}
     failure = "ai_unavailable"
     try:
-        if not item_ids:
-            raise NewsError("item_unavailable")
+        async with factory() as database:
+            turn = await database.get(NewsConversationTurn, turn_id)
+            if turn is None or turn.status != "PROCESSING":
+                return
+            conversation = await owned_conversation(
+                database,
+                turn.conversation_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                now=datetime.now(UTC),
+            )
+            retrieved, previous = await retrieve_for_turn(
+                database, conversation, turn, settings, now=datetime.now(UTC)
+            )
+            question, plan, story_id = turn.question, turn_plan(turn), conversation.story_id
+        metadata = {
+            "examined": retrieved.examined,
+            "limited": retrieved.limited,
+            "scope": retrieved.scope,
+            "resolved_reference": retrieved.resolved_reference,
+            "ordered_item_ids": [str(item.id) for item in retrieved.items],
+        }
+        if not retrieved.items:
+            raise NewsError(
+                "stale_evidence" if retrieved.refresh_source_ids else "item_unavailable"
+            )
         context = NewsContext(
             factory,
             settings,
             workspace_id=workspace_id,
             user_id=user_id,
-            item_ids=item_ids,
+            item_ids=tuple(item.id for item in retrieved.items),
             question=question,
             previous_questions=previous,
-            freshness_seconds=86400 if intent in {"TIMELINE", "BACKGROUND"} else 1800,
+            freshness_seconds=plan.freshness_seconds,
+            story_id=story_id,
         )
         runtime = await build_runtime(settings, factory)
         result, proposal, snapshot_digest = await run_news_task(runtime, context, CONVERSATION)
@@ -263,6 +263,9 @@ async def finish_question(
             raise NewsError("invalid_evidence")
         selection = proposal.model_dump(mode="json")
         snapshot = {str(item.id): item.revision for item in context.initial.items}
+    except NewsError as error:
+        failure = error.code
+        selection = None
     except (
         ContextDenied,
         AIProviderNotConfigured,
@@ -270,11 +273,21 @@ async def finish_question(
         PermissionError,
         ValueError,
     ):
-        # Detailed provider/source text never becomes a durable conversation error.
-        pass
+        selection = None
     async with factory() as database:
-        turn = await database.get(NewsConversationTurn, turn_id)
-        if turn is None or turn.status != "PROCESSING":
+        if context is not None and selection is not None:
+            try:
+                current = await context.read_in_session(database, lock=True)
+                if context.initial is None or current != context.initial:
+                    raise NewsError("source_changed")
+            except (ContextDenied, NewsError, ValueError):
+                selection, failure = None, "source_changed"
+        turn = await database.get(NewsConversationTurn, turn_id, populate_existing=True)
+        if (
+            turn is None
+            or turn.status != "PROCESSING"
+            or stored_utc(turn.expires_at) <= datetime.now(UTC)
+        ):
             return
         await owned_conversation(
             database,
@@ -285,15 +298,12 @@ async def finish_question(
             lock=True,
         )
         turn.status = "READY" if result is not None and selection is not None else "UNAVAILABLE"
-        turn.selection, turn.source_snapshot, turn.context_digest = (
-            selection,
-            snapshot,
-            snapshot_digest,
-        )
-        turn.trace_id, turn.failure_code = (
-            result.trace_id if result else None,
-            None if selection is not None else failure,
-        )
+        turn.selection = selection
+        turn.source_snapshot = snapshot if selection is not None else {}
+        turn.context_digest = snapshot_digest if selection is not None else None
+        turn.retrieval_metadata = metadata
+        turn.trace_id = result.trace_id if result else None
+        turn.failure_code = None if selection is not None else failure
         await database.commit()
 
 
@@ -310,6 +320,8 @@ async def answer_view(
         sequence=turn.sequence,
         question=turn.question,
         as_of=stored_utc(turn.created_at),
+        retrieval_limited=bool((turn.retrieval_metadata or {}).get("limited", True)),
+        freshness=turn_plan(turn).freshness,
     )
     if turn.conversation_id != conversation.id or stored_utc(turn.expires_at) <= now:
         raise NewsError("conversation_unavailable")
@@ -324,11 +336,7 @@ async def answer_view(
             )
         )
     try:
-        age_limit = (
-            timedelta(days=1)
-            if turn.intent in {"TIMELINE", "BACKGROUND"}
-            else timedelta(minutes=30)
-        )
+        age_limit = timedelta(seconds=turn_plan(turn).freshness_seconds)
         if now - stored_utc(turn.created_at) > age_limit:
             raise NewsError("stale_evidence")
         definitions, items = catalog(settings), {}
@@ -341,8 +349,17 @@ async def answer_view(
                 user_id=conversation.user_id,
                 now=now,
             )
-            if item.revision != revision:
+            if item.revision != revision or item.last_observed_at < now - age_limit:
                 raise NewsError("stale_evidence")
+            membership = await database.get(NewsStoryItem, item.id)
+            if membership is None or membership.item_revision != item.revision:
+                raise NewsError("stale_evidence")
+            await owned_story(
+                database,
+                membership.cluster_id,
+                workspace_id=conversation.workspace_id,
+                user_id=conversation.user_id,
+            )
             items[item.id] = item
         selection = NewsSelection.model_validate(turn.selection)
         facts = []
@@ -356,10 +373,17 @@ async def answer_view(
             )
             if claim is None or claim.origin_item_id not in items:
                 raise NewsError("stale_evidence")
-            view = await evaluate_claim(database, claim, definitions, now=now)
+            view = await evaluate_claim(
+                database,
+                claim,
+                definitions,
+                now=now,
+                freshness_seconds=turn_plan(turn).freshness_seconds,
+            )
             source = items[claim.origin_item_id]
             facts.append(
                 AnswerFact(
+                    item_id=source.id,
                     text=view.text,
                     source_name=source.source_name,
                     source_url=source.canonical_url,
@@ -371,6 +395,7 @@ async def answer_view(
             source = items[excerpt.item_id]
             facts.append(
                 AnswerFact(
+                    item_id=source.id,
                     text=quote_at(source, excerpt),
                     source_name=source.source_name,
                     source_url=source.canonical_url,
@@ -383,6 +408,8 @@ async def answer_view(
             if selection.insufficient_context
             else "Here is what the sources report."
         )
+        if bool((turn.retrieval_metadata or {}).get("limited", True)):
+            message += " This is a bounded selection from your connected sources."
         unique = {(fact.source_id, fact.text, fact.status): fact for fact in facts}
         return AnswerRead.model_validate(
             base | dict(status="READY", message=message, facts=tuple(unique.values()))
