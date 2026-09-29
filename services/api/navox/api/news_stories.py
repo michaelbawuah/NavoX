@@ -12,11 +12,13 @@ from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDe
 from navox.api.connector_management import require_origin
 from navox.api.news import news_failure, require_feed
 from navox.db.news import NewsPreference, NewsStory, NewsStoryPreference, NewsStoryVersion
+from navox.db.session import get_session_factory
 from navox.news.clustering import search_terms
 from navox.news.contracts import Category, Contract, NewsError, NewsItemRead, stored_utc
 from navox.news.evidence import ClaimRead, claim_views
 from navox.news.registry import catalog
 from navox.news.stories import StoryRead, StoryUpdate, owned_story, story_view
+from navox.news.synthesis import StorySummary, summary_view
 
 router = APIRouter(prefix="/news", tags=["news"])
 
@@ -271,3 +273,25 @@ async def story_preference(
     setattr(row, field, command.enabled)
     await database.commit()
     return {"saved": row.saved, "dismissed": row.dismissed, "followed": row.followed}
+
+
+@router.get("/stories/{story_id}/summary")
+async def story_summary(
+    story_id: UUID,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> StorySummary:
+    require_feed(settings)
+    try:
+        return await summary_view(
+            database,
+            get_session_factory(),
+            settings,
+            story_id,
+            workspace_id=account.workspace.id,
+            user_id=account.user.id,
+            now=datetime.now(UTC),
+        )
+    except NewsError as error:
+        raise news_failure(error) from None

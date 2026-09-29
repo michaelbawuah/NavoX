@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     # News is opt-in. Only deployment-reviewed definitions can choose endpoints/rights.
     news_feed_enabled: bool = False
     news_chat_enabled: bool = False
+    news_intelligence_enabled: bool = False
     news_x_trends_enabled: bool = False
     news_deep_research_enabled: bool = False
     news_coverage_comparison_enabled: bool = False

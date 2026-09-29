@@ -132,3 +132,18 @@ async def test_news_cannot_set_verification_or_access_other_owner(subscription_e
     assert (await env.client.get(path + "/updates")).status_code == 404
     assert (await env.client.get("/api/v1/news/preferences")).json()["topics"] == []
     assert (await env.client.get("/api/v1/news/top")).json() == []
+
+
+@pytest.mark.asyncio
+async def test_summary_endpoint_reports_unavailable_without_generation(subscription_env):
+    env = subscription_env
+    story, _ = await setup_story(env)
+    response = await env.client.get(f"/api/v1/news/stories/{story.id}/summary")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["status"] == "UNAVAILABLE" and result["sections"] == []
+    assert result["actions_executed"] is False
+    missing = await env.client.get(f"/api/v1/news/stories/{uuid4()}/summary")
+    assert missing.status_code == 404
+    env.settings.news_feed_enabled = False
+    assert (await env.client.get(f"/api/v1/news/stories/{story.id}/summary")).status_code == 503

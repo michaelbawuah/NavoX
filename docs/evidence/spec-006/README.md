@@ -65,9 +65,11 @@ claim-extraction, clustering, conversational quality or usability thresholds.
    current deployed path performs exact deduplication only. Semantic clustering
    recall/precision and material extraction precision have not been measured.
 2. **Automated intelligence pipeline and qualified synthesis.** News prompt/schema
-   artifacts and evidence admission are implemented; automatic extraction,
-   verified evidence assessment and synthesis publication still need end-to-end
-   workflow wiring and news-specific provider qualification/canary evidence.
+   artifacts and evidence admission are implemented. The follow-up adds a default-off
+   background extraction/synthesis coordinator, transactional publication checks and
+   a read-only summary endpoint. Trusted automatic evidence adjudication, consumer
+   summary integration and news-specific provider qualification/canary evidence
+   remain outstanding; authored provider fixtures are not live acceptance.
 3. **X integration and acceptance.** The owner confirmed there is no authorized
    X API access. No X credentials, adapter, live feed or acceptance evidence is
    claimed. X trends remains unavailable; social popularity never establishes truth.
@@ -88,3 +90,19 @@ claim-extraction, clustering, conversational quality or usability thresholds.
 No live provider qualification was performed for SPEC-006. The SPEC-005 routing,
 shadow, excluded-provider settings, controlled-send evidence and extraction failure
 were not changed. No email, calendar or subscription action was executed.
+
+
+## Follow-up implementation: clustering evaluation and background intelligence
+
+The continuation from `13f3152` preserves the three unfinished local clustering files
+and completes their offline regression coverage. See
+`../../architecture/spec-006-intelligence-pipeline.md` for the exact boundaries.
+A candidate policy or a passing authored fixture is not a production qualification.
+The new workflow remains disabled by default and uses the existing task-specific
+gateway qualification gate; no new provider evidence or source authorization is created.
+
+The local changes are tested in an isolated checkout without copied `.env` files,
+credentials or owner databases. A separate temporary PostgreSQL container is used
+for news regressions and migration upgrade/downgrade/upgrade. All safety and
+quality gates remain required, including a negative test for a missing new table.
+The old persistence-installer branch and its failures are not mixed into this result.

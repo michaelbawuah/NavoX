@@ -11,6 +11,7 @@ with workflow.unsafe.imports_passed_through():
     from navox.news.activities import (
         ingest_news_source_activity,
         news_conversation_activity,
+        news_intelligence_activity,
         news_sources_activity,
     )
     from navox.news.jobs import NewsConversationWork, NewsSourceWork, NewsWorkResult
@@ -32,12 +33,25 @@ class NewsConversationRefreshWorkflow:
 class NewsSourceIngestionWorkflow:
     @workflow.run
     async def run(self, payload: NewsSourceWork) -> NewsWorkResult:
-        return await workflow.execute_activity(
+        result = await workflow.execute_activity(
             ingest_news_source_activity,
             payload,
             start_to_close_timeout=timedelta(minutes=2),
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
+        if result.status == "COMPLETED" and workflow.patched("news-intelligence-pipeline-v1"):
+            try:
+                await workflow.execute_activity(
+                    news_intelligence_activity,
+                    payload,
+                    start_to_close_timeout=timedelta(minutes=30),
+                    retry_policy=RetryPolicy(maximum_attempts=1),
+                )
+            except ActivityError as error:
+                if is_cancelled_exception(error):
+                    raise
+                workflow.logger.warning("News intelligence remains unavailable")
+        return result
 
 
 async def reconcile_page(sources: list[NewsSourceWork]) -> None:

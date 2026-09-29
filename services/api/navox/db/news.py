@@ -374,3 +374,34 @@ class NewsConversationTurn(Base):
     failure_code: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class NewsIntelligenceRun(Base):
+    __tablename__ = "news_intelligence_runs"
+    __table_args__ = (
+        UniqueConstraint("cluster_id", "base_version", name="uq_news_intelligence_version"),
+        ForeignKeyConstraint(
+            ["cluster_id", "workspace_id", "user_id"],
+            [
+                "news_story_clusters.id",
+                "news_story_clusters.workspace_id",
+                "news_story_clusters.user_id",
+            ],
+            ondelete="CASCADE",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    cluster_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid)
+    base_version: Mapped[int] = mapped_column(Integer)
+    result_version: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(32))
+    # Only selections, revisions and trace IDs; never a copied article or generated prose.
+    selection: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    source_snapshot: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
+    claim_snapshot: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
+    trace_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    failure_code: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

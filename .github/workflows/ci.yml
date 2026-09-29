@@ -130,7 +130,7 @@ jobs:
         working-directory: services/api
       - name: Verify required schema tables
         run: |
-          for table in users workspaces workspace_memberships plans plan_steps plan_sources actions approvals workflow_refs audit_events proactive_preferences proactive_signals briefing_snapshots people person_identities person_identity_sources operational_observations observation_evidence intelligence_feedback intelligence_source_receipts gmail_sync_plans connector_definitions connector_connections connector_resources connector_subscriptions connector_event_receipts connector_sync_runs connector_sync_receipts connector_import_snapshots merchants merchant_aliases recurring_obligations recurring_obligation_evidence obligation_price_history cancellation_attempts cancellation_evidence subscription_events ai_registry_revisions ai_registry_state ai_providers ai_models ai_model_capabilities ai_profiles ai_profile_assignments ai_prompts ai_schemas ai_routing_policies ai_provider_health ai_evaluation_runs ai_task_runs communication_drafts communication_draft_versions assistant_sessions assistant_turns news_sources news_content_rights news_source_feeds news_items news_ingestion_receipts news_story_clusters news_story_items news_claims news_claim_evidence news_story_versions news_story_preferences news_preferences news_conversations news_conversation_turns; do
+          for table in users workspaces workspace_memberships plans plan_steps plan_sources actions approvals workflow_refs audit_events proactive_preferences proactive_signals briefing_snapshots people person_identities person_identity_sources operational_observations observation_evidence intelligence_feedback intelligence_source_receipts gmail_sync_plans connector_definitions connector_connections connector_resources connector_subscriptions connector_event_receipts connector_sync_runs connector_sync_receipts connector_import_snapshots merchants merchant_aliases recurring_obligations recurring_obligation_evidence obligation_price_history cancellation_attempts cancellation_evidence subscription_events ai_registry_revisions ai_registry_state ai_providers ai_models ai_model_capabilities ai_profiles ai_profile_assignments ai_prompts ai_schemas ai_routing_policies ai_provider_health ai_evaluation_runs ai_task_runs communication_drafts communication_draft_versions assistant_sessions assistant_turns news_sources news_content_rights news_source_feeds news_items news_ingestion_receipts news_story_clusters news_story_items news_claims news_claim_evidence news_story_versions news_story_preferences news_preferences news_conversations news_conversation_turns news_intelligence_runs; do
             grep -F "CREATE TABLE $table" /tmp/navox-schema.sql
           done
           grep -F "client_type" /tmp/navox-schema.sql
@@ -165,7 +165,7 @@ jobs:
           tests/test_ai_operational_domains.py tests/test_ai_readiness.py
           tests/test_news_foundation.py tests/test_news_api.py tests/test_news_jobs.py
           tests/test_news_stories.py tests/test_news_story_api.py
-          tests/test_news_conversations.py tests/test_news_conversation_api.py
+          tests/test_news_conversations.py tests/test_news_intelligence.py tests/test_news_conversation_api.py
 
   dependency-security:
     name: Dependency security

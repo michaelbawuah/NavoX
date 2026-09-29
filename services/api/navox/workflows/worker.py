@@ -30,6 +30,7 @@ from navox.intelligence.activities import (
 from navox.news.activities import (
     ingest_news_source_activity,
     news_conversation_activity,
+    news_intelligence_activity,
     news_sources_activity,
 )
 from navox.proactive.activities import (
@@ -131,6 +132,7 @@ async def main() -> None:
         ],
         activities=[
             news_conversation_activity,
+            news_intelligence_activity,
             news_sources_activity,
             ingest_news_source_activity,
             reevaluate_subscription_activity,

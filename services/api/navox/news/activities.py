@@ -4,12 +4,12 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import httpx
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, exists, or_, select, update
 from temporalio import activity
 
 from navox.core.settings import get_settings
 from navox.db.models import User, WorkspaceMembership
-from navox.db.news import NewsConversation, NewsConversationTurn, NewsSource
+from navox.db.news import NewsConversation, NewsConversationTurn, NewsIntelligenceRun, NewsSource
 from navox.db.session import get_session_factory
 from navox.news.contracts import NewsError
 from navox.news.ingestion import ingest_source, purge_unavailable
@@ -39,6 +39,21 @@ async def news_sources_activity(after: str | None) -> NewsSourcePage:
                     NewsConversationTurn.created_at < now - timedelta(minutes=5),
                 )
                 .values(status="UNAVAILABLE", failure_code="news_unavailable")
+            )
+            await database.execute(
+                update(NewsIntelligenceRun)
+                .where(
+                    NewsIntelligenceRun.status == "PROCESSING",
+                    NewsIntelligenceRun.created_at < now - timedelta(minutes=10),
+                )
+                .values(status="UNAVAILABLE", failure_code="ai_unavailable")
+            )
+            await database.execute(
+                update(NewsIntelligenceRun)
+                .where(
+                    NewsIntelligenceRun.expires_at <= now,
+                )
+                .values(selection=None, claim_snapshot={})
             )
             await database.commit()
         query = select(NewsSource).order_by(NewsSource.id).limit(PAGE_SIZE)
@@ -122,3 +137,54 @@ async def ingest_news_source_activity(payload: NewsSourceWork) -> NewsWorkResult
             result = NewsWorkResult(error.code, purged_count=purged)
         await database.commit()
         return result
+
+
+@activity.defn
+async def news_intelligence_activity(payload: NewsSourceWork) -> int:
+    """Spend nothing unless separately enabled; source work contains only identifiers."""
+    from navox.db.news import NewsStory, NewsStoryItem
+    from navox.news.intelligence import run_story_intelligence
+
+    settings, factory = get_settings(), get_session_factory()
+    if not settings.news_feed_enabled or not settings.news_intelligence_enabled:
+        return 0
+    workspace_id, user_id, source_id = (
+        UUID(payload.workspace_id),
+        UUID(payload.user_id),
+        UUID(payload.source_id),
+    )
+    from navox.db.news import NewsItem
+
+    async with factory() as database:
+        identifiers = list(
+            await database.scalars(
+                select(NewsStoryItem.cluster_id)
+                .join(NewsItem, NewsItem.id == NewsStoryItem.news_item_id)
+                .join(NewsStory, NewsStory.id == NewsStoryItem.cluster_id)
+                .where(
+                    NewsItem.source_id == source_id,
+                    NewsItem.workspace_id == workspace_id,
+                    NewsItem.user_id == user_id,
+                    NewsStory.suppressed.is_(False),
+                    ~exists(
+                        select(NewsIntelligenceRun.id).where(
+                            NewsIntelligenceRun.cluster_id == NewsStory.id,
+                            or_(
+                                NewsIntelligenceRun.base_version == NewsStory.version,
+                                NewsIntelligenceRun.result_version == NewsStory.version,
+                            ),
+                        )
+                    ),
+                )
+                .distinct()
+                .order_by(NewsStoryItem.cluster_id)
+                .limit(4)
+            )
+        )
+    published = 0
+    for identifier in identifiers:
+        result = await run_story_intelligence(
+            factory, settings, identifier, workspace_id=workspace_id, user_id=user_id
+        )
+        published += result == "READY"
+    return published
