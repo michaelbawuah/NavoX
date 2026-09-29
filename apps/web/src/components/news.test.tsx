@@ -239,8 +239,10 @@ describe("News conversational and research UI", () => {
           feed: true,
           chat: true,
           x_trends: false,
-          deep_research: true,
-          coverage_comparison: true,
+          deep_research: false,
+          coverage_comparison: false,
+          timeline: true,
+          source_comparison: true,
         },
       }),
     );

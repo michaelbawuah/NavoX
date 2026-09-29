@@ -55,6 +55,9 @@ export interface NewsAvailability {
   x_trends: boolean;
   deep_research: boolean;
   coverage_comparison: boolean;
+  /** Bounded read-only views; not a promise of complete Deep Research. */
+  timeline?: boolean;
+  source_comparison?: boolean;
 }
 
 export interface NewsSourceOption {

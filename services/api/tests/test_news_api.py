@@ -114,3 +114,34 @@ async def test_unknown_source_is_not_a_network_proxy(subscription_env):
         headers=env.headers,
     )
     assert result.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "feed,timeline,comparison",
+    [
+        (False, True, True),
+        (True, False, False),
+        (True, True, False),
+        (True, False, True),
+        (True, True, True),
+    ],
+)
+async def test_availability_separates_bounded_views_from_reserved_research(
+    subscription_env, feed, timeline, comparison
+):
+    env = subscription_env
+    env.settings.news_feed_enabled = feed
+    env.settings.news_deep_research_enabled = timeline
+    env.settings.news_coverage_comparison_enabled = comparison
+    env.settings.news_x_trends_enabled = True
+    response = await env.client.get("/api/v1/news/availability")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["timeline"] is (feed and timeline)
+    assert result["source_comparison"] is (feed and comparison)
+    assert result["deep_research"] is False
+    assert result["coverage_comparison"] is False
+    assert result["x_trends"] is False
+    await env.client.post("/api/v1/auth/logout", headers=env.headers)
+    assert (await env.client.get("/api/v1/news/availability")).status_code == 401

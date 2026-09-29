@@ -149,7 +149,7 @@ type StoryIntelligenceProps = {
 
 export function StoryIntelligence(props: StoryIntelligenceProps) {
   const { story, availability } = props;
-  const scope = `${story.id}:${story.version}:${story.retrieved_at}:${availability?.deep_research}:${availability?.coverage_comparison}`;
+  const scope = `${story.id}:${story.version}:${story.retrieved_at}:${availability?.timeline}:${availability?.source_comparison}`;
   return <StoryIntelligenceScope key={scope} {...props} />;
 }
 
@@ -195,7 +195,7 @@ function StoryIntelligenceScope({
           stay visible.
         </p>
 
-        {availability?.deep_research && (
+        {availability?.timeline && (
           <details
             open={timeline.open}
             onToggle={(event) => timeline.setOpen(event.currentTarget.open)}
@@ -242,7 +242,7 @@ function StoryIntelligenceScope({
           </details>
         )}
 
-        {availability?.coverage_comparison && (
+        {availability?.source_comparison && (
           <details
             open={coverage.open}
             onToggle={(event) => coverage.setOpen(event.currentTarget.open)}

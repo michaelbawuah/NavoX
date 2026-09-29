@@ -256,7 +256,7 @@ async def story_preference(
 ) -> dict[str, bool]:
     require_origin(request, settings.web_origin)
     await story_detail(story_id, account, database, settings)
-    await owned_story(
+    story = await owned_story(
         database, story_id, workspace_id=account.workspace.id, user_id=account.user.id, lock=True
     )
     row = await database.get(NewsStoryPreference, story_id)
@@ -271,6 +271,11 @@ async def story_preference(
         )
         database.add(row)
     field = {"save": "saved", "dismiss": "dismissed", "follow": "followed"}[operation]
+    if operation == "follow":
+        if command.enabled and not row.followed:
+            row.last_read_version = story.version
+        elif not command.enabled:
+            row.last_read_version = None
     setattr(row, field, command.enabled)
     await database.commit()
     return {"saved": row.saved, "dismissed": row.dismissed, "followed": row.followed}

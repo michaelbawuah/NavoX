@@ -49,6 +49,10 @@ async def availability(
         "x_trends": False,
         "deep_research": False,
         "coverage_comparison": False,
+        # These bounded read-only views are implemented; broader research remains reserved.
+        "timeline": settings.news_feed_enabled and settings.news_deep_research_enabled,
+        "source_comparison": settings.news_feed_enabled
+        and settings.news_coverage_comparison_enabled,
     }
 
 

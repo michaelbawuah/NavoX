@@ -10,6 +10,7 @@ import type {
 } from "@navox/contracts";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { NewsRequestError, newsRequest, newsTime } from "../lib/news";
+import { FollowedStoryUpdates } from "./followed-story-updates";
 import {
   NavoXCard,
   NavoXEmptyState,
@@ -338,6 +339,12 @@ export function NewsWorkspace() {
               </NavoXEmptyState>
             ))}
           <section className={styles.settings} aria-label="Your news settings">
+            <details>
+              <summary>Stories you follow</summary>
+              {!loading && (
+                <FollowedStoryUpdates refreshing={loading || busy !== null} />
+              )}
+            </details>
             <details>
               <summary>Your interests</summary>
               {preferences && (
