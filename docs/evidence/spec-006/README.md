@@ -65,21 +65,25 @@ claim-extraction, clustering, conversational quality or usability thresholds.
    current deployed path performs exact deduplication only. Semantic clustering
    recall/precision and material extraction precision have not been measured.
 2. **Automated intelligence pipeline and qualified synthesis.** News prompt/schema
-   artifacts and evidence admission are implemented. The follow-up adds a default-off
-   background extraction/synthesis coordinator, transactional publication checks and
-   a read-only summary endpoint. Trusted automatic evidence adjudication, consumer
-   summary integration and news-specific provider qualification/canary evidence
-   remain outstanding; authored provider fixtures are not live acceptance.
+   artifacts, evidence admission, a default-off background extraction/synthesis
+   coordinator, transactional publication checks, a read-only summary endpoint and
+   consumer summary integration are implemented. Trusted automatic evidence
+   adjudication and news-specific provider qualification/canary evidence remain
+   outstanding; authored provider fixtures are not live acceptance.
 3. **X integration and acceptance.** The owner confirmed there is no authorized
    X API access. No X credentials, adapter, live feed or acceptance evidence is
    claimed. X trends remains unavailable; social popularity never establishes truth.
-4. **Complete news retrieval/deep intelligence.** Current conversations use owned
-   permitted items and reject stale context. Query-driven authorized retrieval,
-   refresh orchestration, deeper research, timelines, documented coverage comparison,
-   related-story retrieval and measured follow-up continuity remain incomplete.
-5. **Ranking and full personalization.** Current feeds are recency ordered, with
-   explicit category/topic preferences. Separate calibrated importance/trend/relevance
-   ranking and material follow notifications remain incomplete.
+4. **Complete news retrieval/deep intelligence.** Bounded permission-before-query
+   lexical retrieval, freshness checks, numbered follow-ups, timelines, documented
+   source comparison and paginated changes are implemented. Refresh orchestration,
+   related-story retrieval, broader research and measured follow-up continuity remain
+   incomplete. These read-only views do not establish unrestricted or semantic research.
+5. **Ranking and full personalization.** Explicit category/topic/entity preferences,
+   saves/follows, a material followed-story update inbox and an observed-activity
+   trending API are implemented. Trending conversation retrieval is locally reviewed
+   below. Separate calibrated importance/trend/relevance ranking remains incomplete;
+   observed activity is neither importance nor truth. The web feed has no dedicated
+   Trending tab, and the update inbox does not establish external notifications.
 6. **Today/Subscriptions simplification and measured accessibility/usability.**
    Shared navigation is implemented. The full requested experience refresh and
    actual keyboard, screen-reader, mobile and >=90% unassisted usability evidence
@@ -170,3 +174,60 @@ not close the original usability gate. News-specific model qualification, indepe
 clustering/extraction quality, trusted evidence adjudication, authorized X, broader
 fresh-retrieval orchestration, ranking and final A–H acceptance remain outstanding.
 This remains an incomplete SPEC-006 draft; it does not authorize SPEC-007 sign-off.
+
+## Trending retrieval continuation — 29 September 2026
+
+The original eleven-page specification was read again from the owner's PDF and its
+SHA-256 verified as
+`f0c23c289d01440059785494249bd9d4113f2fed746ed69ab6d6813615b3e27c`.
+The mandatory-work list above now reflects newer implementation. Earlier sections
+retain their historical test counts, failures and limitations.
+
+| Work | Implemented | Tested / evidence | Publication | Accepted |
+| --- | --- | --- | --- | --- |
+| Followed-story material updates and bounded research views (`b584dde`) | Yes | Authored tests; baseline hosted checks | Committed and pushed in draft PR #21 | Full-spec acceptance open |
+| Observed-activity trending feed (`e697c78`) | API | Authored tests; baseline hosted checks | Committed and pushed in draft PR #21 | Calibration and end-to-end acceptance open |
+| Explicit entity follows (`9b36ee4`) | Yes | Authored tests; baseline hosted checks | Committed and pushed in draft PR #21 | Measured personalization acceptance open |
+| Trending retrieval patch (published 29 September 2026) | Yes | 49 retrieval/ranking tests, 163 News tests, full 2,024-test API gate | Committed and pushed on `spec-006-news-intelligence`; PR #21 stays draft | Astra local patch review accepted; hosted checkpoint and SPEC-006 acceptance open |
+
+Global TRENDING retrieval orders the bounded fresh, permitted candidate pool by
+existing observed story activity. A documented phrase vocabulary removes trend
+question framing before the ten-term topic limit. Topic words such as New York,
+political right, viral infections, hot springs, Buzz Aldrin and People magazine
+remain searchable. Explicit story/number references, prior-answer precedence,
+ownership, rights, suppression, freshness and limits retain regression coverage.
+The chat path calls the ranking helper directly; it does not call the separate
+trending feed endpoint. This remains lexical retrieval with bounded recency
+candidates, not semantic intent understanding or global trend measurement.
+
+Astra reviewed the captured three-file dirty baseline and the final four-file patch
+for contract compliance and permission boundaries. One correction replaced an
+overbroad word filter that removed topic words and applied the term cap too early.
+The worker retained failing regression probes. The first 2,014-test passing gate is
+superseded by the final **2,024 tests passed / three existing deprecation warnings**.
+The unchanged `bash scripts/check-api.sh` passed all eleven gates using the current
+lock; Ruff formatting and strict mypy also passed. Final source hashes match the
+worker's evidence. No web, SDK, schema, CI, dependency or feature-flag changes were
+made. No local PostgreSQL/Compose or new browser acceptance is claimed.
+
+Astra independently rechecked PR #21: open, draft and unmerged at
+`9b36ee44a1b45837bd09b585c4d7afb2bd473c4b`. Run `36594520421` succeeded in
+API, Web, Chrome extension, dependency security, evaluation/hardening and Compose
+integration on that published head. Those results do **not** cover the trending
+retrieval patch, which was prepared afterwards on the same branch. That patch is
+accepted locally and published in its own commit on `spec-006-news-intelligence`; a
+fresh hosted checkpoint on its exact head is still required, and no merge or
+production activation has occurred. The separate SPEC-007 draft's 601-file content
+manifest remains unchanged.
+
+Native worker session `01a0ee3c-ea9d-78e0-81f8-d98ceaa7e01c` records
+`deepseek/deepseek-v4.1-flash`; router metadata records successful `deepseek`
+provider requests. Astra remained the planner/reviewer. No paid setup probe ran.
+
+The resumable checkpoint and worker evidence remain local working records under
+`docs/agent-work/spec-006-trending/` (plan, checkpoint, worker report and validation
+logs), which this repository does not track.
+Independent quality evaluation, trusted evidence adjudication, news-specific
+provider qualification, refresh/research completion, calibrated ranking and measured
+accessibility/usability/A–H demonstrations remain open. Authorized X access remains
+an external dependency. **SPEC-006 is not accepted.**

@@ -6,7 +6,8 @@ import pytest
 from test_news_foundation import NOW, seed
 from test_news_stories import item
 
-from navox.news.ranking import TrendSignals, observed_trend_signals
+from navox.news.ingestion import item_view
+from navox.news.ranking import TrendSignals, observed_trend_signals, order_trending_items
 from navox.news.stories import index_item, story_view
 
 
@@ -64,3 +65,38 @@ def test_old_activity_falls_outside_trend_window():
         last_updated_at=NOW - timedelta(days=2),
     )
     assert signals.recent_changes == 0 and signals.recent_reports == 0
+
+
+@pytest.mark.asyncio
+async def test_order_trending_items_ranks_activity_and_never_drops_authorized_items(ai_database):
+    await seed(ai_database)
+    async with ai_database() as db:
+        copied = (
+            "A sufficiently long report with identical wording and context copied "
+            "from the same observation so exact-copy grouping is deterministic."
+        )
+        first_config, _, first = await item(db, description=copied)
+        second_config, _, second = await item(db, "two", description=copied)
+        quiet_config, _, quiet = await item(db, "three", headline="Single routine report")
+        loose_config, _, loose = await item(db, "four", headline="Never indexed report")
+        definitions = {
+            first_config.key: first_config,
+            second_config.key: second_config,
+            quiet_config.key: quiet_config,
+            loose_config.key: loose_config,
+        }
+        active = await index_item(db, first, definitions, now=NOW)
+        assert (await index_item(db, second, definitions, now=NOW)).id == active.id
+        await index_item(db, quiet, definitions, now=NOW)
+        views = tuple(
+            [
+                await item_view(db, row, definitions, now=NOW)
+                for row in (quiet, loose, first, second)
+            ]
+        )
+        ordered = await order_trending_items(db, views, now=NOW)
+        assert [view.id for view in ordered[:2]] == sorted(
+            (first.id, second.id), key=lambda value: value.hex
+        )
+        assert [view.id for view in ordered[2:]] == [quiet.id, loose.id]
+        assert {view.id for view in ordered} == {view.id for view in views}

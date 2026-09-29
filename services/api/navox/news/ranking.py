@@ -1,5 +1,6 @@
 """Observed-activity ranking for News. It never assigns political or truth scores."""
 
+from collections import defaultdict
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -7,7 +8,7 @@ from pydantic import Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from navox.db.news import NewsSource, NewsStory, NewsStoryVersion
+from navox.db.news import NewsSource, NewsStory, NewsStoryItem, NewsStoryVersion
 from navox.news.contracts import Contract, NewsItemRead, stored_utc
 
 TREND_WINDOW = timedelta(hours=6)
@@ -67,3 +68,63 @@ async def observed_trend_signals(
         independent_source_groups=len(groups),
         last_updated_at=stored_utc(story.last_updated_at),
     )
+
+
+def activity_tiebreak(item: NewsItemRead) -> tuple[float, str]:
+    """Newest item first, then a stable identifier so equal timestamps never vary."""
+    return (-item.published_at.timestamp(), item.id.hex)
+
+
+async def order_trending_items(
+    database: AsyncSession,
+    items: tuple[NewsItemRead, ...],
+    *,
+    now: datetime,
+) -> tuple[NewsItemRead, ...]:
+    """Order authorized items by observed story activity, never truth or ideology.
+
+    Callers pass items that already passed permission, ownership, suppression and
+    freshness checks. Each input item is returned exactly once; a cluster with no
+    owned activity record keeps its items in deterministic recency order at the end.
+    """
+    if not items:
+        return ()
+    memberships = dict(
+        (
+            await database.execute(
+                select(NewsStoryItem.news_item_id, NewsStoryItem.cluster_id).where(
+                    NewsStoryItem.news_item_id.in_(item.id for item in items)
+                )
+            )
+        )
+        .tuples()
+        .all()
+    )
+    grouped: dict[UUID, list[NewsItemRead]] = defaultdict(list)
+    ungrouped: list[NewsItemRead] = []
+    for item in items:
+        cluster_id = memberships.get(item.id)
+        if cluster_id is None:
+            ungrouped.append(item)
+        else:
+            grouped[cluster_id].append(item)
+    ranked: list[tuple[tuple[int, int, int, int, float, str], UUID]] = []
+    if grouped:
+        stories = {
+            story.id: story
+            for story in await database.scalars(
+                select(NewsStory).where(NewsStory.id.in_(tuple(grouped)))
+            )
+        }
+        for story_id, group in grouped.items():
+            story = stories.get(story_id)
+            if story is None:
+                ungrouped.extend(group)
+                continue
+            signals = await observed_trend_signals(database, story, tuple(group), now=now)
+            ranked.append((signals.sort_key, story_id))
+    ordered: list[NewsItemRead] = []
+    for _, story_id in sorted(ranked):
+        ordered.extend(sorted(grouped[story_id], key=activity_tiebreak))
+    ordered.extend(sorted(ungrouped, key=activity_tiebreak))
+    return tuple(ordered)

@@ -12,9 +12,10 @@ from sqlalchemy.sql import ColumnElement
 
 from navox.db.models import User, WorkspaceMembership
 from navox.db.news import NewsContentRights, NewsItem, NewsSource, NewsStory, NewsStoryItem
-from navox.news.clustering import search_terms
+from navox.news.clustering import normalized_text, search_terms
 from navox.news.contracts import Contract, NewsError, NewsItemRead, SourceDefinition
 from navox.news.evidence import permitted_summary_item
+from navox.news.ranking import order_trending_items
 from navox.news.registry import current_rights, require_definition
 from navox.news.rights import Operation, policy_for, require_operation
 from navox.news.stories import owned_story
@@ -96,9 +97,97 @@ STOP_WORDS = frozenset(
     ).split()
 )
 
+# A trend question is answered by observed activity, so the question's own framing is removed
+# before term matching. The vocabulary stays small and phrase-based: "New York", "the political
+# right", "viral infections", "hot springs", "Buzz Aldrin" and "People magazine" keep their
+# words, while "What's trending?" and "Any buzz about X?" do not turn framing into a filter.
+TREND_FRAMING_PHRASES = (
+    "what are people talking about",
+    "what people are talking about",
+    "what's everyone talking about",
+    "what is everyone talking about",
+    "what are people saying",
+    "what people are saying",
+    "what's everyone saying",
+    "what is everyone saying",
+    "what's trending",
+    "whats trending",
+    "what is trending",
+    "what are trending",
+    "what's the trend",
+    "whats the trend",
+    "what is the trend",
+    "what are the trends",
+    "what's hot",
+    "whats hot",
+    "what is hot",
+    "what's popular",
+    "whats popular",
+    "what is popular",
+    "what's new",
+    "whats new",
+    "what is new",
+    "anything new",
+    "what's going on",
+    "whats going on",
+    "what is going on",
+    "what's happening",
+    "whats happening",
+    "what is happening",
+    "what's buzzing",
+    "whats buzzing",
+    "what is buzzing",
+    "any buzz about",
+    "the buzz about",
+    "buzz about",
+    "buzzing about",
+    "trending on x",
+    "trending now",
+    "trending",
+    "trends",
+    "trend",
+    "buzzing",
+    "right now",
+    "at the moment",
+    "at the minute",
+    "these days",
+    "this week",
+    "this morning",
+    "this afternoon",
+    "this evening",
+    "so far today",
+    "any buzz",
+    "the buzz",
+    "now",
+    "lately",
+    "currently",
+)
+
+TREND_FRAMING_PATTERN = re.compile(
+    r"\b(?:"
+    + "|".join(re.escape(phrase) for phrase in sorted(TREND_FRAMING_PHRASES, key=len, reverse=True))
+    + r")\b"
+)
+
+
+def strip_trend_framing(question: str) -> str:
+    """Remove the question's own trend framing, keeping any topical words around it."""
+    normalized = normalized_text(question).replace("\u2018", "'").replace("\u2019", "'")
+    return TREND_FRAMING_PATTERN.sub(" ", normalized)
+
+
+def topical_terms(text: str) -> tuple[str, ...]:
+    """Bounded search terms for already-selected question text."""
+    return tuple(sorted(search_terms(text) - STOP_WORDS))[:10]
+
 
 def query_terms(question: str) -> tuple[str, ...]:
-    return tuple(sorted(search_terms(question) - STOP_WORDS))[:10]
+    return topical_terms(question)
+
+
+def trending_topic_terms(question: str) -> tuple[str, ...]:
+    """Topical terms of a trend ask, after the question's own framing is removed."""
+    return topical_terms(strip_trend_framing(question))
 
 
 def numbered_reference(question: str) -> int | None:
@@ -166,7 +255,11 @@ async def select_evidence(
         )
     )
     query = query.where(or_(*permissions))
-    terms = query_terms(question)
+    terms = (
+        trending_topic_terms(question)
+        if plan.intent == NewsIntent.TRENDING and story_id is None
+        else query_terms(question)
+    )
     if story_id is not None:
         query = query.where(NewsStory.id == story_id)
     elif terms:
@@ -219,17 +312,24 @@ async def select_evidence(
             continue
     reference_order = {value: index for index, value in enumerate(previous_item_ids)}
 
+    def followup_priority(view: NewsItemRead) -> int:
+        # Previously displayed items keep their order only when the question adds no topic.
+        return reference_order.get(view.id, 1000) if not terms else 0
+
     def rank(view: NewsItemRead) -> tuple[int, int, float, str]:
-        priority = reference_order.get(view.id, 1000) if not terms else 0
         score = 2 * len(set(terms) & search_terms(view.headline))
         score += len(set(terms) & search_terms(view.description or ""))
-        return priority, -score, -view.published_at.timestamp(), view.id.hex
+        return followup_priority(view), -score, -view.published_at.timestamp(), view.id.hex
 
     views.sort(key=rank)
     cutoff = now - timedelta(seconds=plan.freshness_seconds)
     fresh = tuple(
         view for view in views if cutoff <= view.last_observed_at <= now + timedelta(minutes=5)
     )
+    if plan.intent == NewsIntent.TRENDING and story_id is None:
+        fresh = await order_trending_items(database, fresh, now=now)
+        # Ordering by observed activity never discards the conversation's existing precedence.
+        fresh = tuple(sorted(fresh, key=followup_priority))
     stale_sources = tuple(
         dict.fromkeys(view.source_id for view in views if view.last_observed_at < cutoff)
     )
