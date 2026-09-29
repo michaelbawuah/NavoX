@@ -1,0 +1,31 @@
+[
+  {
+    "key": "usgs-significant-earthquakes",
+    "name": "U.S. Geological Survey",
+    "domain": "earthquake.usgs.gov",
+    "source_type": "GOVERNMENT",
+    "region": "world",
+    "language": "en",
+    "identity_verified": true,
+    "feed_type": "ATOM",
+    "endpoint": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_month.atom",
+    "article_domains": ["earthquake.usgs.gov"],
+    "category": "science",
+    "poll_interval_seconds": 900,
+    "independence_group": "usgs-earthquake-hazards",
+    "rights": {
+      "metadata_storage_allowed": true,
+      "snippet_storage_allowed": true,
+      "full_text_processing_allowed": false,
+      "full_text_storage_allowed": false,
+      "summary_generation_allowed": true,
+      "image_display_allowed": false,
+      "attribution_required": true,
+      "link_required": true,
+      "retention_days": 7,
+      "permission_reference": "https://www.usgs.gov/faqs/are-usgs-reportspublications-copyrighted",
+      "reviewed_at": "2026-09-29T00:00:00Z",
+      "expires_at": "2026-12-28T00:00:00Z"
+    }
+  }
+]

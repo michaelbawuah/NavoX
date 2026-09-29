@@ -43,6 +43,18 @@ class Settings(BaseSettings):
     )
     # Explicit opt-in: Stripe's sandbox API has no atomic revision precondition.
     stripe_sandbox_enabled: bool = False
+    # News is opt-in. Only deployment-reviewed definitions can choose endpoints/rights.
+    news_feed_enabled: bool = False
+    news_chat_enabled: bool = False
+    news_x_trends_enabled: bool = False
+    news_deep_research_enabled: bool = False
+    news_coverage_comparison_enabled: bool = False
+    news_operational_relevance_enabled: bool = False
+    news_today_refresh_enabled: bool = False
+    news_subscriptions_refresh_enabled: bool = False
+    news_source_catalog: list[dict[str, JsonValue]] = Field(
+        default_factory=list, max_length=50, repr=False
+    )
     google_gmail_push_subscription: str = ""
     google_gmail_watch_topic: str = ""
     google_calendar_push_url: str = ""

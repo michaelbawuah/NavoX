@@ -28,6 +28,7 @@ SCRIPT = ROOT / "scripts/check-api.sh"
         "watch_schema",
         "ai_schema",
         "draft_schema",
+        "news_schema",
     ],
 )
 def test_api_preflight_blocks_failures_and_runs_remaining_gates(
@@ -72,6 +73,9 @@ if [ "$stage" = alembic ]; then
     ai_profiles ai_profile_assignments ai_prompts ai_schemas ai_routing_policies
     ai_provider_health ai_evaluation_runs ai_task_runs communication_drafts
     communication_draft_versions assistant_sessions assistant_turns
+    news_sources news_content_rights news_source_feeds news_items news_ingestion_receipts
+    news_story_clusters news_story_items news_claims news_claim_evidence news_story_versions
+    news_story_preferences news_preferences news_conversations news_conversation_turns
   )
   for table in "${tables[@]}"; do
     if [ "$PREFLIGHT_TEST_FAILURE" = schema ]; then
@@ -82,6 +86,9 @@ if [ "$stage" = alembic ]; then
     fi
     if [ "$PREFLIGHT_TEST_FAILURE" = draft_schema ]; then
       [ "$table" = communication_draft_versions ] && continue
+    fi
+    if [ "$PREFLIGHT_TEST_FAILURE" = news_schema ]; then
+      [ "$table" = news_conversation_turns ] && continue
     fi
     printf 'CREATE TABLE %s (\\n' "$table"
   done

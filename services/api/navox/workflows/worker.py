@@ -27,6 +27,11 @@ from navox.intelligence.activities import (
     process_source_activity,
     refresh_intelligence_activity,
 )
+from navox.news.activities import (
+    ingest_news_source_activity,
+    news_conversation_activity,
+    news_sources_activity,
+)
 from navox.proactive.activities import (
     commitment_timing_state_activity,
     daily_briefing_delay_activity,
@@ -61,6 +66,11 @@ from navox.workflows.intelligence import (
     ReevaluateCommitmentWorkflow,
     TodayRefreshWorkflow,
 )
+from navox.workflows.news import (
+    NewsConversationRefreshWorkflow,
+    NewsSourceIngestionWorkflow,
+    NewsSourceReconciliationWorkflow,
+)
 from navox.workflows.proactive import (
     CommitmentLifecycleWorkflow,
     DailyBriefingWorkflow,
@@ -87,6 +97,9 @@ async def main() -> None:
         client,
         task_queue=settings.temporal_task_queue,
         workflows=[
+            NewsConversationRefreshWorkflow,
+            NewsSourceIngestionWorkflow,
+            NewsSourceReconciliationWorkflow,
             DiscoverRecurringObligationWorkflow,
             ReevaluateRecurringObligationWorkflow,
             RenewalLifecycleWorkflow,
@@ -117,6 +130,9 @@ async def main() -> None:
             DailyBriefingWorkflow,
         ],
         activities=[
+            news_conversation_activity,
+            news_sources_activity,
+            ingest_news_source_activity,
             reevaluate_subscription_activity,
             cancellation_state_activity,
             execute_cancellation_activity,
@@ -148,6 +164,15 @@ async def main() -> None:
         ],
     )
     async with worker:
+        # Expiry/revocation cleanup continues even when the News feature is disabled.
+        try:
+            await client.start_workflow(
+                NewsSourceReconciliationWorkflow.run,
+                id="navox-news-source-reconciliation-v1",
+                task_queue=settings.temporal_task_queue,
+            )
+        except WorkflowAlreadyStartedError:
+            pass
         # Manual lifecycle facts and confirmed cancellation recovery work without AI.
         try:
             await client.start_workflow(

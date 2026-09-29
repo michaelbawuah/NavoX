@@ -19,6 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from navox.db import (
     ai_registry,  # noqa: F401 - registers AI registry metadata
     communications,  # noqa: F401
+    news,  # noqa: F401
 )
 from navox.db.base import Base
 

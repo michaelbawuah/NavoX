@@ -23,6 +23,9 @@ from navox.api.intelligence_evidence import router as intelligence_evidence_rout
 from navox.api.intelligence_sync import router as intelligence_sync_router
 from navox.api.mcp import router as mcp_router
 from navox.api.middleware import RequestHardeningMiddleware
+from navox.api.news import router as news_router
+from navox.api.news_conversations import router as news_conversations_router
+from navox.api.news_stories import router as news_stories_router
 from navox.api.proactive import router as proactive_router
 from navox.api.subscriptions import router as subscriptions_router
 from navox.api.today import router as today_router
@@ -52,6 +55,9 @@ def create_app() -> FastAPI:
     app.include_router(generic_rest_router, prefix="/api/v1")
     app.include_router(mcp_router, prefix="/api/v1")
     app.include_router(health_router, prefix="/api/v1")
+    app.include_router(news_router, prefix="/api/v1")
+    app.include_router(news_stories_router, prefix="/api/v1")
+    app.include_router(news_conversations_router, prefix="/api/v1")
     app.include_router(gmail_recheck_router, prefix="/api/v1")
     app.include_router(intelligence_router, prefix="/api/v1")
     app.include_router(intelligence_evidence_router, prefix="/api/v1")

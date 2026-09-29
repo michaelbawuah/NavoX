@@ -1,0 +1,8 @@
+{
+  "fixture": "synthetic_ui_only",
+  "cards": 3,
+  "uncertainty_label": true,
+  "save_interaction": true,
+  "mobile_width": 390,
+  "horizontal_overflow": false
+}

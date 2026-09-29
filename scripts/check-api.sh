@@ -56,6 +56,7 @@ render_schema() {
     ai_profiles ai_profile_assignments ai_prompts ai_schemas ai_routing_policies
     ai_provider_health ai_evaluation_runs ai_task_runs communication_drafts
     communication_draft_versions assistant_sessions assistant_turns
+    news_sources news_content_rights news_source_feeds news_items news_ingestion_receipts news_story_clusters news_story_items news_claims news_claim_evidence news_story_versions news_story_preferences news_preferences news_conversations news_conversation_turns
   )
   for table in "${tables[@]}"; do
     grep -F "CREATE TABLE $table (" "$reports/schema.sql" >/dev/null || {

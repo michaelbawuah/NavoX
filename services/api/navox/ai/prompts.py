@@ -109,6 +109,8 @@ COMMUNICATION_V2_INSTRUCTIONS = (
 
 
 def builtin_prompts() -> tuple[tuple[PromptDefinition, ...], tuple[SchemaDefinition, ...]]:
+    from navox.news.ai_contracts import news_artifacts
+
     schemas: list[SchemaDefinition] = []
     prompts: list[PromptDefinition] = []
 
@@ -213,4 +215,5 @@ def builtin_prompts() -> tuple[tuple[PromptDefinition, ...], tuple[SchemaDefinit
                 instructions=UNTRUSTED_BOUNDARY + domain_instructions_v3(domain),
             )
         )
-    return tuple(prompts), tuple(schemas)
+    news_prompts, news_schemas = news_artifacts()
+    return tuple(prompts) + news_prompts, tuple(schemas) + news_schemas

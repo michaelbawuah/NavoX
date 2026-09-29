@@ -1,0 +1,116 @@
+"""Authenticated news source control and projections; no model/provider requests."""
+
+from datetime import datetime
+from uuid import UUID, uuid4
+
+import pytest
+from test_news_foundation import NOW, definition, rss
+
+from navox.db.news import NewsSource
+from navox.news.feeds import parse_feed
+from navox.news.ingestion import store_item
+from navox.news.registry import current_rights
+
+
+@pytest.fixture(autouse=True)
+def news_clock(monkeypatch):
+    from navox.api import news
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return NOW if tz is not None else NOW.replace(tzinfo=None)
+
+    monkeypatch.setattr(news, "datetime", Clock)
+
+
+@pytest.mark.asyncio
+async def test_source_catalog_requires_auth_and_never_accepts_client_rights(subscription_env):
+    env = subscription_env
+    assert (await env.client.get("/api/v1/news/items")).status_code == 503
+    config = definition()
+    env.settings.news_feed_enabled = True
+    env.settings.news_source_catalog = [config.model_dump(mode="json")]
+    response = await env.client.get("/api/v1/news/sources")
+    assert response.status_code == 200 and response.json()[0]["status"] == "disabled"
+    url = f"/api/v1/news/sources/{config.key}/activate"
+    assert (
+        await env.client.post(
+            url,
+            json={"request_id": str(uuid4()), "rights": {"full_text_storage_allowed": True}},
+            headers=env.headers,
+        )
+    ).status_code == 422
+    assert (
+        await env.client.post(
+            url, json={"request_id": str(uuid4())}, headers={"Origin": "https://attacker.example"}
+        )
+    ).status_code == 403
+    result = await env.client.post(url, json={"request_id": str(uuid4())}, headers=env.headers)
+    assert result.status_code == 201
+    identifier = UUID(result.json()["id"])
+    row = await env.database.get(NewsSource, identifier)
+    assert row.workspace_id == env.workspace_id and row.user_id == env.user_id
+    rights = await current_rights(env.database, row)
+    assert rights.policy["full_text_storage_allowed"] is False
+    await env.client.post("/api/v1/auth/logout", headers=env.headers)
+    assert (await env.client.get("/api/v1/news/sources")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_items_and_revocation_use_real_owner_account(subscription_env):
+    env = subscription_env
+    config = definition()
+    env.settings.news_feed_enabled = True
+    env.settings.news_source_catalog = [config.model_dump(mode="json")]
+    result = await env.client.post(
+        f"/api/v1/news/sources/{config.key}/activate",
+        json={"request_id": str(uuid4())},
+        headers=env.headers,
+    )
+    identifier = UUID(result.json()["id"])
+    row = await env.database.get(NewsSource, identifier)
+    rights = await current_rights(env.database, row)
+    await store_item(env.database, row, rights, config, parse_feed(rss(), config)[0][0], now=NOW)
+    await env.database.commit()
+    response = await env.client.get("/api/v1/news/items")
+    assert response.status_code == 200 and len(response.json()) == 1
+    assert response.json()[0]["source_name"] == "Science Fixture"
+    assert "PRIVATE FULL TEXT" not in response.text
+    env.settings.news_feed_enabled = False
+    result = await env.client.post(
+        f"/api/v1/news/sources/{identifier}/disable",
+        json={"request_id": str(uuid4())},
+        headers=env.headers,
+    )
+    assert result.status_code == 200
+    env.settings.news_feed_enabled = True
+    assert (await env.client.get("/api/v1/news/items")).json() == []
+    result = await env.client.post(
+        f"/api/v1/news/sources/{config.key}/activate",
+        json={"request_id": str(uuid4())},
+        headers=env.headers,
+    )
+    assert result.status_code == 201
+    await env.database.refresh(row)
+    assert row.rights_version == 2
+    current = await current_rights(env.database, row)
+    assert current.revoked_at is None and current.id != rights.id
+
+
+@pytest.mark.asyncio
+async def test_unknown_source_is_not_a_network_proxy(subscription_env):
+    env = subscription_env
+    env.settings.news_feed_enabled = True
+    result = await env.client.post(
+        "/api/v1/news/sources/arbitrary-domain/activate",
+        json={"request_id": str(uuid4())},
+        headers=env.headers,
+    )
+    assert result.status_code == 404
+    result = await env.client.post(
+        f"/api/v1/news/sources/{uuid4()}/refresh",
+        json={"request_id": str(uuid4())},
+        headers=env.headers,
+    )
+    assert result.status_code == 404

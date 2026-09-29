@@ -29,3 +29,4 @@ export interface GoogleConnection {
 }
 
 export type * from "./subscriptions";
+export type * from "./news";

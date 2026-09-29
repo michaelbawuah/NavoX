@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { NavoXNavigation } from "../../components/navox-ui";
 import { SubscriptionsDashboard } from "../../components/subscriptions-dashboard";
 import styles from "../../components/today-workspace.module.css";
 
@@ -55,12 +56,7 @@ export default function SubscriptionsPage() {
           </span>
           NavoX
         </a>
-        <nav className={styles.workspaceNav} aria-label="Workspace">
-          <a href="/">Today</a>
-          <a href="/subscriptions" aria-current="page">
-            Subscriptions
-          </a>
-        </nav>
+        <NavoXNavigation current="Subscriptions" />
         <div className={styles.topbarMeta}>{workspace}</div>
       </header>
       {session === "ready" ? (
