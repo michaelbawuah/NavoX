@@ -1,0 +1,173 @@
+{
+  "synthetic": true,
+  "production_acceptance": false,
+  "checks": [
+    "Trending selects activity feed and displays qualification",
+    "Save mutation followed by refreshed saved state",
+    "Global question leaves intent to server",
+    "Numbered follow-up fills input and displays second source-linked answer",
+    "Displayed citation links exactly to supplied source URL",
+    "Timeline focus reaches API without forcing fresh-news defaults and shows source event time",
+    "First keyboard stop is visible skip-to-news link",
+    "Compiled CSS: 200% text at320px fits viewport",
+    "Browser accessibility tree captured; no human screen-reader test claimed"
+  ],
+  "pages": [
+    {
+      "route": "/news",
+      "width": 390,
+      "scrollWidth": 390,
+      "smallTargets": [
+        {
+          "text": "",
+          "height": 19.1875,
+          "width": 19.1875
+        },
+        {
+          "text": "",
+          "height": 19.1875,
+          "width": 19.1875
+        },
+        {
+          "text": "",
+          "height": 19.1875,
+          "width": 19.1875
+        },
+        {
+          "text": "",
+          "height": 19.1875,
+          "width": 19.1875
+        },
+        {
+          "text": "",
+          "height": 19.1875,
+          "width": 19.1875
+        }
+      ]
+    },
+    {
+      "route": "/news",
+      "width": 320,
+      "scrollWidth": 320,
+      "smallTargets": [
+        {
+          "text": "",
+          "height": 19.1875,
+          "width": 19.1875
+        },
+        {
+          "text": "",
+          "height": 19.1875,
+          "width": 19.1875
+        },
+        {
+          "text": "",
+          "height": 19.1875,
+          "width": 19.1875
+        },
+        {
+          "text": "",
+          "height": 19.1875,
+          "width": 19.1875
+        },
+        {
+          "text": "",
+          "height": 19.1875,
+          "width": 19.1875
+        }
+      ]
+    },
+    {
+      "route": "/news",
+      "textScale": "200%",
+      "width": 320,
+      "scrollWidth": 320,
+      "overflow": []
+    }
+  ],
+  "browser": "Chrome/154.0.8037.58",
+  "external_network_requests_allowed": 0,
+  "ax_named_controls": [
+    {
+      "role": "link",
+      "name": "Skip to news"
+    },
+    {
+      "role": "link",
+      "name": "NavoX home"
+    },
+    {
+      "role": "link",
+      "name": "Today"
+    },
+    {
+      "role": "link",
+      "name": "NavoX"
+    },
+    {
+      "role": "link",
+      "name": "News"
+    },
+    {
+      "role": "link",
+      "name": "Search"
+    },
+    {
+      "role": "link",
+      "name": "Subscriptions"
+    },
+    {
+      "role": "button",
+      "name": "Latest"
+    },
+    {
+      "role": "button",
+      "name": "For you"
+    },
+    {
+      "role": "button",
+      "name": "Trending"
+    },
+    {
+      "role": "button",
+      "name": "World"
+    },
+    {
+      "role": "button",
+      "name": "U.S."
+    },
+    {
+      "role": "button",
+      "name": "Business"
+    },
+    {
+      "role": "button",
+      "name": "Technology"
+    },
+    {
+      "role": "button",
+      "name": "Science"
+    },
+    {
+      "role": "button",
+      "name": "Saved"
+    },
+    {
+      "role": "button",
+      "name": "Unsave Public laboratory publishes a new measurement"
+    },
+    {
+      "role": "textbox",
+      "name": "Ask a news question"
+    },
+    {
+      "role": "button",
+      "name": "Ask NavoX"
+    },
+    {
+      "role": "link",
+      "name": "Public laboratory publishes a new measurement"
+    }
+  ],
+  "passed": true
+}

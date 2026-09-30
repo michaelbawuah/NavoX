@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime
 from itertools import permutations
 from uuid import UUID
 
@@ -12,8 +13,10 @@ from pydantic import ValidationError
 
 from navox.news.cluster_evaluation import (
     CalibrationGrid,
+    CalibrationReport,
     ClusterCorpus,
     ClusterExample,
+    CorpusProvenance,
     calibrate,
     make_policy,
     measure,
@@ -59,6 +62,13 @@ def corpus():
         reference="synthetic-regression-only",
         signal_version="fixture-v1",
         label_reference="test-authored-labels-not-human-acceptance",
+        provenance=CorpusProvenance(
+            source_identity="authored-cluster-fixture",
+            captured_at=datetime(2026, 9, 29, 12, tzinfo=UTC),
+            rights_basis="authored synthetic fixture; no publisher text is captured",
+            label_authority="authored",
+            content_digest="0" * 64,
+        ),
         examples=(
             example(1, "development", True),
             example(2, "development", False),
@@ -176,6 +186,39 @@ def test_holdout_cannot_change_the_selected_policy():
     assert before.development == after.development and before.holdout != after.holdout
     assert not before.production_qualified and not before.runtime_activation
     assert before.corpus_sha256 != after.corpus_sha256
+
+
+def test_corpus_requires_provenance():
+    body = corpus().model_dump(mode="json")
+    del body["provenance"]
+    with pytest.raises(ValidationError):
+        ClusterCorpus.model_validate(body)
+
+
+def test_reviewer_labels_need_a_recorded_reviewer_identity():
+    body = corpus().model_dump(mode="json")
+    body["provenance"]["label_authority"] = "reviewer"
+    with pytest.raises(ValidationError):
+        ClusterCorpus.model_validate(body)
+    body["provenance"]["reviewer_identity"] = "named-fixture-reviewer"
+    assert (
+        ClusterCorpus.model_validate(body).provenance.reviewer_identity == "named-fixture-reviewer"
+    )
+    for authority in ("authored", "machine"):
+        body["provenance"]["label_authority"] = authority
+        with pytest.raises(ValidationError):
+            ClusterCorpus.model_validate(body)
+
+
+def test_report_without_provenance_is_impossible():
+    report = calibrate(corpus())
+    assert report.provenance == corpus().provenance
+    assert report.provenance.label_authority == "authored"
+    assert report.provenance.reviewer_identity is None
+    body = report.model_dump(mode="json")
+    del body["provenance"]
+    with pytest.raises(ValidationError):
+        CalibrationReport.model_validate(body)
 
 
 @pytest.mark.parametrize(

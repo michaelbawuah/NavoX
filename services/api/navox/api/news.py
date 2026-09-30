@@ -46,7 +46,6 @@ async def availability(
         "feed": settings.news_feed_enabled,
         "chat": settings.news_feed_enabled and settings.news_chat_enabled,
         # Reserved flags cannot advertise an adapter or workflow not yet delivered.
-        "x_trends": False,
         "deep_research": False,
         "coverage_comparison": False,
         # These bounded read-only views are implemented; broader research remains reserved.

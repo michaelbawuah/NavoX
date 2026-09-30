@@ -17,6 +17,7 @@ from navox.news.contracts import Contract, NewsError, NewsItemRead, SourceDefini
 from navox.news.evidence import permitted_summary_item
 from navox.news.ranking import order_trending_items
 from navox.news.registry import current_rights, require_definition
+from navox.news.research_planning import research_phrase
 from navox.news.rights import Operation, policy_for, require_operation
 from navox.news.stories import owned_story
 
@@ -24,6 +25,7 @@ from navox.news.stories import owned_story
 class NewsIntent(StrEnum):
     CURRENT_NEWS = "CURRENT_NEWS"
     TRENDING = "TRENDING"
+    # Legacy saved turns and unsupported-source questions must never fall back to News.
     X_TRENDS = "X_TRENDS"
     STORY_QUESTION = "STORY_QUESTION"
     VERIFY_CLAIM = "VERIFY_CLAIM"
@@ -190,6 +192,30 @@ def trending_topic_terms(question: str) -> tuple[str, ...]:
     return topical_terms(strip_trend_framing(question))
 
 
+def research_order(items: tuple[NewsItemRead, ...], intent: NewsIntent) -> tuple[NewsItemRead, ...]:
+    """Chronology for timelines; source breadth for comparisons and research.
+
+    Input order already reflects topical relevance and current rights. Round-robin
+    source ordering never treats different publishers as independent confirmation.
+    Event time is used only when explicitly retained from the source.
+    """
+    if intent == NewsIntent.TIMELINE:
+        return tuple(
+            sorted(
+                items, key=lambda item: (item.event_started_at or item.published_at, item.id.hex)
+            )
+        )
+    if intent not in {NewsIntent.COVERAGE_COMPARISON, NewsIntent.DEEP_RESEARCH}:
+        return items
+    positions: dict[UUID, int] = {}
+    ranked = []
+    for position, item in enumerate(items):
+        occurrence = positions.get(item.source_id, 0)
+        positions[item.source_id] = occurrence + 1
+        ranked.append((occurrence, position, item))
+    return tuple(item for _, _, item in sorted(ranked, key=lambda value: value[:2]))
+
+
 def numbered_reference(question: str) -> int | None:
     matches = re.findall(r"(?:#|\b(?:number|item|story)\s+)([0-9]+)\b", question.casefold())
     if not matches:
@@ -255,10 +281,11 @@ async def select_evidence(
         )
     )
     query = query.where(or_(*permissions))
+    research_intent, research_topic = research_phrase(question)
     terms = (
         trending_topic_terms(question)
         if plan.intent == NewsIntent.TRENDING and story_id is None
-        else query_terms(question)
+        else query_terms(research_topic if research_intent == plan.intent else question)
     )
     if story_id is not None:
         query = query.where(NewsStory.id == story_id)
@@ -330,6 +357,8 @@ async def select_evidence(
         fresh = await order_trending_items(database, fresh, now=now)
         # Ordering by observed activity never discards the conversation's existing precedence.
         fresh = tuple(sorted(fresh, key=followup_priority))
+    else:
+        fresh = research_order(fresh, plan.intent)
     stale_sources = tuple(
         dict.fromkeys(view.source_id for view in views if view.last_observed_at < cutoff)
     )

@@ -1,0 +1,29 @@
+.conflicts {
+  padding: 1rem;
+  border: 1px solid #978044;
+  border-radius: 0.75rem;
+  background: #252318;
+  color: #f2eddd;
+  overflow-wrap: anywhere;
+}
+.conflicts h3 {
+  margin-top: 0;
+}
+.conflicts ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 1rem;
+  padding: 0;
+  list-style: none;
+}
+.conflicts li {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.conflicts a {
+  color: #d1efe4;
+  min-height: 2.75rem;
+  display: flex;
+  align-items: center;
+}

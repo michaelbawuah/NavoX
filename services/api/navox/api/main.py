@@ -21,6 +21,9 @@ from navox.api.imports import router as import_router
 from navox.api.intelligence import router as intelligence_router
 from navox.api.intelligence_evidence import router as intelligence_evidence_router
 from navox.api.intelligence_sync import router as intelligence_sync_router
+from navox.api.knowledge import router as knowledge_router
+from navox.api.knowledge_graph import router as knowledge_graph_router
+from navox.api.knowledge_lifecycle import router as knowledge_lifecycle_router
 from navox.api.mcp import router as mcp_router
 from navox.api.middleware import RequestHardeningMiddleware
 from navox.api.news import router as news_router
@@ -80,6 +83,9 @@ def create_app() -> FastAPI:
     app.include_router(commitment_actions_router, prefix="/api/v1")
     app.include_router(today_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")
+    app.include_router(knowledge_router, prefix="/api/v1")
+    app.include_router(knowledge_graph_router, prefix="/api/v1")
+    app.include_router(knowledge_lifecycle_router, prefix="/api/v1")
     return app
 
 

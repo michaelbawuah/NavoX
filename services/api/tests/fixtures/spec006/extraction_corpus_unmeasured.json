@@ -1,0 +1,73 @@
+{
+  "corpus": {
+    "reference": "authored-spec006-extraction-unmeasured",
+    "extraction_version": "fixture-v1",
+    "provenance": {
+      "source_identity": "authored-fixture-manifest-spec006-unmeasured",
+      "captured_at": "2026-09-29T12:00:00Z",
+      "rights_basis": "authored synthetic fixture; no publisher text is captured or redistributed",
+      "label_authority": "authored",
+      "reviewer_identity": null,
+      "content_digest": "30de5777b97531a7bfe25a8d6ab7ad40bfac2004a3ebe223800798c6103ea7a3"
+    },
+    "examples": [
+      {
+        "item_id": "66666666-6666-4666-8666-666666666666",
+        "corpus_item_reference": null,
+        "provenance": {
+          "source_identity": "authored-fixture-item-six",
+          "captured_at": "2026-09-29T12:00:00Z",
+          "rights_basis": "authored synthetic fixture; no publisher text is captured or redistributed",
+          "label_authority": "authored",
+          "reviewer_identity": null,
+          "content_digest": "11384eb7ec8ee79e2c9e70a1b89781cdce60bedc4c384521b9ef1cfffdfa0a56"
+        },
+        "split": "development",
+        "labels": []
+      },
+      {
+        "item_id": "77777777-7777-4777-8777-777777777777",
+        "corpus_item_reference": null,
+        "provenance": {
+          "source_identity": "authored-fixture-item-seven",
+          "captured_at": "2026-09-29T12:00:00Z",
+          "rights_basis": "authored synthetic fixture; no publisher text is captured or redistributed",
+          "label_authority": "authored",
+          "reviewer_identity": null,
+          "content_digest": "360eb94bc5ec73a3784ebe4c95a9411413c03412bb7ebcaf5938f2312423ff99"
+        },
+        "split": "development",
+        "labels": []
+      },
+      {
+        "item_id": "88888888-8888-4888-8888-888888888888",
+        "corpus_item_reference": null,
+        "provenance": {
+          "source_identity": "authored-fixture-item-eight",
+          "captured_at": "2026-09-29T12:00:00Z",
+          "rights_basis": "authored synthetic fixture; no publisher text is captured or redistributed",
+          "label_authority": "authored",
+          "reviewer_identity": null,
+          "content_digest": "a5cdb990852070317060fdd5fcd5bb9723c5b739ec70d50aaf802e94c9360884"
+        },
+        "split": "holdout",
+        "labels": []
+      },
+      {
+        "item_id": "99999999-9999-4999-8999-999999999999",
+        "corpus_item_reference": null,
+        "provenance": {
+          "source_identity": "authored-fixture-item-nine",
+          "captured_at": "2026-09-29T12:00:00Z",
+          "rights_basis": "authored synthetic fixture; no publisher text is captured or redistributed",
+          "label_authority": "authored",
+          "reviewer_identity": null,
+          "content_digest": "88af08a73970383de53a333ec2a41424d1b2043821d9ff694b8bb265a1cbbbb6"
+        },
+        "split": "holdout",
+        "labels": []
+      }
+    ]
+  },
+  "observed": []
+}

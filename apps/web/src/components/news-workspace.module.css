@@ -63,6 +63,12 @@
   border-color: transparent;
   background: transparent;
 }
+.feedCaption {
+  margin: -0.5rem 0 1.25rem;
+  max-width: 38rem;
+  color: #a9c3b3;
+  font-size: 0.85rem;
+}
 .workspace button[aria-pressed="true"] {
   color: #f3fff7;
   border-color: #87ae93;
@@ -155,6 +161,7 @@
 }
 .settings form {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.75rem;
   max-width: 45rem;
 }
@@ -162,6 +169,7 @@
   justify-self: start;
 }
 .settings fieldset {
+  min-inline-size: 0;
   border: 1px solid #476151;
   padding: 1rem;
   border-radius: 0.5rem;

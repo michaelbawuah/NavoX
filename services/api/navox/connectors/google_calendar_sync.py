@@ -394,6 +394,7 @@ async def process_calendar_connection(
     registry.register(CALENDAR_MANIFEST, factory)
     runtime = ConnectorRuntime(
         registry,
+        knowledge_settings=settings,
         secret_broker=GoogleCalendarTokenBroker(settings, authority, connector_id),
         authority_check=authority.check,
         retain_canonical_content=False,

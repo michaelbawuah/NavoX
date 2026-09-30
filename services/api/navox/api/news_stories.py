@@ -11,11 +11,19 @@ from sqlalchemy import select
 from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
 from navox.api.connector_management import require_origin
 from navox.api.news import news_failure, require_feed
-from navox.db.news import NewsPreference, NewsStory, NewsStoryPreference, NewsStoryVersion
+from navox.db.news import (
+    NewsClaim,
+    NewsItem,
+    NewsPreference,
+    NewsStory,
+    NewsStoryPreference,
+    NewsStoryVersion,
+)
 from navox.db.session import get_session_factory
 from navox.news.clustering import search_terms
 from navox.news.contracts import Category, Contract, NewsError, NewsItemRead, stored_utc
-from navox.news.evidence import ClaimRead, claim_views
+from navox.news.evidence import ClaimRead, claim_views, evaluate_claim
+from navox.news.importance import current_importance
 from navox.news.ranking import observed_trend_signals
 from navox.news.registry import catalog
 from navox.news.research import ChangesRead, CoverageRead, TimelineRead, changes, coverage, timeline
@@ -23,6 +31,8 @@ from navox.news.stories import StoryRead, StoryUpdate, owned_story, story_view
 from navox.news.synthesis import StorySummary, summary_view
 
 router = APIRouter(prefix="/news", tags=["news"])
+
+RELATED_STORY_LIMIT = 5
 
 
 class Preferences(Contract):
@@ -119,6 +129,7 @@ async def feed(
         )
         results = []
         trend_keys = {}
+        importance_scores = {}
         for story in rows:
             pref = await database.get(NewsStoryPreference, story.id)
             if (pref and pref.dismissed) or (mode == "saved" and not (pref and pref.saved)):
@@ -126,6 +137,10 @@ async def feed(
             try:
                 view = await story_view(database, story, definitions, now=now)
                 results.append(view)
+                if mode == "top":
+                    importance_scores[view.id] = await current_importance(
+                        database, story, definitions, now=now
+                    )
                 if mode == "trending":
                     signals = await observed_trend_signals(database, story, view.sources, now=now)
                     trend_keys[view.id] = signals.sort_key
@@ -147,7 +162,23 @@ async def feed(
             )
         elif mode == "trending":
             results.sort(key=lambda story: trend_keys[story.id])
-        # Top remains recency-based until broader importance signals are evaluated.
+        elif (
+            mode == "top"
+            and results
+            and all(importance_scores[story.id] is not None for story in results)
+        ):
+            results.sort(
+                key=lambda story: (
+                    -(importance_scores[story.id] or 0),
+                    -story.last_updated_at.timestamp(),
+                    story.id.hex,
+                )
+            )
+            results = [
+                story.model_copy(update={"ranking_basis": "REVIEWED_IMPORTANCE"})
+                for story in results
+            ]
+        # Missing current reviewed inputs keep the whole candidate set in recency order.
         # Trending uses only observed activity and source independence, never a truth score.
         return results[:50]
     except NewsError as error:
@@ -232,6 +263,109 @@ async def story_claims(
         database, story_id, workspace_id=account.workspace.id, user_id=account.user.id
     )
     return await claim_views(database, story, catalog(settings), now=datetime.now(UTC))
+
+
+async def related_story_views(
+    story: NewsStory,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    now: datetime,
+) -> list[StoryRead]:
+    """Other stories this owner may read that share a currently admitted claim digest.
+
+    Matching uses stored claim digests only: no semantic similarity, no embeddings and
+    no generated text. Ranking is shared-claim count, then publication time, then id.
+    """
+    definitions = catalog(settings)
+    current_ids = [view.id for view in await claim_views(database, story, definitions, now=now)]
+    if not current_ids:
+        return []
+    digests = set(
+        await database.scalars(
+            select(NewsClaim.text_digest).where(
+                NewsClaim.cluster_id == story.id,
+                NewsClaim.workspace_id == story.workspace_id,
+                NewsClaim.user_id == story.user_id,
+                NewsClaim.id.in_(current_ids),
+            )
+        )
+    )
+    if not digests:
+        return []
+    shared: dict[UUID, set[str]] = {}
+    claims = await database.scalars(
+        select(NewsClaim)
+        .where(
+            NewsClaim.workspace_id == story.workspace_id,
+            NewsClaim.user_id == story.user_id,
+            NewsClaim.cluster_id != story.id,
+            NewsClaim.text_digest.in_(sorted(digests)),
+        )
+        .order_by(NewsClaim.cluster_id, NewsClaim.id)
+        .limit(500)
+    )
+    for claim in claims:
+        try:
+            await evaluate_claim(database, claim, definitions, now=now)
+        except NewsError:
+            # A claim whose origin revision changed, or whose rights were withdrawn,
+            # no longer describes something this owner may currently read.
+            continue
+        shared.setdefault(claim.cluster_id, set()).add(claim.text_digest)
+    if not shared:
+        return []
+    candidates = list(
+        await database.scalars(
+            select(NewsStory).where(
+                NewsStory.id.in_(sorted(shared)),
+                NewsStory.workspace_id == story.workspace_id,
+                NewsStory.user_id == story.user_id,
+                NewsStory.suppressed.is_(False),
+            )
+        )
+    )
+    anchor_times: dict[UUID, datetime] = {}
+    anchors = await database.execute(
+        select(NewsItem.id, NewsItem.published_at).where(
+            NewsItem.id.in_([candidate.anchor_item_id for candidate in candidates])
+        )
+    )
+    for item_id, published_at in anchors:
+        anchor_times[item_id] = stored_utc(published_at)
+    ordered = sorted(
+        (candidate for candidate in candidates if candidate.anchor_item_id in anchor_times),
+        key=lambda candidate: (
+            -len(shared[candidate.id]),
+            -anchor_times[candidate.anchor_item_id].timestamp(),
+            candidate.id.hex,
+        ),
+    )
+    results: list[StoryRead] = []
+    for candidate in ordered:
+        if len(results) >= RELATED_STORY_LIMIT:
+            break
+        try:
+            results.append(await story_view(database, candidate, definitions, now=now))
+        except NewsError:
+            continue
+    return results
+
+
+@router.get("/stories/{story_id}/related")
+async def story_related(
+    story_id: UUID,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> list[StoryRead]:
+    require_feed(settings)
+    try:
+        story = await owned_story(
+            database, story_id, workspace_id=account.workspace.id, user_id=account.user.id
+        )
+        return await related_story_views(story, database, settings, datetime.now(UTC))
+    except NewsError as error:
+        raise news_failure(error) from None
 
 
 @router.get("/stories/{story_id}/updates")

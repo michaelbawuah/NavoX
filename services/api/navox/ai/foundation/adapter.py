@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from enum import StrEnum
-from typing import Annotated, Protocol, runtime_checkable
+from typing import Annotated, Literal, Protocol, runtime_checkable
 from uuid import UUID
 
 from pydantic import Field
@@ -52,6 +52,7 @@ class ProviderRequest(Contract):
     """Gateway-built request after authorization, minimization, and model selection."""
 
     task_id: UUID
+    operation: Literal["structured", "embedding"] = "structured"
     model: Identifier
     instructions: Annotated[str, Field(min_length=1, max_length=100_000, repr=False)]
     context: JSONDocument = Field(repr=False)

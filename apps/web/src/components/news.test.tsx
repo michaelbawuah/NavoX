@@ -4,7 +4,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { newsStatus, newsStatusExplanation, safeNewsUrl } from "../lib/news";
 import { NavoXNavigation, NavoXSourceList, NavoXStatus } from "./navox-ui";
-import { NewsAnswerCard, referenceableTurnId } from "./news-chat";
+import {
+  NewsAnswerCard,
+  NewsFocusControl,
+  referenceableTurnId,
+} from "./news-chat";
 import { NewsStoryCard } from "./news-workspace";
 import { StoryIntelligence, StorySummaryView } from "./story-intelligence";
 
@@ -100,6 +104,21 @@ describe("News evidence display", () => {
 });
 
 describe("News conversational and research UI", () => {
+  it("offers bounded research focus and hides unavailable comparison", () => {
+    const control = (comparisonAvailable: boolean) =>
+      renderToStaticMarkup(
+        createElement(NewsFocusControl, {
+          value: "auto",
+          disabled: false,
+          comparisonAvailable,
+          onChange: vi.fn(),
+        }),
+      );
+    expect(control(false)).toContain("Timeline");
+    expect(control(false)).toContain("Background");
+    expect(control(false)).not.toContain("Compare source reports");
+    expect(control(true)).toContain("Compare source reports");
+  });
   const answer: NewsAnswer = {
     id: "turn-two",
     sequence: 2,
@@ -154,6 +173,27 @@ describe("News conversational and research UI", () => {
       }),
     );
     expect(older).not.toContain("Ask about #1");
+  });
+
+  it("distinguishes retained event time from report publication time", () => {
+    const dated = {
+      ...answer,
+      facts: answer.facts.map((fact, index) => ({
+        ...fact,
+        published_at: "2026-09-29T12:00:00Z",
+        event_started_at: index === 0 ? "2026-09-28T12:00:00Z" : null,
+      })),
+    };
+    const html = renderToStaticMarkup(
+      createElement(NewsAnswerCard, {
+        answer: dated,
+        canReference: false,
+        onReference: vi.fn(),
+      }),
+    );
+    expect(html).toContain("Source event time:");
+    expect(html).toContain("Reported");
+    expect(html).toContain('href="https://science.example/report"');
   });
 
   it("references only the immediately latest ready answer", () => {
@@ -222,7 +262,6 @@ describe("News conversational and research UI", () => {
         availability: {
           feed: true,
           chat: true,
-          x_trends: false,
           deep_research: false,
           coverage_comparison: false,
         },
@@ -238,7 +277,6 @@ describe("News conversational and research UI", () => {
         availability: {
           feed: true,
           chat: true,
-          x_trends: false,
           deep_research: false,
           coverage_comparison: false,
           timeline: true,

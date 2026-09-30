@@ -16,7 +16,6 @@ from navox.ai.foundation.contracts import (
     AIResult,
     AITask,
     Capability,
-    JSONDocument,
     LatencyClass,
     Profile,
     ProviderPolicy,
@@ -34,11 +33,14 @@ from navox.intelligence.contracts import SourceDocument
 from navox.news.ai_contracts import (
     CONVERSATION,
     EXTRACTION,
+    RELATIONS,
     SYNTHESIS,
     ClaimExtraction,
     NewsContextInput,
+    NewsRelations,
     NewsSelection,
     NewsSynthesis,
+    news_context_payload,
     validate_news_output,
 )
 from navox.news.contracts import NewsError
@@ -135,10 +137,11 @@ class NewsContext:
             except NewsError:
                 raise ContextDenied("News story changed") from None
         items, claims = [], []
+        source_fingerprints = {}
         cluster_ids = set()
         for identifier in self.item_ids:
             try:
-                _, view, _ = await permitted_summary_item(
+                _, view, source = await permitted_summary_item(
                     database,
                     identifier,
                     definitions,
@@ -151,6 +154,7 @@ class NewsContext:
             if view.last_observed_at < now - timedelta(seconds=self.freshness_seconds):
                 raise ContextDenied("News evidence requires a fresh source check")
             items.append(view)
+            source_fingerprints[source.id] = definitions[source.source_key].fingerprint
             membership = await database.get(NewsStoryItem, identifier)
             if self.story_id is not None and (
                 membership is None
@@ -202,6 +206,7 @@ class NewsContext:
             items=tuple(items),
             claims=tuple(claims),
             as_of=self.as_of,
+            source_policy_fingerprints=source_fingerprints,
         )
         reject_credentials(context.model_dump_json(), configured_secrets(self.settings))
         return context
@@ -225,9 +230,7 @@ class NewsContext:
             user_id=self.user_id,
             source_ids=self.item_ids,
             sensitivity=Sensitivity.PERSONAL,
-            content=JSONDocument(
-                text=json.dumps({"news_context": current.model_dump(mode="json")})
-            ),
+            content=news_context_payload(current),
         )
 
 
@@ -237,8 +240,8 @@ async def run_news_task(
     reference: VersionedRef,
     *,
     max_cost: Decimal = Decimal("0.05"),
-) -> tuple[AIResult, ClaimExtraction | NewsSelection | NewsSynthesis, str]:
-    if reference not in {EXTRACTION, CONVERSATION, SYNTHESIS}:
+) -> tuple[AIResult, ClaimExtraction | NewsSelection | NewsSynthesis | NewsRelations, str]:
+    if reference not in {EXTRACTION, CONVERSATION, SYNTHESIS, RELATIONS}:
         raise ValueError("Unknown news task")
     if (reference == CONVERSATION) != (context.mode == "conversation"):
         raise ContextDenied("News task mode mismatch")

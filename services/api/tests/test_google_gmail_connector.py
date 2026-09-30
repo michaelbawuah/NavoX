@@ -23,6 +23,7 @@ from navox.connectors.builtin.google_gmail import (
 )
 from navox.connectors.contracts import ConnectorRuntimeError, SyncRequest
 from navox.connectors.runtime import ConnectorRuntime
+from navox.connectors.sync_state import database_now
 from navox.db.base import Base
 from navox.db.models import (
     AuditEvent,
@@ -130,7 +131,10 @@ async def system(tmp_path, monkeypatch):
         async with factory() as db:
             connector = await db.get(ConnectorConnection, state.connector_id)
             if connector:
-                connector.retry_not_before = datetime.now(UTC) - timedelta(seconds=1)
+                # The runtime compares this deadline against the database clock, so
+                # expire it on that same clock. A host-clock deadline can still be in
+                # the future whenever the server's clock lags the test host.
+                connector.retry_not_before = await database_now(db) - timedelta(seconds=1)
                 await db.commit()
 
     state.sync, state.expire_backoff = sync, expire_backoff

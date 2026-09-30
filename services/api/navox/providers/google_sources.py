@@ -455,6 +455,10 @@ def calendar_document(
             "timezone": _text(start.get("timeZone"), 64),
             "status": _text(data.get("status"), 32) or "confirmed",
             "calendar_id": "primary",
+            "ical_uid": _text(data.get("iCalUID"), 512),
+            "html_link": _text(data.get("htmlLink"), 2048),
+            "recurring_event_id": _text(data.get("recurringEventId"), 512),
+            "recurring": bool(data.get("recurrence") or data.get("recurringEventId")),
         },
     )
 

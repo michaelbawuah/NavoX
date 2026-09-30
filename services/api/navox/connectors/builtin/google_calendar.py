@@ -142,6 +142,24 @@ class GoogleCalendarFailure(ConnectorRuntimeError):
         self.google_http_status = error.http_status
 
 
+def calendar_source_url(value: object) -> str | None:
+    from urllib.parse import urlsplit
+
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    if parsed.scheme != "https" or parsed.username or parsed.password:
+        return None
+    if parsed.netloc == "calendar.google.com" or (
+        parsed.netloc == "www.google.com" and parsed.path.startswith("/calendar/")
+    ):
+        return value
+    return None
+
+
 def calendar_resource(document: SourceDocument, connection_id: UUID) -> CanonicalResource:
     if document.provider != "google" or document.source_type != "calendar_event":
         raise ConnectorRuntimeError("INVALID_PROVIDER_RESPONSE", "Not a Calendar source")
@@ -159,6 +177,7 @@ def calendar_resource(document: SourceDocument, connection_id: UUID) -> Canonica
             "source_document": document.model_dump(mode="json", exclude={"retrieved_at"}),
             "status": document.metadata.get("status", "active"),
         },
+        source_url=calendar_source_url(document.metadata.get("html_link")),
         updated_at=document.occurred_at,
         retrieved_at=document.retrieved_at,
     )

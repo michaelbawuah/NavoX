@@ -9,7 +9,14 @@ import type {
   NewsStory,
 } from "@navox/contracts";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
-import { NewsRequestError, newsRequest, newsTime } from "../lib/news";
+import {
+  loadNewsFeed,
+  type NewsFeed,
+  NewsRequestError,
+  newsRequest,
+  newsTime,
+  newsTrendingCaption,
+} from "../lib/news";
 import { parseFollowedLabels } from "../lib/news-preferences";
 import { FollowedStoryUpdates } from "./followed-story-updates";
 import {
@@ -24,6 +31,7 @@ import {
 } from "./navox-ui";
 import { NewsChat } from "./news-chat";
 import styles from "./news-workspace.module.css";
+import { RelatedStories } from "./related-stories";
 import { StoryIntelligence } from "./story-intelligence";
 
 const categories: [NewsCategory, string][] = [
@@ -33,7 +41,7 @@ const categories: [NewsCategory, string][] = [
   ["technology", "Technology"],
   ["science", "Science"],
 ];
-type Feed = "top" | "for-you" | "saved" | NewsCategory;
+type Feed = NewsFeed;
 
 function NewsFrame({ children }: { children: React.ReactNode }) {
   return (
@@ -104,6 +112,44 @@ export function NewsStoryCard({
   );
 }
 
+export function NewsFeedTabs({
+  feed,
+  onSelect,
+  reviewedImportance = false,
+}: {
+  feed: Feed;
+  onSelect: (feed: Feed) => void;
+  reviewedImportance?: boolean;
+}) {
+  return (
+    <>
+      <nav aria-label="News sections" className={styles.tabs}>
+        {(
+          [
+            ["top", reviewedImportance ? "Top stories" : "Latest"],
+            ["for-you", "For you"],
+            ["trending", "Trending"],
+            ...categories,
+            ["saved", "Saved"],
+          ] as [Feed, string][]
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={feed === value}
+            onClick={() => onSelect(value)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+      {feed === "trending" && (
+        <p className={styles.feedCaption}>{newsTrendingCaption}</p>
+      )}
+    </>
+  );
+}
+
 export function NewsWorkspace() {
   const [selection, setSelection] = useState<{ feed: Feed }>({ feed: "top" });
   const { feed } = selection;
@@ -134,11 +180,8 @@ export function NewsWorkspace() {
         setAvailability(available);
         setSignedOut(false);
         if (!available.feed) return;
-        const path = ["top", "for-you", "saved"].includes(selection.feed)
-          ? `/${selection.feed}`
-          : `/categories/${selection.feed}`;
         const [items, options, prefs] = await Promise.all([
-          newsRequest<NewsStory[]>(path, { signal }),
+          loadNewsFeed(selection.feed, signal),
           newsRequest<NewsSourceOption[]>("/sources", { signal }),
           newsRequest<NewsPreferences>("/preferences", { signal }),
         ]);
@@ -287,25 +330,25 @@ export function NewsWorkspace() {
       ) : null}
       {availability?.feed && !signedOut && !error && (
         <>
-          <nav aria-label="News sections" className={styles.tabs}>
-            {(
-              [
-                ["top", "Latest"],
-                ["for-you", "For you"],
-                ...categories,
-                ["saved", "Saved"],
-              ] as [Feed, string][]
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                aria-pressed={feed === value}
-                onClick={() => setSelection({ feed: value })}
-              >
-                {label}
-              </button>
-            ))}
-          </nav>
+          <NewsFeedTabs
+            feed={feed}
+            reviewedImportance={
+              stories.length > 0 &&
+              stories.every(
+                (story) => story.ranking_basis === "REVIEWED_IMPORTANCE",
+              )
+            }
+            onSelect={(value) => setSelection({ feed: value })}
+          />
+          {feed === "top" && stories.length > 0 && (
+            <p className={styles.notice}>
+              {stories.every(
+                (story) => story.ranking_basis === "REVIEWED_IMPORTANCE",
+              )
+                ? "Ordered by reviewed public significance, with source evidence."
+                : "Latest updates. Reviewed importance is not available for every story."}
+            </p>
+          )}
           <p role="status" className={styles.notice}>
             {notice}
           </p>
@@ -593,6 +636,7 @@ export function NewsStoryWorkspace({ storyId }: { storyId: string }) {
               <h2>Original reporting</h2>
               <NavoXSourceList sources={story.sources} />
             </section>
+            <RelatedStories storyId={storyId} />
             <details className={styles.detailSection}>
               <summary>More about this story</summary>
               <p>Last checked {newsTime(story.retrieved_at)}.</p>

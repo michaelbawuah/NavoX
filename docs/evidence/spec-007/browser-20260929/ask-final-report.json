@@ -1,0 +1,32 @@
+{
+  "synthetic": true,
+  "production_acceptance": false,
+  "provider_calls": 0,
+  "checks": [
+    "Failed Ask retry reuses durable paid request identifier",
+    "Source #2 follows displayed resource order, independent of turn sequence",
+    "Mobile Ask form does not retain a desktop-width flex basis as height",
+    "Clear during an in-flight answer erases results and rejects late rendering; form remains usable",
+    "Owned source outage is named without provider error detail",
+    "Conflicting calendar/email dates show both linked sources, year/time zone, and schedule authority",
+    "Refresh happens only on explicit click and reports queued/cached state"
+  ],
+  "pages": [
+    {
+      "route": "/navox/search",
+      "mode": "ASK",
+      "textScale": "200%",
+      "width": 320,
+      "scrollWidth": 320
+    },
+    {
+      "route": "/navox/search",
+      "mode": "CONFLICT",
+      "textScale": "200%",
+      "width": 320,
+      "scrollWidth": 320
+    }
+  ],
+  "page_errors": [],
+  "passed": true
+}

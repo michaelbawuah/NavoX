@@ -6,7 +6,12 @@ import type {
   NewsFreshness,
 } from "@navox/contracts";
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { newsRequest, newsTime, safeNewsUrl } from "../lib/news";
+import {
+  newsEvidenceTime,
+  newsRequest,
+  newsTime,
+  safeNewsUrl,
+} from "../lib/news";
 import { NavoXAskBox, NavoXStatus } from "./navox-ui";
 import styles from "./news-chat.module.css";
 
@@ -50,6 +55,13 @@ export function NewsAnswerCard({
                 key={`${fact.item_id}-${fact.status}-${fact.text}`}
               >
                 <blockquote>{fact.text}</blockquote>
+                {fact.published_at && (
+                  <small>
+                    {fact.event_started_at
+                      ? `Source event time: ${newsEvidenceTime(fact.event_started_at)}`
+                      : `Reported ${newsEvidenceTime(fact.published_at)}`}
+                  </small>
+                )}
                 <div className={styles.factMeta}>
                   <NavoXStatus status={fact.status} />
                   {url ? (
@@ -95,6 +107,8 @@ export function NewsChat({ storyId }: { storyId?: string }) {
 
 function NewsChatSession({ storyId }: { storyId?: string }) {
   const [available, setAvailable] = useState(false);
+  const [comparisonAvailable, setComparisonAvailable] = useState(false);
+  const [focus, setFocus] = useState<NewsFocus>("auto");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
   const [answers, setAnswers] = useState<NewsAnswer[]>([]);
@@ -109,7 +123,10 @@ function NewsChatSession({ storyId }: { storyId?: string }) {
       signal: controller.signal,
     })
       .then((value) => {
-        if (!controller.signal.aborted) setAvailable(value.chat);
+        if (!controller.signal.aborted) {
+          setAvailable(value.chat);
+          setComparisonAvailable(Boolean(value.source_comparison));
+        }
       })
       .catch(() => {});
     return () => {
@@ -146,8 +163,12 @@ function NewsChatSession({ storyId }: { storyId?: string }) {
           body: JSON.stringify({
             request_id: crypto.randomUUID(),
             question: text,
-            intent: storyId ? "STORY_QUESTION" : "CURRENT_NEWS",
-            freshness: "FRESH",
+            intent:
+              focus === "auto"
+                ? storyId
+                  ? "STORY_QUESTION"
+                  : undefined
+                : focus,
             depth: "STANDARD",
           }),
         },
@@ -208,6 +229,12 @@ function NewsChatSession({ storyId }: { storyId?: string }) {
         />
       ))}
       {error && <p role="alert">{error}</p>}
+      <NewsFocusControl
+        value={focus}
+        disabled={busy}
+        comparisonAvailable={comparisonAvailable}
+        onChange={setFocus}
+      />
       <NavoXAskBox
         id="news-question"
         label={storyId ? "Ask about this story" : "Ask a news question"}
@@ -225,5 +252,46 @@ function NewsChatSession({ storyId }: { storyId?: string }) {
         {busy ? "Checking the sources…" : ""}
       </p>
     </section>
+  );
+}
+
+type NewsFocus = "auto" | "TIMELINE" | "BACKGROUND" | "COVERAGE_COMPARISON";
+
+export function NewsFocusControl({
+  value,
+  disabled,
+  comparisonAvailable,
+  onChange,
+}: {
+  value: NewsFocus;
+  disabled: boolean;
+  comparisonAvailable: boolean;
+  onChange: (value: NewsFocus) => void;
+}) {
+  return (
+    <label className={styles.focus}>
+      Answer focus
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(event) => {
+          const next = event.target.value;
+          if (
+            next === "auto" ||
+            next === "TIMELINE" ||
+            next === "BACKGROUND" ||
+            (next === "COVERAGE_COMPARISON" && comparisonAvailable)
+          )
+            onChange(next);
+        }}
+      >
+        <option value="auto">Let NavoX choose</option>
+        <option value="TIMELINE">Timeline</option>
+        <option value="BACKGROUND">Background</option>
+        {comparisonAvailable && (
+          <option value="COVERAGE_COMPARISON">Compare source reports</option>
+        )}
+      </select>
+    </label>
   );
 }

@@ -9,6 +9,11 @@
   gap: 2rem;
   align-items: flex-end;
   padding: 3.5rem 0 2.2rem;
+  overflow-wrap: anywhere;
+}
+.hero > * {
+  min-width: 0;
+  max-width: 100%;
 }
 .eyebrow {
   color: #8ce9d1;
@@ -37,6 +42,8 @@
 .dashboard button,
 .dialog button,
 .linkButton {
+  max-width: 100%;
+  overflow-wrap: anywhere;
   background: #172439;
   border: 1px solid #344660;
   color: #e2eafa;

@@ -22,7 +22,7 @@ from navox.news.conversation_retrieval import retrieve_for_turn, turn_plan
 from navox.news.evidence import evaluate_claim, permitted_summary_item, quote_at
 from navox.news.questions import Question as Question
 from navox.news.registry import catalog
-from navox.news.retrieval import Freshness
+from navox.news.retrieval import Freshness, NewsIntent
 from navox.news.stories import owned_story
 
 
@@ -33,6 +33,8 @@ class AnswerFact(Contract):
     source_url: str
     source_id: UUID
     status: Verification
+    published_at: datetime | None = None
+    event_started_at: datetime | None = None
 
 
 class AnswerRead(Contract):
@@ -157,7 +159,7 @@ async def begin_question(
         request_id=question.request_id,
         sequence=(sequence or 0) + 1,
         question=question.question,
-        intent=question.intent,
+        intent=question.plan.intent,
         status="PROCESSING",
         source_snapshot={},
         retrieval_plan=question.plan.model_dump(mode="json"),
@@ -389,6 +391,8 @@ async def answer_view(
                     source_url=source.canonical_url,
                     source_id=source.source_id,
                     status=view.status,
+                    published_at=source.published_at,
+                    event_started_at=source.event_started_at,
                 )
             )
         for excerpt in selection.excerpts:
@@ -401,6 +405,8 @@ async def answer_view(
                     source_url=source.canonical_url,
                     source_id=source.source_id,
                     status=Verification.ATTRIBUTED,
+                    published_at=source.published_at,
+                    event_started_at=source.event_started_at,
                 )
             )
         message = (
@@ -411,8 +417,21 @@ async def answer_view(
         if bool((turn.retrieval_metadata or {}).get("limited", True)):
             message += " This is a bounded selection from your connected sources."
         unique = {(fact.source_id, fact.text, fact.status): fact for fact in facts}
+        shown = list(unique.values())
+        if turn_plan(turn).intent == NewsIntent.TIMELINE:
+            shown.sort(
+                key=lambda fact: (
+                    items[fact.item_id].event_started_at or items[fact.item_id].published_at,
+                    fact.item_id.hex,
+                )
+            )
+            message += " Ordered by source event time, or publication time when unavailable."
+        elif turn_plan(turn).intent == NewsIntent.COVERAGE_COMPARISON:
+            message += (
+                " Compare the attributed wording; an absent report is not proof of an omission."
+            )
         return AnswerRead.model_validate(
-            base | dict(status="READY", message=message, facts=tuple(unique.values()))
+            base | dict(status="READY", message=message, facts=tuple(shown))
         )
     except (NewsError, ValueError, KeyError):
         return AnswerRead.model_validate(

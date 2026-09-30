@@ -1,0 +1,139 @@
+{
+  "corpus": {
+    "reference": "authored-spec006-extraction-regression",
+    "extraction_version": "fixture-v1",
+    "provenance": {
+      "source_identity": "authored-fixture-manifest-spec006",
+      "captured_at": "2026-09-29T12:00:00Z",
+      "rights_basis": "authored synthetic fixture; no publisher text is captured or redistributed",
+      "label_authority": "authored",
+      "reviewer_identity": null,
+      "content_digest": "978db5cfacf87ef98149ba23a2c01c2aeeddc88163606a3cf014e5adb31131cd"
+    },
+    "examples": [
+      {
+        "item_id": "11111111-1111-4111-8111-111111111111",
+        "corpus_item_reference": null,
+        "provenance": {
+          "source_identity": "authored-fixture-item-one",
+          "captured_at": "2026-09-29T12:00:00Z",
+          "rights_basis": "authored synthetic fixture; no publisher text is captured or redistributed",
+          "label_authority": "authored",
+          "reviewer_identity": null,
+          "content_digest": "88af08a73970383de53a333ec2a41424d1b2043821d9ff694b8bb265a1cbbbb6"
+        },
+        "split": "development",
+        "labels": [
+          {
+            "item_id": "11111111-1111-4111-8111-111111111111",
+            "corpus_item_reference": null,
+            "field": "headline",
+            "start": 0,
+            "end": 45,
+            "text_digest": "88af08a73970383de53a333ec2a41424d1b2043821d9ff694b8bb265a1cbbbb6"
+          }
+        ]
+      },
+      {
+        "item_id": "22222222-2222-4222-8222-222222222222",
+        "corpus_item_reference": null,
+        "provenance": {
+          "source_identity": "authored-fixture-item-two",
+          "captured_at": "2026-09-29T12:00:00Z",
+          "rights_basis": "authored synthetic fixture; no publisher text is captured or redistributed",
+          "label_authority": "authored",
+          "reviewer_identity": null,
+          "content_digest": "360eb94bc5ec73a3784ebe4c95a9411413c03412bb7ebcaf5938f2312423ff99"
+        },
+        "split": "development",
+        "labels": [
+          {
+            "item_id": "22222222-2222-4222-8222-222222222222",
+            "corpus_item_reference": null,
+            "field": "description",
+            "start": 0,
+            "end": 50,
+            "text_digest": "360eb94bc5ec73a3784ebe4c95a9411413c03412bb7ebcaf5938f2312423ff99"
+          }
+        ]
+      },
+      {
+        "item_id": "33333333-3333-4333-8333-333333333333",
+        "corpus_item_reference": null,
+        "provenance": {
+          "source_identity": "authored-fixture-item-three",
+          "captured_at": "2026-09-29T12:00:00Z",
+          "rights_basis": "authored synthetic fixture; no publisher text is captured or redistributed",
+          "label_authority": "authored",
+          "reviewer_identity": null,
+          "content_digest": "11384eb7ec8ee79e2c9e70a1b89781cdce60bedc4c384521b9ef1cfffdfa0a56"
+        },
+        "split": "development",
+        "labels": []
+      },
+      {
+        "item_id": "44444444-4444-4444-8444-444444444444",
+        "corpus_item_reference": null,
+        "provenance": {
+          "source_identity": "authored-fixture-item-four",
+          "captured_at": "2026-09-29T12:00:00Z",
+          "rights_basis": "authored synthetic fixture; no publisher text is captured or redistributed",
+          "label_authority": "authored",
+          "reviewer_identity": null,
+          "content_digest": "a5cdb990852070317060fdd5fcd5bb9723c5b739ec70d50aaf802e94c9360884"
+        },
+        "split": "holdout",
+        "labels": [
+          {
+            "item_id": "44444444-4444-4444-8444-444444444444",
+            "corpus_item_reference": null,
+            "field": "headline",
+            "start": 0,
+            "end": 52,
+            "text_digest": "a5cdb990852070317060fdd5fcd5bb9723c5b739ec70d50aaf802e94c9360884"
+          }
+        ]
+      },
+      {
+        "item_id": "55555555-5555-4555-8555-555555555555",
+        "corpus_item_reference": null,
+        "provenance": {
+          "source_identity": "authored-fixture-item-five",
+          "captured_at": "2026-09-29T12:00:00Z",
+          "rights_basis": "authored synthetic fixture; no publisher text is captured or redistributed",
+          "label_authority": "authored",
+          "reviewer_identity": null,
+          "content_digest": "51cc1fda2f10339e7f0a4abfdeaa021f30af4fb864eb82f12cd9f11b6add6091"
+        },
+        "split": "holdout",
+        "labels": []
+      }
+    ]
+  },
+  "observed": [
+    {
+      "item_id": "11111111-1111-4111-8111-111111111111",
+      "corpus_item_reference": null,
+      "field": "headline",
+      "start": 0,
+      "end": 45,
+      "text_digest": "88af08a73970383de53a333ec2a41424d1b2043821d9ff694b8bb265a1cbbbb6"
+    },
+    {
+      "item_id": "22222222-2222-4222-8222-222222222222",
+      "corpus_item_reference": null,
+      "field": "description",
+      "start": 0,
+      "end": 50,
+      "text_digest": "360eb94bc5ec73a3784ebe4c95a9411413c03412bb7ebcaf5938f2312423ff99"
+    },
+    {
+      "item_id": "44444444-4444-4444-8444-444444444444",
+      "corpus_item_reference": null,
+      "field": "headline",
+      "start": 0,
+      "end": 52,
+      "text_digest": "a5cdb990852070317060fdd5fcd5bb9723c5b739ec70d50aaf802e94c9360884"
+    }
+  ]
+}

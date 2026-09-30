@@ -322,6 +322,7 @@ async def process_gmail_connection(
     registry.register(GMAIL_MANIFEST, factory)
     runtime = ConnectorRuntime(
         registry,
+        knowledge_settings=settings,
         secret_broker=GoogleCalendarTokenBroker(
             settings, authority, connector_id, cache_access_tokens=True
         ),

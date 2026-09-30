@@ -47,12 +47,27 @@ class Settings(BaseSettings):
     news_feed_enabled: bool = False
     news_chat_enabled: bool = False
     news_intelligence_enabled: bool = False
-    news_x_trends_enabled: bool = False
     news_deep_research_enabled: bool = False
     news_coverage_comparison_enabled: bool = False
     news_operational_relevance_enabled: bool = False
     news_today_refresh_enabled: bool = False
     news_subscriptions_refresh_enabled: bool = False
+    # Reviewed semantic clustering is off by default. The deployment policy and
+    # calibration report are operator inputs; neither exists by default and no
+    # code here installs, widens or promotes them.
+    news_semantic_clustering_enabled: bool = False
+    news_semantic_clustering_hourly_quota: int = Field(default=20, ge=1, le=200)
+    news_semantic_deployment_policy: dict[str, JsonValue] | None = Field(default=None, repr=False)
+    news_semantic_calibration_report: dict[str, JsonValue] | None = Field(default=None, repr=False)
+    # Connected knowledge search is opt-in; enabling it in tests is not deployment.
+    knowledge_enabled: bool = False
+    # Optional paid semantic search stays off until an operator marks it on. The
+    # quota bounds how many paid embedding requests one user may reserve per hour.
+    knowledge_semantic_enabled: bool = False
+    knowledge_semantic_hourly_quota: int = Field(default=20, ge=1, le=200)
+    # Grounded Ask is a separate opt-in paid path with its own hourly quota.
+    knowledge_ask_enabled: bool = False
+    knowledge_ask_hourly_quota: int = Field(default=20, ge=1, le=200)
     news_source_catalog: list[dict[str, JsonValue]] = Field(
         default_factory=list, max_length=50, repr=False
     )

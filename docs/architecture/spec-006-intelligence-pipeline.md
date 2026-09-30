@@ -13,6 +13,24 @@ its metrics. Reports explicitly retain `production_qualified=false` and
 `runtime_activation=false`. The tests use authored, precomputed signals; they do not measure
 semantic clustering quality on real news. No semantic merge is activated by this change.
 
+Each corpus now also carries a required `CorpusProvenance` record: source identity, capture
+timestamp, rights basis, label authority (`authored`, `machine` or `reviewer` with a named
+reviewer identity) and a captured text or manifest digest. An authored or machine record
+cannot also name a reviewer. The calibrator repeats that provenance in its report, so a
+report without provenance cannot be constructed.
+
+## Material extraction measurement
+
+`navox.news.extraction_evaluation` measures labelled material-claim spans against the spans
+that currently admitted claims already record. It reports admitted-claim precision,
+labelled-span recall, exact-span match rate, unmatched labels, admitted spans outside any
+label and abstentions, and it keeps `production_qualified=false` and
+`runtime_activation=false`. Precision is unmeasured, never 100%, when nothing was admitted,
+and a corpus that carries no labels reports an explicit unmeasured state rather than a pass.
+A read-only adapter turns admitted claims for a bounded batch of stories into observed spans
+through the existing evidence and story helpers; it writes nothing, generates no text and
+calls no provider. Its CLI refuses to replace an existing report and writes reports `0600`.
+
 ## Background pipeline
 
 A separately default-off `news_intelligence_enabled` flag gates the background activity.
@@ -54,6 +72,12 @@ has a thirty-minute timeout for at most four sequential, bounded two-phase runs.
 source deletion cascades through story-owned records.
 
 ## Deliberate limits
+
+Both evaluation corpora in this checkpoint are authored synthetic fixtures. No
+rights-cleared real-article corpus has been captured and no semantic clustering or material
+extraction quality on real news has been measured; the reports therefore state
+`production_qualified=false` and `runtime_activation=false` and the acceptance record's
+corpus-provenance and extraction-measurement gaps stay open.
 
 The read-only summary endpoint is backend-only; the consumer summary UI is not connected
 in this checkpoint. Same-version retry after failure or summary expiry requires a future

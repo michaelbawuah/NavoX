@@ -24,6 +24,11 @@
   justify-content: space-between;
   gap: 2rem;
   margin: 3rem 0 2rem;
+  overflow-wrap: anywhere;
+}
+.pageHeader > * {
+  min-width: 0;
+  max-width: 100%;
 }
 .pageHeader h1 {
   font-size: clamp(2.4rem, 5vw, 4.25rem);

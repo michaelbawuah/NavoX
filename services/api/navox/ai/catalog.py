@@ -8,6 +8,7 @@ from navox.ai.prompts import builtin_prompts
 def catalog_template() -> RegistrySnapshot:
     prompts, schemas = builtin_prompts()
     tasks = {
+        Profile.EMBEDDING: {TaskType.EMBED},
         Profile.EXTRACTION_FAST: {TaskType.EXTRACT, TaskType.CLASSIFY},
         Profile.EXTRACTION_HIGH_ACCURACY: {TaskType.EXTRACT},
         Profile.REASONING_STANDARD: {TaskType.REASON, TaskType.RANK},
@@ -28,7 +29,11 @@ def catalog_template() -> RegistrySnapshot:
             ProfileDefinition(
                 profile=profile,
                 task_types=frozenset(tasks[profile]),
-                required_capabilities=frozenset({Capability.TEXT, Capability.STRUCTURED_OUTPUT})
+                required_capabilities=(
+                    frozenset({Capability.EMBEDDINGS})
+                    if profile == Profile.EMBEDDING
+                    else frozenset({Capability.TEXT, Capability.STRUCTURED_OUTPUT})
+                )
                 | (
                     frozenset({Capability.VISION})
                     if profile == Profile.MULTIMODAL_STANDARD

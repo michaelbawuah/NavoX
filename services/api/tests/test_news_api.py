@@ -134,7 +134,6 @@ async def test_availability_separates_bounded_views_from_reserved_research(
     env.settings.news_feed_enabled = feed
     env.settings.news_deep_research_enabled = timeline
     env.settings.news_coverage_comparison_enabled = comparison
-    env.settings.news_x_trends_enabled = True
     response = await env.client.get("/api/v1/news/availability")
     assert response.status_code == 200
     result = response.json()
@@ -142,6 +141,6 @@ async def test_availability_separates_bounded_views_from_reserved_research(
     assert result["source_comparison"] is (feed and comparison)
     assert result["deep_research"] is False
     assert result["coverage_comparison"] is False
-    assert result["x_trends"] is False
+    assert "x_trends" not in result
     await env.client.post("/api/v1/auth/logout", headers=env.headers)
     assert (await env.client.get("/api/v1/news/availability")).status_code == 401

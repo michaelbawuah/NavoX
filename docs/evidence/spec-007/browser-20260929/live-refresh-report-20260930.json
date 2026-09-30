@@ -1,0 +1,12 @@
+{
+  "synthetic": true,
+  "liveCalls": 1,
+  "polls": 1,
+  "checks": [
+    "Cached result and pending refresh are labelled honestly",
+    "One dispatch then cached polling updates the result",
+    "320px layout at 200% text has no horizontal overflow"
+  ],
+  "pageErrors": [],
+  "passed": true
+}

@@ -25,6 +25,7 @@ from navox.news.contracts import (
     SourceDefinition,
     SourceType,
     Verification,
+    stored_utc,
 )
 from navox.news.ingestion import item_view
 from navox.news.registry import current_rights
@@ -201,6 +202,15 @@ async def review_evidence(
         user_id=claim.user_id,
         now=now,
     )
+    # Adjudication can only bind evidence that is a current member of this story.
+    # Otherwise an unrelated owned item could corroborate an unrelated claim.
+    member = await database.get(NewsStoryItem, item.id)
+    if (
+        member is None
+        or member.cluster_id != claim.cluster_id
+        or member.item_revision != item.revision
+    ):
+        raise NewsError("invalid_evidence")
     quote_at(view, span)
     # Company statements and social posts cannot acquire primary-evidence authority.
     if review.kind == EvidenceKind.PRIMARY_RECORD and source.source_type not in {
@@ -288,6 +298,20 @@ async def evaluate_claim(
                 )
             )
             quote_at(view, span)
+            if row.review_reference and row.review_reference.startswith("auto-rel:"):
+                definition = definitions.get(source.source_key)
+                policy = definition.evidence_policy if definition is not None else None
+                if (
+                    policy is None
+                    or not policy.reviewed_at <= now < policy.expires_at
+                    or row.reviewed_at is None
+                    or not policy.reviewed_at <= stored_utc(row.reviewed_at) < policy.expires_at
+                    or not row.review_reference.startswith(f"auto-rel:{policy.review_reference}:")
+                    or row.evidence_kind != policy.role
+                    or (row.evidence_strength == "strong") != policy.strong_evidence_allowed
+                    or frozenset(row.origin_groups) != policy.origin_groups
+                ):
+                    continue
             fact = EvidenceFact(
                 item_id=item.id,
                 source_id=source.id,

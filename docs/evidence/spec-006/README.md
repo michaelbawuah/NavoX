@@ -62,28 +62,34 @@ claim-extraction, clustering, conversational quality or usability thresholds.
 
 1. **Calibrated semantic clustering and extraction evaluation.** The weighted
    scoring contract exists, but uncalibrated similarity never auto-merges. The
-   current deployed path performs exact deduplication only. Semantic clustering
-   recall/precision and material extraction precision have not been measured.
+   current deployed path performs exact deduplication only. Offline measurement
+   machinery with a corpus provenance contract now exists
+   (`navox/news/cluster_evaluation.py`, `navox/news/extraction_evaluation.py`), but
+   no corpus with a recorded rights basis exists, so semantic clustering
+   recall/precision and material extraction precision remain unmeasured.
 2. **Automated intelligence pipeline and qualified synthesis.** News prompt/schema
    artifacts, evidence admission, a default-off background extraction/synthesis
    coordinator, transactional publication checks, a read-only summary endpoint and
    consumer summary integration are implemented. Trusted automatic evidence
    adjudication and news-specific provider qualification/canary evidence remain
    outstanding; authored provider fixtures are not live acceptance.
-3. **X integration and acceptance.** The owner confirmed there is no authorized
-   X API access. No X credentials, adapter, live feed or acceptance evidence is
-   claimed. X trends remains unavailable; social popularity never establishes truth.
+3. **Popular rumor acceptance.** The owner removed X integration from SPEC-006
+   scope on 2026-09-30. A rights-cleared, independent rumor corpus and live source
+   demonstration must still show that repetition or popularity cannot establish
+   truth or promote an uncorroborated report into an established Top story.
 4. **Complete news retrieval/deep intelligence.** Bounded permission-before-query
    lexical retrieval, freshness checks, numbered follow-ups, timelines, documented
-   source comparison and paginated changes are implemented. Refresh orchestration,
-   related-story retrieval, broader research and measured follow-up continuity remain
-   incomplete. These read-only views do not establish unrestricted or semantic research.
+   source comparison, paginated changes and bounded related-story reads are
+   implemented. Broader research and measured follow-up continuity remain
+   incomplete. These read-only views do not establish unrestricted or semantic
+   research.
 5. **Ranking and full personalization.** Explicit category/topic/entity preferences,
-   saves/follows, a material followed-story update inbox and an observed-activity
-   trending API are implemented. Trending conversation retrieval is locally reviewed
-   below. Separate calibrated importance/trend/relevance ranking remains incomplete;
-   observed activity is neither importance nor truth. The web feed has no dedicated
-   Trending tab, and the update inbox does not establish external notifications.
+   saves/follows, a material followed-story update inbox, an observed-activity
+   trending API and a Trending tab in the web feed are implemented. Trending
+   conversation retrieval is locally reviewed below. Separate calibrated
+   importance/trend/relevance ranking remains incomplete; observed activity is
+   neither importance nor truth, and the update inbox does not establish external
+   notifications.
 6. **Today/Subscriptions simplification and measured accessibility/usability.**
    Shared navigation is implemented. The full requested experience refresh and
    actual keyboard, screen-reader, mobile and >=90% unassisted usability evidence
@@ -231,3 +237,157 @@ Independent quality evaluation, trusted evidence adjudication, news-specific
 provider qualification, refresh/research completion, calibrated ranking and measured
 accessibility/usability/A–H demonstrations remain open. Authorized X access remains
 an external dependency. **SPEC-006 is not accepted.**
+
+## Offline acceptance window — 29 September 2026, afternoon
+
+Three bounded bundles were implemented, tested and accepted locally on
+`spec-006-news-intelligence` after the trending retrieval patch. The coordinator
+committed, pushed, merged and enabled nothing: the working tree is the proposed
+commit, and no hosted run covers it yet.
+
+| Bundle | Implemented | Tested / evidence | Publication | Accepted |
+| --- | --- | --- | --- | --- |
+| S006-SURF-1 news discovery surfaces | Trending feed tab wired to `GET /api/v1/news/stories/trending` with observed-activity labeling; `GET /api/v1/news/stories/{id}/related` bounded to five shared claim digests; story-screen Related stories section | 10 API tests, 197 web tests in 27 files, web lint/typecheck/build, unchanged gate 2030 tests | Uncommitted | Astra local acceptance |
+| S006-EVAL-1 evaluation machinery | Corpus provenance contract carried into the calibration report; extraction measurement module with precision, recall, exact-span rate, unmatched labels, spans outside labels, abstentions, explicit unmeasured state, bounded read-only adapter over admitted claims, non-overwriting CLI | 47 focused tests, strict mypy clean, CLI measured/refusal/unmeasured runs, unchanged gate 2054 tests | Uncommitted | Astra local acceptance |
+| S006-ADV-1 adversarial regressions | Specification test list as explicit regressions: circular sourcing, syndication, rumor, retraction, stale video, mismatched headlines, prompt injection, zero-tolerance invariants | 13 new tests, 229 news tests, unchanged gate 2067 tests | Uncommitted | Astra local acceptance |
+| S006-REFRESH-1 refresh orchestration | `prepare_news_conversation_activity` is now registered: `NewsConversationRefreshWorkflow` refreshes the turn's stale sources through bounded `NewsSourceIngestionWorkflow` children before the answer, behind patch marker `news-conversation-refresh-v1`, with refresh failures never blocking the answer | 7 new workflow tests, 125 focused news workflow/activity tests, unchanged gate 2074 tests | Uncommitted | Astra local acceptance |
+
+The adversarial bundle found and fixed a real defect: `review_evidence` accepted an
+item that was not a current member of the claim's story, so an unrelated owned item
+could make a claim `CORROBORATED` with `independent_supports=2`. The fix in
+[evidence.py](../../../services/api/navox/news/evidence.py:204) requires current
+story membership and a matching revision, mirroring `admit_claim`. The fix sits at
+the adjudication write boundary; a read-time membership filter in `evaluate_claim`
+was considered and deliberately not added, because membership can legitimately
+change when a story is re-clustered while the recorded quote stays valid.
+
+Status against the specification's measurement gates, which this record carries from
+[the architecture note](../../architecture/spec-006-news.md:138):
+
+| Required measurement | Threshold | Status |
+| --- | --- | --- |
+| Exact deduplication precision | >=99% | Implemented and regression-tested; no corpus measurement |
+| Story clustering precision / recall | >=95% / >=90% | Harness with provenance ready; unmeasured |
+| Material claim extraction precision | >=95% | Harness ready; unmeasured |
+| Source attribution accuracy | >=99% | Attribution implemented and tested with fixtures; unmeasured |
+| Independent-source counting | >=98% | Independence groups implemented with adversarial coverage; unmeasured |
+| Grounded chat claims / freshness compliance | >=98% / >=98% | Permission-first retrieval, freshness and citation checks tested; unmeasured |
+| Follow-up continuity | >=95% | Numbered follow-ups and prior-answer precedence tested; unmeasured |
+| Correction / retraction propagation | 100% / 100% | Covered by regressions and read-time withholding; not measured across a corpus |
+| Fabricated URLs or unsupported definitive claims | 0 | Explicit regressions now exist; two defects were found and fixed during SPEC-006 |
+| Rights violations, cross-user leaks, unauthorized actions | 0 | Covered by tests; this is not a security certification |
+| Unassisted completion of core News tasks | >=90% | No human study has been performed |
+
+The corpus-based rows require independently labelled source material with a recorded
+rights basis. Human usability requires participants and observed task completion, not
+an article corpus. News-specific provider qualification and canary evidence require
+live provider access and spend authorization. Authorized X access remains unavailable
+in the recorded evidence, so no adapter or feed is claimed. These are separate
+acceptance dependencies; they do not remove the implementation gaps listed above.
+
+**SPEC-006 is not accepted.** Discovery surfaces, related-story reads, refresh
+orchestration and evaluation machinery have implementations and regression coverage.
+They do not complete calibrated semantic clustering, trusted automatic evidence
+adjudication, broader research, or separate importance/trend/relevance ranking.
+Refresh has an offline workflow harness; true pre-patch Temporal replay remains
+unverified. Corpus, live-provider, X, and human usability gates remain distinct.
+Hosted CI run `36610643121` passed all six jobs on published head
+`5573ba4345a69cf4d01f793cfa4a6d0dd195a6f6`; it does not cover this uncommitted tree.
+
+## News provider diagnostics and question routing — 29 September 2026
+
+The continuation verified all six baseline hosted jobs at `5573ba4`, preserved the
+existing dirty tree, and found a consumer-path defect: global News chat always sent
+`CURRENT_NEWS`, so natural trending questions did not reach activity retrieval.
+The UI now leaves global intent to a narrow server-owned request-phrase classifier;
+explicit story intent and all scope/freshness/reference bounds remain intact. An
+X-specific trend question stays unavailable instead of being answered as publisher
+activity. Sixty-one focused question/retrieval/API tests passed.
+
+The user authorized existing approved providers and a **$10 total session cap**.
+Candidate diagnostics used only ten fixed, newly authored public fixtures, the
+existing enabled/priced models from registry revision 6, and isolated in-memory
+public-evaluation grants. The serving registry, rollout, account source policies,
+owner data, and feature flags were not changed. These diagnostics cannot be imported
+as production qualification and do not measure independent real-news quality.
+
+| Candidate | OpenAI gpt-5.6-luna | Gemini gemini-3.5-flash-lite | Claude haiku-4-5-20251001 |
+| --- | --- | --- | --- |
+| Original News v1 | Request rejected; remaining cases not attempted | 8/10 | 4/10 |
+| Strict OpenAI wire-schema fix | 7/10 | Not rerun | Not rerun |
+| News v2 with exact server-counted headline span options | 10/10 | 8/10 | 8/10 |
+
+The first rejection exposed an OpenAI strict-schema compatibility defect: the News
+span schema had an optional `claim_type` default, but strict output requires every
+property to be required. The wire adapter now narrows optional properties to required
+and strips default annotations without changing the locally validated canonical
+schema. See [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+
+The initial successful responses also exposed incorrect character offsets. Versioned
+v2 News prompts can copy exact application-counted headline spans; v1 prompt/schema
+bytes remain unchanged and have digest regressions. No span is repaired after model
+output, and a supplied span is neither proof nor an instruction channel. Existing
+validators still reject truncated qualifiers, fabricated citations, empty synthesis
+sections, and disputed claims placed in definitive sections. The retained v2 Gemini
+and Claude failures mean those candidates are not accepted for News deployment.
+
+Evidence: `provider-diagnostic-20260929.json`,
+`provider-diagnostic-openai-wire-20260929.json`, and
+`provider-diagnostic-span-v2-20260929.json`, with non-overwriting reservation records.
+Known estimated usage cost across these runs: **$0.0422862**; conservative total
+reserved cost: **$0.5075062**. Unknown cost was not described as zero. No embedding
+calls were made. The local worker ledger is
+`docs/agent-work/spec-006-007/LIVE-BUDGET.json`.
+
+Provider diagnostics have seven budget/scoring regression cases, exact span options
+and v1 preservation have three cases, and the focused News conversation/intelligence/
+adversarial/provider suite passed 47 cases. These are focused results, not the final
+combined gate. SPEC-006 remains **IN PROGRESS**, with the original X, independent
+quality, automated verification, full clustering/research/ranking, usability and
+end-to-end completion requirements still binding.
+
+## Bounded research and automatic relation implementation — continued 29 September
+
+Natural timeline/background/source-comparison requests now select their intended
+retrieval behavior. Timelines use retained event time or explicit publication-time
+fallback and preserve that order through answer rendering. Comparison/deep retrieval
+include another source before repeats within existing bounds; different sources are
+not automatically independent. News chat has an answer-focus control and visible
+source times. No broad open-web research or source approval is implied. 75 focused
+API tests,12 PostgreSQL research tests and16 News web tests passed during development.
+
+Automatic relation interpretation is now an optional third intelligence phase. A new
+`news_evidence_relations@v1` artifact selects claim IDs, exact source spans and
+SUPPORTS/CONTRADICTS/ATTRIBUTES only. A current, explicit operator-owned evidence
+policy supplies the role and optional strong-evidence permission. Policies default
+absent; publisher/wire original-report roles cannot be given to company/social/
+research/government sources. Primary-record, correction and retraction authority is
+not assigned by this model task. Exact task qualification in the gateway remains
+mandatory, and no qualification or policy was created in serving configuration.
+The three reserved phase ceilings sum to$0.05; the existing durable run prevents
+retry spending. Current catalog fingerprints enter the context fence, and expired
+or changed policies remove automatic evidence authority at reads. Original absent-
+policy source fingerprint bytes and all original v1 prompt/schema digests are preserved.
+
+The initial pipeline/adversarial/provider suite passed61 tests; PostgreSQL relation+
+intelligence cohort passed34 tests. Further tests cover two explicitly clustered,
+independent authored reports reaching CORROBORATED through the automatic pipeline;
+that fixture does not establish semantic clustering quality. Combined final gate
+still pending on the completed SPEC007 tree.
+
+The approved OpenAI candidate was tested live on five newly authored public relation
+fixtures. **4/5 passed**: the support case returned an empty relation set; contradiction,
+attribution, unrelated text and prompt injection cases passed. Known cost$0.0013922,
+no unknown-cost calls, reservation$0.25 under the user's$10 session cap. No retry,
+source-account data, serving promotion or config change. This failure is retained in
+`provider-diagnostic-relations-20260929.json` and prevents claiming qualification.
+Independent corpus quality, live source configuration, calibrated semantic grouping,
+importance ranking, broader research and human usability remain open.
+
+## Scope change — 30 September 2026
+
+The owner removed X integration, its UI and its API-access acceptance dependency
+from SPEC-006. Earlier sections record the requirements and observations in force
+when those tests ran; their X-related to-do statements are superseded. The retained
+rumor-safety gate uses independently sourced, rights-cleared material and still
+requires that popularity or repeated copies never establish claim truth.

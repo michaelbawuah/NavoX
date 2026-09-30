@@ -160,6 +160,7 @@ class NewsStory(Base):
     last_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     suppressed: Mapped[bool] = mapped_column(Boolean, default=False)
+    importance_review: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
 
 
 class NewsStoryItem(Base):
@@ -188,6 +189,11 @@ class NewsStoryItem(Base):
     url_digest: Mapped[str] = mapped_column(String(64), index=True)
     copy_digest: Mapped[str | None] = mapped_column(String(64), index=True)
     decision: Mapped[str] = mapped_column(String(32))
+    # Audit of a semantic join: the reviewed policy reference and embedding
+    # namespace that authorized it. Null for exact identity memberships, and
+    # never a copy of source text.
+    match_reference: Mapped[str | None] = mapped_column(String(128))
+    match_namespace: Mapped[str | None] = mapped_column(String(64))
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
@@ -377,6 +383,140 @@ class NewsConversationTurn(Base):
     failure_code: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class NewsClusterFeature(Base):
+    """Source-cited reviewed identity for one exact item revision and policy.
+
+    Written only by an internal trusted review boundary. No model, provider or
+    public request can create, widen or extend a record, and the record stops
+    applying when the item revision, retained digest, rights fingerprint or
+    review expiry changes.
+    """
+
+    __tablename__ = "news_cluster_features"
+    __table_args__ = (
+        UniqueConstraint("news_item_id", "item_revision", name="uq_news_cluster_feature_revision"),
+        ForeignKeyConstraint(
+            ["news_item_id", "workspace_id", "user_id"],
+            ["news_items.id", "news_items.workspace_id", "news_items.user_id"],
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["news_item_id", "source_id"],
+            ["news_items.id", "news_items.source_id"],
+            ondelete="CASCADE",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid)
+    news_item_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    item_revision: Mapped[int] = mapped_column(Integer)
+    item_digest: Mapped[str] = mapped_column(String(64))
+    rights_fingerprint: Mapped[str] = mapped_column(String(64))
+    source_id: Mapped[UUID] = mapped_column(Uuid)
+    language: Mapped[str] = mapped_column(String(32))
+    entity_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    geographic_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    event_type: Mapped[str | None] = mapped_column(String(64))
+    event_identity: Mapped[str | None] = mapped_column(String(128))
+    event_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    citations: Mapped[list[dict[str, str]]] = mapped_column(JSON, default=list)
+    reviewer: Mapped[str] = mapped_column(String(256))
+    review_reference: Mapped[str] = mapped_column(String(128))
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class NewsClusterEmbedding(Base):
+    """One stored item vector inside one exact embedding namespace.
+
+    The vector is stored normalized, bound to the item revision, retained
+    content digest and rights fingerprint it was produced from, so a rebuilt or
+    revoked item can never be compared under its old revision.
+    """
+
+    __tablename__ = "news_cluster_embeddings"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "user_id",
+            "news_item_id",
+            "item_revision",
+            "namespace_digest",
+            name="uq_news_cluster_embedding_namespace",
+        ),
+        ForeignKeyConstraint(
+            ["news_item_id", "workspace_id", "user_id"],
+            ["news_items.id", "news_items.workspace_id", "news_items.user_id"],
+            ondelete="CASCADE",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid)
+    news_item_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    item_revision: Mapped[int] = mapped_column(Integer)
+    item_digest: Mapped[str] = mapped_column(String(64))
+    rights_fingerprint: Mapped[str] = mapped_column(String(64))
+    source_id: Mapped[UUID] = mapped_column(Uuid)
+    namespace_digest: Mapped[str] = mapped_column(String(64), index=True)
+    provider: Mapped[str] = mapped_column(String(64))
+    model: Mapped[str] = mapped_column(String(128))
+    registry_revision: Mapped[str] = mapped_column(String(64))
+    artifact: Mapped[str] = mapped_column(String(128))
+    pipeline_version: Mapped[str] = mapped_column(String(64))
+    dimension: Mapped[int] = mapped_column(Integer)
+    vector: Mapped[list[float]] = mapped_column(JSON)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class NewsClusterEmbeddingRequest(Base):
+    """Durable, per-user, bounded reservation for exactly one paid attempt.
+
+    The reservation is committed before any provider call and is unique per
+    request identifier and per item revision plus namespace, so a retry, crash
+    or a second worker cannot buy the same embedding twice.
+    """
+
+    __tablename__ = "news_cluster_embedding_requests"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "user_id", "request_id", name="uq_news_cluster_request_id"
+        ),
+        UniqueConstraint(
+            "workspace_id",
+            "user_id",
+            "news_item_id",
+            "item_revision",
+            "namespace_digest",
+            name="uq_news_cluster_attempt_namespace",
+        ),
+        ForeignKeyConstraint(
+            ["news_item_id", "workspace_id", "user_id"],
+            ["news_items.id", "news_items.workspace_id", "news_items.user_id"],
+            ondelete="CASCADE",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    workspace_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    user_id: Mapped[UUID] = mapped_column(Uuid)
+    request_id: Mapped[UUID] = mapped_column(Uuid)
+    news_item_id: Mapped[UUID] = mapped_column(Uuid, index=True)
+    item_revision: Mapped[int] = mapped_column(Integer)
+    namespace_digest: Mapped[str] = mapped_column(String(64))
+    # Reproducible namespace reference; identifiers only, never source text.
+    namespace_reference: Mapped[dict[str, str]] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(32))
+    reason: Mapped[str | None] = mapped_column(String(64))
+    provider: Mapped[str | None] = mapped_column(String(64))
+    model: Mapped[str | None] = mapped_column(String(128))
+    registry_revision: Mapped[str | None] = mapped_column(String(64))
+    dimension: Mapped[int | None] = mapped_column(Integer)
+    cost_micros: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class NewsIntelligenceRun(Base):

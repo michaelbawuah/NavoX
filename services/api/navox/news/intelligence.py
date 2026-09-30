@@ -14,18 +14,21 @@ from navox.ai.context import ContextDenied
 from navox.ai.factory import AIProviderNotConfigured
 from navox.ai.runtime import GatewayUnavailable
 from navox.core.settings import Settings
-from navox.db.news import NewsClaim, NewsIntelligenceRun, NewsStoryItem
+from navox.db.news import NewsClaim, NewsIntelligenceRun, NewsItem, NewsSource, NewsStoryItem
 from navox.news.ai_context import NewsContext, run_news_task
 from navox.news.ai_contracts import (
     EXTRACTION,
+    RELATIONS,
     SYNTHESIS,
     ClaimExtraction,
     NewsContextInput,
+    NewsRelations,
     NewsSynthesis,
 )
 from navox.news.contracts import NewsError
 from navox.news.evidence import ClaimRead, admit_claim, refresh_verification
 from navox.news.registry import catalog
+from navox.news.relations import apply_relations, relations_enabled
 from navox.news.stories import owned_story, record_version
 
 MAX_RUNS_PER_HOUR = 4
@@ -206,8 +209,25 @@ async def run_story_intelligence(
             return "SKIPPED"
         run_id, context = started
         runtime = await build_runtime(settings, factory)
+        async with factory() as database:
+            selected_keys = set(
+                await database.scalars(
+                    select(NewsSource.source_key)
+                    .join(NewsItem, NewsItem.source_id == NewsSource.id)
+                    .where(
+                        NewsItem.id.in_(context.item_ids),
+                        NewsItem.workspace_id == workspace_id,
+                        NewsItem.user_id == user_id,
+                    )
+                )
+            )
+        interpret_relations = relations_enabled(
+            {key: value for key, value in catalog(settings).items() if key in selected_keys},
+            now=datetime.now(UTC),
+        )
+        phase_budget = Decimal("0.015") if interpret_relations else PHASE_BUDGET
         extraction_result, extraction, _ = await run_news_task(
-            runtime, context, EXTRACTION, max_cost=PHASE_BUDGET
+            runtime, context, EXTRACTION, max_cost=phase_budget
         )
         if not isinstance(extraction, ClaimExtraction):
             raise NewsError("invalid_evidence")
@@ -232,6 +252,43 @@ async def run_story_intelligence(
             row.result_version = story.version
             row.trace_ids = [str(extraction_result.trace_id)]
             await database.commit()
+        if interpret_relations:
+            context = NewsContext(
+                factory,
+                settings,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                item_ids=context.item_ids,
+                question="Select exact evidence relationships without assigning verification.",
+                mode="intelligence",
+                story_id=story_id,
+            )
+            relation_result, proposals, _ = await run_news_task(
+                runtime, context, RELATIONS, max_cost=Decimal("0.02")
+            )
+            if not isinstance(proposals, NewsRelations):
+                raise NewsError("invalid_evidence")
+            async with factory() as database:
+                row = await current_run(database, run_id, context)
+                story = await owned_story(
+                    database, story_id, workspace_id=workspace_id, user_id=user_id
+                )
+                definitions, now = catalog(settings), datetime.now(UTC)
+                applied = await apply_relations(
+                    database,
+                    story,
+                    proposals,
+                    definitions,
+                    trace_id=relation_result.trace_id,
+                    now=now,
+                )
+                if applied:
+                    story.version += 1
+                    await record_version(database, story, "EVIDENCE_INTERPRETED", now=now)
+                await refresh_verification(database, story, definitions, now=now)
+                row.result_version = story.version
+                row.trace_ids = [*row.trace_ids, str(relation_result.trace_id)]
+                await database.commit()
         context = NewsContext(
             factory,
             settings,
@@ -243,7 +300,7 @@ async def run_story_intelligence(
             story_id=story_id,
         )
         synthesis_result, synthesis, _ = await run_news_task(
-            runtime, context, SYNTHESIS, max_cost=PHASE_BUDGET
+            runtime, context, SYNTHESIS, max_cost=phase_budget
         )
         if not isinstance(synthesis, NewsSynthesis) or context.initial is None:
             raise NewsError("invalid_evidence")

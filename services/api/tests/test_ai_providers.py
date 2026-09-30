@@ -180,7 +180,10 @@ def test_registered_vision_does_not_imply_adapter_support():
     model = definition(Provider.OPENAI).model_copy(update={"capabilities": frozenset(Capability)})
     adapter = OpenAIAdapter(api_key=SecretStr("credential"), models=(model,))
     assert Capability.VISION not in adapter.capabilities(MODEL)
-    assert Capability.EMBEDDINGS not in adapter.capabilities(MODEL)
+    # Embedding transport now exists, but still needs an explicit model capability.
+    assert Capability.EMBEDDINGS in adapter.capabilities(MODEL)
+    plain = OpenAIAdapter(api_key=SecretStr("credential"), models=(definition(Provider.OPENAI),))
+    assert Capability.EMBEDDINGS not in plain.capabilities(MODEL)
 
 
 @pytest.mark.asyncio

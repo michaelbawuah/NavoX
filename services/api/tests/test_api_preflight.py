@@ -78,6 +78,12 @@ if [ "$stage" = alembic ]; then
     news_story_clusters news_story_items news_claims news_claim_evidence news_story_versions
     news_story_preferences news_preferences news_conversations news_conversation_turns
     news_intelligence_runs
+    news_cluster_features news_cluster_embeddings news_cluster_embedding_requests
+    knowledge_resources knowledge_resource_permissions knowledge_chunks
+    knowledge_resource_index knowledge_exclusions knowledge_recent_searches
+    knowledge_embeddings knowledge_embedding_requests knowledge_answer_requests
+    knowledge_sessions knowledge_turns
+    knowledge_entities knowledge_relationships
   )
   for table in "${tables[@]}"; do
     if [ "$PREFLIGHT_TEST_FAILURE" = schema ]; then

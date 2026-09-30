@@ -36,6 +36,7 @@ export interface NewsStory {
   saved: boolean;
   followed: boolean;
   evidence_pending: boolean;
+  ranking_basis?: "RECENCY" | "REVIEWED_IMPORTANCE";
 }
 
 export interface NewsClaim {
@@ -52,7 +53,6 @@ export interface NewsClaim {
 export interface NewsAvailability {
   feed: boolean;
   chat: boolean;
-  x_trends: boolean;
   deep_research: boolean;
   coverage_comparison: boolean;
   /** Bounded read-only views; not a promise of complete Deep Research. */
@@ -91,6 +91,7 @@ export type NewsDepth = "QUICK" | "STANDARD" | "DEEP";
 export type NewsIntent =
   | "CURRENT_NEWS"
   | "TRENDING"
+  /** Legacy saved turns only; this intent never queries a source. */
   | "X_TRENDS"
   | "STORY_QUESTION"
   | "VERIFY_CLAIM"
@@ -107,6 +108,8 @@ export interface NewsAnswerFact {
   source_url: string;
   source_id: string;
   status: NewsVerification;
+  published_at?: string | null;
+  event_started_at?: string | null;
 }
 
 export interface NewsAnswer {

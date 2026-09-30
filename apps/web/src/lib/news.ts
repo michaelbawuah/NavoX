@@ -1,4 +1,32 @@
-import type { NewsVerification } from "@navox/contracts";
+import type {
+  NewsCategory,
+  NewsStory,
+  NewsVerification,
+} from "@navox/contracts";
+
+export type NewsFeed = "top" | "for-you" | "trending" | "saved" | NewsCategory;
+
+const newsFeedPaths: Record<string, string> = {
+  top: "/top",
+  "for-you": "/for-you",
+  trending: "/trending",
+  saved: "/saved",
+};
+
+export function newsFeedPath(feed: NewsFeed): string {
+  return newsFeedPaths[feed] ?? `/categories/${feed}`;
+}
+
+export async function loadNewsFeed(
+  feed: NewsFeed,
+  signal?: AbortSignal,
+): Promise<NewsStory[]> {
+  return newsRequest<NewsStory[]>(newsFeedPath(feed), { signal });
+}
+
+export const newsTrendingCaption =
+  "Trending reflects observed activity among the sources you can already read. " +
+  "It is not a measure of global popularity, importance or truth.";
 
 export const newsStatus: Record<NewsVerification, string> = {
   VERIFIED: "Verified",
@@ -78,6 +106,20 @@ export function newsTime(value: string): string {
         day: "numeric",
         hour: "numeric",
         minute: "2-digit",
+      });
+}
+
+export function newsEvidenceTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf())
+    ? "Time unavailable"
+    : date.toLocaleString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        timeZoneName: "short",
       });
 }
 

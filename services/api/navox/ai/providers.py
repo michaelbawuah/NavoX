@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 from pydantic import SecretStr
 
+from navox.ai.embedding_contracts import EmbeddingInput, EmbeddingOutput
 from navox.ai.foundation.adapter import (
     ErrorCode,
     ProviderError,
@@ -19,7 +20,7 @@ from navox.ai.foundation.adapter import (
 )
 from navox.ai.foundation.contracts import Capability, FinishReason, JSONDocument, Provider, Usage
 from navox.ai.foundation.registry import ModelDefinition
-from navox.ai.provider_schema import claude_output_schema
+from navox.ai.provider_schema import claude_output_schema, openai_output_schema
 
 
 class AdapterFailure(RuntimeError):
@@ -36,6 +37,7 @@ class HTTPAdapter:
     provider: Provider
     endpoint: str
     models_endpoint: str
+    embedding_endpoint: str | None = None
     supported_capabilities = frozenset({Capability.TEXT, Capability.STRUCTURED_OUTPUT})
 
     def __init__(
@@ -129,7 +131,10 @@ class HTTPAdapter:
 
     def capabilities(self, model: str) -> frozenset[Capability]:
         definition = self._models.get(model)
-        return definition.capabilities & self.supported_capabilities if definition else frozenset()
+        supported = self.supported_capabilities | (
+            frozenset({Capability.EMBEDDINGS}) if self.embedding_endpoint else frozenset()
+        )
+        return definition.capabilities & supported if definition else frozenset()
 
     def estimate_cost(self, model: str, usage: Usage) -> Decimal | None:
         definition = self._models.get(model)
@@ -173,17 +178,78 @@ class HTTPAdapter:
         # Configured model names can never create URLs or another network target.
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", request.model):
             raise AdapterFailure(ErrorCode.INVALID_REQUEST)
+        if request.operation == "embedding":
+            if self.embedding_endpoint is None or Capability.EMBEDDINGS not in self.capabilities(
+                request.model
+            ):
+                raise AdapterFailure(ErrorCode.INVALID_REQUEST)
+            try:
+                content = EmbeddingInput.model_validate_json(request.context.text)
+            except ValueError:
+                raise AdapterFailure(ErrorCode.INVALID_REQUEST) from None
+            body = await self._request(
+                self.embedding_endpoint.format(model=request.model),
+                self.embedding_payload(request, content),
+            )
+            try:
+                result = self.decode_embedding(request, body)
+                parsed = EmbeddingOutput.model_validate_json(result.output.text)
+                if result.model != request.model or (
+                    content.dimensions is not None and len(parsed.vector) != content.dimensions
+                ):
+                    raise invalid()
+                return result
+            except (ValueError, KeyError, TypeError, IndexError, AttributeError):
+                raise invalid() from None
         body = await self._request(self.endpoint.format(model=request.model), self.payload(request))
         response = self.normalize_response(body)
         if response.model != request.model:
             raise invalid()
         return response
 
+    def embedding_payload(
+        self, request: ProviderRequest, content: EmbeddingInput
+    ) -> dict[str, Any]:
+        raise AdapterFailure(ErrorCode.INVALID_REQUEST)
+
+    def decode_embedding(
+        self, request: ProviderRequest, body: Mapping[str, Any]
+    ) -> ProviderResponse:
+        raise AdapterFailure(ErrorCode.INVALID_REQUEST)
+
 
 class OpenAIAdapter(HTTPAdapter):
     provider = Provider.OPENAI
     endpoint = "https://api.openai.com/v1/responses"
     models_endpoint = "https://api.openai.com/v1/models"
+    embedding_endpoint: str | None = "https://api.openai.com/v1/embeddings"
+
+    def embedding_payload(
+        self, request: ProviderRequest, content: EmbeddingInput
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model": request.model,
+            "input": content.text,
+            "encoding_format": "float",
+        }
+        if content.dimensions is not None:
+            payload["dimensions"] = content.dimensions
+        return payload
+
+    def decode_embedding(
+        self, request: ProviderRequest, body: Mapping[str, Any]
+    ) -> ProviderResponse:
+        rows = body["data"]
+        if not isinstance(rows, list) or len(rows) != 1 or rows[0].get("index") != 0:
+            raise invalid()
+        output = EmbeddingOutput.model_validate({"vector": rows[0]["embedding"]})
+        usage = body.get("usage") or {}
+        return ProviderResponse(
+            model=body["model"],
+            output=JSONDocument(text=output.model_dump_json()),
+            finish_reason=FinishReason.STOP,
+            usage=Usage(input_tokens=usage.get("prompt_tokens"), output_tokens=0),
+        )
 
     def payload(self, request: ProviderRequest) -> dict[str, Any]:
         name = re.sub(r"[^A-Za-z0-9_-]", "_", request.schema_ref.name)[:64]
@@ -197,7 +263,7 @@ class OpenAIAdapter(HTTPAdapter):
                 "format": {
                     "type": "json_schema",
                     "name": name,
-                    "schema": json.loads(request.output_schema.text),
+                    "schema": openai_output_schema(json.loads(request.output_schema.text)),
                     "strict": True,
                 }
             },
@@ -236,12 +302,42 @@ class GrokAdapter(OpenAIAdapter):
     provider = Provider.XAI
     endpoint = "https://api.x.ai/v1/responses"
     models_endpoint = "https://api.x.ai/v1/models"
+    embedding_endpoint = None
 
 
 class GeminiAdapter(HTTPAdapter):
     provider = Provider.GEMINI
     endpoint = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     models_endpoint = "https://generativelanguage.googleapis.com/v1beta/models"
+    embedding_endpoint = (
+        "https://generativelanguage.googleapis.com/v1beta/models/{model}:embedContent"
+    )
+
+    def embedding_payload(
+        self, request: ProviderRequest, content: EmbeddingInput
+    ) -> dict[str, Any]:
+        config: dict[str, Any] = {"taskType": content.purpose}
+        if content.dimensions is not None:
+            config["outputDimensionality"] = content.dimensions
+        return {
+            "model": f"models/{request.model}",
+            "content": {"parts": [{"text": content.text}]},
+            "embedContentConfig": config,
+        }
+
+    def decode_embedding(
+        self, request: ProviderRequest, body: Mapping[str, Any]
+    ) -> ProviderResponse:
+        output = EmbeddingOutput.model_validate({"vector": body["embedding"]["values"]})
+        usage = body.get("usageMetadata") or {}
+        # Gemini binds model identity through the fixed request endpoint. Some
+        # embedding responses omit token counts; missing usage remains unknown.
+        return ProviderResponse(
+            model=request.model,
+            output=JSONDocument(text=output.model_dump_json()),
+            finish_reason=FinishReason.STOP,
+            usage=Usage(input_tokens=usage.get("promptTokenCount"), output_tokens=0),
+        )
 
     def headers(self) -> dict[str, str]:
         return {"x-goog-api-key": self._api_key.get_secret_value()}

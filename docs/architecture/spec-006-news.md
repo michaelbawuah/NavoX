@@ -8,7 +8,8 @@ See [the acceptance record](../evidence/spec-006/README.md) for exact evidence a
 remaining mandatory work; no milestone is declared complete by this design file.
 The source is the owner's eleven-page `SPEC-006_NavoX_Complete.pdf`, SHA-256
 `f0c23c289d01440059785494249bd9d4113f2fed746ed69ab6d6813615b3e27c`.
-The complete specification includes News, X trends, news conversations, deeper
+The owner's 2026-09-30 scope change removes the original X trends feature and
+its acceptance dependency. Active scope includes News, news conversations, deeper
 research, personalization, and simplification of Today and Subscriptions.
 
 SPEC-005 supplies the policy-controlled AI gateway, task-bound evaluation,
@@ -114,7 +115,6 @@ ingestion. No live source, provider route or feature is enabled by migrations.
 | M2 Story intelligence | Exact deduplication and calibrated clustering; syndicated/circular reports do not inflate independent corroboration |
 | M3 Verification | Claim/evidence graph, attributed interested-party claims, contradictions, corrections and retractions; application logic owns final state |
 | M4 News experience | Clean category feed and story page, evidence-backed summaries and original source links |
-| M5 X trends | Authorized X access; trending remains distinct from verified reporting |
 | M6 Ask NavoX News | Global/story conversations, owned retrieval snapshots, fresh evidence and validated stored citations |
 | M7 Deep intelligence | Bounded research, timelines, background, changes and documented coverage comparison |
 | M8 Personalization | Explicit interests, follows and saves with scoped history; no inferred sensitive political identity |
@@ -126,7 +126,7 @@ DEVELOPING, UNCONFIRMED, DISPUTED, CONTRADICTED and RETRACTED. A generated answe
 cannot upgrade a claim's state. Propagate material corrections to story versions,
 caches and conversations with visible history.
 
-Feature flags start disabled: `news_feed`, `news_chat`, `x_trends`,
+Feature flags start disabled: `news_feed`, `news_chat`,
 `deep_research`, `coverage_comparison`, `operational_relevance`, `today_refresh`
 and `subscriptions_refresh`. Keep default cards to a headline, concise description,
 status/source row and at most two prominent actions. Evidence/history belongs
@@ -135,7 +135,7 @@ Subscriptions navigation with actual usability tests.
 
 ## Acceptance gates carried forward unchanged
 
-The source PDF's A-H demonstrations remain required: verified story, X rumor,
+The retained A-H demonstrations require: verified story, uncorroborated popular rumor,
 breaking updates, correction, news follow-up conversation, claim verification,
 rights enforcement and consumer-facing language. Preserve failed and incomplete
 observations alongside passes.

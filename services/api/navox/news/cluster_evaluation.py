@@ -4,16 +4,19 @@ import argparse
 import hashlib
 import json
 import os
+from datetime import datetime
 from itertools import product
 from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from navox.news.cluster_selection import CandidateSet, SelectionPolicy, select_candidate
 from navox.news.clustering import ClusterCalibration, ClusterDecision
-from navox.news.contracts import Contract
+from navox.news.contracts import Contract, aware_utc
+
+LabelAuthority = Literal["authored", "machine", "reviewer"]
 
 
 class ClusterExample(Contract):
@@ -31,11 +34,37 @@ class ClusterExample(Contract):
         return self
 
 
+class CorpusProvenance(Contract):
+    """Where captured evaluation text came from and who produced its labels.
+
+    This records a provenance claim; it verifies nothing on its own. A label is
+    never described as human approval unless a reviewer identity is recorded, and
+    an authored or machine record cannot also name a reviewer.
+    """
+
+    source_identity: str = Field(min_length=1, max_length=512)
+    captured_at: datetime
+    rights_basis: str = Field(min_length=1, max_length=512)
+    label_authority: LabelAuthority
+    reviewer_identity: str | None = Field(default=None, min_length=1, max_length=256)
+    # Digest of one captured text, or of the corpus manifest, never of source we may not hold.
+    content_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    _captured = field_validator("captured_at")(aware_utc)
+
+    @model_validator(mode="after")
+    def reviewer_identity_matches_authority(self) -> "CorpusProvenance":
+        if (self.label_authority == "reviewer") != (self.reviewer_identity is not None):
+            raise ValueError("Only reviewer labels name a reviewer")
+        return self
+
+
 class ClusterCorpus(Contract):
     reference: str = Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")
     signal_version: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")
     # An identifier for the label record, not a claim that a human approved it.
     label_reference: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")
+    provenance: CorpusProvenance
     examples: tuple[ClusterExample, ...] = Field(min_length=4, max_length=5000)
 
     @model_validator(mode="after")
@@ -150,6 +179,7 @@ def measure(examples: tuple[ClusterExample, ...], policy: SelectionPolicy) -> Cl
 
 class CalibrationReport(Contract):
     corpus_sha256: str
+    provenance: CorpusProvenance
     signal_version: str
     candidate_policy: SelectionPolicy
     policies_evaluated: int
@@ -191,6 +221,7 @@ def calibrate(corpus: ClusterCorpus, grid: CalibrationGrid | None = None) -> Cal
     _, winner, dev_metrics = max(proposals, key=lambda entry: entry[0])
     return CalibrationReport(
         corpus_sha256=fingerprint(corpus),
+        provenance=corpus.provenance,
         signal_version=corpus.signal_version,
         candidate_policy=winner,
         policies_evaluated=len(proposals),

@@ -173,7 +173,9 @@
   display: inline-flex;
   align-items: center;
   gap: 0.7rem;
-  min-width: 11rem;
+  min-width: min(11rem, 100%);
+  max-width: 100%;
+  overflow-wrap: anywhere;
   margin-top: 1.25rem;
   padding: 0.85rem 1rem;
   border: 1px solid rgb(119 166 255 / 22%);
@@ -190,6 +192,7 @@
 }
 
 .posture div {
+  min-width: 0;
   display: grid;
   gap: 0.16rem;
 }
@@ -401,6 +404,7 @@
 .sectionHeading,
 .controlHeading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
@@ -613,6 +617,9 @@
 
 .controlCard {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  overflow-wrap: anywhere;
   gap: 0.85rem;
   padding: 1rem;
 }
@@ -635,6 +642,7 @@
 .captureForm,
 .queryForm {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.72rem;
 }
 
@@ -650,6 +658,7 @@
 .captureForm select,
 .queryForm input {
   width: 100%;
+  min-width: 0;
   border: 1px solid rgb(142 165 204 / 21%);
   border-radius: 0.62rem;
   outline: none;

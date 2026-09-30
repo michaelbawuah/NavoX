@@ -109,10 +109,18 @@ COMMUNICATION_V2_INSTRUCTIONS = (
 
 
 def builtin_prompts() -> tuple[tuple[PromptDefinition, ...], tuple[SchemaDefinition, ...]]:
+    from navox.ai.embedding_contracts import embedding_artifacts
+    from navox.knowledge.ask_contracts import answer_artifacts
     from navox.news.ai_contracts import news_artifacts
 
     schemas: list[SchemaDefinition] = []
     prompts: list[PromptDefinition] = []
+    embedding_prompt, embedding_schema = embedding_artifacts()
+    prompts.append(embedding_prompt)
+    schemas.append(embedding_schema)
+    answer_prompt, answer_schema = answer_artifacts()
+    prompts.append(answer_prompt)
+    schemas.append(answer_schema)
 
     def register(name: str, instructions: str, schema: dict[str, object]) -> None:
         reference = VersionedRef(name=name, version="v1")

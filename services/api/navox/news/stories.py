@@ -1,9 +1,11 @@
 """Owned story projections with live permission checks and content-free change history."""
 
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import false, or_, select
+from sqlalchemy import exists, false, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.db.news import (
@@ -26,6 +28,9 @@ from navox.news.contracts import (
 )
 from navox.news.ingestion import item_view
 
+if TYPE_CHECKING:  # The engine imports this module for the join transaction.
+    from navox.news.semantic_clustering import SemanticClusterer
+
 
 class StoryRead(Contract):
     id: UUID
@@ -43,6 +48,7 @@ class StoryRead(Contract):
     sources: tuple[NewsItemRead, ...]
     saved: bool
     followed: bool
+    ranking_basis: str = "RECENCY"
     evidence_pending: bool
 
 
@@ -96,6 +102,7 @@ async def index_item(
     definitions: dict[str, SourceDefinition],
     *,
     now: datetime,
+    clustering: "SemanticClusterer | None" = None,
 ) -> NewsStory:
     view = await item_view(database, item, definitions, now=now)
     url_key, copy_key = duplicate_keys(view)
@@ -168,22 +175,82 @@ async def index_item(
             break
         except NewsError:
             continue
+    if story is None and clustering is not None:
+        # An unindexed item may still join a reviewed semantic candidate. The
+        # engine buys at most one bounded embedding, and the join transaction
+        # re-reads rights, revisions, vectors and the policy before writing.
+        try:
+            proposal = await clustering.propose(database, item, definitions, now=now)
+            joined = (
+                await clustering.commit(database, item, definitions, proposal=proposal, now=now)
+                if proposal is not None
+                else None
+            )
+        except NewsError:
+            joined = None
+        except Exception:  # noqa: BLE001 - a paid-path defect never blocks exact indexing
+            # The semantic engine already converts known provider and validation
+            # outcomes into ``None``; this is the last-resort guard so an
+            # unexpected failure still leaves the exact path available.
+            joined = None
+        if joined is not None:
+            # The engine owns the membership row, its audit and its version snapshot.
+            await database.flush()
+            return joined
     if story is None:
-        story = NewsStory(
-            workspace_id=item.workspace_id,
-            user_id=item.user_id,
-            anchor_item_id=item.id,
-            primary_category=(view.categories or (Category.WORLD,))[0],
-            region=item.region,
-            language=item.language,
-            started_at=item.event_started_at,
-            last_updated_at=now,
-            version=1,
-            lifecycle_status="DISCOVERED",
-        )
-        database.add(story)
-        await database.flush()
-        decision, change = "CREATE_NEW", "DISCOVERED"
+        # One bounded savepoint covers the first membership and its anchor story,
+        # so a concurrent worker that indexed the same item first wins cleanly and
+        # this worker returns that story instead of failing or duplicating it.
+        try:
+            async with database.begin_nested():
+                indexed = await database.get(NewsStoryItem, item.id, populate_existing=True)
+                if indexed is not None:
+                    return await owned_story(
+                        database,
+                        indexed.cluster_id,
+                        workspace_id=item.workspace_id,
+                        user_id=item.user_id,
+                    )
+                story = NewsStory(
+                    workspace_id=item.workspace_id,
+                    user_id=item.user_id,
+                    anchor_item_id=item.id,
+                    primary_category=(view.categories or (Category.WORLD,))[0],
+                    region=item.region,
+                    language=item.language,
+                    started_at=item.event_started_at,
+                    last_updated_at=now,
+                    version=1,
+                    lifecycle_status="DISCOVERED",
+                )
+                database.add(story)
+                await database.flush()
+                database.add(
+                    NewsStoryItem(
+                        news_item_id=item.id,
+                        cluster_id=story.id,
+                        workspace_id=item.workspace_id,
+                        user_id=item.user_id,
+                        item_revision=item.revision,
+                        url_digest=url_key,
+                        copy_digest=copy_key,
+                        decision="CREATE_NEW",
+                        joined_at=now,
+                    )
+                )
+                await database.flush()
+                await record_version(database, story, "DISCOVERED", now=now)
+        except IntegrityError:
+            indexed = await database.get(NewsStoryItem, item.id, populate_existing=True)
+            if indexed is None:
+                raise
+            return await owned_story(
+                database,
+                indexed.cluster_id,
+                workspace_id=item.workspace_id,
+                user_id=item.user_id,
+            )
+        return story
     else:
         story.version += 1
         decision, change = "EXACT_DUPLICATE", "SOURCE_ADDED"
@@ -213,22 +280,27 @@ async def index_source(
     workspace_id: UUID,
     user_id: UUID,
     now: datetime,
+    clustering: "SemanticClusterer | None" = None,
+    unindexed_only: bool = False,
+    limit: int = 200,
 ) -> int:
-    rows = await database.scalars(
-        select(NewsItem)
-        .where(
-            NewsItem.source_id == source_id,
-            NewsItem.workspace_id == workspace_id,
-            NewsItem.user_id == user_id,
-            NewsItem.expires_at > now,
-        )
-        .order_by(NewsItem.published_at.desc())
-        .limit(200)
+    query = select(NewsItem).where(
+        NewsItem.source_id == source_id,
+        NewsItem.workspace_id == workspace_id,
+        NewsItem.user_id == user_id,
+        NewsItem.expires_at > now,
     )
+    if unindexed_only:
+        query = query.where(
+            ~exists(
+                select(NewsStoryItem.news_item_id).where(NewsStoryItem.news_item_id == NewsItem.id)
+            )
+        )
+    rows = await database.scalars(query.order_by(NewsItem.published_at.desc()).limit(max(0, limit)))
     count = 0
     for row in rows:
         try:
-            await index_item(database, row, definitions, now=now)
+            await index_item(database, row, definitions, now=now, clustering=clustering)
             count += 1
         except NewsError:
             continue

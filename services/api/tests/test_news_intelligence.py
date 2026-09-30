@@ -347,15 +347,28 @@ async def test_workflow_preserves_ingestion_and_uses_one_paid_activity_attempt(m
 
     async def execute(fn, payload, **kwargs):
         calls.append((fn, kwargs))
-        return NewsWorkResult("COMPLETED", 1) if fn == activities.ingest_news_source_activity else 1
+        if fn == activities.ingest_news_source_activity:
+            # A payload that deferred exact indexing to the clustering activity.
+            return NewsWorkResult("COMPLETED", 1, 0, True)
+        if fn == activities.news_clustering_activity:
+            return NewsWorkResult("COMPLETED", 1)
+        return 1
 
     monkeypatch.setattr(news.workflow, "execute_activity", execute)
     monkeypatch.setattr(news.workflow, "patched", lambda _: True)
     result = await news.NewsSourceIngestionWorkflow().run(
         NewsSourceWork(str(uuid4()), str(WORKSPACE), str(USER), str(uuid4()))
     )
-    assert result.stored_count == 1 and calls[1][0] == activities.news_intelligence_activity
+    # Bounded semantic clustering runs between ingestion and the single paid
+    # intelligence attempt when the payload deferred indexing, and each paid
+    # phase keeps one attempt.
+    assert result.stored_count == 1
+    assert [call[0] for call in calls[1:]] == [
+        activities.news_clustering_activity,
+        activities.news_intelligence_activity,
+    ]
     assert calls[1][1]["retry_policy"].maximum_attempts == 1
+    assert calls[2][1]["retry_policy"].maximum_attempts == 1
 
 
 @pytest.mark.asyncio

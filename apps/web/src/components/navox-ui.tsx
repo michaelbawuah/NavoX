@@ -11,7 +11,7 @@ import styles from "./navox-ui.module.css";
 export function NavoXNavigation({
   current,
 }: {
-  current: "Today" | "News" | "Subscriptions";
+  current: "Today" | "News" | "Search" | "Subscriptions";
 }) {
   return (
     <nav aria-label="Workspace" className={styles.navigation}>
@@ -20,6 +20,7 @@ export function NavoXNavigation({
           ["Today", "/"],
           ["NavoX", "/#ask-navox"],
           ["News", "/news"],
+          ["Search", "/navox/search"],
           ["Subscriptions", "/subscriptions"],
         ] as const
       ).map(([label, url]) => (

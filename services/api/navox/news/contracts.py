@@ -6,6 +6,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -146,6 +147,32 @@ class ContentRights(Contract):
         return self
 
 
+class SourceEvidencePolicy(Contract):
+    """Operator-reviewed feed role; absent by default, never provided by source text."""
+
+    role: Literal["ORIGINAL_REPORT", "INTERESTED_PARTY", "SYNDICATED", "SOCIAL"]
+    strong_evidence_allowed: bool = Field(default=False, strict=True)
+    origin_groups: frozenset[str] = Field(default=frozenset(), max_length=20)
+    review_reference: str = Field(min_length=8, max_length=80)
+    reviewed_at: datetime
+    expires_at: datetime
+
+    _reviewed = field_validator("reviewed_at")(aware_utc)
+    _expires = field_validator("expires_at")(aware_utc)
+
+    @model_validator(mode="after")
+    def reviewed_scope(self) -> SourceEvidencePolicy:
+        if self.expires_at <= self.reviewed_at:
+            raise ValueError("Evidence policy requires a bounded review window")
+        if self.strong_evidence_allowed and self.role != "ORIGINAL_REPORT":
+            raise ValueError("Only reviewed original reporting can supply strong evidence")
+        if self.role == "SYNDICATED" and not self.origin_groups:
+            raise ValueError("Syndication requires reviewed origins")
+        if any(not group.strip() or len(group) > 128 for group in self.origin_groups):
+            raise ValueError("Invalid reviewed origin identity")
+        return self
+
+
 class SourceDefinition(Contract):
     key: str = Field(pattern=r"^[a-z][a-z0-9-]{1,63}$")
     name: str = Field(min_length=1, max_length=200)
@@ -162,6 +189,24 @@ class SourceDefinition(Contract):
     # Source/copy independence is operator reviewed, never assigned by an article or model.
     independence_group: str = Field(min_length=1, max_length=128)
     rights: ContentRights
+    evidence_policy: SourceEvidencePolicy | None = None
+
+    @model_validator(mode="after")
+    def evidence_authority(self) -> SourceDefinition:
+        policy = self.evidence_policy
+        if policy is not None:
+            if not self.identity_verified:
+                raise ValueError("Automatic evidence requires a reviewed source identity")
+            if policy.role == "ORIGINAL_REPORT" and self.source_type not in {
+                SourceType.PUBLISHER,
+                SourceType.WIRE_SERVICE,
+            }:
+                raise ValueError("This source cannot acquire original-report authority")
+            if self.source_type == SourceType.SOCIAL and policy.role != "SOCIAL":
+                raise ValueError("Social sources remain social evidence")
+            if self.source_type == SourceType.COMPANY and policy.role != "INTERESTED_PARTY":
+                raise ValueError("Company sources remain interested-party evidence")
+        return self
 
     @field_validator("endpoint")
     @classmethod
@@ -183,7 +228,12 @@ class SourceDefinition(Contract):
 
     @property
     def fingerprint(self) -> str:
-        value = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        payload = self.model_dump(mode="json")
+        if self.evidence_policy is None:
+            payload.pop("evidence_policy")
+        else:
+            payload["evidence_policy"]["origin_groups"] = sorted(self.evidence_policy.origin_groups)
+        value = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(value.encode()).hexdigest()
 
 

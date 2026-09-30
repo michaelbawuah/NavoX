@@ -1,0 +1,21 @@
+{
+  "synthetic": true,
+  "provider_calls": 0,
+  "checks": [
+    "Search UI requests next-midnight exclusive date and renders attributed result",
+    "Source link uses supplied URL",
+    "Obsolete request cannot clear active loading or overwrite newer result",
+    "Successful exclusion followed by failed refresh clears old result"
+  ],
+  "pages": [
+    {
+      "route": "/navox/search",
+      "textScale": "200%",
+      "width": 320,
+      "scrollWidth": 320,
+      "overflow": []
+    }
+  ],
+  "page_errors": [],
+  "passed": true
+}

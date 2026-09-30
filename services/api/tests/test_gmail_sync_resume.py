@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from navox.ai.errors import AIProviderError
+from navox.connectors.sync_state import database_now
 from navox.core.settings import Settings
 from navox.db.base import Base
 from navox.db.models import (
@@ -254,9 +255,12 @@ async def run(database: AsyncSession, connection_id: UUID, model: Model) -> list
     connections = await database.scalars(
         select(ConnectorConnection).where(ConnectorConnection.legacy_connection_id == connection_id)
     )
+    # Expire the deadline on the clock the runtime claims against; a host-clock
+    # deadline can stay in the future when the database clock lags the test host.
+    deadline = await database_now(database) - timedelta(seconds=1)
     for connector in connections:
         if connector.retry_not_before is not None:
-            connector.retry_not_before = datetime.now(UTC) - timedelta(seconds=1)
+            connector.retry_not_before = deadline
     await database.commit()
     result = await ingestion.process_connection(
         database,
