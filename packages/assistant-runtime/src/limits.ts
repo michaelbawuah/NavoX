@@ -26,8 +26,8 @@ export const LIMITS = {
   maxItems: 50,
   /** Citation selectors rendered for one answer. */
   maxCitations: 50,
-  /** Clarify suggestions echoed from the owning service. */
-  maxSuggestions: 10,
+  /** Clarify suggestions echoed from the owning service; SPEC-002 publishes eleven. */
+  maxSuggestions: 16,
   /** Client referents accepted but unused in M1. */
   maxReferents: 8,
   /** Retention window for M1 question and Today answer text. */

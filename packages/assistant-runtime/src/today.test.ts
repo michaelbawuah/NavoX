@@ -45,6 +45,31 @@ describe("SPEC-002 Today payloads", () => {
     expect(JSON.stringify(parsed)).not.toContain("evidence_locator");
   });
 
+  it("accepts SPEC-002's eleven published supported queries", () => {
+    const supported_queries = [
+      "What do I need to know today?",
+      "What am I missing today?",
+      "What needs my attention?",
+      "What is coming up this week?",
+      "What am I waiting on?",
+      "What renewals are coming up?",
+      "What promises have I made?",
+      "What am I forgetting?",
+      "Prepare me for my next meeting.",
+      "Anything costing me money soon?",
+      "What can you handle for me?",
+    ];
+    const parsed = parseTodayQueryResult({
+      intent: "today",
+      answer: "1 item needs attention now.",
+      items: [],
+      supported_queries,
+      details: [],
+    });
+    expect(parsed.supported_queries).toEqual(supported_queries);
+    expect(decideToday(parsed).response_state).toBe("READY");
+  });
+
   it("fails closed on a malformed or oversized payload", () => {
     expect(() => parseTodayQueryResult(null)).toThrow(AssistantError);
     expect(() => parseTodayQueryResult({ intent: "today" })).toThrow(
@@ -65,6 +90,18 @@ describe("SPEC-002 Today payloads", () => {
         answer: "ok",
         items: [{ id: 1, type: "task", title: "t", status: "open" }],
         supported_queries: [],
+        details: [],
+      }),
+    ).toThrow(/could not verify/i);
+    expect(() =>
+      parseTodayQueryResult({
+        intent: "today",
+        answer: "ok",
+        items: [],
+        supported_queries: Array.from(
+          { length: LIMITS.maxSuggestions + 1 },
+          (_, index) => `Question ${index + 1}`,
+        ),
         details: [],
       }),
     ).toThrow(/could not verify/i);

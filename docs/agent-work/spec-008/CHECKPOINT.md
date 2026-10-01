@@ -1,9 +1,10 @@
 # SPEC-008 checkpoint — 1 October 2026
 
-Branch `spec-008-navoxbot` is stacked on the SPEC-006/007 PR #21 head
-`bb0a7c96f4f9a7a6e9acb50fad431f8c546c6256`. Its SPEC-008 changes remain
-uncommitted and have no hosted CI run. Preserve unrelated untracked SPEC-006/007
-validation material. PR #21 was merged into `main` on 1 October 2026 as
+Branch `spec-008-navoxbot` began on the SPEC-006/007 PR #21 head
+`bb0a7c96f4f9a7a6e9acb50fad431f8c546c6256`. The SPEC-008 foundation was
+committed as `7c6f40dfaa274ce2cb27384e105a8ad0fae9618c` and pushed to
+draft PR #22. Preserve unrelated untracked SPEC-006/007 validation material.
+PR #21 was merged into `main` on 1 October 2026 as
 `5513526ba3e7bba8543e121f006c1366dcb94d86` after all six PR CI jobs
 passed on the exact PR head. Post-merge CI run 208 also completed successfully
 on that exact merge SHA: API, Web, Chrome extension, dependency security,
@@ -162,5 +163,22 @@ tests passed with zero skips, and every lint, type, metric, schema, release
 evaluation and whitespace gate passed. The log is
 `/tmp/navox-spec008-m11b-root-api-gate.log`. No speech profile, provider grant or paid call
 was activated. The TypeScript voice client, synthesis, active wake detector,
-acoustic barge-in, live source/provider acceptance and hosted CI for SPEC-008
+acoustic barge-in, live source/provider acceptance and green hosted CI for SPEC-008
 remain outstanding.
+
+## Foundation publication and first hosted correction
+
+Draft PR #22 opened on the foundation commit. Its first hosted CI run
+`36821483043` passed Web, Chrome extension, API, dependency security and
+evaluation/hardening, but Compose failed in the new assistant lifecycle smoke.
+SPEC-002 returned eleven published `supported_queries`; the TypeScript Today
+validator allowed only ten, so it rejected an otherwise valid grounded answer.
+The regression test first reproduced that failure. The correction raises the
+bounded suggestions contract to sixteen and preserves rejection beyond that
+limit. Root npm lint/typecheck/tests and Web build passed; all 228 assistant
+runtime tests passed against disposable PostgreSQL. The full API preflight
+passed again with 2,687 tests and zero skips on the correction tree; see
+`/tmp/navox-spec008-foundation-ci-fix-api-gate.log`. A follow-up PR run must
+verify Compose on the new exact head before the foundation checkpoint is
+accepted as CI green. `M11C-VOICE-CLIENT-BRIEF.md` defines the next microphone
+integration phase; it must not start until this CI failure is resolved.
