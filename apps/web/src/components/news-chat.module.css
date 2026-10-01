@@ -1,0 +1,92 @@
+.chat {
+  margin: 2rem 0;
+  padding: clamp(1rem, 3vw, 2rem);
+  background: #132d20;
+  border: 1px solid #426047;
+  border-radius: 1rem;
+}
+.chat h2 {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 500;
+}
+.chat > p {
+  color: #c0d4c5;
+  line-height: 1.7;
+}
+.chat .progress {
+  min-height: 1.4rem;
+  margin-bottom: 0;
+  font-size: 0.85rem;
+}
+.answer {
+  padding: 1rem 0;
+  border-bottom: 1px solid #426047;
+  overflow-wrap: anywhere;
+}
+.answer h3 {
+  font-size: 1rem;
+  font-weight: 500;
+}
+.answer p {
+  color: #c9dbcc;
+  line-height: 1.7;
+}
+.fact {
+  margin: 1rem 0;
+}
+.fact blockquote {
+  margin: 0 0 1rem;
+  padding-left: 1rem;
+  border-left: 2px solid #80a17c;
+  color: #d5e8d8;
+  line-height: 1.8;
+}
+.fact a {
+  display: inline-block;
+  margin: 0.5rem 1rem;
+  color: #c0f0cd;
+}
+.facts {
+  margin: 1rem 0 0;
+  padding-left: 1.75rem;
+}
+.fact {
+  padding: 0.75rem 0 1rem 0.25rem;
+}
+.factMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.factMeta a {
+  margin: 0;
+}
+.scopeNote {
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+  color: #b7cdbc;
+}
+.referenceButton {
+  margin-top: 0.75rem;
+  min-height: 44px;
+}
+.focus {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  overflow-wrap: anywhere;
+}
+.focus select {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 0.5rem;
+  color: #edf4eb;
+  background: #132d20;
+  border: 1px solid #80a17c;
+  border-radius: 0.5rem;
+  font: inherit;
+}

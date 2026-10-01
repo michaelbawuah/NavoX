@@ -1,0 +1,54 @@
+{
+  "base_commit": "13f3152751e7c9c136bbbee64581f0580ecac2d9",
+  "api": {
+    "command": "bash scripts/check-api.sh",
+    "exit_code": 0,
+    "passed_tests": 1925,
+    "warnings": 3,
+    "log_sha256": "b65522d123a2a26471d0fb4024a7a2a342e7349a1719b08008d327ab49a1c6b3"
+  },
+  "news_postgresql": {
+    "tests": 87,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "junit_sha256": "a85e59abfedf6ece5836e8e4b65c40e04d9c7198a4f78fb564344562b4c93480",
+    "database": "separate disposable PostgreSQL container",
+    "provider_mode": "authored synthetic fixture"
+  },
+  "migration": {
+    "upgrade_downgrade_upgrade": true,
+    "down_to": "0026_news_foundation",
+    "up_to": "0027_news_intelligence",
+    "log_sha256": "0f01e83894f5cc5021ce65583e169fec76d22756611d73ca00847d96e833a33a",
+    "full_schema_parity_claim": false
+  },
+  "qualification": {
+    "real_news_quality_measured": false,
+    "model_qualification_performed": false,
+    "runtime_activation": false,
+    "external_actions_executed": false
+  },
+  "checked_files": {
+    ".github/workflows/ci.yml": "b1b93fde92ac720b838a65f81f838ef8a96541144199636e3a8c3eb2e4be58b0",
+    "docs/architecture/spec-006-intelligence-pipeline.md": "c20718152d535126cc28db1cbba6ab20780536842d478689c838193afdf5aa91",
+    "docs/evidence/spec-006/README.md": "faaa2d649783e467d084d943acd0fc03b8211cf288c3e414618d02b05cebee01",
+    "scripts/check-api.sh": "b34b92b811db90378faba7c4863c444031d8d42f9ef6cecb277ce5ed7731a7f2",
+    "services/api/migrations/versions/0027_news_intelligence.py": "2b4083c426298ec1f46b0e4805a667c3d451c166320be4c91008dcb0af612b9d",
+    "services/api/navox/api/news_stories.py": "d09d453d54c4d30a13c982d17c32f60f2ace5eb4309f711e7364c1f118a0d6ec",
+    "services/api/navox/core/settings.py": "e00a41f0e9aacdd8c111a9c9a2e262cad5da202f74d91022e58fe8fc616e433f",
+    "services/api/navox/db/news.py": "d26f96b936175b93b58807b2d736f8efcbe04c2f095854895b4540b8949b28eb",
+    "services/api/navox/news/activities.py": "2e91a3624f34a731eaeb9fc93794fabf97a8c3d45f9608f6af3a494a40a856e9",
+    "services/api/navox/news/ai_context.py": "62b460994beea2f0a7fa0615b5bfa143b3c75605c38b20ebebc3cd46d4ca5562",
+    "services/api/navox/news/cluster_evaluation.py": "66256cb537cc895478be88cdf293b36c8a308e2b6cd0e289af67aa5f0dde88b3",
+    "services/api/navox/news/cluster_selection.py": "c4f95f7f1afd20c97fa4e77c24512bfc10b8b8f80bf123f5d4f4462344b36db0",
+    "services/api/navox/news/intelligence.py": "91a392c0a2d01373d7ec197cdb522b0095797d24d643da5f993e3571faca6245",
+    "services/api/navox/news/synthesis.py": "85bca2dce7793a9754239e387c5f8e14ecbd91623fc2de5fac96f24d729fe22a",
+    "services/api/navox/workflows/news.py": "01a4d7c2d5b0886458cae115456a1b5d160a811b5d66650cd5f41550466864e9",
+    "services/api/navox/workflows/worker.py": "95aa540572b1c5a7e618bf80df2ef5208b050035f15705b1f2adf309141b4c2e",
+    "services/api/tests/test_api_preflight.py": "3bd920565abba0424f40d8506b72af6be55de3d180ae9b4f870ec12226e15776",
+    "services/api/tests/test_news_cluster_evaluation.py": "d2e3383ee065a0eb2964194436f6a867a5b42619750e2e04efd35e1317e4a4a4",
+    "services/api/tests/test_news_intelligence.py": "0d79df2b63171c9c5e4766044e0998805884d877e980adcc1c32382ec7135d4f",
+    "services/api/tests/test_news_story_api.py": "4def57f2da822e6c9bc76f608d1353bb859f902805542a754c4cc8f0be54c6ec"
+  }
+}

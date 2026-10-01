@@ -4,6 +4,49 @@ from copy import deepcopy
 from typing import Any
 
 
+def openai_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Require every declared property for OpenAI's strict output grammar.
+
+    Requiring an optional property narrows the wire grammar; it does not relax
+    the canonical schema validated locally. Nullable properties retain their
+    explicit null branch. Defaults are annotations, never generated values.
+    https://developers.openai.com/api/docs/guides/structured-outputs
+    """
+    result = deepcopy(schema)
+
+    def visit(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        node.pop("default", None)
+        properties = node.get("properties")
+        if isinstance(properties, dict):
+            node["required"] = list(properties)
+        for key in ("properties", "$defs", "definitions", "patternProperties", "dependentSchemas"):
+            entries = node.get(key)
+            if isinstance(entries, dict):
+                for child in entries.values():
+                    visit(child)
+        for key in (
+            "items",
+            "contains",
+            "not",
+            "if",
+            "then",
+            "else",
+            "additionalProperties",
+            "propertyNames",
+        ):
+            visit(node.get(key))
+        for key in ("anyOf", "allOf", "oneOf", "prefixItems"):
+            entries = node.get(key)
+            if isinstance(entries, list):
+                for child in entries:
+                    visit(child)
+
+    visit(result)
+    return result
+
+
 def claude_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """Move unsupported bounds into descriptions without mutating the catalog.
 

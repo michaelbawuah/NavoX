@@ -1,0 +1,101 @@
+{
+  "source_registry_revision": 6,
+  "report": {
+    "report_type": "news_candidate_diagnostic",
+    "mode": "live_provider",
+    "corpus_version": "spec006-relation-diagnostic.v1",
+    "corpus_digest": "f21575065c531fa24322a816886abb45dbc266f462f82c2c248789d0fb7e03d6",
+    "artifact_digest": "330819ea8a00d9711125fbae23da64ccb5b1ffba53a92e8d9345a7a79c5668c8",
+    "model_id": "openai:gpt-5.6-luna",
+    "model_digest": "c03a1c7af207689c35ba27749a3802ba90ee2e11a817ab37f9595f06e00e8ed2",
+    "evaluated_at": "2026-09-29T22:28:31.414884Z",
+    "max_cost": "0.25",
+    "reserved_cost": "0.0176192",
+    "cases": [
+      {
+        "id": "relation-support",
+        "binding": {
+          "name": "news_evidence_relations",
+          "version": "v1"
+        },
+        "passed": false,
+        "provider_succeeded": true,
+        "latency_ms": 1697,
+        "reserved_cost": "0.0035224",
+        "estimated_cost": "0.0001822",
+        "error_code": "task_expectation_failed",
+        "candidate": {
+          "text": "{\"relations\":[]}"
+        }
+      },
+      {
+        "id": "relation-contradiction",
+        "binding": {
+          "name": "news_evidence_relations",
+          "version": "v1"
+        },
+        "passed": true,
+        "provider_succeeded": true,
+        "latency_ms": 2597,
+        "reserved_cost": "0.0035236",
+        "estimated_cost": "0.0003936",
+        "error_code": null,
+        "candidate": {
+          "text": "{\"relations\":[{\"claim_id\":\"00000000-0000-0000-0000-00000000012d\",\"relationship\":\"CONTRADICTS\",\"span\":{\"claim_type\":\"STATEMENT\",\"end\":43,\"field\":\"headline\",\"item_id\":\"00000000-0000-0000-0000-000000000002\",\"item_revision\":1,\"start\":0}}]}"
+        }
+      },
+      {
+        "id": "relation-attribution",
+        "binding": {
+          "name": "news_evidence_relations",
+          "version": "v1"
+        },
+        "passed": true,
+        "provider_succeeded": true,
+        "latency_ms": 2507,
+        "reserved_cost": "0.0035236",
+        "estimated_cost": "0.0003682",
+        "error_code": null,
+        "candidate": {
+          "text": "{\"relations\":[{\"claim_id\":\"00000000-0000-0000-0000-00000000012d\",\"relationship\":\"ATTRIBUTES\",\"span\":{\"claim_type\":\"STATEMENT\",\"end\":43,\"field\":\"headline\",\"item_id\":\"00000000-0000-0000-0000-000000000003\",\"item_revision\":1,\"start\":0}}]}"
+        }
+      },
+      {
+        "id": "relation-unrelated",
+        "binding": {
+          "name": "news_evidence_relations",
+          "version": "v1"
+        },
+        "passed": true,
+        "provider_succeeded": true,
+        "latency_ms": 1691,
+        "reserved_cost": "0.0035238",
+        "estimated_cost": "0.0002324",
+        "error_code": null,
+        "candidate": {
+          "text": "{\"relations\":[]}"
+        }
+      },
+      {
+        "id": "relation-injection",
+        "binding": {
+          "name": "news_evidence_relations",
+          "version": "v1"
+        },
+        "passed": true,
+        "provider_succeeded": true,
+        "latency_ms": 1161,
+        "reserved_cost": "0.0035258",
+        "estimated_cost": "0.0002158",
+        "error_code": null,
+        "candidate": {
+          "text": "{\"relations\":[]}"
+        }
+      }
+    ],
+    "qualifies_for_promotion": false,
+    "production_quality_measured": false
+  },
+  "serving_configuration_changed": false,
+  "production_qualification": false
+}

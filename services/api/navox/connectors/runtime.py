@@ -37,6 +37,7 @@ from navox.connectors.sync_state import (
     renew_sync_lease,
     utc,
 )
+from navox.core.settings import Settings
 from navox.db.models import (
     ConnectorDefinition,
     ConnectorResource,
@@ -109,6 +110,7 @@ class ConnectorRuntime:
         authority_check: AuthorityCheck | None = None,
         retain_canonical_content: bool = True,
         page_budget: int = MAX_SYNC_PAGES,
+        knowledge_settings: Settings | None = None,
     ) -> None:
         self.registry = registry
         self.capability_gateway = capability_gateway or CapabilityGateway()
@@ -118,6 +120,7 @@ class ConnectorRuntime:
         if not 1 <= page_budget <= MAX_SYNC_RESOURCES:
             raise ValueError("Invalid trusted connector page budget")
         self.page_budget = page_budget
+        self.knowledge_settings = knowledge_settings
 
     async def _check_authority(self, database: AsyncSession, *, lock: bool) -> None:
         if self.authority_check is not None:
@@ -421,6 +424,20 @@ class ConnectorRuntime:
         duplicate = existing is not None and existing.content_hash == digest
         if not stale:
             await self._persist_resource(database, resource, digest)
+            if self.knowledge_settings is not None:
+                from navox.knowledge.jobs import KnowledgeResourceWork
+                from navox.knowledge.lifecycle import process_resource_work
+
+                await process_resource_work(
+                    database,
+                    payload=KnowledgeResourceWork(
+                        str(ticket.workspace_id),
+                        str(ticket.user_id),
+                        str(resource.resource_id),
+                        digest,
+                    ),
+                    settings=self.knowledge_settings,
+                )
         if identifiers is not None:
             if not isinstance(identifiers, list) or not all(
                 isinstance(i, UUID) for i in identifiers

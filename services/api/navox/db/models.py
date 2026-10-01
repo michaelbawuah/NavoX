@@ -19,6 +19,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from navox.db import (
     ai_registry,  # noqa: F401 - registers AI registry metadata
     communications,  # noqa: F401
+    knowledge,  # noqa: F401 - registers SPEC-007 knowledge foundation metadata
+    news,  # noqa: F401
 )
 from navox.db.base import Base
 
@@ -962,6 +964,22 @@ class ConnectorConnection(Base):
             "external_account_id",
             name="uq_connector_connections_workspace_definition_account",
         ),
+        # Composite scope target for derived knowledge resources: a knowledge
+        # resource may only cite a connection owned by its own owner_user_id.
+        # `id` is already unique, so this adds no new identity rule.
+        UniqueConstraint(
+            "workspace_id",
+            "id",
+            "user_id",
+            name="uq_connector_connections_workspace_identity",
+        ),
+        # Composite scope target for user-scoped knowledge exclusions; `id` is
+        # already unique, so this adds no new connection identity rule.
+        UniqueConstraint(
+            "workspace_id",
+            "id",
+            name="uq_connector_connections_workspace_id",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -1020,6 +1038,15 @@ class ConnectorResource(Base):
             "resource_type",
             "external_id",
             name="uq_connector_resources_connection_type_external",
+        ),
+        # Composite provenance target for derived knowledge resources; `id` is
+        # already unique, so canonical identity is unchanged.
+        UniqueConstraint(
+            "workspace_id",
+            "connector_connection_id",
+            "external_id",
+            "id",
+            name="uq_connector_resources_workspace_connection_external_id",
         ),
     )
 

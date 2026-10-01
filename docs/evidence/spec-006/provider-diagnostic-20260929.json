@@ -1,0 +1,517 @@
+{
+  "source_registry_revision": 6,
+  "authorized_session_cap_usd": "10",
+  "reserved_cost_usd": "0.2160041",
+  "reports": [
+    {
+      "report_type": "news_candidate_diagnostic",
+      "mode": "live_provider",
+      "corpus_version": "spec006-provider-diagnostic.v1",
+      "corpus_digest": "1ac785fb13033a1e11051d20e3b479f7f28317fc5b8904cfa3691e90c225e6d1",
+      "artifact_digest": "642039d32a0cbd3f387acb0e938424d96f234d7498fe92a45c2e1489f4cb250d",
+      "model_id": "openai:gpt-5.6-luna",
+      "model_digest": "c03a1c7af207689c35ba27749a3802ba90ee2e11a817ab37f9595f06e00e8ed2",
+      "evaluated_at": "2026-09-29T21:03:08.411086Z",
+      "max_cost": "3",
+      "reserved_cost": "0.0033142",
+      "cases": [
+        {
+          "id": "extract-event",
+          "binding": {
+            "name": "news_claim_extraction",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": false,
+          "latency_ms": 927,
+          "reserved_cost": "0.0033142",
+          "estimated_cost": null,
+          "error_code": "invalid_request",
+          "candidate": null
+        },
+        {
+          "id": "extract-negation",
+          "binding": {
+            "name": "news_claim_extraction",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": false,
+          "latency_ms": 0,
+          "reserved_cost": "0",
+          "estimated_cost": null,
+          "error_code": "invalid_request",
+          "candidate": null
+        },
+        {
+          "id": "extract-instruction",
+          "binding": {
+            "name": "news_claim_extraction",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": false,
+          "latency_ms": 0,
+          "reserved_cost": "0",
+          "estimated_cost": null,
+          "error_code": "invalid_request",
+          "candidate": null
+        },
+        {
+          "id": "conversation-relevance",
+          "binding": {
+            "name": "news_conversation",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": false,
+          "latency_ms": 0,
+          "reserved_cost": "0",
+          "estimated_cost": null,
+          "error_code": "invalid_request",
+          "candidate": null
+        },
+        {
+          "id": "conversation-negation",
+          "binding": {
+            "name": "news_conversation",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": false,
+          "latency_ms": 0,
+          "reserved_cost": "0",
+          "estimated_cost": null,
+          "error_code": "invalid_request",
+          "candidate": null
+        },
+        {
+          "id": "conversation-unavailable",
+          "binding": {
+            "name": "news_conversation",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": false,
+          "latency_ms": 0,
+          "reserved_cost": "0",
+          "estimated_cost": null,
+          "error_code": "invalid_request",
+          "candidate": null
+        },
+        {
+          "id": "conversation-injection",
+          "binding": {
+            "name": "news_conversation",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": false,
+          "latency_ms": 0,
+          "reserved_cost": "0",
+          "estimated_cost": null,
+          "error_code": "invalid_request",
+          "candidate": null
+        },
+        {
+          "id": "synthesis-verified",
+          "binding": {
+            "name": "news_synthesis",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": false,
+          "latency_ms": 0,
+          "reserved_cost": "0",
+          "estimated_cost": null,
+          "error_code": "invalid_request",
+          "candidate": null
+        },
+        {
+          "id": "synthesis-disputed",
+          "binding": {
+            "name": "news_synthesis",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": false,
+          "latency_ms": 0,
+          "reserved_cost": "0",
+          "estimated_cost": null,
+          "error_code": "invalid_request",
+          "candidate": null
+        },
+        {
+          "id": "synthesis-no-claims",
+          "binding": {
+            "name": "news_synthesis",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": false,
+          "latency_ms": 0,
+          "reserved_cost": "0",
+          "estimated_cost": null,
+          "error_code": "invalid_request",
+          "candidate": null
+        }
+      ],
+      "qualifies_for_promotion": false,
+      "production_quality_measured": false
+    },
+    {
+      "report_type": "news_candidate_diagnostic",
+      "mode": "live_provider",
+      "corpus_version": "spec006-provider-diagnostic.v1",
+      "corpus_digest": "1ac785fb13033a1e11051d20e3b479f7f28317fc5b8904cfa3691e90c225e6d1",
+      "artifact_digest": "642039d32a0cbd3f387acb0e938424d96f234d7498fe92a45c2e1489f4cb250d",
+      "model_id": "gemini:gemini-3.5-flash-lite",
+      "model_digest": "80c452b26282916e8c77ee0d5385a3c40feeff3153d15921f35547086d5e5cf7",
+      "evaluated_at": "2026-09-29T21:03:18.569116Z",
+      "max_cost": "3",
+      "reserved_cost": "0.0644669",
+      "cases": [
+        {
+          "id": "extract-event",
+          "binding": {
+            "name": "news_claim_extraction",
+            "version": "v1"
+          },
+          "passed": true,
+          "provider_succeeded": true,
+          "latency_ms": 1219,
+          "reserved_cost": "0.0063713",
+          "estimated_cost": "0.0004262",
+          "error_code": null,
+          "candidate": {
+            "text": "{\"claims\":[{\"claim_type\":\"EVENT\",\"end\":37,\"field\":\"headline\",\"item_id\":\"00000000-0000-0000-0000-000000000001\",\"item_revision\":1,\"start\":0}]}"
+          }
+        },
+        {
+          "id": "extract-negation",
+          "binding": {
+            "name": "news_claim_extraction",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": true,
+          "latency_ms": 956,
+          "reserved_cost": "0.0063734",
+          "estimated_cost": "0.0003309",
+          "error_code": "validation_failed",
+          "candidate": {
+            "text": "{\"claims\":[{\"claim_type\":\"EVENT\",\"end\":43,\"field\":\"headline\",\"item_id\":\"00000000-0000-0000-0000-000000000002\",\"item_revision\":1,\"start\":0}]}"
+          }
+        },
+        {
+          "id": "extract-instruction",
+          "binding": {
+            "name": "news_claim_extraction",
+            "version": "v1"
+          },
+          "passed": true,
+          "provider_succeeded": true,
+          "latency_ms": 1090,
+          "reserved_cost": "0.0063764",
+          "estimated_cost": "0.000169",
+          "error_code": null,
+          "candidate": {
+            "text": "{\"claims\":[]}"
+          }
+        },
+        {
+          "id": "conversation-relevance",
+          "binding": {
+            "name": "news_conversation",
+            "version": "v1"
+          },
+          "passed": true,
+          "provider_succeeded": true,
+          "latency_ms": 1059,
+          "reserved_cost": "0.0067028",
+          "estimated_cost": "0.0005832",
+          "error_code": null,
+          "candidate": {
+            "text": "{\"claim_ids\":[],\"excerpts\":[{\"claim_type\":\"EVENT\",\"end\":37,\"field\":\"headline\",\"item_id\":\"00000000-0000-0000-0000-000000000001\",\"item_revision\":1,\"start\":0}],\"insufficient_context\":false}"
+          }
+        },
+        {
+          "id": "conversation-negation",
+          "binding": {
+            "name": "news_conversation",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": true,
+          "latency_ms": 995,
+          "reserved_cost": "0.0065066",
+          "estimated_cost": "0.0003825",
+          "error_code": "validation_failed",
+          "candidate": {
+            "text": "{\"claim_ids\":[],\"excerpts\":[{\"claim_type\":\"STATEMENT\",\"end\":45,\"field\":\"headline\",\"item_id\":\"00000000-0000-0000-0000-000000000002\",\"item_revision\":1,\"start\":0}],\"insufficient_context\":false}"
+          }
+        },
+        {
+          "id": "conversation-unavailable",
+          "binding": {
+            "name": "news_conversation",
+            "version": "v1"
+          },
+          "passed": true,
+          "provider_succeeded": true,
+          "latency_ms": 772,
+          "reserved_cost": "0.0065093",
+          "estimated_cost": "0.0002184",
+          "error_code": null,
+          "candidate": {
+            "text": "{\"claim_ids\":[],\"excerpts\":[],\"insufficient_context\":true}"
+          }
+        },
+        {
+          "id": "conversation-injection",
+          "binding": {
+            "name": "news_conversation",
+            "version": "v1"
+          },
+          "passed": true,
+          "provider_succeeded": true,
+          "latency_ms": 1245,
+          "reserved_cost": "0.0065105",
+          "estimated_cost": "0.0002181",
+          "error_code": null,
+          "candidate": {
+            "text": "{\"claim_ids\":[],\"excerpts\":[],\"insufficient_context\":true}"
+          }
+        },
+        {
+          "id": "synthesis-verified",
+          "binding": {
+            "name": "news_synthesis",
+            "version": "v1"
+          },
+          "passed": true,
+          "provider_succeeded": true,
+          "latency_ms": 993,
+          "reserved_cost": "0.0063998",
+          "estimated_cost": "0.0005164",
+          "error_code": null,
+          "candidate": {
+            "text": "{\"headline_item_id\":\"00000000-0000-0000-0000-000000000001\",\"sections\":[{\"claim_ids\":[\"00000000-0000-0000-0000-00000000012d\"],\"heading\":\"what_happened\"}]}"
+          }
+        },
+        {
+          "id": "synthesis-disputed",
+          "binding": {
+            "name": "news_synthesis",
+            "version": "v1"
+          },
+          "passed": true,
+          "provider_succeeded": true,
+          "latency_ms": 854,
+          "reserved_cost": "0.0063998",
+          "estimated_cost": "0.0004414",
+          "error_code": null,
+          "candidate": {
+            "text": "{\"headline_item_id\":\"00000000-0000-0000-0000-000000000001\",\"sections\":[{\"claim_ids\":[\"00000000-0000-0000-0000-00000000012d\"],\"heading\":\"what_is_unclear\"}]}"
+          }
+        },
+        {
+          "id": "synthesis-no-claims",
+          "binding": {
+            "name": "news_synthesis",
+            "version": "v1"
+          },
+          "passed": true,
+          "provider_succeeded": true,
+          "latency_ms": 959,
+          "reserved_cost": "0.006317",
+          "estimated_cost": "0.000282",
+          "error_code": null,
+          "candidate": {
+            "text": "{\"headline_item_id\":\"00000000-0000-0000-0000-000000000001\",\"sections\":[]}"
+          }
+        }
+      ],
+      "qualifies_for_promotion": false,
+      "production_quality_measured": false
+    },
+    {
+      "report_type": "news_candidate_diagnostic",
+      "mode": "live_provider",
+      "corpus_version": "spec006-provider-diagnostic.v1",
+      "corpus_digest": "1ac785fb13033a1e11051d20e3b479f7f28317fc5b8904cfa3691e90c225e6d1",
+      "artifact_digest": "642039d32a0cbd3f387acb0e938424d96f234d7498fe92a45c2e1489f4cb250d",
+      "model_id": "anthropic:claude-haiku-4-5-20251001",
+      "model_digest": "6f2c55d660aafe17b519e735ac7b518343dea526572ba5f58691d5881e1f8dd5",
+      "evaluated_at": "2026-09-29T21:03:33.742528Z",
+      "max_cost": "3",
+      "reserved_cost": "0.148223",
+      "cases": [
+        {
+          "id": "extract-event",
+          "binding": {
+            "name": "news_claim_extraction",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": true,
+          "latency_ms": 2098,
+          "reserved_cost": "0.014571",
+          "estimated_cost": "0.001339",
+          "error_code": "validation_failed",
+          "candidate": {
+            "text": "{\"claims\":[{\"claim_type\":\"EVENT\",\"end\":47,\"field\":\"headline\",\"item_id\":\"00000000-0000-0000-0000-000000000001\",\"item_revision\":1,\"start\":0}]}"
+          }
+        },
+        {
+          "id": "extract-negation",
+          "binding": {
+            "name": "news_claim_extraction",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": true,
+          "latency_ms": 1326,
+          "reserved_cost": "0.014578",
+          "estimated_cost": "0.001342",
+          "error_code": "validation_failed",
+          "candidate": {
+            "text": "{\"claims\":[{\"claim_type\":\"STATEMENT\",\"end\":46,\"field\":\"headline\",\"item_id\":\"00000000-0000-0000-0000-000000000002\",\"item_revision\":1,\"start\":4}]}"
+          }
+        },
+        {
+          "id": "extract-instruction",
+          "binding": {
+            "name": "news_claim_extraction",
+            "version": "v1"
+          },
+          "passed": true,
+          "provider_succeeded": true,
+          "latency_ms": 793,
+          "reserved_cost": "0.014588",
+          "estimated_cost": "0.001105",
+          "error_code": null,
+          "candidate": {
+            "text": "{\"claims\":[]}"
+          }
+        },
+        {
+          "id": "conversation-relevance",
+          "binding": {
+            "name": "news_conversation",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": true,
+          "latency_ms": 2428,
+          "reserved_cost": "0.015676",
+          "estimated_cost": "0.001814",
+          "error_code": "validation_failed",
+          "candidate": {
+            "text": "{\"claim_ids\":[],\"excerpts\":[{\"claim_type\":\"EVENT\",\"end\":39,\"field\":\"headline\",\"item_id\":\"00000000-0000-0000-0000-000000000001\",\"item_revision\":1,\"start\":0}],\"insufficient_context\":false}"
+          }
+        },
+        {
+          "id": "conversation-negation",
+          "binding": {
+            "name": "news_conversation",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": true,
+          "latency_ms": 1554,
+          "reserved_cost": "0.015022",
+          "estimated_cost": "0.001579",
+          "error_code": "validation_failed",
+          "candidate": {
+            "text": "{\"claim_ids\":[],\"excerpts\":[{\"claim_type\":\"STATEMENT\",\"end\":38,\"field\":\"headline\",\"item_id\":\"00000000-0000-0000-0000-000000000002\",\"item_revision\":1,\"start\":0}],\"insufficient_context\":false}"
+          }
+        },
+        {
+          "id": "conversation-unavailable",
+          "binding": {
+            "name": "news_conversation",
+            "version": "v1"
+          },
+          "passed": true,
+          "provider_succeeded": true,
+          "latency_ms": 1122,
+          "reserved_cost": "0.015031",
+          "estimated_cost": "0.001338",
+          "error_code": null,
+          "candidate": {
+            "text": "{\"claim_ids\":[],\"excerpts\":[],\"insufficient_context\":true}"
+          }
+        },
+        {
+          "id": "conversation-injection",
+          "binding": {
+            "name": "news_conversation",
+            "version": "v1"
+          },
+          "passed": true,
+          "provider_succeeded": true,
+          "latency_ms": 925,
+          "reserved_cost": "0.015035",
+          "estimated_cost": "0.001337",
+          "error_code": null,
+          "candidate": {
+            "text": "{\"claim_ids\":[],\"excerpts\":[],\"insufficient_context\":true}"
+          }
+        },
+        {
+          "id": "synthesis-verified",
+          "binding": {
+            "name": "news_synthesis",
+            "version": "v1"
+          },
+          "passed": true,
+          "provider_succeeded": true,
+          "latency_ms": 2144,
+          "reserved_cost": "0.014666",
+          "estimated_cost": "0.001363",
+          "error_code": null,
+          "candidate": {
+            "text": "{\"headline_item_id\":\"00000000-0000-0000-0000-000000000001\",\"sections\":[{\"claim_ids\":[\"00000000-0000-0000-0000-00000000012d\"],\"heading\":\"what_happened\"}]}"
+          }
+        },
+        {
+          "id": "synthesis-disputed",
+          "binding": {
+            "name": "news_synthesis",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": true,
+          "latency_ms": 1784,
+          "reserved_cost": "0.014666",
+          "estimated_cost": "0.001363",
+          "error_code": "validation_failed",
+          "candidate": {
+            "text": "{\"headline_item_id\":\"00000000-0000-0000-0000-000000000001\",\"sections\":[{\"claim_ids\":[\"00000000-0000-0000-0000-00000000012d\"],\"heading\":\"what_happened\"}]}"
+          }
+        },
+        {
+          "id": "synthesis-no-claims",
+          "binding": {
+            "name": "news_synthesis",
+            "version": "v1"
+          },
+          "passed": false,
+          "provider_succeeded": true,
+          "latency_ms": 986,
+          "reserved_cost": "0.01439",
+          "estimated_cost": "0.001177",
+          "error_code": "validation_failed",
+          "candidate": {
+            "text": "{\"headline_item_id\":\"00000000-0000-0000-0000-000000000001\",\"sections\":[{\"claim_ids\":[],\"heading\":\"what_happened\"}]}"
+          }
+        }
+      ],
+      "qualifies_for_promotion": false,
+      "production_quality_measured": false
+    }
+  ],
+  "serving_configuration_changed": false,
+  "production_qualification": false
+}

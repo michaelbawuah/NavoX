@@ -17,6 +17,7 @@ from navox.ai.foundation.contracts import (
     FinishReason,
     LatencyClass,
     Provider,
+    TaskType,
     Usage,
     validate_result_binding,
 )
@@ -200,6 +201,7 @@ class GatewayRuntime:
                 await self.store.trace(run)
                 request = ProviderRequest(
                     task_id=task.id,
+                    operation="embedding" if task.task_type == TaskType.EMBED else "structured",
                     model=model.reference.model,
                     instructions=binding.prompt.instructions,
                     context=context.content,

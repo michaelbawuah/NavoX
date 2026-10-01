@@ -24,6 +24,7 @@ import {
   IntelligenceFeedback,
   WorkspaceContext,
 } from "./intelligence-controls";
+import { NavoXAskBox, NavoXNavigation } from "./navox-ui";
 import { OperationalAssistance } from "./operational-assistance";
 import { PagedList } from "./paged-list";
 import { ProactivePanel } from "./proactive-panel";
@@ -762,12 +763,7 @@ export function TodayWorkspace({
           </span>
           NavoX
         </a>
-        <nav className={styles.workspaceNav} aria-label="Workspace">
-          <a href="/" aria-current="page">
-            Today
-          </a>
-          <a href="/subscriptions">Subscriptions</a>
-        </nav>
+        <NavoXNavigation current="Today" />
         <div className={styles.topbarMeta}>
           <span>{account.workspace.name}</span>
           <button onClick={() => void onSignOut()} type="button">
@@ -883,20 +879,19 @@ export function TodayWorkspace({
                 <span className={styles.controlMeta}>Read-only</span>
               </div>
               <h2>What do you need to know?</h2>
-              <form className={styles.queryForm} onSubmit={askNavox}>
-                <label className={styles.visuallyHidden} htmlFor="navox-query">
-                  Ask NavoX
-                </label>
-                <input
+              <div id="ask-navox">
+                <NavoXAskBox
                   id="navox-query"
-                  maxLength={500}
-                  onChange={(event) => setQuery(event.target.value)}
+                  label="Ask NavoX about your day"
                   value={query}
+                  placeholder="What needs my attention today?"
+                  busy={querying}
+                  busyLabel="Reading state…"
+                  maxLength={500}
+                  onChange={setQuery}
+                  onSubmit={askNavox}
                 />
-                <button disabled={querying} type="submit">
-                  {querying ? "Reading state…" : "Ask"}
-                </button>
-              </form>
+              </div>
               {queryResult && (
                 <div className={styles.queryAnswer} aria-live="polite">
                   <div className={styles.queryAnswerHeader}>

@@ -1,0 +1,100 @@
+{
+  "synthetic": true,
+  "provider_calls": 0,
+  "checks": [
+    "Search UI requests next-midnight exclusive date and renders attributed result",
+    "Source link uses supplied URL",
+    "Obsolete request cannot clear active loading or overwrite newer result",
+    "Successful exclusion followed by failed refresh clears old result"
+  ],
+  "pages": [
+    {
+      "route": "/navox/search",
+      "textScale": "200%",
+      "width": 320,
+      "scrollWidth": 528,
+      "overflow": [
+        {
+          "tag": "FIELDSET",
+          "cls": "search-workspace-module__khuYYq__modes",
+          "text": "ModeAutoSearchAsk",
+          "right": 528.4375
+        },
+        {
+          "tag": "LABEL",
+          "cls": "",
+          "text": "Search",
+          "right": 386.453125
+        },
+        {
+          "tag": "LABEL",
+          "cls": "",
+          "text": "Ask",
+          "right": 519.4375
+        },
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "right": 434.84375
+        },
+        {
+          "tag": "LABEL",
+          "cls": "search-workspace-module__khuYYq__field",
+          "text": "TypeAny typeEmailEmail threadCalendarDocumentFileA",
+          "right": 351
+        },
+        {
+          "tag": "SPAN",
+          "cls": "",
+          "text": "Type",
+          "right": 351
+        },
+        {
+          "tag": "SELECT",
+          "cls": "",
+          "text": "Any typeEmailEmail threadCalendarDocumentFileAssig",
+          "right": 351
+        },
+        {
+          "tag": "LABEL",
+          "cls": "search-workspace-module__khuYYq__field",
+          "text": "From",
+          "right": 371
+        },
+        {
+          "tag": "SPAN",
+          "cls": "",
+          "text": "From",
+          "right": 371
+        },
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "right": 371
+        },
+        {
+          "tag": "LABEL",
+          "cls": "search-workspace-module__khuYYq__field",
+          "text": "To",
+          "right": 371
+        },
+        {
+          "tag": "SPAN",
+          "cls": "",
+          "text": "To",
+          "right": 371
+        },
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "right": 371
+        }
+      ]
+    }
+  ],
+  "page_errors": [],
+  "passed": true
+}

@@ -92,6 +92,25 @@ export interface SubscriptionSummary {
   label: string;
 }
 
+export type SubscriptionQueryIntent =
+  | "SUMMARY"
+  | "UPCOMING"
+  | "TRIALS"
+  | "SEARCH";
+
+export interface SubscriptionQuery {
+  intent: SubscriptionQueryIntent;
+  text: string;
+  currency: string | null;
+  days: number;
+}
+
+export interface SubscriptionQueryResult {
+  intent: SubscriptionQueryIntent;
+  summary: SubscriptionSummary | null;
+  subscriptions: RecurringSubscription[];
+}
+
 export interface PreventedRenewals {
   label: string;
   count: number;

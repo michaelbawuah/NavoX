@@ -1,0 +1,70 @@
+{
+  "base_commit": "c465919836845e556bae31d2b6e20ab92f052a97",
+  "scope": "UI implementation and static offline regressions, not release acceptance",
+  "gates": [
+    {
+      "gate": "api",
+      "exit_code": 0,
+      "seconds": 174.29,
+      "log_sha256": "0a68ac4a46485002583289e36fb721c90af6029a638e84e6d323713d327921af"
+    },
+    {
+      "gate": "lint",
+      "exit_code": 0,
+      "seconds": 0.35,
+      "log_sha256": "96f469d65d9a7cc101859f50db1dce225af015233ccd579c4d01eef2b81b455d"
+    },
+    {
+      "gate": "typecheck",
+      "exit_code": 0,
+      "seconds": 2.1,
+      "log_sha256": "4d38651292c85edd3cd2ddbe7f13f146e4dbd9fe712757b73f536b870ef251f9"
+    },
+    {
+      "gate": "tests",
+      "exit_code": 0,
+      "seconds": 0.82,
+      "log_sha256": "4978ba470e652facff9fc9d9a85697bd59da1da1abd1df3d0754cd175283738f"
+    },
+    {
+      "gate": "build",
+      "exit_code": 0,
+      "seconds": 3.53,
+      "log_sha256": "694d24dd3d25cd0613eae02310fe648db08047b515299f54a145b15003c4d69e"
+    }
+  ],
+  "api_tests": 1952,
+  "web_tests": 180,
+  "web_test_files": 24,
+  "extension_tests": 8,
+  "api_deprecation_warnings": 3,
+  "css_specificity_warnings": 9,
+  "generated_next_types_restored": true,
+  "code_files_match_gate_start": true,
+  "final_typecheck_log_sha256": "4d38651292c85edd3cd2ddbe7f13f146e4dbd9fe712757b73f536b870ef251f9",
+  "final_lint_log_sha256": "ce6358b284e9f1b16ecc13ba1e546a2ea5b33797216a35e8ece4ee4f37a85218",
+  "browser_interaction_tests": "not run; fixture-write blocked",
+  "provider_qualification": false,
+  "runtime_activation": false,
+  "source_files_sha256": {
+    "apps/web/next.config.mjs": "6ccb7ccef033b213a5ad8cac6356da33bd9ccd5881b81213e66185050c1ea94a",
+    "apps/web/src/components/story-intelligence.tsx": "62ef4da1baa48b0072c70f508094800ba1d6ad83644bbda65964ce27a3f1a493",
+    "apps/web/src/components/subscriptions-ask.tsx": "7c325e0e74a80e7baa64e57c534ceb317ee1f274d9c8ae36e1b737ede85b3fa4",
+    "apps/web/src/components/navox-ui.module.css": "55b4d47b88429362e5fca37463fe9b0d246ed7438aa3a0492084f550f02e1ba5",
+    "apps/web/src/components/navox-ui.tsx": "5cfcc70e9373f5587313b2f65dfc3525d83c568979a5385cef49eb41880fa228",
+    "apps/web/src/components/news-chat.module.css": "2c0d4b9238feefad362c865490caa7c728104fddc3165c23a19d8d8cb838a8fd",
+    "apps/web/src/components/news-chat.tsx": "43689cdac86d33238d8271f2ad32ec3b98904697899f4ea7c938fe0eb85936df",
+    "apps/web/src/components/news-workspace.module.css": "d534714514975b91f621788089801b13717dcfc1ab3ac6a5853838e105d62302",
+    "apps/web/src/components/news-workspace.tsx": "fed2f62c72c32d1485d1b4974e8d41c3455e250ff5291ba8cec8a46219964d0b",
+    "apps/web/src/components/news.test.tsx": "777c963329e59102cc5a9e9640d6a28386fe5925f609e161d71ff32b0ee047ca",
+    "apps/web/src/components/subscriptions-dashboard.module.css": "31041da4d460f41186468638297ddd55c4f377229ece436c2b5d979eea775454",
+    "apps/web/src/components/subscriptions-dashboard.tsx": "6cd8f15e37da8f046e19b9f769c34047e19c704b9f6cded577bb583c1fea4c6f",
+    "apps/web/src/components/subscriptions.test.tsx": "b9e9d5df9c38c9f6da08d96123aa56d65912bf467e1fc39835f7e60a40ee21fe",
+    "apps/web/src/components/today-workspace.tsx": "a26d24a8437f70889982fc03180b41c2856ef1ac1903f6e7b3aa6b97300e8055",
+    "apps/web/src/lib/subscriptions.ts": "814447044e9da4514a7aae8a530cc6ec373bdf322fb4859d05ac7901e664ff46",
+    "apps/web/tsconfig.json": "73f6d739df3c3b1bcbc0684e6b8754d1c8aa562869615c9c8310ea965fcb1d8a",
+    "docs/evidence/spec-006/README.md": "7325d3beac00af3f3f93a3e9595c0d9ac3c8dfec2770ac4edbe7863430572d15",
+    "packages/contracts/src/news.ts": "0e7ed09ae6aee0e19e962d114f67ee651c4e183193c7939106a1e7954073d77d",
+    "packages/contracts/src/subscriptions.ts": "3509d0ed251d85c5a0de0ca006a2bcb7e1e449fcaba2ab6577f170c420c439cd"
+  }
+}

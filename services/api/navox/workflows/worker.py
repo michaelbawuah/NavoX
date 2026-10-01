@@ -27,6 +27,22 @@ from navox.intelligence.activities import (
     process_source_activity,
     refresh_intelligence_activity,
 )
+from navox.knowledge.activities import (
+    knowledge_delete_activity,
+    knowledge_embedding_activity,
+    knowledge_pending_embeddings_activity,
+    knowledge_reindex_activity,
+    knowledge_resource_activity,
+    knowledge_source_page_activity,
+)
+from navox.news.activities import (
+    ingest_news_source_activity,
+    news_clustering_activity,
+    news_conversation_activity,
+    news_exact_index_activity,
+    news_intelligence_activity,
+    news_sources_activity,
+)
 from navox.proactive.activities import (
     commitment_timing_state_activity,
     daily_briefing_delay_activity,
@@ -61,6 +77,21 @@ from navox.workflows.intelligence import (
     ReevaluateCommitmentWorkflow,
     TodayRefreshWorkflow,
 )
+from navox.workflows.knowledge import (
+    KnowledgeEmbeddingWorkflow,
+    KnowledgeEntityResolutionWorkflow,
+    KnowledgePermissionRefreshWorkflow,
+    KnowledgeReconciliationWorkflow,
+    KnowledgeReindexWorkflow,
+    KnowledgeResourceDeleteWorkflow,
+    KnowledgeResourceIngestWorkflow,
+    KnowledgeResourceUpdateWorkflow,
+)
+from navox.workflows.news import (
+    NewsConversationRefreshWorkflow,
+    NewsSourceIngestionWorkflow,
+    NewsSourceReconciliationWorkflow,
+)
 from navox.workflows.proactive import (
     CommitmentLifecycleWorkflow,
     DailyBriefingWorkflow,
@@ -87,6 +118,17 @@ async def main() -> None:
         client,
         task_queue=settings.temporal_task_queue,
         workflows=[
+            KnowledgeResourceIngestWorkflow,
+            KnowledgeResourceUpdateWorkflow,
+            KnowledgeResourceDeleteWorkflow,
+            KnowledgeEmbeddingWorkflow,
+            KnowledgeEntityResolutionWorkflow,
+            KnowledgePermissionRefreshWorkflow,
+            KnowledgeReindexWorkflow,
+            KnowledgeReconciliationWorkflow,
+            NewsConversationRefreshWorkflow,
+            NewsSourceIngestionWorkflow,
+            NewsSourceReconciliationWorkflow,
             DiscoverRecurringObligationWorkflow,
             ReevaluateRecurringObligationWorkflow,
             RenewalLifecycleWorkflow,
@@ -117,6 +159,18 @@ async def main() -> None:
             DailyBriefingWorkflow,
         ],
         activities=[
+            knowledge_delete_activity,
+            knowledge_embedding_activity,
+            knowledge_reindex_activity,
+            knowledge_resource_activity,
+            knowledge_pending_embeddings_activity,
+            knowledge_source_page_activity,
+            news_clustering_activity,
+            news_conversation_activity,
+            news_exact_index_activity,
+            news_intelligence_activity,
+            news_sources_activity,
+            ingest_news_source_activity,
             reevaluate_subscription_activity,
             cancellation_state_activity,
             execute_cancellation_activity,
@@ -148,6 +202,24 @@ async def main() -> None:
         ],
     )
     async with worker:
+        # Cleanup continues when connected search is disabled; indexing stays gated.
+        try:
+            await client.start_workflow(
+                KnowledgeReconciliationWorkflow.run,
+                id="navox-knowledge-reconciliation-v1",
+                task_queue=settings.temporal_task_queue,
+            )
+        except WorkflowAlreadyStartedError:
+            pass
+        # Expiry/revocation cleanup continues even when the News feature is disabled.
+        try:
+            await client.start_workflow(
+                NewsSourceReconciliationWorkflow.run,
+                id="navox-news-source-reconciliation-v1",
+                task_queue=settings.temporal_task_queue,
+            )
+        except WorkflowAlreadyStartedError:
+            pass
         # Manual lifecycle facts and confirmed cancellation recovery work without AI.
         try:
             await client.start_workflow(

@@ -135,6 +135,7 @@ async def _connector_sync(payload: ConnectorSyncWork) -> int:
             secret_broker = None
         runtime = ConnectorRuntime(
             registry,
+            knowledge_settings=settings,
             secret_broker=secret_broker,
             retain_canonical_content=connection.provider not in {"import", "canvas"},
             page_budget=1000 if connection.provider == "canvas" else 50,

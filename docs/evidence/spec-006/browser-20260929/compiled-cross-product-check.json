@@ -1,0 +1,59 @@
+{
+  "synthetic": true,
+  "production_acceptance": false,
+  "external_network_requests_allowed": 0,
+  "pages": [
+    {
+      "route": "/",
+      "width": 390,
+      "scrollWidth": 390
+    },
+    {
+      "route": "/",
+      "width": 320,
+      "scrollWidth": 320
+    },
+    {
+      "route": "/",
+      "textScale": "200%",
+      "width": 320,
+      "scrollWidth": 320,
+      "overflow": [
+        {
+          "tag": "DIV",
+          "cls": "today-workspace-module__2kOCjq__glowOne",
+          "text": "",
+          "right": 512
+        },
+        {
+          "tag": "DIV",
+          "cls": "today-workspace-module__2kOCjq__glowTwo",
+          "text": "",
+          "right": 704
+        }
+      ]
+    },
+    {
+      "route": "/subscriptions",
+      "width": 390,
+      "scrollWidth": 390
+    },
+    {
+      "route": "/subscriptions",
+      "width": 320,
+      "scrollWidth": 320
+    },
+    {
+      "route": "/subscriptions",
+      "textScale": "200%",
+      "width": 320,
+      "scrollWidth": 320,
+      "overflow": []
+    }
+  ],
+  "checks": [
+    "Today shows priority assignment and upcoming meeting",
+    "Subscriptions shows authored service and known monthly cost"
+  ],
+  "page_errors": []
+}

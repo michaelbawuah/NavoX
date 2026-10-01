@@ -1,0 +1,15 @@
+{
+  "observed_at": "2026-09-29T04:44:05.037002+00:00",
+  "source": "usgs-significant-earthquakes",
+  "endpoint": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_month.atom",
+  "status": "PASS",
+  "stored_items": 7,
+  "stories": 7,
+  "rejected_items": 0,
+  "all_attributed": true,
+  "all_unconfirmed_without_review": true,
+  "full_article_fetches": 0,
+  "image_fetches": 0,
+  "provider_calls": 0,
+  "owner_database_used": false
+}

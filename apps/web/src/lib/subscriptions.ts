@@ -187,8 +187,10 @@ export async function subscriptionRequest<T>(
   path: string,
   body?: object,
   method = "POST",
+  signal?: AbortSignal,
 ): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
+    ...(signal ? { signal } : {}),
     credentials: "include",
     cache: "no-store",
     ...(body === undefined

@@ -1,0 +1,31 @@
+{
+  "checked_at": "2026-09-29T07:48:23.203407+00:00",
+  "base_commit": "61c08010a7a576894443238de63083fbeee69549",
+  "full_api_tests_passed": 1952,
+  "retained_warnings": 3,
+  "full_locked_preflight": "passed",
+  "preflight_log_sha256": "ddba7959ea97fa4760b8e341783b4d43b3878b4a5344e4bb439c363223a91089",
+  "checked_source_sha256": {
+    ".github/workflows/ci.yml": "f7ebe1de32f3ac9afa8a19211913d29617a75e4898340418b9e303705741a791",
+    "services/api/migrations/versions/0028_news_retrieval.py": "ec470c57e0c5dff0b25404f0c03025ee412db5c10faf31a897f2b3282e5a87e7",
+    "services/api/navox/api/news_stories.py": "aaa9385565dc03e4ffe60706fff9cba807e520cae8f750e81fbb4984d5418a26",
+    "services/api/navox/db/news.py": "6480b2e753113252768dd5c5fa11a83afe7ffcb58a2e27790d1d0ea2aa3fcfcd",
+    "services/api/navox/news/activities.py": "c1b2311cf8af4a2f489aaf1a58488df89cad8c550ab28ee6c8f8f14c88b1e337",
+    "services/api/navox/news/ai_context.py": "de36cc15c95a8c4f9e9af73bfab2ebe6347ef13377fb1ec3308a1c9ea3462b05",
+    "services/api/navox/news/contracts.py": "9280db5d8b809ad8819eae33570296c337671cb678230ef312d8fe49b5465c61",
+    "services/api/navox/news/conversation_retrieval.py": "5eaa298aebd80a66311cbc04e01fbd145648b1f133759e6a7366b3b449179f46",
+    "services/api/navox/news/conversations.py": "7c7484c617a7dc54c76c7d56f5ae1c1035fd13d504264770d7e35812ec3b6871",
+    "services/api/navox/news/questions.py": "21d1a7aec54fdec62e426043ec7738a3e967ac314e6bf5e02f2a60e013be4ff1",
+    "services/api/navox/news/research.py": "f8981fd75a877afe50ea8e5710730fad9f1035ab64d5ac39e7ee1b5f3445bc5e",
+    "services/api/navox/news/retrieval.py": "a832eec1cb07bb9792424fafbd57820e10b9f393f6b1a0b093b4077b30657078",
+    "services/api/tests/test_news_research.py": "c2a8ea0b18c419b110107c2c4f59e8111ed37a902de9488fdf3c7b17e30fca24",
+    "services/api/tests/test_news_retrieval.py": "0ed84b81c1a05ffe86ff86b5046145e9ccece81173bc6c883906a7e12b35a06c"
+  },
+  "execution": "authorized Mac, clean offline process, owner dotenv files inaccessible, outbound network denied",
+  "postgresql_news_retrieval": "not run locally; included in next hosted CI",
+  "hosted_ci_new_head": "not yet observed",
+  "live_provider_calls": 0,
+  "runtime_activation": false,
+  "spec_006_complete": false,
+  "remaining": "X access, independent clustering quality, news provider qualification, broader retrieval/ranking, UX and human usability acceptance remain open"
+}
