@@ -221,6 +221,14 @@ def test_catalog_registers_one_bounded_plan_artifact():
     snapshot = catalog_template()
     prompt = next(item for item in snapshot.prompts if item.reference == INTENT_PLAN_PROMPT)
     assert prompt.output_schema == INTENT_PLAN_SCHEMA
+    previous = next(
+        item
+        for item in snapshot.prompts
+        if item.reference.name == "assistant_intent_plan" and item.reference.version == "v8"
+    )
+    assert previous.output_schema == INTENT_PLAN_SCHEMA
+    assert "What's the weather today?" not in previous.instructions
+    assert "What's the weather today?" in prompt.instructions
     assert next(item for item in snapshot.schemas if item.reference == INTENT_PLAN_SCHEMA)
     profile = next(item for item in snapshot.profiles if item.profile == Profile.PLANNING_HIGH)
     assert TaskType.PLAN in profile.task_types
@@ -502,7 +510,7 @@ async def test_authenticated_plan_returns_routes_and_audits_the_task(intent_env)
     async with env.factory() as database:
         run = await database.scalar(select(AITaskRun))
         assert run is not None
-        assert run.prompt == "assistant_intent_plan@v8"
+        assert run.prompt == "assistant_intent_plan@v9"
         assert run.schema == "assistant_intent_plan@v8"
         assert run.profile == Profile.PLANNING_HIGH.value
         assert run.status == "COMPLETED" and run.shadow is False

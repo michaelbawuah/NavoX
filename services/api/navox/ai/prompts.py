@@ -22,6 +22,7 @@ from navox.ai.intent_plan import (
     INTENT_PLAN_INSTRUCTIONS_V5,
     INTENT_PLAN_INSTRUCTIONS_V6,
     INTENT_PLAN_INSTRUCTIONS_V7,
+    INTENT_PLAN_INSTRUCTIONS_V8,
     INTENT_PLAN_PROMPT,
     INTENT_PLAN_SCHEMA,
     intent_plan_json_schema,
@@ -244,6 +245,14 @@ def builtin_prompts() -> tuple[tuple[PromptDefinition, ...], tuple[SchemaDefinit
             instructions=UNTRUSTED_BOUNDARY + INTENT_PLAN_INSTRUCTIONS_V7,
         )
     )
+    previous_plan_v8 = VersionedRef(name="assistant_intent_plan", version="v8")
+    prompts.append(
+        PromptDefinition(
+            reference=previous_plan_v8,
+            output_schema=INTENT_PLAN_SCHEMA,
+            instructions=UNTRUSTED_BOUNDARY + INTENT_PLAN_INSTRUCTIONS_V8,
+        )
+    )
     schemas.append(
         SchemaDefinition(
             reference=INTENT_PLAN_SCHEMA,
@@ -257,7 +266,7 @@ def builtin_prompts() -> tuple[tuple[PromptDefinition, ...], tuple[SchemaDefinit
             instructions=UNTRUSTED_BOUNDARY + INTENT_PLAN_INSTRUCTIONS,
         )
     )
-    # Published v1-v7 content remains immutable when a new plan version is added.
+    # Published v1-v8 content remains immutable when a new plan version is added.
     prompts.append(
         PromptDefinition(
             reference=EXTRACTION_PROMPT,

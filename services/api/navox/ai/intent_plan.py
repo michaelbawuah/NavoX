@@ -51,7 +51,7 @@ MAX_RECENT_REFERENCES = 4
 MAX_REFERENCE_LENGTH = 240
 MAX_INTENTS = 4
 
-INTENT_PLAN_PROMPT = VersionedRef(name="assistant_intent_plan", version="v8")
+INTENT_PLAN_PROMPT = VersionedRef(name="assistant_intent_plan", version="v9")
 INTENT_PLAN_SCHEMA = VersionedRef(name="assistant_intent_plan", version="v8")
 
 
@@ -290,6 +290,24 @@ INTENT_PLAN_INSTRUCTIONS = INTENT_PLAN_INSTRUCTIONS_V7.replace(
     "words; never resolve a date, never claim an action succeeded, and never describe a "
     "planned, pending, failed or unverified action as done.\n"
     "- assistant.clarify: anything you cannot map to the routes above, including any request\n",
+)
+INTENT_PLAN_INSTRUCTIONS_V8 = INTENT_PLAN_INSTRUCTIONS
+INTENT_PLAN_INSTRUCTIONS = INTENT_PLAN_INSTRUCTIONS_V8.replace(
+    "- today.read: a read-only question about the user's current day, tasks or commitments.",
+    "- today.read: a read-only question about the user's current day, tasks or commitments. "
+    "This includes natural questions such as 'What am I missing today?' and 'What should "
+    "I know today?'; the runtime checks actual sources and may answer unknown.",
+).replace(
+    "- weather.read: read-only current weather for the user's configured city. Only use "
+    "this route for current conditions, not forecasts or alerts. A named city must be "
+    "copied from the utterance and checked against the configured city by the runtime. "
+    "Never guess a city or claim a live observation before lookup.",
+    "- weather.read: read-only current weather for the user's configured city. Questions "
+    "such as 'What's the weather today?' or 'What's the weather like today?' use this "
+    "route for current conditions; the runtime checks the user's configured city and "
+    "whether a fresh observation exists. Do not claim a forecast or alert. A named city "
+    "must be copied from the utterance and checked against the configured city by the "
+    "runtime. Never guess a city or claim a live observation before lookup.",
 )
 
 
