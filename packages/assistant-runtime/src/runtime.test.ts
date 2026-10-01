@@ -2550,6 +2550,27 @@ describe("real SPEC-005 and SPEC-007 wire shapes", () => {
 });
 
 describe("adaptive response modality", () => {
+  it("saves a wake greeting in the same session without planning or action authority", async () => {
+    const context = await withSession();
+    const response = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "Hey NavoX",
+        modality: "VOICE",
+      },
+    });
+    expect(context.upstream.calls.plan).toHaveLength(0);
+    expect(context.upstream.calls.today).toHaveLength(0);
+    expect(response.turn.plan?.intents[0]?.kind).toBe("assistant.delivery");
+    expect(response.turn.decision?.kind).toBe("PRESENT");
+    expect(response.turn.decision?.requires_approval).toBe(false);
+    expect(response.turn.action_refs).toEqual([]);
+    expect(response.turn.presentation?.speech_text).toBe("Hi, I'm listening.");
+    expect(response.turn.presentation?.speak).toBe(true);
+  });
+
   it("answers a spoken turn with the same visual blocks plus a bounded summary", async () => {
     const context = await withSession();
     const response = await context.runtime.submitTurn({

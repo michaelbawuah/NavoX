@@ -45,6 +45,10 @@ import {
   type SynthesizeSpeech,
   type TranscribeSpeech,
 } from "../lib/assistant-speech";
+import {
+  type BrowserWakeWordAdapter,
+  createBrowserWakeWordAdapter,
+} from "../lib/assistant-wake";
 import { safeSourceUrl } from "../lib/search";
 import { AssistantEmailActions } from "./assistant-email-actions";
 import styles from "./navox-assistant.module.css";
@@ -461,6 +465,12 @@ function browserSessionStorage(): Storage | null {
 }
 
 export function NavoXAssistant() {
+  type HandsFreePhase =
+    | "OFF"
+    | "PREPARING"
+    | "WAKE_LISTENING"
+    | "CONVERSATION"
+    | "PAUSED";
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [turns, setTurns] = useState<AssistantTurnView[]>([]);
   const [text, setText] = useState("");
@@ -468,9 +478,13 @@ export function NavoXAssistant() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [connecting, setConnecting] = useState(true);
+  const [handsFreePhase, setHandsFreePhase] = useState<HandsFreePhase>("OFF");
   const ledger = useRef(new AssistantTurnLedger());
   const adapterRef = useRef<SpeechAdapter | null>(null);
   const voiceRef = useRef<VoiceSession | null>(null);
+  const wakeRef = useRef<BrowserWakeWordAdapter | null>(null);
+  const handsFreeEnabledRef = useRef(false);
+  const wakeGenerationRef = useRef(0);
   const submitTranscriptRef = useRef<(transcript: string) => void>(() => {});
   const pendingVoiceToken = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
@@ -615,6 +629,110 @@ export function NavoXAssistant() {
     };
   }, [sendTurn]);
 
+  const startWakeListening = useCallback(async () => {
+    if (!handsFreeEnabledRef.current || !sessionIdRef.current) return;
+    if (typeof document !== "undefined" && document.hidden) {
+      setHandsFreePhase("PAUSED");
+      return;
+    }
+    const generation = ++wakeGenerationRef.current;
+    setHandsFreePhase("PREPARING");
+    await wakeRef.current?.stop();
+    if (generation !== wakeGenerationRef.current) return;
+    const wake = createBrowserWakeWordAdapter({
+      onError: (message) => {
+        if (generation !== wakeGenerationRef.current) return;
+        handsFreeEnabledRef.current = false;
+        setHandsFreePhase("OFF");
+        setNotice(message);
+      },
+    });
+    wakeRef.current = wake;
+    if (!wake.supported || !adapter().captureSupported) {
+      handsFreeEnabledRef.current = false;
+      setHandsFreePhase("OFF");
+      setNotice(
+        "Hands-Free needs on-device wake recognition and a microphone. Use the microphone button or type instead.",
+      );
+      return;
+    }
+    try {
+      await wake.start((event) => {
+        if (
+          !handsFreeEnabledRef.current ||
+          generation !== wakeGenerationRef.current
+        )
+          return;
+        setHandsFreePhase("CONVERSATION");
+        voiceSession().resumeForWake();
+        voiceSession().setVoiceMode(true);
+        // The local wake detector can include a same-utterance suffix. It is
+        // ordinary question text, never an approval or action authority.
+        submitTranscriptRef.current(event.request_text ?? "Hey NavoX");
+      });
+      if (
+        handsFreeEnabledRef.current &&
+        generation === wakeGenerationRef.current &&
+        wake.active
+      )
+        setHandsFreePhase("WAKE_LISTENING");
+    } catch (error) {
+      if (generation !== wakeGenerationRef.current) return;
+      handsFreeEnabledRef.current = false;
+      setHandsFreePhase("OFF");
+      setNotice(
+        error instanceof Error
+          ? error.message
+          : "Hands-Free could not start on this device.",
+      );
+    }
+  }, [adapter, voiceSession]);
+
+  const disableHandsFree = useCallback(() => {
+    handsFreeEnabledRef.current = false;
+    wakeGenerationRef.current += 1;
+    void wakeRef.current?.stop();
+    voiceRef.current?.stop();
+    setHandsFreePhase("OFF");
+  }, []);
+
+  const toggleHandsFree = useCallback(() => {
+    if (handsFreeEnabledRef.current) {
+      disableHandsFree();
+      return;
+    }
+    handsFreeEnabledRef.current = true;
+    void startWakeListening();
+  }, [disableHandsFree, startWakeListening]);
+
+  useEffect(() => {
+    if (!handsFreeEnabledRef.current || handsFreePhase !== "CONVERSATION")
+      return;
+    if (voice.state === "SPEAKING") {
+      voiceSession().armBargeIn();
+    } else if ((voice.state === "IDLE" || voice.state === "MUTED") && !busy) {
+      voiceSession().listenAutomatically();
+    } else if (voice.state === "STOPPED" && !busy) {
+      void startWakeListening();
+    }
+  }, [busy, handsFreePhase, startWakeListening, voice.state, voiceSession]);
+
+  useEffect(() => {
+    const onVisibility = () => {
+      if (!handsFreeEnabledRef.current) return;
+      if (document.hidden) {
+        wakeGenerationRef.current += 1;
+        void wakeRef.current?.stop();
+        voiceRef.current?.stop();
+        setHandsFreePhase("PAUSED");
+      } else {
+        void startWakeListening();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, [startWakeListening]);
+
   const onSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -638,8 +756,13 @@ export function NavoXAssistant() {
   );
 
   const toggleMicrophone = useCallback(() => {
+    if (handsFreeEnabledRef.current && handsFreePhase === "WAKE_LISTENING") {
+      wakeGenerationRef.current += 1;
+      void wakeRef.current?.stop();
+      setHandsFreePhase("CONVERSATION");
+    }
     voiceSession().toggleListening();
-  }, [voiceSession]);
+  }, [handsFreePhase, voiceSession]);
 
   const toggleMute = useCallback(() => {
     voiceSession().toggleMuted();
@@ -656,6 +779,7 @@ export function NavoXAssistant() {
   const clearConversation = useCallback(async () => {
     const current = sessionId;
     // Abandon in-flight work and audio before the session identity changes.
+    disableHandsFree();
     runner.invalidate();
     voiceRef.current?.dispose();
     voiceRef.current = null;
@@ -677,10 +801,13 @@ export function NavoXAssistant() {
       setNotice(failureMessage(error));
     }
     await openSession();
-  }, [openSession, runner, sessionId, voiceSession]);
+  }, [disableHandsFree, openSession, runner, sessionId, voiceSession]);
 
   useEffect(
     () => () => {
+      handsFreeEnabledRef.current = false;
+      wakeGenerationRef.current += 1;
+      void wakeRef.current?.stop();
       runner.invalidate();
       voiceRef.current?.dispose();
       voiceRef.current = null;
@@ -710,9 +837,10 @@ export function NavoXAssistant() {
         Answers use your saved Today state and connected sources you can access.
         Questions and answers expire after 30 days of session access, and
         expired rows are purged on a bounded schedule. Clear conversation
-        removes this history right away. Recording starts only when you press
-        the microphone control, and only the finished clip is sent for
-        transcription.
+        removes this history right away. The microphone records after you press
+        it or explicitly enable Hands-Free. Hands-Free wake detection stays on
+        this device while this page is open; finished question clips go to the
+        NavoX speech gateway for transcription.
       </p>
 
       {notice && (
@@ -746,9 +874,22 @@ export function NavoXAssistant() {
           question.
         </p>
       )}
+      {handsFreePhase !== "OFF" && (
+        <p className={styles.status} data-hands-free-state={handsFreePhase}>
+          {handsFreePhase === "WAKE_LISTENING"
+            ? 'Hands-Free on · waiting for "Hey NavoX".'
+            : handsFreePhase === "PREPARING"
+              ? "Preparing on-device wake recognition…"
+              : handsFreePhase === "PAUSED"
+                ? "Hands-Free paused while this page is hidden."
+                : "Hands-Free conversation active · microphone and speech state are shown below."}
+        </p>
+      )}
       {status && (
         <p className={styles.status} data-voice-state={voice.state}>
-          {status}
+          {handsFreePhase === "CONVERSATION" && voice.state === "LISTENING"
+            ? "Listening for your next question. Speak naturally, or press Stop."
+            : status}
         </p>
       )}
       {!controls.voiceModeEnabled && (
@@ -775,6 +916,19 @@ export function NavoXAssistant() {
           disabled={connecting || !sessionId || busy || !text.trim()}
         >
           {busy ? "Checking…" : "Send"}
+        </button>
+        <button
+          type="button"
+          onClick={toggleHandsFree}
+          aria-pressed={handsFreePhase !== "OFF"}
+          aria-label={
+            handsFreePhase === "OFF"
+              ? "Turn Hands-Free on"
+              : "Turn Hands-Free off"
+          }
+          disabled={connecting || !sessionId || (handsFreePhase === "OFF" && busy)}
+        >
+          {handsFreePhase === "OFF" ? "Hands-Free On" : "Hands-Free Off"}
         </button>
         <button
           type="button"
@@ -831,9 +985,19 @@ export function NavoXAssistant() {
           type="button"
           className={styles.iconButton}
           onClick={stopEverything}
-          aria-label="Stop listening and speech"
-          title="Stop listening and speech"
-          disabled={!controls.stopAvailable}
+          aria-label={
+            handsFreePhase === "CONVERSATION"
+              ? "End conversation and return to wake listening"
+              : "Stop listening and speech"
+          }
+          title={
+            handsFreePhase === "CONVERSATION"
+              ? "End conversation and return to wake listening"
+              : "Stop listening and speech"
+          }
+          disabled={
+            !controls.stopAvailable && handsFreePhase !== "CONVERSATION"
+          }
         >
           <SpeakerIcon />
           <span className={styles.srOnly}>Stop</span>

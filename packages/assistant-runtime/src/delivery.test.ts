@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import { resolveDeliveryIntent } from "./delivery";
 
 describe("delivery preference", () => {
+  it("treats the exact wake phrase as a read-only greeting cue", () => {
+    expect(resolveDeliveryIntent("Hey NavoX!")).toEqual({
+      intent: "SPEAK",
+      cue_only: true,
+      ordinal: null,
+      wake_only: true,
+    });
+    expect(
+      resolveDeliveryIntent("Hey NavoX, what is next?").wake_only,
+    ).toBeUndefined();
+  });
   it("leaves an ordinary question alone", () => {
     expect(resolveDeliveryIntent("What am I missing today?")).toEqual({
       intent: "AUTOMATIC",

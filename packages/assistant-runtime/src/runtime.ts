@@ -425,6 +425,14 @@ export function createAssistantRuntime(
       decision: presentDecision("delivery.read_aloud"),
       blocks: source.presentation.blocks,
     });
+    if (input.delivery.wake_only) {
+      return {
+        plan,
+        state: "READY" as AssistantResponseState,
+        decision: presentDecision("delivery.wake_greeting"),
+        blocks: [{ kind: "ANSWER" as const, text: "Hi, I'm listening." }],
+      };
+    }
     if (input.delivery.intent === "SUPPRESS") {
       return clarify(
         "delivery.suppressed",

@@ -25,6 +25,8 @@ export interface DeliveryResolution {
    * most recent. `null` means the operator named no specific turn.
    */
   ordinal: number | null;
+  /** An app-open wake greeting; it carries no capability or action authority. */
+  wake_only?: boolean;
 }
 
 /**
@@ -293,6 +295,9 @@ function ordinalFrom(normalized: string): number | null {
  */
 export function resolveDeliveryIntent(text: string): DeliveryResolution {
   const normalized = normalizeUtterance(text);
+  if (normalized === "hey navox") {
+    return { intent: "SPEAK", cue_only: true, ordinal: null, wake_only: true };
+  }
   const stripped = stripFillers(normalized);
   const cueOnly = CUE_ONLY.has(stripped);
   const boundary = normalizeWithBoundaries(text);

@@ -236,3 +236,27 @@ the Web build passed. The TypeScript migration check passed 29 assertions.
 `M12-ADAPTIVE-MODALITY-WORKER-REPORT.md` records the implementation and limits.
 No live microphone, TTS provider, on-device wake phrase or acoustic barge-in
 has been accepted yet.
+
+M11D hosted CI run `36840848212` and M12 hosted CI run `36847318387` each
+completed successfully across all six jobs on their respective exact heads.
+M12 was published as `c1a4bd36788c7bf0636b061c333b600290acd6dc`.
+
+## M13 in-app Hands-Free implementation
+
+`M13-HANDS-FREE-REPORT.md` records the explicit open-app Hands-Free control,
+local-only wake adapter, separate wake and conversation states, same-session
+greeting, automatic bounded SPEC-005 transcription clips and acoustic
+interruption of saved-turn TTS. Unsupported local recognition fails to the
+manual microphone and text. The full `bash scripts/check-api.sh` pre-push gate
+passed on this code tree with disposable PostgreSQL/Temporal: 2,726 tests,
+zero skipped, plus Ruff, strict mypy, Alembic/schema, metric, deterministic
+release evaluation and whitespace checks. Log:
+`/tmp/navox-spec008-m13-root-api-gate.log`. Root npm lint, typecheck, tests
+and Web build passed: 386 Web tests, 272 PostgreSQL-backed assistant-runtime
+tests and eight extension tests; the migration check passed 29 assertions.
+
+This is an implementation checkpoint. A real device has not established local
+language-pack installation, wake recognition, microphone capture, provider
+STT/TTS, playback or barge-in quality. The R3 connected-app, controlled action,
+bounded-goal/workflow and end-to-end acceptance gates remain open. Draft PR
+#22 must stay unmerged until those mandatory checks pass.

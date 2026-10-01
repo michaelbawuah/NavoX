@@ -14,6 +14,7 @@
  */
 
 import { MAX_SPEECH_AUDIO_BYTES } from "./assistant-client";
+import { VoiceActivityDetector } from "./assistant-voice-activity";
 import {
   encodeWavPcm16,
   MAX_WAV_MILLISECONDS,
@@ -55,6 +56,20 @@ export interface SpeechAdapter {
   readonly synthesisReason: string | null;
   /** Opens the microphone and starts buffering one clip. */
   startListening(handlers: SpeechHandlers, transcribe: TranscribeSpeech): void;
+  /** Opt-in Hands-Free capture, automatically finished after local silence. */
+  startAutomaticListening(
+    handlers: SpeechHandlers,
+    transcribe: TranscribeSpeech,
+  ): void;
+  /**
+   * Monitor locally while TTS plays. Actual user speech cancels playback and
+   * is retained in the same bounded WAV clip sent to SPEC-005.
+   */
+  startBargeIn(
+    handlers: SpeechHandlers,
+    transcribe: TranscribeSpeech,
+    onSpeech: () => void,
+  ): void;
   /**
    * The operator's second click: finish the clip and transcribe it. Returns
    * true only when this call really ended a recording and started the upload,
@@ -129,7 +144,13 @@ interface CaptureScope {
   navigator?: {
     mediaDevices?: {
       getUserMedia?: (constraints: {
-        audio: boolean;
+        audio:
+          | boolean
+          | {
+              echoCancellation: boolean;
+              noiseSuppression: boolean;
+              autoGainControl: boolean;
+            };
       }) => Promise<MediaStreamLike>;
     };
   };
@@ -160,7 +181,12 @@ interface Attempt {
   controller: AbortController;
   handlers: SpeechHandlers;
   transcribe: TranscribeSpeech;
-  phase: "opening" | "recording" | "uploading";
+  phase: "opening" | "monitoring" | "recording" | "uploading";
+  mode: "manual" | "auto" | "barge";
+  activity: VoiceActivityDetector | null;
+  onSpeech: (() => void) | null;
+  preRollFrames: Float32Array[];
+  preRollSamples: number;
   settled: boolean;
   buffered: number;
   frames: Float32Array[];
@@ -309,11 +335,16 @@ export function createSpeechAdapter(scope: unknown): SpeechAdapter {
    * instead of a clip SPEC-005 would refuse.
    */
   const stopAtCeiling = (target: Attempt) => {
-    if (attempt !== target || target.settled || target.phase !== "recording") {
+    if (
+      attempt !== target ||
+      target.settled ||
+      (target.phase !== "recording" && target.phase !== "monitoring")
+    ) {
       return;
     }
+    const heardSpeech = target.phase === "recording";
     releaseRecording(target);
-    settle(target, { error: CEILING_REASON });
+    settle(target, heardSpeech ? { error: CEILING_REASON } : null);
   };
 
   const upload = async (target: Attempt, wav: Uint8Array<ArrayBuffer>) => {
@@ -334,6 +365,33 @@ export function createSpeechAdapter(scope: unknown): SpeechAdapter {
     }
   };
 
+  /** Close one recording and upload its bounded WAV through the injected route. */
+  const finishClip = (target: Attempt): boolean => {
+    if (attempt !== target || target.settled || target.phase !== "recording")
+      return false;
+    const sampleRate = target.context?.sampleRate ?? 0;
+    const frames = target.frames;
+    target.frames = [];
+    releaseRecording(target);
+    let wav: Uint8Array<ArrayBuffer>;
+    try {
+      const total = frames.reduce((sum, frame) => sum + frame.length, 0);
+      const merged = new Float32Array(total);
+      let offset = 0;
+      for (const frame of frames) {
+        merged.set(frame, offset);
+        offset += frame.length;
+      }
+      wav = encodeWavPcm16(merged, sampleRate);
+      parseAssistantWav(wav);
+    } catch (error) {
+      settle(target, { error: failureMessage(error) });
+      return false;
+    }
+    void upload(target, wav);
+    return true;
+  };
+
   const openMicrophone = async (target: Attempt) => {
     const devices = mediaDevices;
     const ContextCtor = AudioContextCtor;
@@ -349,7 +407,16 @@ export function createSpeechAdapter(scope: unknown): SpeechAdapter {
     try {
       // Called on the MediaDevices object: a bare function reference loses the
       // receiver a WebIDL brand check requires.
-      stream = await devices.getUserMedia({ audio: true });
+      stream = await devices.getUserMedia({
+        audio:
+          target.mode === "manual"
+            ? true
+            : {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+              },
+      });
     } catch (error) {
       if (attempt !== target || target.settled) return;
       settle(target, { error: permissionMessage(error) });
@@ -393,8 +460,45 @@ export function createSpeechAdapter(scope: unknown): SpeechAdapter {
         const channel = event.inputBuffer.getChannelData(0);
         const chunk =
           channel.length > remaining ? channel.subarray(0, remaining) : channel;
-        target.frames.push(Float32Array.from(chunk));
-        target.buffered += chunk.length;
+        const frame = Float32Array.from(chunk);
+        if (target.mode === "manual") {
+          target.frames.push(frame);
+          target.buffered += frame.length;
+        } else {
+          const activity = target.activity?.observe(frame, context.sampleRate);
+          if (target.phase === "monitoring") {
+            target.preRollFrames.push(frame);
+            target.preRollSamples += frame.length;
+            const maxPreRoll = Math.ceil(context.sampleRate * 0.5);
+            while (
+              target.preRollSamples > maxPreRoll &&
+              target.preRollFrames.length > 1
+            ) {
+              const removed = target.preRollFrames.shift();
+              target.preRollSamples -= removed?.length ?? 0;
+            }
+            if (activity?.started) {
+              target.phase = "recording";
+              target.frames.push(...target.preRollFrames);
+              target.buffered = target.preRollSamples;
+              target.preRollFrames = [];
+              target.preRollSamples = 0;
+              try {
+                target.onSpeech?.();
+              } catch {
+                abandonAttempt(target);
+                return;
+              }
+            }
+          } else {
+            target.frames.push(frame);
+            target.buffered += frame.length;
+          }
+          if (activity?.ended && target.phase === "recording") {
+            finishClip(target);
+            return;
+          }
+        }
         if (target.buffered >= maxFrames) stopAtCeiling(target);
       };
       source.connect(processor);
@@ -409,7 +513,7 @@ export function createSpeechAdapter(scope: unknown): SpeechAdapter {
       target.source = source;
       target.processor = processor;
       target.sink = sink;
-      target.phase = "recording";
+      target.phase = target.mode === "manual" ? "recording" : "monitoring";
       target.timer = setTimeout(
         () => stopAtCeiling(target),
         MAX_WAV_MILLISECONDS + CEILING_SLACK_MS,
@@ -422,6 +526,46 @@ export function createSpeechAdapter(scope: unknown): SpeechAdapter {
     }
   };
 
+  const beginCapture = (
+    mode: Attempt["mode"],
+    handlers: SpeechHandlers,
+    transcribe: TranscribeSpeech,
+    onSpeech: (() => void) | null = null,
+  ) => {
+    if (mode !== "barge") cancelSpeech();
+    const previous = attempt;
+    if (previous) abandonAttempt(previous);
+    if (!captureSupported) {
+      handlers.onError(captureReason ?? CAPTURE_REASON);
+      handlers.onEnd();
+      return;
+    }
+    const target: Attempt = {
+      controller: new AbortController(),
+      handlers,
+      transcribe,
+      phase: "opening",
+      mode,
+      activity:
+        mode === "manual" ? null : new VoiceActivityDetector(mode === "barge"),
+      onSpeech,
+      preRollFrames: [],
+      preRollSamples: 0,
+      settled: false,
+      buffered: 0,
+      frames: [],
+      context: null,
+      source: null,
+      processor: null,
+      sink: null,
+      stream: null,
+      timer: null,
+    };
+    attempt = target;
+    if (mode !== "barge") handlers.onStart?.();
+    void openMicrophone(target);
+  };
+
   return {
     captureSupported,
     captureReason,
@@ -429,65 +573,25 @@ export function createSpeechAdapter(scope: unknown): SpeechAdapter {
     synthesisReason,
 
     startListening(handlers, transcribe) {
-      // A new operator utterance takes the turn: any speech in flight stops.
-      cancelSpeech();
-      const previous = attempt;
-      if (previous) abandonAttempt(previous);
-      if (!captureSupported) {
-        handlers.onError(captureReason ?? CAPTURE_REASON);
-        handlers.onEnd();
-        return;
-      }
-      const target: Attempt = {
-        controller: new AbortController(),
-        handlers,
-        transcribe,
-        phase: "opening",
-        settled: false,
-        buffered: 0,
-        frames: [],
-        context: null,
-        source: null,
-        processor: null,
-        sink: null,
-        stream: null,
-        timer: null,
-      };
-      attempt = target;
-      handlers.onStart?.();
-      void openMicrophone(target);
+      beginCapture("manual", handlers, transcribe);
+    },
+
+    startAutomaticListening(handlers, transcribe) {
+      beginCapture("auto", handlers, transcribe);
+    },
+
+    startBargeIn(handlers, transcribe, onSpeech) {
+      beginCapture("barge", handlers, transcribe, () => {
+        cancelSpeech();
+        onSpeech();
+      });
     },
 
     finishListening() {
       const target = attempt;
       // Only a live capture can finish. A second click while the browser is
       // still asking for permission is ignored, and Stop owns cancellation.
-      if (!target || target.settled || target.phase !== "recording") {
-        return false;
-      }
-      // The caller may only claim a transcription once this call really owns
-      // the clip; an encode failure settles with its own typed fallback.
-      const sampleRate = target.context?.sampleRate ?? 0;
-      const frames = target.frames;
-      target.frames = [];
-      releaseRecording(target);
-      let wav: Uint8Array<ArrayBuffer>;
-      try {
-        const total = frames.reduce((sum, frame) => sum + frame.length, 0);
-        const merged = new Float32Array(total);
-        let offset = 0;
-        for (const frame of frames) {
-          merged.set(frame, offset);
-          offset += frame.length;
-        }
-        wav = encodeWavPcm16(merged, sampleRate);
-        parseAssistantWav(wav);
-      } catch (error) {
-        settle(target, { error: failureMessage(error) });
-        return false;
-      }
-      void upload(target, wav);
-      return true;
+      return target?.mode === "manual" ? finishClip(target) : false;
     },
 
     stopListening() {

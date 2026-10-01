@@ -1,6 +1,6 @@
 import type { AssistantTurnView } from "@navox/contracts";
 import { describe, expect, it } from "vitest";
-import type { VoiceEvent, VoiceSessionState } from "./voice";
+import type { VoiceEvent, VoiceSessionState, WakeWordEvent } from "./voice";
 import {
   automaticSpeechAllowed,
   createInactiveWakeWordAdapter,
@@ -44,6 +44,21 @@ function apply(
 }
 
 describe("click-to-talk voice state", () => {
+  it("resumes a stopped session only on a new local wake event", () => {
+    const stopped = reduceVoiceState(initialVoiceState(), { type: "STOP" });
+    expect(reduceVoiceState(stopped, { type: "SUBMITTED" }).state).toBe(
+      "STOPPED",
+    );
+    const awake = reduceVoiceState(stopped, { type: "WAKE" });
+    expect(awake.state).toBe("IDLE");
+    expect(reduceVoiceState(awake, { type: "SUBMITTED" }).state).toBe(
+      "THINKING",
+    );
+    const speaking = reduceVoiceState(initialVoiceState(), {
+      type: "SPEAKING_STARTED",
+    });
+    expect(reduceVoiceState(speaking, { type: "WAKE" })).toEqual(speaking);
+  });
   it("walks listening to transcribed to thinking", () => {
     let state = initialVoiceState();
     state = reduceVoiceState(state, { type: "REQUEST_LISTENING" });
@@ -408,6 +423,24 @@ describe("saved-turn spoken text", () => {
 });
 
 describe("wake word boundary", () => {
+  it("accepts an optional same-utterance request without authority", () => {
+    const event: WakeWordEvent = {
+      type: "wake",
+      detected_at: "2026-10-01T00:00:00.000Z",
+      device_id: "device-1",
+      confidence: 0.9,
+      request_text: "what am i missing today?",
+    };
+    expect(event.request_text).toBe("what am i missing today?");
+    const bare: WakeWordEvent = {
+      type: "wake",
+      detected_at: "2026-10-01T00:00:00.000Z",
+      device_id: "device-1",
+      confidence: 0.9,
+    };
+    expect(bare.request_text).toBeUndefined();
+  });
+
   it("ships inert: unsupported, inactive and loud on start", async () => {
     const adapter = createInactiveWakeWordAdapter();
     expect(adapter.supported).toBe(false);

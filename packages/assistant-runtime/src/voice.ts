@@ -49,6 +49,7 @@ export type VoiceEvent =
   | { type: "READ_ALOUD_STARTED" }
   | { type: "SPEAKING_ENDED" }
   | { type: "BARGE_IN" }
+  | { type: "WAKE" }
   | { type: "MUTE" }
   | { type: "UNMUTE" }
   | { type: "SET_VOICE_MODE"; enabled: boolean }
@@ -195,6 +196,20 @@ export function reduceVoiceState(
     case "BARGE_IN":
       if (!state.microphoneSupported) return state;
       return { ...state, state: "LISTENING", transcript: null, error: null };
+    case "WAKE":
+      if (
+        !state.microphoneSupported ||
+        (state.state !== "STOPPED" &&
+          state.state !== "IDLE" &&
+          state.state !== "MUTED")
+      )
+        return state;
+      return {
+        ...state,
+        state: restingState(state),
+        transcript: null,
+        error: null,
+      };
     case "MUTE":
       return state.muted ? state : mutedState(state);
     case "UNMUTE":
@@ -246,6 +261,12 @@ export interface WakeWordEvent {
   detected_at: string;
   device_id: string;
   confidence: number;
+  /**
+   * The bounded text spoken after the wake phrase in the same utterance, if
+   * any, e.g. "what am I missing today?". This is local, on-device input for
+   * the next turn; it carries no action authority and may be absent.
+   */
+  request_text?: string;
 }
 
 /**

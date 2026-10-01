@@ -732,3 +732,90 @@ describe("browser speech playback", () => {
     expect(synthesize).not.toHaveBeenCalled();
   });
 });
+
+describe("opt-in Hands-Free capture", () => {
+  it("automatically finishes a voiced clip and uses the SPEC-005 uploader", async () => {
+    const { scope, processors, getUserMedia, tracks } = captureScope();
+    const speech = createSpeechAdapter(scope);
+    const calls = handlers();
+    const transcribe = vi.fn(
+      async (_wav: Uint8Array<ArrayBuffer>, _signal: AbortSignal) =>
+        "What class do I have next?",
+    );
+    speech.startAutomaticListening(calls, transcribe);
+    await tick();
+    const processor = processors[0];
+    expect(processor).toBeDefined();
+    expect(getUserMedia).toHaveBeenCalledWith({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+    processor?.emit(tone(1600));
+    processor?.emit(tone(1600));
+    for (let index = 0; index < 9; index++)
+      processor?.emit(new Float32Array(1600));
+    await tick();
+    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(parseAssistantWav(transcribe.mock.calls[0]?.[0])).toMatchObject({
+      channels: 1,
+      sampleRate: 16_000,
+      bitsPerSample: 16,
+    });
+    expect(calls.onTranscript).toHaveBeenCalledWith(
+      "What class do I have next?",
+    );
+    expect(tracks[0]?.stop).toHaveBeenCalled();
+  });
+
+  it("keeps speaker echo inert, then cancels TTS and captures a new utterance", async () => {
+    const capture = captureScope();
+    const playback = synthesisScope();
+    const speech = createSpeechAdapter({ ...capture.scope, ...playback.scope });
+    const synthesize = vi.fn(async () =>
+      Uint8Array.from([0x49, 0x44, 0x33, 0x04]),
+    );
+    speech.speak("turn-1", { onEnd: vi.fn(), onError: vi.fn() }, synthesize);
+    await tick();
+    const barge = vi.fn();
+    const calls = handlers();
+    const transcribe = vi.fn(
+      async (_wav: Uint8Array<ArrayBuffer>, _signal: AbortSignal) =>
+        "Actually, show the next one.",
+    );
+    speech.startBargeIn(calls, transcribe, barge);
+    await tick();
+    const processor = capture.processors[0];
+    for (let index = 0; index < 5; index++)
+      processor?.emit(new Float32Array(1600).fill(0.02));
+    expect(barge).not.toHaveBeenCalled();
+    expect(playback.current()?.pause).not.toHaveBeenCalled();
+    processor?.emit(tone(1600));
+    processor?.emit(tone(1600));
+    expect(barge).toHaveBeenCalledTimes(1);
+    expect(playback.current()?.pause).toHaveBeenCalled();
+    for (let index = 0; index < 9; index++)
+      processor?.emit(new Float32Array(1600));
+    await tick();
+    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(calls.onTranscript).toHaveBeenCalledWith(
+      "Actually, show the next one.",
+    );
+  });
+
+  it("releases a quiet monitor without uploading on Stop", async () => {
+    const { scope, processors, tracks } = captureScope();
+    const speech = createSpeechAdapter(scope);
+    const calls = handlers();
+    const transcribe = vi.fn();
+    speech.startBargeIn(calls, transcribe, vi.fn());
+    await tick();
+    processors[0]?.emit(new Float32Array(1600));
+    speech.stopListening();
+    expect(transcribe).not.toHaveBeenCalled();
+    expect(calls.onEnd).toHaveBeenCalledOnce();
+    expect(tracks[0]?.stop).toHaveBeenCalled();
+  });
+});

@@ -474,6 +474,7 @@ describe("assistant turn runner", () => {
 
 interface FakeAdapter extends SpeechAdapter {
   log: string[];
+  bargeSpeech: (() => void) | null;
   spoken: string[];
   /** The saved-turn fetcher the session handed to the last playback. */
   synthesize: SynthesizeSpeech | null;
@@ -506,6 +507,7 @@ function fakeAdapter(overrides: Partial<SpeechAdapter> = {}): FakeAdapter {
     captureReason: null,
     synthesisReason: null,
     log,
+    bargeSpeech: null,
     spoken,
     synthesize: null,
     finishResult,
@@ -514,6 +516,15 @@ function fakeAdapter(overrides: Partial<SpeechAdapter> = {}): FakeAdapter {
     startListening(handlers, transcribe) {
       log.push("startListening");
       capture.push({ handlers, transcribe });
+    },
+    startAutomaticListening(handlers, transcribe) {
+      log.push("startAutomaticListening");
+      capture.push({ handlers, transcribe });
+    },
+    startBargeIn(handlers, transcribe, onSpeech) {
+      log.push("startBargeIn");
+      capture.push({ handlers, transcribe });
+      this.bargeSpeech = onSpeech;
     },
     finishListening() {
       log.push("finishListening");
@@ -711,6 +722,31 @@ describe("voice session lifecycle", () => {
     expect(speechStartForTurn({ ...state, state: "STOPPED" }, true)).toBe(
       "MANUAL",
     );
+  });
+
+  it("turns acoustic interruption into a new turn in the same session", async () => {
+    const rig = voiceRig();
+    rig.session.speakManually(voiceTurn("VOICE", "first answer"));
+    rig.session.armBargeIn();
+    expect(rig.adapter.log).toContain("startBargeIn");
+    expect(rig.session.current().state).toBe("SPEAKING");
+    rig.adapter.bargeSpeech?.();
+    expect(rig.session.current().state).toBe("LISTENING");
+    rig.adapter.deliverTranscript("Actually, show the next one.");
+    await rig.settle();
+    expect(rig.transcripts).toEqual(["Actually, show the next one."]);
+    expect(rig.appended.at(-1)?.question).toBe("Actually, show the next one.");
+  });
+
+  it("automatically captures a Hands-Free question after wake", async () => {
+    const rig = voiceRig();
+    rig.session.stop();
+    rig.session.resumeForWake();
+    rig.session.listenAutomatically();
+    expect(rig.adapter.log).toContain("startAutomaticListening");
+    rig.adapter.deliverTranscript("What class do I have next?");
+    await rig.settle();
+    expect(rig.transcripts).toEqual(["What class do I have next?"]);
   });
 
   it("cancels playback and listens when the microphone is pressed during speech", async () => {

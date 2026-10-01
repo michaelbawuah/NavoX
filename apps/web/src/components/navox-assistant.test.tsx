@@ -429,7 +429,9 @@ describe("voice controls", () => {
     );
     expect(stopTag).not.toContain("aria-pressed");
     // The microphone is the start/finish toggle; Stop is the separate command.
-    expect(markup).toContain("Recording starts only when you press");
+    expect(markup).toContain("The microphone records after you press");
+    expect(markup).toContain('aria-label="Turn Hands-Free on"');
+    expect(markup).toContain("Hands-Free wake detection stays on this device");
     expect(markup).not.toContain("Finish recording and transcribe");
   });
 

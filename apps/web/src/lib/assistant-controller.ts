@@ -191,6 +191,12 @@ export interface VoiceSession {
   /** The explicit Read aloud control. The page offers it only when unmuted. */
   speakManually(turn: AssistantTurnView): void;
   listen(): void;
+  /** Opt-in Hands-Free clip: local silence finishes the SPEC-005 upload. */
+  listenAutomatically(): void;
+  /** Opt-in local speech monitor while TTS plays. */
+  armBargeIn(): void;
+  /** A local wake event resumes a stopped conversation without granting authority. */
+  resumeForWake(): void;
   /**
    * The microphone control: the first click starts capture, the second click
    * finishes and transcribes it. Clicking during playback cancels speech first.
@@ -314,9 +320,13 @@ export function createVoiceSession(deps: VoiceSessionDeps): VoiceSession {
     adapter.speak(
       turn.id,
       {
-        onEnd: () => dispatch({ type: "SPEAKING_ENDED" }),
+        onEnd: () => {
+          adapter.stopListening();
+          dispatch({ type: "SPEAKING_ENDED" });
+        },
         onError: (reason) => {
           deps.onNotice(reason);
+          adapter.stopListening();
           dispatch({ type: "SPEAKING_ENDED" });
         },
       },
@@ -332,6 +342,59 @@ export function createVoiceSession(deps: VoiceSessionDeps): VoiceSession {
       }),
     );
   }
+
+  const capture = (mode: "manual" | "auto" | "barge") => {
+    if (disposed) return;
+    if (!adapter.captureSupported) {
+      dispatch({
+        type: "MICROPHONE_UNSUPPORTED",
+        reason: adapter.captureReason ?? "",
+      });
+      return;
+    }
+    if (mode === "barge" && state.state !== "SPEAKING") return;
+    endAttempt();
+    const currentAttempt = attempt;
+    let interrupted = mode !== "barge";
+    const live = () => !disposed && currentAttempt === attempt;
+    if (mode !== "barge") {
+      adapter.stopSpeaking();
+      dispatch({ type: "BARGE_IN" });
+    }
+    const handlers = {
+      onTranscript: (text: string) => {
+        if (!live()) return;
+        const next = reduceVoiceState(state, { type: "TRANSCRIPT", text });
+        publish(next);
+        if (next.state !== "TRANSCRIBING" || !next.transcript) return;
+        deps.onTranscript(voiceTurnRequest(next.transcript));
+        if (state.state === "TRANSCRIBING") dispatch({ type: "STOP" });
+      },
+      onError: (reason: string) => {
+        if (!live()) return;
+        deps.onNotice(reason);
+      },
+      onEnd: () => {
+        if (!live()) return;
+        // A quiet barge-in monitor may end when TTS finishes, without a new
+        // utterance. It must not stop the conversation or fabricate a turn.
+        if (mode === "barge" && !interrupted) return;
+        if (state.state === "THINKING") return;
+        dispatch({ type: "STOP" });
+      },
+    };
+    if (mode === "barge") {
+      adapter.startBargeIn(handlers, deps.transcribe, () => {
+        if (!live()) return;
+        interrupted = true;
+        dispatch({ type: "BARGE_IN" });
+      });
+    } else if (mode === "auto") {
+      adapter.startAutomaticListening(handlers, deps.transcribe);
+    } else {
+      adapter.startListening(handlers, deps.transcribe);
+    }
+  };
 
   return {
     current: () => state,
@@ -371,50 +434,20 @@ export function createVoiceSession(deps: VoiceSessionDeps): VoiceSession {
     },
 
     listen() {
+      capture("manual");
+    },
+
+    listenAutomatically() {
+      capture("auto");
+    },
+
+    armBargeIn() {
+      capture("barge");
+    },
+
+    resumeForWake() {
       if (disposed) return;
-      if (!adapter.captureSupported) {
-        dispatch({
-          type: "MICROPHONE_UNSUPPORTED",
-          reason: adapter.captureReason ?? "",
-        });
-        return;
-      }
-      endAttempt();
-      const currentAttempt = attempt;
-      const live = () => !disposed && currentAttempt === attempt;
-      // Manual interruption: cancel playback first, then open the microphone.
-      adapter.stopSpeaking();
-      dispatch({ type: "BARGE_IN" });
-      adapter.startListening(
-        {
-          onTranscript: (text) => {
-            if (!live()) return;
-            // The session decides whether this transcript is still current; a
-            // late result after Stop or unmount is never submitted.
-            const next = reduceVoiceState(state, { type: "TRANSCRIPT", text });
-            publish(next);
-            if (next.state !== "TRANSCRIBING" || !next.transcript) return;
-            deps.onTranscript(voiceTurnRequest(next.transcript));
-            // The page may refuse the turn, for example while another turn is
-            // in flight. A refused transcript must not leave the microphone
-            // session resting mid-transcription.
-            if (state.state === "TRANSCRIBING") dispatch({ type: "STOP" });
-          },
-          onError: (reason) => {
-            if (!live()) return;
-            deps.onNotice(reason);
-          },
-          onEnd: () => {
-            if (!live()) return;
-            // A finished capture whose transcript already opened a turn leaves
-            // the pending answer alone; a failed or refused upload releases the
-            // microphone instead of resting mid-transcription.
-            if (state.state === "THINKING") return;
-            dispatch({ type: "STOP" });
-          },
-        },
-        deps.transcribe,
-      );
+      dispatch({ type: "WAKE" });
     },
 
     toggleListening() {
