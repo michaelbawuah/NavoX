@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canvasAuthorizationUrl,
+  canvasInstitutions,
   canvasOrigin,
   canvasSelection,
 } from "./canvas-setup";
@@ -46,4 +47,51 @@ describe("Canvas read consent and OAuth redirect boundary", () => {
   ])("rejects unsafe setup %s", (value) =>
     expect(() => canvasOrigin(value)).toThrow(),
   );
+  it("accepts a public multi-school catalog and binds a redirect to its selected school", () => {
+    const institutions = canvasInstitutions([
+      {
+        id: "north",
+        name: "North University",
+        origin: "https://canvas.north.edu",
+      },
+      {
+        id: "south",
+        name: "South College",
+        origin: "https://canvas.south.edu",
+      },
+    ]);
+    expect(institutions).toHaveLength(2);
+    expect(() =>
+      canvasAuthorizationUrl(
+        "https://canvas.south.edu/login/oauth2/auth?state=nonce",
+        institutions[0].origin,
+      ),
+    ).toThrow();
+    expect(
+      canvasAuthorizationUrl(
+        "https://canvas.south.edu/login/oauth2/auth?state=nonce",
+        institutions[1].origin,
+      ),
+    ).toContain("state=nonce");
+  });
+  it.each(
+    [
+      [],
+      [{ id: "north", name: "North", origin: "http://canvas.north.edu" }],
+      [
+        {
+          id: "north",
+          name: "North",
+          origin: "https://canvas.north.edu",
+          client_secret: "leak",
+        },
+      ],
+      [
+        { id: "north", name: "North", origin: "https://canvas.north.edu" },
+        { id: "north", name: "Other", origin: "https://canvas.other.edu" },
+      ],
+    ].map((value) => ({ value })),
+  )("rejects malformed or duplicate school catalogs", ({ value }) => {
+    expect(() => canvasInstitutions(value)).toThrow();
+  });
 });

@@ -105,7 +105,9 @@ class OAuthCanvasConnector(CanvasConnector):
         access_check: AccessCheck = check_access,
     ) -> None:
         self.config = CanvasConfig.model_validate(config)
-        self.deployment = canvas_oauth.deployment(settings)
+        self.deployment = canvas_oauth.deployment_for_connection(
+            settings, self.config.base_url, self.config.deployment_hash
+        )
         if (
             self.config.base_url != self.deployment.origin
             or self.config.deployment_hash != self.deployment.fingerprint

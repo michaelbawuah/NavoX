@@ -2,14 +2,28 @@
 
 ## User flow and deployment prerequisites
 
-Connections → Browse → Connect Canvas → choose read permissions → explicitly
+Connections → Browse → Connect Canvas → choose school and read permissions → explicitly
 approve source processing → authorize on the institution's Canvas website →
 identifiers-only workflow → shared Connector Runtime → existing SPEC-002 → Today.
 
 Canvas's OAuth documentation requires multi-user applications to use OAuth;
 there is no personal-token or account-password collection form. An institution
-administrator must enable an endpoint-scoped OAuth developer key. This checkpoint
-supports one institution per NavoX deployment, configured only on the server:
+administrator must enable an endpoint-scoped OAuth developer key. NavoX accepts
+multiple operator-reviewed schools through `CANVAS_OAUTH_DEPLOYMENTS`, a JSON
+array of at most 50 entries. Each entry has a stable lowercase `id`, public
+`name`, exact HTTPS `origin`, numeric `client_id`, and protected
+`client_secret`. Example shape, with placeholder values only:
+
+```json
+[{"id":"example-school","name":"Example School","origin":"https://canvas.example.edu","client_id":"12345","client_secret":"from-secret-store"}]
+```
+
+Configure this JSON in the deployment secret store. An institution-scoped key
+works only at that school; an Instructure-issued global key can be used at
+multiple reviewed origins only after each institution enables it. Students
+choose from the approved list; they cannot submit an arbitrary Canvas URL or
+personal token. The older single-school fields remain a fallback when no
+multi-school catalog is configured:
 
 - `CANVAS_BASE_URL`: exact public HTTPS institution origin, port 443.
 - `CANVAS_OAUTH_CLIENT_ID` and protected `CANVAS_OAUTH_CLIENT_SECRET`.
@@ -21,6 +35,9 @@ supports one institution per NavoX deployment, configured only on the server:
 The catalogue stays `setup_pending` until configuration and encryption are
 available. This is configuration readiness, not proof the institution approved
 its developer key or that a live account has successfully connected.
+Unknown schools remain unavailable until NavoX obtains an approved key and
+adds their exact origin. NavoX does not require students at other schools to
+use Cornell's Canvas account.
 
 Only selected GET scopes are requested. Courses are required to enumerate
 student enrollments; submission state requires assignment permission. The
@@ -42,6 +59,7 @@ route is implemented. OAuth token POSTs are solely credential acquisition.
 
 One-use random state is hashed and bound to the authenticated owner, workspace,
 ten-minute expiry, selected capabilities and deployment fingerprint. The
+fingerprint includes the chosen school's stable ID for multi-school entries.
 callback atomically consumes it before exchanging the code. A replay, wrong
 owner/workspace, expired attempt or changed deployment cannot exchange tokens.
 Membership is checked again after OAuth I/O before storing anything.
@@ -55,6 +73,8 @@ boundary. Reflected credential material in provider JSON is rejected before
 normalization/model processing. Models receive no credential handles.
 
 Reconnect must authenticate the same Canvas account and cannot add permissions.
+It also cannot switch schools. Refresh and sync resolve the existing connection's
+origin and fingerprint; removed or rotated keys fail closed until reauthorization.
 Credential replacement fences in-flight attempts. A paused connection remains
 paused; neither reconnect nor connection resume overrides the global agent pause.
 Existing connection IDs, provenance and source receipts are retained.

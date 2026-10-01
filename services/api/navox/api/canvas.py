@@ -47,6 +47,7 @@ class ConnectCommand(BaseModel):
     request_id: UUID
     capabilities: list[str] = Field(min_length=1, max_length=5)
     confirmed: bool
+    institution_id: str | None = Field(default=None, pattern=r"^[a-z0-9-]{1,64}$")
 
     @field_validator("confirmed", mode="before")
     @classmethod
@@ -61,9 +62,9 @@ class ConnectCommand(BaseModel):
         return sorted(canvas_oauth.validate_capabilities(value))
 
 
-def configured(settings: Settings) -> canvas_oauth.CanvasDeployment:
+def configured(settings: Settings) -> tuple[canvas_oauth.CanvasDeployment, ...]:
     try:
-        result = canvas_oauth.deployment(settings)
+        result = canvas_oauth.deployments(settings)
         SecretBroker(settings)
         return result
     except (ConnectorRuntimeError, SecretBrokerError):
@@ -77,9 +78,13 @@ async def setup(
     account: CurrentAccountDependency, settings: SettingsDependency
 ) -> dict[str, object]:
     del account
-    config = configured(settings)
+    configs = configured(settings)
     return {
-        "origin": config.origin,
+        "institutions": [
+            {"id": item.institution_id, "name": item.institution_name, "origin": item.origin}
+            for item in configs
+        ],
+        "origin": configs[0].origin if len(configs) == 1 else None,
         "capabilities": list(canvas_oauth.CANVAS_SCOPES),
         "read_only": True,
     }
@@ -91,8 +96,9 @@ async def start(
     settings: Settings,
     capabilities: list[str],
     connection_id: UUID | None = None,
+    institution_id: str | None = None,
 ) -> dict[str, object]:
-    config = configured(settings)
+    configs = configured(settings)
     selected = sorted(canvas_oauth.validate_capabilities(capabilities))
     now = await database_now(database)
     owner = await database.scalar(select(User).where(User.id == account.user.id).with_for_update())
@@ -128,7 +134,27 @@ async def start(
             raise HTTPException(404, "Canvas connection not found")
         if frozenset(selected) != frozenset(row.authorized_capabilities):
             raise HTTPException(409, "Reconnect cannot add permissions")
+        try:
+            bound = CanvasConfig.model_validate(row.config)
+            config = canvas_oauth.deployment_for_connection(
+                settings, bound.base_url, bound.deployment_hash
+            )
+        except (ValueError, ConnectorRuntimeError):
+            raise HTTPException(
+                409, "Canvas institution changed; reconnect is unavailable"
+            ) from None
+        if institution_id is not None and institution_id != config.institution_id:
+            raise HTTPException(409, "Reconnect cannot change Canvas institution")
         provenance_id = (await ensure_provenance_connection(database, row)).id
+    elif institution_id is None:
+        if len(configs) != 1:
+            raise HTTPException(400, "Select a Canvas institution")
+        config = configs[0]
+    else:
+        try:
+            config = canvas_oauth.deployment_for_id(settings, institution_id)
+        except ConnectorRuntimeError:
+            raise HTTPException(400, "Canvas institution is unavailable") from None
     state = token_urlsafe(32)
     expires = now + timedelta(minutes=10)
     database.add(
@@ -170,7 +196,13 @@ async def connect(
     settings: SettingsDependency,
 ) -> dict[str, object]:
     require_origin(request, settings.web_origin)
-    return await start(account, database, settings, command.capabilities)
+    return await start(
+        account,
+        database,
+        settings,
+        command.capabilities,
+        institution_id=command.institution_id,
+    )
 
 
 async def queue(
@@ -200,7 +232,7 @@ async def callback(
     database: DatabaseSession,
     settings: SettingsDependency,
 ) -> RedirectResponse:
-    config = configured(settings)
+    configured(settings)
     values = request.query_params
     state, code = values.get("state", ""), values.get("code", "")
     if not 16 <= len(state) <= 128 or any(
@@ -220,8 +252,12 @@ async def callback(
         )
         .with_for_update()
     )
-    if attempt is None or attempt.code_verifier != config.fingerprint:
+    if attempt is None:
         raise HTTPException(400, "Canvas authorization expired or belongs to another session")
+    try:
+        config = canvas_oauth.deployment_for_fingerprint(settings, attempt.code_verifier)
+    except ConnectorRuntimeError:
+        raise HTTPException(400, "Canvas institution configuration changed") from None
     capabilities = list(attempt.requested_scopes)
     canvas_oauth.validate_capabilities(capabilities)
     original = attempt.connection_id
@@ -261,7 +297,11 @@ async def callback(
         )
         .with_for_update()
     )
-    if user is None or member is None or configured(settings).fingerprint != fingerprint:
+    try:
+        current_config = canvas_oauth.deployment_for_fingerprint(settings, fingerprint)
+    except ConnectorRuntimeError:
+        current_config = None
+    if user is None or member is None or current_config != config:
         raise HTTPException(403, "Canvas authorization is no longer permitted")
     external = f"{config.origin}:{tokens.user_id}"
     row = await database.scalar(

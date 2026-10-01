@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { canvasAuthorizationUrl } from "../lib/canvas-setup";
+import {
+  canvasAuthorizationUrl,
+  canvasInstitutions,
+} from "../lib/canvas-setup";
 import {
   type ConnectorEntry,
   canOpenConnector,
@@ -175,11 +178,18 @@ export function ConnectionsPanel({
               c.connector_id === "canvas-lms" && key === `${c.id}:reauthorize`,
           )
         ) {
-          const setup = await requestJson<{ origin: string }>(
+          const setup = await requestJson<{ institutions: unknown }>(
             "/connectors/canvas-lms/setup",
           );
+          const institutions = canvasInstitutions(setup.institutions);
+          const target = new URL(body.authorization_url ?? "").origin;
+          const institution = institutions.find(
+            (item) => item.origin === target,
+          );
+          if (!institution)
+            throw new Error("Canvas institution is unavailable.");
           window.location.assign(
-            canvasAuthorizationUrl(body.authorization_url, setup.origin),
+            canvasAuthorizationUrl(body.authorization_url, institution.origin),
           );
         } else
           window.location.assign(
