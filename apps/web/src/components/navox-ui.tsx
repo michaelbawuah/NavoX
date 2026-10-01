@@ -11,7 +11,7 @@ import styles from "./navox-ui.module.css";
 export function NavoXNavigation({
   current,
 }: {
-  current: "Today" | "News" | "Search" | "Subscriptions";
+  current: "Today" | "Assistant" | "News" | "Search" | "Subscriptions";
 }) {
   return (
     <nav aria-label="Workspace" className={styles.navigation}>
@@ -19,6 +19,7 @@ export function NavoXNavigation({
         [
           ["Today", "/"],
           ["NavoX", "/#ask-navox"],
+          ["Assistant", "/navox"],
           ["News", "/news"],
           ["Search", "/navox/search"],
           ["Subscriptions", "/subscriptions"],

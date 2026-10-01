@@ -1,0 +1,1240 @@
+import { randomUUID } from "node:crypto";
+import type {
+  AssistantBlock,
+  AssistantEmailAction,
+  AssistantEmailDraft,
+  AssistantMessageRequest,
+  AssistantMessageResponse,
+  AssistantResponseState,
+  AssistantSessionView,
+  CapabilityDecision,
+  IntentPlan,
+  PlannedIntent,
+} from "@navox/contracts";
+import {
+  assertRegistryIntegrity,
+  capabilityForIntentKind,
+} from "./capabilities";
+import { answerNextClass, parseClassSourceSnapshot } from "./class-meetings";
+import {
+  decideEmailSearch,
+  decideEmailSelection,
+  parseEmailSearchOutcome,
+} from "./email";
+import { createAssistantEmailActions } from "./email-actions";
+import { AssistantError, isAssistantError, toAssistantError } from "./errors";
+import {
+  type AccountScope,
+  type NavoxUpstream,
+  PLANNER_NO_PROVIDER,
+} from "./gateway";
+import {
+  assertTurnBudget,
+  fingerprintTurn,
+  resolveReplay,
+  retentionWindow,
+} from "./ledger";
+import { LIMITS } from "./limits";
+import { meetingBlocks } from "./meeting";
+import {
+  answerNews,
+  clarifyNews,
+  namedNewsMatches,
+  newsSelector,
+  newsTrends,
+  parseNewsFeed,
+  parseNewsStory,
+  parseNewsSummary,
+} from "./news";
+import { parseIntentPlanEnvelope, planTurn } from "./planner";
+import { buildPresentationPlan } from "./presentation";
+import {
+  type AssistantRequestClaim,
+  type AssistantSessionRecord,
+  type AssistantStore,
+  type AssistantTurnRecord,
+  toTurnView,
+} from "./store";
+import {
+  answerSubscription,
+  clarifySubscriptions,
+  parseSubscriptionCancellation,
+  parseSubscriptionSearch,
+  subscriptionSelector,
+} from "./subscriptions";
+import { answerCurrentTime } from "./time";
+import {
+  blocksFromToday,
+  decideToday,
+  noticeBlocks,
+  type TodayQueryResult,
+} from "./today";
+import {
+  assertUuid,
+  clampText,
+  parseAssistantMessageRequest,
+  parseCapabilityDecision,
+} from "./validate";
+import { parseWeather, weatherAnswer, weatherSelector } from "./weather";
+
+/** Qualified planning failures. A plan is a proposal, never a fallback route. */
+const PLAN_FAILURE_TEXT: Record<string, string> = {
+  invalid_request:
+    "That request could not be planned safely. Nothing was changed.",
+  misconfigured:
+    "The assistant cannot plan that request in this deployment. Nothing was changed.",
+  unsupported:
+    "That assistant lookup is not enabled in this deployment. Nothing was changed.",
+  forbidden: "This account cannot read those sources. Nothing was changed.",
+  conflict: "That conversation changed. Please ask again. Nothing was changed.",
+  not_found:
+    "The assistant could not find that information. Nothing was changed.",
+  unavailable:
+    "The assistant could not look that up right now. Nothing was changed.",
+};
+
+export interface AssistantRuntimeDeps {
+  store: AssistantStore;
+  upstream: NavoxUpstream;
+  now?: () => Date;
+  newId?: () => string;
+  sleep?: (ms: number) => Promise<void>;
+  claimWaitMs?: number;
+  claimPollMs?: number;
+  claimStaleMs?: number;
+}
+
+export interface AssistantRuntime {
+  createSession(input: { cookie: string }): Promise<AssistantSessionView>;
+  readSession(input: {
+    cookie: string;
+    session_id: string;
+  }): Promise<AssistantSessionView>;
+  submitTurn(input: {
+    cookie: string;
+    session_id: string;
+    body: unknown;
+  }): Promise<AssistantMessageResponse>;
+  deleteSession(input: { cookie: string; session_id: string }): Promise<void>;
+  purgeExpired(): Promise<number>;
+  createEmailDraft(input: {
+    cookie: string;
+    session_id: string;
+    body: unknown;
+  }): Promise<AssistantEmailDraft>;
+  readEmailDraft(input: {
+    cookie: string;
+    session_id: string;
+    source_turn_id: string;
+    draft_id: string;
+  }): Promise<AssistantEmailDraft>;
+  reviseEmailDraft(input: {
+    cookie: string;
+    session_id: string;
+    draft_id: string;
+    body: unknown;
+  }): Promise<AssistantEmailDraft>;
+  prepareEmailDraft(input: {
+    cookie: string;
+    session_id: string;
+    draft_id: string;
+    body: unknown;
+  }): Promise<AssistantEmailAction>;
+  approveEmailDraft(input: {
+    cookie: string;
+    session_id: string;
+    draft_id: string;
+    body: unknown;
+  }): Promise<AssistantEmailAction>;
+  readEmailAction(input: {
+    cookie: string;
+    session_id: string;
+    source_turn_id: string;
+    draft_id: string;
+  }): Promise<AssistantEmailAction>;
+}
+
+function sessionView(
+  record: AssistantSessionRecord,
+  turns: AssistantSessionView["turns"],
+  now: Date,
+): AssistantSessionView {
+  const expired = Date.parse(record.expires_at) <= now.getTime();
+  return {
+    id: record.id,
+    created_at: record.created_at,
+    updated_at: record.updated_at,
+    expires_at: record.expires_at,
+    status: expired ? "expired" : "active",
+    turns,
+  };
+}
+
+function requireSession(
+  record: AssistantSessionRecord | null,
+  now: Date,
+): AssistantSessionRecord {
+  if (!record) {
+    throw new AssistantError(
+      "not_found",
+      "That assistant session is no longer available.",
+    );
+  }
+  if (Date.parse(record.expires_at) <= now.getTime()) {
+    throw new AssistantError("expired", "That assistant session has expired.");
+  }
+  return record;
+}
+
+export function createAssistantRuntime(
+  deps: AssistantRuntimeDeps,
+): AssistantRuntime {
+  assertRegistryIntegrity();
+  const now = deps.now ?? (() => new Date());
+  const newId = deps.newId ?? (() => randomUUID());
+  const sleep =
+    deps.sleep ??
+    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const claimWaitMs = deps.claimWaitMs ?? LIMITS.claimWaitMs;
+  const claimPollMs = deps.claimPollMs ?? LIMITS.claimPollMs;
+  const claimStaleMs = deps.claimStaleMs ?? LIMITS.claimStaleMs;
+
+  function replayOf(
+    existing: AssistantTurnRecord,
+    fingerprint: string,
+    sessionId: string,
+  ): AssistantMessageResponse {
+    if (
+      resolveReplay(existing.request_fingerprint, fingerprint) === "conflict"
+    ) {
+      throw new AssistantError(
+        "conflict",
+        "That request ID was already used with a different question.",
+      );
+    }
+    return {
+      session_id: sessionId,
+      turn: toTurnView(existing),
+      replay: true,
+    };
+  }
+
+  async function releaseClaim(
+    sessionId: string,
+    scope: AccountScope,
+    requestId: string,
+  ): Promise<void> {
+    try {
+      await deps.store.releaseClaimRequest({
+        session_id: sessionId,
+        scope,
+        request_id: requestId,
+      });
+    } catch {
+      // A stale claim is taken over after the stale window; never mask the
+      // real failure with a cleanup error.
+    }
+  }
+
+  async function resolveClaim(
+    sessionId: string,
+    scope: AccountScope,
+    requestId: string,
+    turnId: string,
+  ): Promise<void> {
+    try {
+      await deps.store.resolveClaimRequest({
+        session_id: sessionId,
+        scope,
+        request_id: requestId,
+        turn_id: turnId,
+        now: now().toISOString(),
+      });
+    } catch {
+      // The turn is durable, so a retry still replays from the fast path.
+    }
+  }
+
+  /**
+   * Takes the durable per-request claim before any upstream call. A duplicate
+   * either owns the work, waits for the owner, or conflicts on a changed
+   * payload — never a second Today call.
+   */
+  async function acquireClaim(input: {
+    sessionId: string;
+    scope: AccountScope;
+    request: AssistantMessageRequest;
+    fingerprint: string;
+    at: Date;
+  }): Promise<
+    | { owned: true; claim: AssistantRequestClaim }
+    | { owned: false; claim: AssistantRequestClaim | null }
+  > {
+    const staleBefore = new Date(
+      input.at.getTime() - claimStaleMs,
+    ).toISOString();
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const result = await deps.store.claimRequest({
+        session_id: input.sessionId,
+        scope: input.scope,
+        request_id: input.request.request_id,
+        request_fingerprint: input.fingerprint,
+        now: input.at.toISOString(),
+        stale_before: staleBefore,
+      });
+      if (result.created && result.claim)
+        return { owned: true, claim: result.claim };
+      if (result.claim) return { owned: false, claim: result.claim };
+      // The claim vanished between the failed insert and the read; try again.
+      await sleep(claimPollMs);
+    }
+    throw new AssistantError(
+      "unavailable",
+      "The assistant could not reserve that question. Please try again.",
+      { retryable: true },
+    );
+  }
+
+  /** Waits for the owning request to resolve so a duplicate replays its result. */
+  async function awaitClaimedTurn(input: {
+    sessionId: string;
+    scope: AccountScope;
+    requestId: string;
+  }): Promise<AssistantTurnRecord | null> {
+    const deadline = Date.now() + claimWaitMs;
+    for (;;) {
+      const turn = await deps.store.findTurnByRequest({
+        session_id: input.sessionId,
+        scope: input.scope,
+        request_id: input.requestId,
+      });
+      if (turn) return turn;
+      const claim = await deps.store.readClaimRequest({
+        session_id: input.sessionId,
+        scope: input.scope,
+        request_id: input.requestId,
+      });
+      if (!claim) return null;
+      if (claim.status === "RESOLVED") {
+        return deps.store.findTurnByRequest({
+          session_id: input.sessionId,
+          scope: input.scope,
+          request_id: input.requestId,
+        });
+      }
+      if (Date.now() >= deadline) return null;
+      await sleep(claimPollMs);
+    }
+  }
+
+  async function scopeFor(cookie: string): Promise<AccountScope> {
+    try {
+      return await deps.upstream.fetchAccount(cookie);
+    } catch (error) {
+      throw toAssistantError(error);
+    }
+  }
+
+  async function loadSession(
+    sessionId: string,
+    scope: AccountScope,
+  ): Promise<AssistantSessionRecord> {
+    const record = await deps.store.readSession({
+      session_id: sessionId,
+      scope,
+    });
+    return requireSession(record, now());
+  }
+
+  function clarifyDecision(reason: string): CapabilityDecision {
+    return parseCapabilityDecision({
+      kind: "CLARIFY",
+      capability_id: null,
+      target: null,
+      reason,
+      requires_approval: false,
+      action_state: "NONE",
+      action_id: null,
+      response_state: "CLARIFY",
+    });
+  }
+
+  /** Converts a planning or delegation failure into a qualified turn outcome. */
+  function planFailure(
+    error: unknown,
+    phase:
+      | "plan"
+      | "today"
+      | "search"
+      | "meeting"
+      | "subscription"
+      | "news"
+      | "class"
+      | "weather" = "plan",
+  ): {
+    state: AssistantResponseState;
+    decision: CapabilityDecision;
+    blocks: AssistantBlock[];
+  } {
+    const failure = isAssistantError(error) ? error : toAssistantError(error);
+    const state: AssistantResponseState =
+      failure.code === "forbidden" ? "WITHHELD" : "UNAVAILABLE";
+    const refused =
+      failure.code === "invalid_request" || failure.code === "misconfigured";
+    return {
+      state,
+      decision: parseCapabilityDecision({
+        kind: refused
+          ? "REFUSED"
+          : state === "WITHHELD"
+            ? "WITHHELD"
+            : "UNAVAILABLE",
+        capability_id: null,
+        target: null,
+        reason: `${phase}.${failure.code}`,
+        requires_approval: false,
+        action_state: "NONE",
+        action_id: null,
+        response_state: state,
+      }),
+      blocks: noticeBlocks(
+        state,
+        PLAN_FAILURE_TEXT[failure.code] ??
+          "The assistant could not plan that request. Nothing was changed.",
+      ),
+    };
+  }
+
+  async function resolvedToday(input: {
+    cookie: string;
+    scope: AccountScope;
+    request: AssistantMessageRequest;
+    today?: TodayQueryResult;
+  }): Promise<{
+    state: AssistantResponseState;
+    decision: CapabilityDecision;
+    blocks: AssistantBlock[];
+  }> {
+    try {
+      const today =
+        input.today ??
+        (await deps.upstream.queryToday(input.cookie, {
+          query: input.request.text,
+          timezone: input.request.timezone,
+        }));
+      if (today.intent === "meeting_prep") {
+        const current = await scopeFor(input.cookie);
+        if (
+          current.user_id !== input.scope.user_id ||
+          current.workspace_id !== input.scope.workspace_id
+        )
+          throw new AssistantError("forbidden", "This account changed.");
+        try {
+          const prep = await deps.upstream.getMeetingPrep(input.cookie);
+          const decision = decideToday(today);
+          return {
+            state: decision.response_state,
+            decision,
+            blocks: meetingBlocks(today, prep),
+          };
+        } catch (error) {
+          if (isAssistantError(error) && error.code === "unauthorized")
+            throw error;
+          return planFailure(error, "meeting");
+        }
+      }
+      const decision = decideToday(today);
+      return {
+        state: decision.response_state,
+        decision,
+        blocks: blocksFromToday(today),
+      };
+    } catch (error) {
+      if (isAssistantError(error) && error.code === "unauthorized") throw error;
+      return planFailure(error, "today");
+    }
+  }
+
+  function exactTodayFallback(
+    question: string,
+    today: TodayQueryResult,
+  ): boolean {
+    const normalized = question.trim().toLocaleLowerCase("en-US");
+    return today.supported_queries.some(
+      (example) => example.trim().toLocaleLowerCase("en-US") === normalized,
+    );
+  }
+
+  /**
+   * Free-form questions reach the registered SPEC-005 planner first. SPEC-002's
+   * keyword classifier cannot establish that a whole question belongs to Today
+   * (for example, weather "today" or a named subscription "renewal"). The
+   * runtime validates the plan and delegates at most one read-only capability.
+   */
+  async function planFreeformTurn(input: {
+    cookie: string;
+    scope: AccountScope;
+    record: AssistantSessionRecord;
+    request: AssistantMessageRequest;
+    turns: readonly AssistantTurnRecord[];
+  }): Promise<{
+    plan: IntentPlan;
+    state: AssistantResponseState;
+    decision: CapabilityDecision;
+    blocks: AssistantBlock[];
+  }> {
+    const pinned = planTurn({ text: input.request.text });
+    const references = input.turns.slice(-LIMITS.maxPlanReferences);
+
+    // A free-form route is a SPEC-005 decision. When no qualified planner is
+    // available, only an exact SPEC-002 supported template can fall back.
+    let plan: IntentPlan;
+    try {
+      // Only the operator's own prior questions leave this runtime; answers from
+      // other services are never forwarded as planner input.
+      const raw = await deps.upstream.planIntents(input.cookie, {
+        utterance: input.request.text,
+        recentReferences: references.map((turn) => turn.question),
+        sessionId: input.record.navox_session_id,
+      });
+      plan = parseIntentPlanEnvelope(raw, {
+        utterance: input.request.text,
+        sessionId: input.record.navox_session_id,
+        recentTurns: references.map((turn) => ({
+          turn_id: turn.id,
+          question: turn.question,
+        })),
+      });
+    } catch (error) {
+      if (isAssistantError(error) && error.code === "unauthorized") throw error;
+      const failure = isAssistantError(error) ? error : toAssistantError(error);
+      if (failure.reason === PLANNER_NO_PROVIDER) {
+        try {
+          const today = await deps.upstream.queryToday(input.cookie, {
+            query: input.request.text,
+            timezone: input.request.timezone,
+          });
+          if (exactTodayFallback(input.request.text, today)) {
+            return {
+              plan: pinned,
+              ...(await resolvedToday({ ...input, today })),
+            };
+          }
+        } catch (fallbackError) {
+          if (
+            isAssistantError(fallbackError) &&
+            fallbackError.code === "unauthorized"
+          )
+            throw fallbackError;
+          return { plan: pinned, ...planFailure(fallbackError, "today") };
+        }
+      }
+      return { plan: pinned, ...planFailure(error) };
+    }
+
+    // Phase 2: route resolution and delegation. Each route uses its exact
+    // validated question span and the same session-owned scope.
+    async function resolveOne(intent: PlannedIntent): Promise<{
+      plan: IntentPlan;
+      state: AssistantResponseState;
+      decision: CapabilityDecision;
+      blocks: AssistantBlock[];
+    }> {
+      try {
+        const definition = capabilityForIntentKind(intent.kind);
+        if (intent.requires_clarification || definition === null) {
+          return {
+            plan,
+            state: "CLARIFY",
+            decision: clarifyDecision("plan.clarify"),
+            blocks: noticeBlocks(
+              "CLARIFY",
+              intent.clarification ??
+                "I need a little more detail before I can look that up.",
+            ),
+          };
+        }
+        if (definition.mode !== "read_only") {
+          throw new AssistantError(
+            "misconfigured",
+            "That capability is not available in this assistant phase.",
+          );
+        }
+        if (definition.id === "today.read") {
+          return {
+            plan,
+            ...(await resolvedToday({
+              ...input,
+              request: { ...input.request, text: intent.question },
+            })),
+          };
+        }
+        // The current-time route is answered from this runtime's own injected
+        // clock, so it never reaches an upstream service.
+        if (definition.id === "time.now") {
+          return { plan, ...answerCurrentTime(now(), input.request.timezone) };
+        }
+        // Recheck the current account before handing the request to another
+        // owning service. Local rows stay fenced by the session scope.
+        const current = await scopeFor(input.cookie);
+        if (
+          current.user_id !== input.scope.user_id ||
+          current.workspace_id !== input.scope.workspace_id
+        ) {
+          throw new AssistantError(
+            "forbidden",
+            "This account cannot use that assistant capability.",
+          );
+        }
+        if (definition.id === "subscription.search") {
+          const selector = subscriptionSelector(intent);
+          if (selector === null) {
+            return {
+              plan,
+              state: "CLARIFY",
+              decision: clarifyDecision("subscription.missing_entity"),
+              blocks: noticeBlocks(
+                "CLARIFY",
+                "Which named subscription should I look up?",
+              ),
+            };
+          }
+          try {
+            const rows = parseSubscriptionSearch(
+              await deps.upstream.querySubscriptions(input.cookie, selector),
+              selector,
+            );
+            if (rows.length !== 1)
+              return { plan, ...clarifySubscriptions(rows) };
+            // The second read must not cross an account switch while this turn
+            // waits on SPEC-004's search response.
+            const afterSearch = await scopeFor(input.cookie);
+            if (
+              afterSearch.user_id !== input.scope.user_id ||
+              afterSearch.workspace_id !== input.scope.workspace_id
+            ) {
+              throw new AssistantError(
+                "forbidden",
+                "This account cannot use that assistant capability.",
+              );
+            }
+            const row = rows[0];
+            if (!row)
+              throw new AssistantError("unavailable", "Subscription changed.");
+            const cancellation = parseSubscriptionCancellation(
+              await deps.upstream.getSubscriptionCancellation(
+                input.cookie,
+                row.id,
+              ),
+              row,
+              input.scope,
+            );
+            return { plan, ...answerSubscription(row, cancellation) };
+          } catch (error) {
+            if (isAssistantError(error) && error.code === "unauthorized")
+              throw error;
+            return { plan, ...planFailure(error, "subscription") };
+          }
+        }
+        if (definition.id === "news.read") {
+          const selector = newsSelector(intent);
+          if (selector === undefined) {
+            return {
+              plan,
+              state: "CLARIFY",
+              decision: clarifyDecision("news.ungrounded_entity"),
+              blocks: noticeBlocks(
+                "CLARIFY",
+                "Which named news story should I look up?",
+              ),
+            };
+          }
+          try {
+            const stories = parseNewsFeed(
+              await deps.upstream.getTrendingNews(input.cookie),
+              now(),
+            );
+            if (selector === null) return { plan, ...newsTrends(stories) };
+            const matches = namedNewsMatches(stories, selector);
+            if (matches.length !== 1) return { plan, ...clarifyNews(matches) };
+            const selected = matches[0];
+            if (!selected)
+              throw new AssistantError("unavailable", "News changed.");
+            const beforeDetail = await scopeFor(input.cookie);
+            if (
+              beforeDetail.user_id !== input.scope.user_id ||
+              beforeDetail.workspace_id !== input.scope.workspace_id
+            )
+              throw new AssistantError(
+                "forbidden",
+                "This account cannot read that story.",
+              );
+            const detail = parseNewsStory(
+              await deps.upstream.getNewsStory(input.cookie, selected.id),
+              now(),
+            );
+            if (
+              detail.id !== selected.id ||
+              detail.version !== selected.version ||
+              detail.verification_status !== selected.verification_status ||
+              detail.headline !== selected.headline
+            )
+              throw new AssistantError(
+                "unavailable",
+                "That news story changed.",
+              );
+            const beforeSummary = await scopeFor(input.cookie);
+            if (
+              beforeSummary.user_id !== input.scope.user_id ||
+              beforeSummary.workspace_id !== input.scope.workspace_id
+            )
+              throw new AssistantError(
+                "forbidden",
+                "This account cannot read that story.",
+              );
+            const summary = parseNewsSummary(
+              await deps.upstream.getNewsSummary(input.cookie, detail.id),
+              detail,
+              now(),
+            );
+            return { plan, ...answerNews(detail, summary) };
+          } catch (error) {
+            if (isAssistantError(error) && error.code === "unauthorized")
+              throw error;
+            return { plan, ...planFailure(error, "news") };
+          }
+        }
+        if (definition.id === "weather.read") {
+          const selector = weatherSelector(intent);
+          if (selector === undefined) {
+            return {
+              plan,
+              state: "CLARIFY",
+              decision: clarifyDecision("weather.unsupported_scope"),
+              blocks: noticeBlocks(
+                "CLARIFY",
+                "I can check current weather for your configured city. Which current city reading did you mean?",
+              ),
+            };
+          }
+          try {
+            const reading = parseWeather(
+              await deps.upstream.getWeather(input.cookie),
+              now(),
+            );
+            return { plan, ...weatherAnswer(reading, selector) };
+          } catch (error) {
+            if (isAssistantError(error) && error.code === "unauthorized")
+              throw error;
+            return { plan, ...planFailure(error, "weather") };
+          }
+        }
+        if (definition.id === "class.next") {
+          try {
+            const snapshot = parseClassSourceSnapshot(
+              await deps.upstream.getClassSources(input.cookie),
+              now(),
+            );
+            return {
+              plan,
+              ...answerNextClass(snapshot, now(), input.request.timezone),
+            };
+          } catch (error) {
+            if (isAssistantError(error) && error.code === "unauthorized")
+              throw error;
+            return { plan, ...planFailure(error, "class") };
+          }
+        }
+        let resolved: ReturnType<typeof decideEmailSearch>;
+        try {
+          const search = await deps.upstream.searchEmail(input.cookie, {
+            query: intent.question,
+            limit: LIMITS.maxEmailResults,
+          });
+          resolved = decideEmailSearch(parseEmailSearchOutcome(search), {
+            now: now(),
+          });
+        } catch (error) {
+          if (isAssistantError(error) && error.code === "unauthorized")
+            throw error;
+          // A source outage or an unverifiable payload is a search failure with
+          // its own reason. It is never replaced by SPEC-002's answer.
+          return { plan, ...planFailure(error, "search") };
+        }
+        return {
+          plan,
+          state: resolved.state,
+          decision: resolved.decision,
+          blocks: resolved.blocks,
+        };
+      } catch (error) {
+        if (isAssistantError(error) && error.code === "unauthorized")
+          throw error;
+        return { plan, ...planFailure(error) };
+      }
+    }
+
+    const one = plan.intents[0];
+    if (!one)
+      return {
+        plan,
+        ...planFailure(new AssistantError("invalid_request", "Empty plan")),
+      };
+    if (plan.intents.length === 1) return resolveOne(one);
+
+    // A mixed consequential/unclear plan cannot trigger even a partial read.
+    if (
+      plan.intents.some(
+        (intent) =>
+          intent.requires_clarification || intent.kind === "assistant.clarify",
+      )
+    ) {
+      return {
+        plan,
+        state: "CLARIFY",
+        decision: clarifyDecision("plan.multi_intent"),
+        blocks: noticeBlocks(
+          "CLARIFY",
+          "One part of that request needs clarification. Which read-only part should I handle first?",
+        ),
+      };
+    }
+    const labels: Record<PlannedIntent["kind"], string> = {
+      "today.read": "Today",
+      "email.search": "Email",
+      "subscription.search": "Subscription",
+      "news.read": "News",
+      "weather.read": "Weather",
+      "class.next": "Next class",
+      "time.now": "Time",
+      "assistant.clarify": "Request",
+    };
+    const parts: {
+      intent: PlannedIntent;
+      result: Awaited<ReturnType<typeof resolveOne>>;
+    }[] = [];
+    for (const intent of plan.intents) {
+      const current = await scopeFor(input.cookie);
+      if (
+        current.user_id !== input.scope.user_id ||
+        current.workspace_id !== input.scope.workspace_id
+      )
+        return {
+          plan,
+          ...planFailure(
+            new AssistantError("forbidden", "This account changed."),
+          ),
+        };
+      const result = await resolveOne(intent);
+      if (result.state === "WITHHELD")
+        return {
+          plan,
+          ...planFailure(
+            new AssistantError(
+              "forbidden",
+              "This account cannot read those sources.",
+            ),
+          ),
+        };
+      parts.push({ intent, result });
+    }
+    const current = await scopeFor(input.cookie);
+    if (
+      current.user_id !== input.scope.user_id ||
+      current.workspace_id !== input.scope.workspace_id
+    )
+      return {
+        plan,
+        ...planFailure(
+          new AssistantError("forbidden", "This account changed."),
+        ),
+      };
+    const ready = parts.some(({ result }) => result.state === "READY");
+    const state: AssistantResponseState = ready
+      ? "READY"
+      : parts.some(({ result }) => result.state === "CLARIFY")
+        ? "CLARIFY"
+        : "UNAVAILABLE";
+    const lines = parts.map(({ intent, result }) => {
+      const text = result.blocks.find(
+        (block) => block.kind === "ANSWER" || block.kind === "NOTICE",
+      );
+      return `${labels[intent.kind]}: ${clampText(text?.text ?? "No verified answer is available.", 700)}`;
+    });
+    const combined = clampText(lines.join("\n"), LIMITS.maxAnswerLength);
+    const details = parts.flatMap(({ result }) =>
+      result.blocks.filter(
+        (block) => block.kind !== "ANSWER" && block.kind !== "NOTICE",
+      ),
+    );
+    const caveats: AssistantBlock[] = parts.flatMap(({ intent, result }) => {
+      if (result.state === "READY") return [];
+      const notice = result.blocks.find((block) => block.kind === "NOTICE");
+      const text =
+        notice?.text ?? "This part needs clarification or a fresh source.";
+      return [
+        {
+          kind: "NOTICE" as const,
+          state: result.state,
+          text: `${labels[intent.kind]}: ${clampText(text, 700)}`,
+        },
+      ];
+    });
+    if (details.length + caveats.length > 63)
+      return {
+        plan,
+        ...planFailure(
+          new AssistantError(
+            "unavailable",
+            "The combined result exceeded its bounds.",
+          ),
+        ),
+      };
+    return {
+      plan,
+      state,
+      decision: parseCapabilityDecision({
+        kind: ready
+          ? "DELEGATE"
+          : state === "CLARIFY"
+            ? "CLARIFY"
+            : "UNAVAILABLE",
+        capability_id: null,
+        target: null,
+        reason: ready
+          ? parts.every(({ result }) => result.state === "READY")
+            ? "plan.combined"
+            : "plan.partial"
+          : "plan.no_complete_answer",
+        requires_approval: false,
+        action_state: "NONE",
+        action_id: null,
+        response_state: state,
+      }),
+      blocks: [
+        state === "UNAVAILABLE"
+          ? { kind: "NOTICE", state, text: combined }
+          : { kind: "ANSWER", text: combined },
+        ...details,
+        ...caveats,
+      ],
+    };
+  }
+
+  /** A clicked candidate is a pointer, not authority. Recheck both the saved
+   * ambiguous turn and the current SPEC-007 result before making it actionable.
+   */
+  async function selectEmail(input: {
+    cookie: string;
+    scope: AccountScope;
+    sessionId: string;
+    request: AssistantMessageRequest;
+  }): Promise<{
+    plan: IntentPlan;
+    state: AssistantResponseState;
+    decision: CapabilityDecision;
+    blocks: AssistantBlock[];
+  }> {
+    const { request } = input;
+    if (
+      request.modality !== "TEXT" ||
+      request.text !== "Select an email" ||
+      request.referents.length !== 2
+    ) {
+      throw new AssistantError("invalid_request", "Select one listed email.");
+    }
+    const [sourceTurnId, resourceId] = request.referents;
+    const sourceId = assertUuid(sourceTurnId, "source turn ID");
+    const selectedId = assertUuid(resourceId, "email resource ID");
+    const turns = await deps.store.listTurns({
+      session_id: input.sessionId,
+      scope: input.scope,
+    });
+    const source = turns.find((turn) => turn.id === sourceId);
+    const items = source?.presentation.blocks.filter(
+      (block) => block.kind === "ITEM",
+    );
+    if (
+      source?.state !== "CLARIFY" ||
+      source.decision.capability_id !== "email.search" ||
+      source.decision.reason !== "email.search.ambiguous" ||
+      source.plan.intents.length !== 1 ||
+      source.plan.intents[0]?.kind !== "email.search" ||
+      !items ||
+      items.length < 2 ||
+      items.filter(
+        (block) =>
+          block.item.id === selectedId &&
+          block.item.type === "EMAIL" &&
+          block.item.sources.some(
+            (citation) =>
+              citation.evidence_id === selectedId &&
+              citation.source_type === "EMAIL",
+          ),
+      ).length !== 1
+    ) {
+      throw new AssistantError(
+        "forbidden",
+        "That email was not an exact option in this conversation.",
+      );
+    }
+    const current = await scopeFor(input.cookie);
+    if (
+      current.user_id !== input.scope.user_id ||
+      current.workspace_id !== input.scope.workspace_id
+    ) {
+      throw new AssistantError("forbidden", "This account changed.");
+    }
+    const search = await deps.upstream.searchEmail(input.cookie, {
+      query: source.question,
+      limit: LIMITS.maxEmailResults,
+    });
+    const resolved = decideEmailSelection(
+      parseEmailSearchOutcome(search),
+      selectedId,
+      { now: now() },
+    );
+    return {
+      plan: source.plan,
+      state: resolved.state,
+      decision: resolved.decision,
+      blocks: resolved.blocks,
+    };
+  }
+
+  return {
+    ...createAssistantEmailActions(deps),
+    async createSession(input) {
+      const scope = await scopeFor(input.cookie);
+      const navoxSessionId = await deps.upstream.createAssistantSession(
+        input.cookie,
+      );
+      const window = retentionWindow(now());
+      const record = await deps.store.createSession({
+        id: newId(),
+        navox_session_id: navoxSessionId,
+        scope,
+        created_at: window.createdAt,
+        expires_at: window.expiresAt,
+      });
+      // Retention is enforced opportunistically; a failure here never blocks a session.
+      try {
+        await deps.store.purgeExpired(window.createdAt, LIMITS.purgeBatchSize);
+      } catch {
+        // Ignore: the next successful call retries the same bounded delete.
+      }
+      return sessionView(record, [], now());
+    },
+
+    async readSession(input) {
+      const scope = await scopeFor(input.cookie);
+      const sessionId = assertUuid(input.session_id, "session ID");
+      const record = await loadSession(sessionId, scope);
+      const turns = await deps.store.listTurns({
+        session_id: sessionId,
+        scope,
+      });
+      return sessionView(record, turns.map(toTurnView), now());
+    },
+
+    async submitTurn(input) {
+      assertRegistryIntegrity();
+      const request = parseAssistantMessageRequest(input.body);
+      const sessionId = assertUuid(input.session_id, "session ID");
+      const scope = await scopeFor(input.cookie);
+      const at = now();
+      const record = await loadSession(sessionId, scope);
+
+      const fingerprint = fingerprintTurn({
+        text: request.text,
+        modality: request.modality,
+        timezone: request.timezone,
+        referents: request.referents,
+      });
+
+      // An exact retry returns the saved response without touching an upstream
+      // service again; a changed payload behind the same ID is refused.
+      const existing = await deps.store.findTurnByRequest({
+        session_id: sessionId,
+        scope,
+        request_id: request.request_id,
+      });
+      if (existing) {
+        return replayOf(existing, fingerprint, sessionId);
+      }
+      assertTurnBudget(record.next_sequence);
+
+      // Durable claim before the upstream call: a concurrent duplicate replays
+      // one result, and a changed payload is refused without a second Today call.
+      const held = await acquireClaim({
+        sessionId,
+        scope,
+        request,
+        fingerprint,
+        at,
+      });
+      if (!held.owned) {
+        if (!held.claim) {
+          throw new AssistantError(
+            "unavailable",
+            "The assistant could not reserve that question. Please try again.",
+            { retryable: true },
+          );
+        }
+        if (held.claim.request_fingerprint !== fingerprint) {
+          throw new AssistantError(
+            "conflict",
+            "That request ID was already used with a different question.",
+          );
+        }
+        const saved = await awaitClaimedTurn({
+          sessionId,
+          scope,
+          requestId: request.request_id,
+        });
+        if (saved) return replayOf(saved, fingerprint, sessionId);
+        throw new AssistantError(
+          "unavailable",
+          "That question is still being answered. Please try again shortly.",
+          { retryable: true },
+        );
+      }
+
+      let plan = planTurn({ text: request.text });
+
+      let state: AssistantResponseState;
+      let decision: CapabilityDecision;
+      let blocks: AssistantBlock[];
+      try {
+        if (request.referents.length > 0) {
+          const selected = await selectEmail({
+            cookie: input.cookie,
+            scope,
+            sessionId,
+            request,
+          });
+          plan = selected.plan;
+          state = selected.state;
+          decision = selected.decision;
+          blocks = selected.blocks;
+        } else {
+          const turns = await deps.store.listTurns({
+            session_id: sessionId,
+            scope,
+          });
+          const planned = await planFreeformTurn({
+            cookie: input.cookie,
+            scope,
+            record,
+            request,
+            turns,
+          });
+          plan = planned.plan;
+          state = planned.state;
+          decision = planned.decision;
+          blocks = planned.blocks;
+        }
+      } catch (error) {
+        const failure = isAssistantError(error)
+          ? error
+          : toAssistantError(error);
+        if (failure.code === "unauthorized") {
+          await releaseClaim(sessionId, scope, request.request_id);
+          throw failure;
+        }
+        if (request.referents.length > 0) {
+          const refused = planFailure(error, "search");
+          state = refused.state;
+          decision = refused.decision;
+          blocks = refused.blocks;
+        } else {
+          const refused = planFailure(error);
+          state = refused.state;
+          decision = refused.decision;
+          blocks = refused.blocks;
+        }
+      }
+
+      const presentation = buildPresentationPlan({
+        decision,
+        blocks,
+        presentation: request.modality === "VOICE" ? "VOICE" : "TEXT",
+      });
+
+      const answer = blocks.find((block) => block.kind === "ANSWER");
+      let sequence: number;
+      try {
+        sequence = await deps.store.reserveSequence({
+          session_id: sessionId,
+          scope,
+          now: at.toISOString(),
+        });
+      } catch (error) {
+        await releaseClaim(sessionId, scope, request.request_id);
+        throw error;
+      }
+
+      let turn: AssistantTurnRecord;
+      try {
+        turn = await deps.store.insertTurn({
+          id: newId(),
+          session_id: sessionId,
+          scope,
+          sequence,
+          modality: request.modality,
+          state,
+          request_id: request.request_id,
+          request_fingerprint: fingerprint,
+          question: request.text,
+          response_text:
+            answer && answer.kind === "ANSWER" ? answer.text : null,
+          plan,
+          decision,
+          presentation,
+          action_refs: [],
+          created_at: at.toISOString(),
+        });
+      } catch (error) {
+        // A concurrent duplicate lost the insert race; return the saved winner.
+        if (isAssistantError(error) && error.code === "conflict") {
+          const saved = await deps.store.findTurnByRequest({
+            session_id: sessionId,
+            scope,
+            request_id: request.request_id,
+          });
+          if (saved) {
+            await resolveClaim(sessionId, scope, request.request_id, saved.id);
+            return replayOf(saved, fingerprint, sessionId);
+          }
+        }
+        await releaseClaim(sessionId, scope, request.request_id);
+        throw error;
+      }
+
+      await resolveClaim(sessionId, scope, request.request_id, turn.id);
+      return { session_id: sessionId, turn: toTurnView(turn), replay: false };
+    },
+
+    async deleteSession(input) {
+      const scope = await scopeFor(input.cookie);
+      const sessionId = assertUuid(input.session_id, "session ID");
+      const deleted = await deps.store.deleteSession({
+        session_id: sessionId,
+        scope,
+      });
+      if (!deleted) {
+        throw new AssistantError(
+          "not_found",
+          "That assistant session is no longer available.",
+        );
+      }
+    },
+
+    async purgeExpired() {
+      return deps.store.purgeExpired(
+        now().toISOString(),
+        LIMITS.purgeBatchSize,
+      );
+    },
+  };
+}

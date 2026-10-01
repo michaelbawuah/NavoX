@@ -94,9 +94,17 @@ services:
       dockerfile: apps/web/Dockerfile
     environment:
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
+      NAVOX_API_BASE_URL: http://api:8000/api/v1
+      NAVOX_ASSISTANT_DATABASE_URL: postgres://navox:navox@postgres:5432/navox
+      NAVOX_ASSISTANT_ORIGIN: http://localhost:3000
     depends_on:
       api:
         condition: service_started
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    command: ["sh", "-c", "npm run migrate --workspace=@navox/assistant-runtime && npm run start --workspace=@navox/web"]
     ports:
       - "3000:3000"
 

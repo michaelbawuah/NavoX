@@ -32,6 +32,10 @@ from navox.ai.prompts import EXTRACTION_PROMPT, EXTRACTION_SCHEMA
 from navox.ai.routing import PolicyRules
 from navox.evaluation.intelligence_smoke import OfflineSmokeProvider
 
+# Audio vocabulary is published only by an explicit operator opt-in (M11A), so the
+# default catalog template must not advertise these profiles yet.
+SPEECH_PROFILES = (Profile.SPEECH_TRANSCRIPTION, Profile.SPEECH_SYNTHESIS)
+
 
 class CorpusFixtureAdapter:
     def __init__(self, provider, fail=False, empty=False):
@@ -150,7 +154,9 @@ async def test_evaluation_counts_denials_failures_and_missing_observations(failu
 def test_template_is_complete_but_enables_no_model_or_traffic(capsys):
     assert main(["template"]) == 0
     template = json.loads(capsys.readouterr().out)
-    assert {p["profile"] for p in template["profiles"]} == {p.value for p in Profile}
+    assert {p["profile"] for p in template["profiles"]} == {p.value for p in Profile} - {
+        p.value for p in SPEECH_PROFILES
+    }
     assert not template["models"] and all(not p["assignments"] for p in template["profiles"])
     assert {p["reference"]["name"] for p in template["prompts"]} >= {
         "commitment_extraction",

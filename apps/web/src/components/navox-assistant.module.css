@@ -1,0 +1,356 @@
+.assistant {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 4rem;
+}
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.header h1 {
+  margin: 0.15rem 0 0;
+  font-size: 1.5rem;
+  color: var(--ink);
+}
+
+.header button {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.header button:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: rgb(97 223 196 / 45%);
+}
+
+.header button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--aqua);
+}
+
+.policy {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.error {
+  margin: 0;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid rgb(255 182 187 / 40%);
+  border-radius: 6px;
+  background: rgb(74 24 32 / 55%);
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.turn[data-modality="VOICE"] {
+  border-left: 2px solid var(--aqua);
+}
+
+.turn[data-state="UNAVAILABLE"],
+.turn[data-state="WITHHELD"] {
+  border-left: 2px solid var(--danger);
+}
+
+.question {
+  margin: 0;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.answer {
+  margin: 0;
+  color: var(--ink);
+}
+
+.notice {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgb(9 15 28 / 70%);
+}
+
+.itemTitle {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+.itemMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.itemBody {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.selectEmail {
+  align-self: flex-start;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--aqua);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--aqua-bright);
+  font: inherit;
+  cursor: pointer;
+}
+
+.selectEmail:hover {
+  background: rgb(97 223 196 / 12%);
+}
+
+.details,
+.citations {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.citations {
+  font-size: 0.75rem;
+  color: var(--aqua-bright);
+}
+
+.sourceLink {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.sourceLink:focus-visible {
+  outline: 2px solid var(--aqua);
+  outline-offset: 2px;
+}
+
+.status {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.status[data-voice-state="SPEAKING"] {
+  color: var(--aqua-bright);
+}
+
+.status[data-voice-state="MUTED"],
+.status[data-voice-state="STOPPED"] {
+  color: var(--aqua);
+}
+
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.6rem;
+  padding: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.field {
+  display: flex;
+  flex: 1 1 18rem;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.field input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgb(6 9 20 / 80%);
+  color: var(--ink);
+  font: inherit;
+}
+
+.field input:focus-visible,
+.header button:focus-visible,
+.form > button:focus-visible {
+  outline: 2px solid var(--aqua);
+  outline-offset: 1px;
+}
+
+.form > button {
+  padding: 0.55rem 1rem;
+  border: 1px solid rgb(97 223 196 / 45%);
+  border-radius: 6px;
+  background: rgb(28 59 51 / 90%);
+  color: var(--aqua-bright);
+  font: inherit;
+  cursor: pointer;
+}
+
+.form > button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.iconButton[aria-pressed="true"] {
+  border-color: var(--aqua);
+  color: var(--aqua-bright);
+}
+
+.iconButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.speakButton {
+  display: inline-flex;
+  align-self: flex-end;
+  align-items: center;
+  justify-content: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.speakButton:hover {
+  border-color: rgb(97 223 196 / 45%);
+  color: var(--aqua-bright);
+}
+
+.speakButton:focus-visible {
+  outline: 2px solid var(--aqua);
+  outline-offset: 1px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.emailAction {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.emailAction input:not([type="checkbox"]),
+.emailAction textarea {
+  width: 100%;
+  padding: 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgb(6 9 20 / 80%);
+  color: var(--ink);
+  font: inherit;
+}
+
+.emailAction textarea {
+  min-height: 6rem;
+}
+.emailAction button {
+  width: fit-content;
+  padding: 0.5rem 0.8rem;
+  cursor: pointer;
+}
+.emailAction button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.emailReview {
+  display: grid;
+  gap: 0.25rem;
+  white-space: pre-wrap;
+}
+.emailBody {
+  white-space: pre-wrap;
+}

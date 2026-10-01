@@ -1,0 +1,247 @@
+import { parseAssistantMessageRequest } from "@navox/assistant-runtime";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  AssistantClientError,
+  AssistantRequestIdError,
+  AssistantTurnLedger,
+  assistantSessionPath,
+  createAssistantSession,
+  deleteAssistantSession,
+  loadAssistantSession,
+  newAssistantRequestId,
+  resumeOrCreateAssistantSession,
+  submitAssistantTurn,
+} from "./assistant-client";
+
+const UUID_V4 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+const session = {
+  id: "66666666-6666-4666-8666-666666666666",
+  created_at: "2026-09-30T12:00:00.000Z",
+  updated_at: "2026-09-30T12:00:00.000Z",
+  expires_at: "2026-10-30T12:00:00.000Z",
+  status: "active" as const,
+  turns: [],
+};
+
+const turn = {
+  id: "88888888-8888-4888-8888-888888888888",
+  sequence: 1,
+  modality: "TEXT" as const,
+  state: "READY" as const,
+  question: "What am I missing today?",
+  plan: null,
+  decision: null,
+  presentation: null,
+  action_refs: [],
+  created_at: "2026-09-30T12:00:00.000Z",
+};
+
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("assistant client", () => {
+  it("resumes an authorized tab session and replaces an expired pointer", async () => {
+    const entries = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => entries.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        entries.set(key, value);
+      },
+      removeItem: (key: string) => {
+        entries.delete(key);
+      },
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(json({ session }, 201))
+      .mockResolvedValueOnce(json({ session }))
+      .mockResolvedValueOnce(json({ error: { code: "expired" } }, 410))
+      .mockResolvedValueOnce(json({ session }, 201));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await resumeOrCreateAssistantSession(storage)).toEqual(session);
+    expect(await resumeOrCreateAssistantSession(storage)).toEqual(session);
+    expect(fetcher.mock.calls[1][1].body).toBeUndefined();
+    expect(await resumeOrCreateAssistantSession(storage)).toEqual(session);
+    expect(fetcher.mock.calls[3][1].method).toBe("POST");
+  });
+  it("posts same-origin JSON with credentials and never a client scope", async () => {
+    const fetcher = vi.fn().mockResolvedValue(json({ session }, 201));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await createAssistantSession()).toEqual(session);
+    const [url, init] = fetcher.mock.calls[0];
+    expect(url).toBe("/api/v1/assistant/sessions");
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("include");
+    expect(init.cache).toBe("no-store");
+    expect(init.headers["content-type"]).toBe("application/json");
+    expect(JSON.parse(init.body)).toEqual({});
+  });
+
+  it("sends only the request id, text, modality, timezone and referents", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(json({ session_id: session.id, turn, replay: false }));
+    vi.stubGlobal("fetch", fetcher);
+    await submitAssistantTurn(session.id, {
+      requestId: "77777777-7777-4777-8777-777777777777",
+      text: "What am I missing today?",
+      modality: "VOICE",
+      timezone: "America/New_York",
+    });
+    const [url, init] = fetcher.mock.calls[0];
+    expect(url).toBe(`${assistantSessionPath(session.id)}/messages`);
+    expect(JSON.parse(init.body)).toEqual({
+      request_id: "77777777-7777-4777-8777-777777777777",
+      text: "What am I missing today?",
+      modality: "VOICE",
+      timezone: "America/New_York",
+      referents: [],
+    });
+  });
+
+  it("forwards an explicit email selection as pointers, without client authority", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(json({ session_id: session.id, turn, replay: false }));
+    vi.stubGlobal("fetch", fetcher);
+    await submitAssistantTurn(session.id, {
+      requestId: "77777777-7777-4777-8777-777777777777",
+      text: "Select an email",
+      modality: "TEXT",
+      referents: [turn.id, "cccccccc-cccc-4ccc-8ccc-cccccccccccc"],
+    });
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({
+      text: "Select an email",
+      referents: [turn.id, "cccccccc-cccc-4ccc-8ccc-cccccccccccc"],
+    });
+  });
+
+  it("loads and deletes through the same session path", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(json({ session }))
+      .mockResolvedValueOnce(json({ session_id: session.id, deleted: true }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await loadAssistantSession(session.id)).toEqual(session);
+    await deleteAssistantSession(session.id);
+    expect(fetcher.mock.calls[0][1].method).toBe("GET");
+    expect(fetcher.mock.calls[1][1].method).toBe("DELETE");
+    expect(fetcher.mock.calls[0][0]).toBe(
+      `/api/v1/assistant/sessions/${session.id}`,
+    );
+  });
+
+  it("surfaces the server error code and message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        json(
+          {
+            error: {
+              code: "conflict",
+              message: "Already sent.",
+              retryable: false,
+            },
+          },
+          409,
+        ),
+      ),
+    );
+    const failure = await submitAssistantTurn(session.id, {
+      requestId: "77777777-7777-4777-8777-777777777777",
+      text: "What am I missing today?",
+      modality: "TEXT",
+    }).catch((error) => error);
+    expect(failure).toBeInstanceOf(AssistantClientError);
+    expect(failure.code).toBe("conflict");
+    expect(failure.status).toBe(409);
+    expect(failure.message).toBe("Already sent.");
+  });
+
+  it("falls back to a qualified failure for an unreadable error body", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("nope", { status: 500 })),
+    );
+    const failure = await createAssistantSession().catch((error) => error);
+    expect(failure.code).toBe("unavailable");
+  });
+});
+
+describe("request identifiers", () => {
+  it("prefers crypto.randomUUID", () => {
+    const source = {
+      randomUUID: () => "11111111-1111-4111-8111-111111111111",
+    };
+    expect(newAssistantRequestId(source)).toBe(
+      "11111111-1111-4111-8111-111111111111",
+    );
+  });
+
+  it("derives a server-valid v4 uuid when randomUUID is unavailable", () => {
+    const source = {
+      getRandomValues: (array: Uint8Array) => {
+        for (let index = 0; index < array.length; index += 1) {
+          array[index] = (index * 16 + 1) % 256;
+        }
+        return array;
+      },
+    };
+    const id = newAssistantRequestId(source);
+    expect(id).toMatch(UUID_V4);
+    // The runtime's validator is the authority for what the API accepts.
+    expect(() =>
+      parseAssistantMessageRequest({
+        request_id: id,
+        text: "What am I missing today?",
+        modality: "TEXT",
+      }),
+    ).not.toThrow();
+  });
+
+  it("falls back to getRandomValues when randomUUID throws", () => {
+    const source = {
+      randomUUID: () => {
+        throw new Error("blocked by policy");
+      },
+      getRandomValues: (array: Uint8Array) => {
+        array.fill(7);
+        return array;
+      },
+    };
+    expect(newAssistantRequestId(source)).toMatch(UUID_V4);
+  });
+
+  it("fails clearly instead of sending an unacceptable identifier", () => {
+    expect(() => newAssistantRequestId({})).toThrow(AssistantRequestIdError);
+    expect(() => newAssistantRequestId({})).toThrow(
+      /secure request identifier/i,
+    );
+  });
+});
+
+describe("request ledger", () => {
+  it("reuses one identifier for a pending submission", () => {
+    const ledger = new AssistantTurnLedger();
+    const first = ledger.requestIdFor("TEXT:hello");
+    expect(ledger.requestIdFor("TEXT:hello")).toBe(first);
+    expect(ledger.requestIdFor("TEXT:different")).not.toBe(first);
+  });
+
+  it("forgets the identifier after a resolved or abandoned submission", () => {
+    const ledger = new AssistantTurnLedger();
+    const first = ledger.requestIdFor("TEXT:hello");
+    ledger.resolve();
+    expect(ledger.requestIdFor("TEXT:hello")).not.toBe(first);
+    const second = ledger.requestIdFor("TEXT:hello");
+    ledger.forget();
+    expect(ledger.requestIdFor("TEXT:hello")).not.toBe(second);
+  });
+});

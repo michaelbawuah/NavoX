@@ -1,11 +1,21 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from navox.providers.google_gmail import GmailReplyMetadata
 
 PostSendState = Literal["waiting", "completed", "unchanged"]
+
+
+class KnowledgeEmailSendContext(BaseModel):
+    """Selector-level source binding for one approved reply that has no commitment."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    draft_id: UUID
+    knowledge_resource_id: UUID
+    source_message_id: str = Field(min_length=1, max_length=512)
 
 
 class PrepareGmailSendRequest(BaseModel):

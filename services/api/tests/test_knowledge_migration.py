@@ -246,11 +246,16 @@ def test_migration_is_the_single_head_after_the_m1_foundation() -> None:
     config = Config(str(API_ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(API_ROOT / "migrations"))
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == ["0033_news_semantic_clustering"]
+    assert script.get_heads() == ["0034_knowledge_email_drafts"]
     importance = script.get_revision("0032_news_importance")
     assert importance is not None and importance.down_revision == REVISION
     clustering = script.get_revision("0033_news_semantic_clustering")
     assert clustering is not None and clustering.down_revision == "0032_news_importance"
+    knowledge_email = script.get_revision("0034_knowledge_email_drafts")
+    assert (
+        knowledge_email is not None
+        and knowledge_email.down_revision == "0033_news_semantic_clustering"
+    )
     assert len(REVISION) <= 32
 
 

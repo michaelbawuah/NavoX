@@ -32,6 +32,13 @@ class GenerateDraft(Contract):
     source_id: UUID
 
 
+class GenerateKnowledgeEmailDraft(Contract):
+    """Authorized source is an opaque SPEC-007 resource selector, nothing more."""
+
+    source_id: UUID
+    instructions: str = Field(min_length=1, max_length=4000)
+
+
 class ReviseDraft(DraftContent):
     expected_version: int = Field(ge=1)
 
@@ -43,6 +50,8 @@ class RegenerateDraft(Contract):
 
 class PrepareDraft(Contract):
     expected_version: int = Field(ge=1)
-    connection_id: UUID
+    # A knowledge-email draft derives its mailbox server-side; every other
+    # binding still requires the exact connection the caller prepared against.
+    connection_id: UUID | None = None
     request_id: UUID
     reply_to_source: bool = False
