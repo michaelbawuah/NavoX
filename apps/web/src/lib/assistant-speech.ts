@@ -4,14 +4,16 @@
  * Microphone capture is a click-to-talk recording: the first click opens the
  * microphone and buffers PCM frames in memory, the second click encodes one
  * bounded 16 kHz mono WAV clip and hands it to an injected uploader. The reply
- * text is the only thing that leaves this module. `speechSynthesis` stays the
- * provisional browser playback for this phase; it is not SPEC-005 TTS.
+ * text is the only thing that leaves this module. Spoken answers are bounded
+ * MP3 payloads fetched by an injected session-scoped selector and played with
+ * an `Audio` element; the browser `speechSynthesis` vendor path is removed.
  *
  * Nothing here carries authority, runs in the background, persists audio or
  * logs it, and every failure is reported to the caller so the page can fall
  * back to typed input.
  */
 
+import { MAX_SPEECH_AUDIO_BYTES } from "./assistant-client";
 import {
   encodeWavPcm16,
   MAX_WAV_MILLISECONDS,
@@ -35,6 +37,15 @@ export type TranscribeSpeech = (
   signal: AbortSignal,
 ) => Promise<string>;
 
+/**
+ * Fetches one bounded MP3 answer for a saved turn. The implementation owns the
+ * same-origin fetch; the adapter owns the abort and the object URL.
+ */
+export type SynthesizeSpeech = (
+  turnId: string,
+  signal: AbortSignal,
+) => Promise<Uint8Array<ArrayBuffer>>;
+
 export interface SpeechAdapter {
   readonly captureSupported: boolean;
   /** Typed fallback copy when the microphone is unavailable. */
@@ -52,7 +63,15 @@ export interface SpeechAdapter {
   finishListening(): boolean;
   /** Stop, clear or unmount: abort capture or the in-flight upload. */
   stopListening(): void;
-  speak(text: string, handlers: Omit<SpeechHandlers, "onTranscript">): void;
+  /**
+   * Fetches and plays one bounded saved-turn answer. `turnId` is a selector,
+   * never the spoken text: the server derives and bounds the answer.
+   */
+  speak(
+    turnId: string,
+    handlers: Omit<SpeechHandlers, "onTranscript">,
+    synthesize: SynthesizeSpeech,
+  ): void;
   stopSpeaking(): void;
 }
 
@@ -98,11 +117,12 @@ interface AudioContextLike {
   close?(): Promise<void> | void;
 }
 
-interface UtteranceLike {
-  lang: string;
-  onstart: (() => void) | null;
-  onend: (() => void) | null;
+interface AudioElementLike {
+  src: string;
+  onended: (() => void) | null;
   onerror: (() => void) | null;
+  play(): Promise<void> | void;
+  pause(): void;
 }
 
 interface CaptureScope {
@@ -115,11 +135,12 @@ interface CaptureScope {
   };
   AudioContext?: new () => AudioContextLike;
   webkitAudioContext?: new () => AudioContextLike;
-  speechSynthesis?: {
-    speak(utterance: UtteranceLike): void;
-    cancel(): void;
+  Audio?: new (src?: string) => AudioElementLike;
+  Blob?: new (parts: unknown[], options?: { type?: string }) => Blob;
+  URL?: {
+    createObjectURL?: (blob: Blob) => string;
+    revokeObjectURL?: (url: string) => void;
   };
-  SpeechSynthesisUtterance?: new (text: string) => UtteranceLike;
 }
 
 const BUFFER_FRAMES = 4_096;
@@ -131,6 +152,8 @@ const CAPTURE_REASON =
   "This browser cannot record from the microphone. Type your question instead.";
 const SYNTHESIS_REASON =
   "This browser cannot play spoken answers. Read the answer instead.";
+const SYNTHESIS_FAILED =
+  "The spoken answer could not be played. Read the answer instead.";
 
 /** One live or in-flight microphone attempt. Audio never leaves this object. */
 interface Attempt {
@@ -147,6 +170,14 @@ interface Attempt {
   sink: GainLike | null;
   stream: MediaStreamLike | null;
   timer: ReturnType<typeof setTimeout> | null;
+}
+
+/** One in-flight fetch and the audio element it may start. */
+interface SpeechAttempt {
+  controller: AbortController;
+  audio: AudioElementLike | null;
+  url: string | null;
+  release: () => void;
 }
 
 function permissionMessage(error: unknown): string {
@@ -174,31 +205,51 @@ export function createSpeechAdapter(scope: unknown): SpeechAdapter {
   const mediaDevices = environment.navigator?.mediaDevices;
   const AudioContextCtor =
     environment.AudioContext ?? environment.webkitAudioContext;
-  const synthesis = environment.speechSynthesis;
-  const Utterance = environment.SpeechSynthesisUtterance;
+  const AudioCtor = environment.Audio;
+  const BlobCtor = environment.Blob;
+  const objectUrls = environment.URL;
   const captureSupported =
     typeof mediaDevices?.getUserMedia === "function" &&
     typeof AudioContextCtor === "function" &&
     typeof AudioContextCtor.prototype?.createScriptProcessor === "function";
   const synthesisSupported =
-    typeof Utterance === "function" && Boolean(synthesis);
+    typeof AudioCtor === "function" &&
+    typeof BlobCtor === "function" &&
+    typeof objectUrls?.createObjectURL === "function" &&
+    typeof objectUrls?.revokeObjectURL === "function";
 
   const captureReason = captureSupported ? null : CAPTURE_REASON;
   const synthesisReason = synthesisSupported ? null : SYNTHESIS_REASON;
 
   let attempt: Attempt | null = null;
-  let activeSpeech: { utterance: UtteranceLike; release: () => void } | null =
-    null;
+  let activeSpeech: SpeechAttempt | null = null;
 
   /**
-   * Detaches first: a cancelled utterance must not report a late end or error
-   * into a session that already moved on.
+   * Detaches first: a cancelled playback must not report a late end or error
+   * into a session that already moved on, and its object URL is revoked.
    */
+  const releaseSpeech = (target: SpeechAttempt) => {
+    target.release();
+    try {
+      target.audio?.pause();
+    } catch {
+      // An element that never started needs no further release.
+    }
+    if (target.url) {
+      try {
+        objectUrls?.revokeObjectURL?.(target.url);
+      } catch {
+        // A revoked URL is already released.
+      }
+    }
+  };
+
   const cancelSpeech = () => {
     const current = activeSpeech;
     activeSpeech = null;
-    current?.release();
-    synthesis?.cancel();
+    if (!current) return;
+    current.controller.abort();
+    releaseSpeech(current);
   };
 
   const releaseRecording = (target: Attempt) => {
@@ -444,35 +495,73 @@ export function createSpeechAdapter(scope: unknown): SpeechAdapter {
       if (target) abandonAttempt(target);
     },
 
-    speak(text, handlers) {
-      if (!Utterance || !synthesis || !text.trim()) {
+    speak(turnId, handlers, synthesize) {
+      if (!AudioCtor || !BlobCtor || !objectUrls || !turnId.trim()) {
+        handlers.onError(SYNTHESIS_REASON);
         handlers.onEnd();
         return;
       }
       cancelSpeech();
-      const utterance = new Utterance(text);
-      utterance.lang = "en-US";
-      const release = () => {
-        utterance.onstart = null;
-        utterance.onend = null;
-        utterance.onerror = null;
+      const controller = new AbortController();
+      const current: SpeechAttempt = {
+        controller,
+        audio: null,
+        url: null,
+        release: () => {},
       };
-      const end = () => {
+      activeSpeech = current;
+
+      /** One terminal report for this attempt: never twice, never when stale. */
+      const finish = (outcome: "ended" | "failed") => {
+        if (activeSpeech !== current) return;
         activeSpeech = null;
-        release();
-      };
-      utterance.onstart = () => handlers.onStart?.();
-      utterance.onend = () => {
-        end();
+        releaseSpeech(current);
+        if (outcome === "failed") handlers.onError(SYNTHESIS_FAILED);
         handlers.onEnd();
       };
-      utterance.onerror = () => {
-        end();
-        handlers.onError("The spoken answer could not be played.");
-        handlers.onEnd();
+
+      const start = async () => {
+        let bytes: Uint8Array<ArrayBuffer>;
+        try {
+          bytes = await synthesize(turnId, controller.signal);
+        } catch {
+          // A fetch aborted by Stop, mute, clear or unmount is not an error.
+          if (activeSpeech !== current || controller.signal.aborted) return;
+          finish("failed");
+          return;
+        }
+        if (activeSpeech !== current || controller.signal.aborted) return;
+        try {
+          if (
+            bytes.byteLength === 0 ||
+            bytes.byteLength > MAX_SPEECH_AUDIO_BYTES
+          ) {
+            finish("failed");
+            return;
+          }
+          const url = objectUrls.createObjectURL?.(
+            new BlobCtor([bytes], { type: "audio/mpeg" }),
+          );
+          if (!url) {
+            finish("failed");
+            return;
+          }
+          const audio = new AudioCtor(url);
+          audio.onended = () => finish("ended");
+          audio.onerror = () => finish("failed");
+          current.audio = audio;
+          current.url = url;
+          current.release = () => {
+            audio.onended = null;
+            audio.onerror = null;
+          };
+          await audio.play();
+        } catch {
+          finish("failed");
+        }
       };
-      activeSpeech = { utterance, release };
-      synthesis.speak(utterance);
+
+      void start();
     },
 
     stopSpeaking() {

@@ -93,28 +93,58 @@ function captureScope(sampleRate = 16_000) {
 }
 
 function synthesisScope() {
-  const spoken: string[] = [];
-  let utterance: {
-    onstart: (() => void) | null;
-    onend: (() => void) | null;
+  const created: string[] = [];
+  const revoked: string[] = [];
+  const played: string[] = [];
+  const blobs: { parts: unknown[]; options?: { type?: string } }[] = [];
+  let current: {
+    src: string;
+    onended: (() => void) | null;
     onerror: (() => void) | null;
+    play: ReturnType<typeof vi.fn>;
+    pause: ReturnType<typeof vi.fn>;
   } | null = null;
-  class FakeUtterance {
-    lang = "";
-    onstart: (() => void) | null = null;
-    onend: (() => void) | null = null;
-    onerror: (() => void) | null = null;
-    constructor(public text: string) {
-      spoken.push(text);
-      utterance = this as unknown as typeof utterance;
+
+  class FakeBlob {
+    constructor(
+      public parts: unknown[],
+      public options?: { type?: string },
+    ) {
+      blobs.push(this);
     }
   }
-  const synth = { speak: vi.fn(), cancel: vi.fn() };
+
+  class FakeAudio {
+    onended: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    play = vi.fn(async () => {
+      played.push(this.src);
+    });
+    pause = vi.fn();
+    constructor(public src: string) {
+      current = this;
+    }
+  }
+
+  const objectUrls = {
+    createObjectURL: vi.fn((_blob: unknown) => {
+      const url = `blob:navox/${created.length}`;
+      created.push(url);
+      return url;
+    }),
+    revokeObjectURL: vi.fn((url: string) => {
+      revoked.push(url);
+    }),
+  };
+
   return {
-    scope: { speechSynthesis: synth, SpeechSynthesisUtterance: FakeUtterance },
-    spoken,
-    synth,
-    current: () => utterance,
+    scope: { Audio: FakeAudio, Blob: FakeBlob, URL: objectUrls },
+    created,
+    revoked,
+    played,
+    blobs,
+    objectUrls,
+    current: () => current,
   };
 }
 
@@ -504,13 +534,14 @@ describe("recorded-clip voice flow", () => {
       },
       onNotice: () => {},
       onBusy: () => {},
-      onSpeak: (text) => voice.speakAutomatic(text, pendingToken.current),
+      onSpeak: (turn) => voice.speakAutomatic(turn, pendingToken.current),
     });
 
     voice = createVoiceSession({
       adapter: createSpeechAdapter(scope),
       transcribe: (wav, signal) =>
         transcribeAssistantSpeech(sessionId, wav, signal),
+      synthesize: async () => Uint8Array.from([0x49, 0x44, 0x33]),
       onState: () => {},
       onNotice: () => {},
       onTranscript: (request) => {
@@ -572,55 +603,131 @@ describe("recorded-clip voice flow", () => {
 });
 
 describe("browser speech playback", () => {
-  it("speaks an answer and reports start and end", () => {
-    const { scope, spoken, current } = synthesisScope();
+  const mp3 = () => Uint8Array.from([0x49, 0x44, 0x33, 0x04]);
+
+  it("fetches one saved-turn answer, plays one object URL and reports the end", async () => {
+    const { scope, blobs, created, revoked, played, current } =
+      synthesisScope();
     const adapter = createSpeechAdapter(scope);
     expect(adapter.synthesisSupported).toBe(true);
-    const onStart = vi.fn();
+    const synthesize = vi.fn(async (_turnId: string, _signal: AbortSignal) =>
+      mp3(),
+    );
     const onEnd = vi.fn();
-    adapter.speak("1 item needs attention now.", {
-      onStart,
-      onEnd,
-      onError: vi.fn(),
-    });
-    expect(spoken).toEqual(["1 item needs attention now."]);
-    current()?.onstart?.();
-    current()?.onend?.();
-    expect(onStart).toHaveBeenCalled();
-    expect(onEnd).toHaveBeenCalled();
+    adapter.speak("turn-1", { onEnd, onError: vi.fn() }, synthesize);
+    await tick();
+
+    expect(synthesize).toHaveBeenCalledTimes(1);
+    const [turnId, signal] = synthesize.mock.calls[0] ?? [];
+    // The selector travels, never the spoken text or a provider field.
+    expect(turnId).toBe("turn-1");
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(blobs[0]?.options?.type).toBe("audio/mpeg");
+    expect(created).toHaveLength(1);
+    expect(played).toEqual(created);
+    current()?.onended?.();
+    expect(onEnd).toHaveBeenCalledTimes(1);
+    // A finished answer releases its object URL and cannot report twice.
+    expect(revoked).toEqual(created);
+    current()?.onended?.();
+    expect(onEnd).toHaveBeenCalledTimes(1);
   });
 
-  it("cancels speech when a new utterance or a recording takes the turn", () => {
-    const { scope, synth } = synthesisScope();
-    const adapter = createSpeechAdapter(scope);
-    adapter.speak("first", { onEnd: vi.fn(), onError: vi.fn() });
-    const afterSpeak = synth.cancel.mock.calls.length;
-    adapter.stopSpeaking();
-    expect(synth.cancel.mock.calls.length).toBeGreaterThan(afterSpeak);
-
+  it("revokes the object URL when playback is stopped or a recording takes the turn", async () => {
+    const { scope, created, revoked } = synthesisScope();
     const capture = captureScope();
-    const capturing = createSpeechAdapter({ ...capture.scope, ...scope });
-    capturing.speak("second", { onEnd: vi.fn(), onError: vi.fn() });
-    const afterSecond = synth.cancel.mock.calls.length;
+    const adapter = createSpeechAdapter({ ...capture.scope, ...scope });
+    const synthesize = vi.fn(async () => mp3());
+    adapter.speak("first", { onEnd: vi.fn(), onError: vi.fn() }, synthesize);
+    await tick();
+    expect(created).toHaveLength(1);
+    adapter.stopSpeaking();
+    expect(revoked).toEqual(created);
+
+    adapter.speak("second", { onEnd: vi.fn(), onError: vi.fn() }, synthesize);
+    await tick();
+    const beforeRecording = revoked.length;
     // Opening the microphone is an operator turn: playback is cancelled first.
-    capturing.startListening(handlers(), vi.fn());
-    expect(synth.cancel.mock.calls.length).toBeGreaterThan(afterSecond);
-    capturing.stopListening();
+    adapter.startListening(handlers(), vi.fn());
+    expect(revoked.length).toBeGreaterThan(beforeRecording);
+    adapter.stopListening();
   });
 
-  it("drops a late utterance callback after speech was cancelled", () => {
+  it("drops a late playback callback after speech was cancelled", async () => {
     const { scope, current } = synthesisScope();
     const adapter = createSpeechAdapter(scope);
     const onEnd = vi.fn();
     const onError = vi.fn();
-    adapter.speak("1 item needs attention now.", { onEnd, onError });
-    const cancelled = current();
+    adapter.speak(
+      "turn-1",
+      { onEnd, onError },
+      vi.fn(async () => mp3()),
+    );
+    await tick();
+    const lateEnd = current()?.onended;
     adapter.stopSpeaking();
-    // A browser that reports an end for a cancelled utterance must not move
+    // A browser that still reports an end for a cancelled element must not move
     // the session out of its current state.
-    cancelled?.onend?.();
-    cancelled?.onerror?.();
+    lateEnd?.();
     expect(onEnd).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("aborts the in-flight fetch on stop and never plays a late answer", async () => {
+    const { scope, played } = synthesisScope();
+    const adapter = createSpeechAdapter(scope);
+    const onEnd = vi.fn();
+    const onError = vi.fn();
+    const seen: { signal: AbortSignal | null } = { signal: null };
+    adapter.speak("turn-1", { onEnd, onError }, (_turnId, signal) => {
+      seen.signal = signal;
+      return new Promise(() => {
+        // Never settles: only the abort can end this attempt.
+      });
+    });
+    await tick();
+    adapter.stopSpeaking();
+    expect(seen.signal?.aborted).toBe(true);
+    expect(played).toEqual([]);
+    expect(onError).not.toHaveBeenCalled();
+    expect(onEnd).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on a provider error, an oversize answer and a missing capability", async () => {
+    const { scope, played } = synthesisScope();
+    const adapter = createSpeechAdapter(scope);
+    const failed = vi.fn();
+    adapter.speak(
+      "turn-1",
+      { onEnd: vi.fn(), onError: failed },
+      vi.fn(async () => {
+        throw new Error("provider body must not surface");
+      }),
+    );
+    await tick();
+    expect(failed).toHaveBeenCalledTimes(1);
+    expect(failed.mock.calls[0]?.[0]).not.toContain("provider body");
+    expect(played).toEqual([]);
+
+    const oversize = vi.fn();
+    adapter.speak(
+      "turn-2",
+      { onEnd: vi.fn(), onError: oversize },
+      vi.fn(async () => new Uint8Array(2 * 1024 * 1024 + 1)),
+    );
+    await tick();
+    expect(oversize).toHaveBeenCalledTimes(1);
+    expect(played).toEqual([]);
+
+    const unsupported = createSpeechAdapter({});
+    const refused = vi.fn();
+    const synthesize = vi.fn(async () => mp3());
+    unsupported.speak(
+      "turn-3",
+      { onEnd: vi.fn(), onError: refused },
+      synthesize,
+    );
+    expect(refused).toHaveBeenCalledTimes(1);
+    expect(synthesize).not.toHaveBeenCalled();
   });
 });

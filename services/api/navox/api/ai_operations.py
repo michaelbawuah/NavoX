@@ -21,6 +21,10 @@ from navox.ai.speech_service import (
     read_bounded_audio,
     transcribe_audio,
 )
+from navox.ai.speech_synthesis import (
+    SpeechTextRejected,
+    synthesize_speech,
+)
 from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
 from navox.api.connector_management import require_origin
 from navox.connectors.authorization import ConnectorAccessDenied
@@ -30,6 +34,12 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 
 class TranscriptionResponse(BaseModel):
     """Only bounded question text. A transcript never conveys action authority."""
+
+    text: str
+
+
+class SynthesisRequest(BaseModel):
+    """Only bounded, already-derived answer text. Never a provider, voice or model."""
 
     text: str
 
@@ -143,3 +153,36 @@ async def assistant_transcribe(
         raise HTTPException(503, "No qualified speech provider is available") from None
     response.headers["Cache-Control"] = "no-store"
     return TranscriptionResponse(text=text)
+
+
+@router.post("/assistant/speech/synthesize")
+async def assistant_synthesize(
+    request: Request,
+    payload: SynthesisRequest,
+    account: CurrentAccountDependency,
+    settings: SettingsDependency,
+) -> Response:
+    """One bounded answer string in, one bounded MP3 out. No action authority."""
+
+    require_origin(request, settings.web_origin)
+    try:
+        runtime = await build_runtime(settings)
+        audio = await synthesize_speech(
+            runtime,
+            settings,
+            workspace_id=account.workspace.id,
+            user_id=account.user.id,
+            text=payload.text,
+            adapters=configured_speech_adapters(settings),
+        )
+    except SpeechTextRejected:
+        raise HTTPException(422, "The spoken answer is not supported") from None
+    except SpeechQuotaExceeded:
+        raise HTTPException(429, "The speech synthesis quota is exhausted") from None
+    except PermissionError:
+        raise HTTPException(403, "Speech synthesis is unavailable") from None
+    except SpeechUpstreamFailure:
+        raise HTTPException(502, "The speech provider failed") from None
+    except (SpeechUnavailable, AIProviderNotConfigured, GatewayUnavailable, LookupError):
+        raise HTTPException(503, "No qualified speech provider is available") from None
+    return Response(content=audio, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})

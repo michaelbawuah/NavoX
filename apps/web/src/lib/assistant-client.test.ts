@@ -8,9 +8,11 @@ import {
   createAssistantSession,
   deleteAssistantSession,
   loadAssistantSession,
+  MAX_SPEECH_AUDIO_BYTES,
   newAssistantRequestId,
   resumeOrCreateAssistantSession,
   submitAssistantTurn,
+  synthesizeAssistantSpeech,
   transcribeAssistantSpeech,
 } from "./assistant-client";
 
@@ -269,6 +271,121 @@ describe("assistant speech transcription", () => {
     expect(failure.code).toBe("unsupported");
     expect(failure.status).toBe(422);
     expect(failure.message).toMatch(/type your question instead/i);
+  });
+});
+
+describe("saved-turn speech client", () => {
+  const mp3 = (bytes = [0x49, 0x44, 0x33]) =>
+    new Response(Uint8Array.from(bytes), {
+      status: 200,
+      headers: { "content-type": "audio/mpeg" },
+    });
+
+  it("sends only the session and turn selectors and returns the bounded audio", async () => {
+    const fetcher = vi.fn().mockResolvedValue(mp3());
+    vi.stubGlobal("fetch", fetcher);
+
+    const audio = await synthesizeAssistantSpeech(session.id, turn.id);
+
+    expect(Array.from(audio)).toEqual([0x49, 0x44, 0x33]);
+    const [url, init] = fetcher.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(url).toBe(
+      `/api/v1/assistant/sessions/${session.id}/turns/${turn.id}/speech`,
+    );
+    expect(init.method).toBe("POST");
+    expect(init.cache).toBe("no-store");
+    expect(init.credentials).toBe("include");
+    expect(init.headers).toEqual({ "content-type": "application/json" });
+    // No answer text, provider, model or voice can travel from the browser.
+    expect(init.body).toBe("{}");
+  });
+
+  it("carries the abort signal and surfaces the route's typed refusal", async () => {
+    const controller = new AbortController();
+    const fetcher = vi.fn(
+      (_url: unknown, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () =>
+            reject(new Error("aborted")),
+          );
+        }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    const pending = synthesizeAssistantSpeech(
+      session.id,
+      turn.id,
+      controller.signal,
+    );
+    controller.abort();
+    await expect(pending).rejects.toThrow(/aborted/i);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        json(
+          {
+            error: {
+              code: "unsupported",
+              message: "Spoken answers are not available right now.",
+              retryable: false,
+            },
+          },
+          503,
+        ),
+      ),
+    );
+    const failure = await synthesizeAssistantSpeech(session.id, turn.id).catch(
+      (error) => error,
+    );
+    expect(failure).toBeInstanceOf(AssistantClientError);
+    expect(failure.code).toBe("unsupported");
+  });
+
+  it("refuses a wrong media type, an empty body and an oversize answer", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(Uint8Array.from([1, 2, 3]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+    await expect(
+      synthesizeAssistantSpeech(session.id, turn.id),
+    ).rejects.toThrow(/could not be played/i);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(new Uint8Array(0), {
+          status: 200,
+          headers: { "content-type": "audio/mpeg" },
+        }),
+      ),
+    );
+    await expect(
+      synthesizeAssistantSpeech(session.id, turn.id),
+    ).rejects.toThrow(/could not be played/i);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(new Uint8Array(MAX_SPEECH_AUDIO_BYTES + 1), {
+          status: 200,
+          headers: {
+            "content-type": "audio/mpeg",
+            "content-length": String(MAX_SPEECH_AUDIO_BYTES + 1),
+          },
+        }),
+      ),
+    );
+    await expect(
+      synthesizeAssistantSpeech(session.id, turn.id),
+    ).rejects.toThrow(/could not be played/i);
   });
 });
 

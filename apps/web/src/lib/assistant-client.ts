@@ -288,6 +288,65 @@ export async function transcribeAssistantSpeech(
   return text;
 }
 
+/** One bounded MP3 answer; the SPEC-005 speech route never exceeds 2 MiB. */
+export const MAX_SPEECH_AUDIO_BYTES = 2 * 1024 * 1024;
+
+export function assistantTurnPath(sessionId: string, turnId: string): string {
+  return `${assistantSessionPath(sessionId)}/turns/${encodeURIComponent(turnId)}`;
+}
+
+/**
+ * Requests the saved-turn speech route with session and turn selectors only.
+ * The server derives and bounds the spoken text; no answer text, provider,
+ * model, voice or destination ever travels from the browser.
+ */
+export async function synthesizeAssistantSpeech(
+  sessionId: string,
+  turnId: string,
+  signal?: AbortSignal,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const response = await fetch(
+    `${assistantTurnPath(sessionId, turnId)}/speech`,
+    {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+      signal,
+    },
+  );
+  if (!response.ok) throw await readError(response);
+  const mediaType = (response.headers.get("content-type") ?? "")
+    .split(";")[0]
+    ?.trim()
+    .toLowerCase();
+  if (mediaType !== "audio/mpeg") {
+    throw new AssistantClientError(
+      "unavailable",
+      502,
+      "The spoken answer could not be played. Read the answer instead.",
+    );
+  }
+  const declared = Number(response.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > MAX_SPEECH_AUDIO_BYTES) {
+    throw new AssistantClientError(
+      "unavailable",
+      502,
+      "The spoken answer could not be played. Read the answer instead.",
+    );
+  }
+  const audio = new Uint8Array(await response.arrayBuffer());
+  if (audio.byteLength === 0 || audio.byteLength > MAX_SPEECH_AUDIO_BYTES) {
+    throw new AssistantClientError(
+      "unavailable",
+      502,
+      "The spoken answer could not be played. Read the answer instead.",
+    );
+  }
+  return audio;
+}
+
 function draftPath(sessionId: string, draftId?: string): string {
   const base = `${assistantSessionPath(sessionId)}/email-drafts`;
   return draftId ? `${base}/${encodeURIComponent(draftId)}` : base;

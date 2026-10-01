@@ -2,8 +2,9 @@
 
 An adapter is a single-purpose HTTP boundary: it turns one already-validated
 bounded clip plus a registry-selected model identifier into one bounded
-transcript string, or into a fixed error classification. It never chooses a
-model, holds a grant, persists audio, or exposes a response body.
+transcript string, or one bounded speech string into bounded MP3 audio, or into
+a fixed error classification. It never chooses a model, holds a grant, persists
+audio, or exposes a response body.
 """
 
 from __future__ import annotations
@@ -22,11 +23,17 @@ from navox.core.settings import Settings
 
 # The fixed HTTPS destination. Model identity can never create a network target.
 OPENAI_TRANSCRIPTIONS_URL: Final[str] = "https://api.openai.com/v1/audio/transcriptions"
+OPENAI_SPEECH_URL: Final[str] = "https://api.openai.com/v1/audio/speech"
 MAX_AUDIO_REQUEST_BYTES: Final[int] = 1_000_000
 MAX_TRANSCRIPTION_RESPONSE_BYTES: Final[int] = 262_144
 MAX_PROVIDER_TRANSCRIPT_CHARACTERS: Final[int] = 4_096
+# One bounded MP3 answer. The route never streams or persists the audio.
+MAX_SPEECH_AUDIO_BYTES: Final[int] = 2 * 1024 * 1024
+MAX_PROVIDER_SPEECH_CHARACTERS: Final[int] = 4_096
 WAV_CONTENT_TYPE: Final[str] = "audio/wav"
+AUDIO_MPEG_CONTENT_TYPE: Final[str] = "audio/mpeg"
 MODEL_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
+VOICE_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 
 
 @runtime_checkable
@@ -39,6 +46,20 @@ class SpeechAdapter(Protocol):
     def capabilities(self, model: str) -> frozenset[Capability]: ...
 
     async def transcribe(self, *, model: str, audio: bytes, timeout_seconds: float) -> str: ...
+
+    def classify_error(self, error: Exception) -> ProviderError: ...
+
+
+@runtime_checkable
+class SpeechSynthesisAdapter(Protocol):
+    """One bounded synthesis request. Implementations keep no text or audio state."""
+
+    @property
+    def provider(self) -> Provider: ...
+
+    async def synthesize(
+        self, *, model: str, text: str, voice: str, timeout_seconds: float
+    ) -> bytes: ...
 
     def classify_error(self, error: Exception) -> ProviderError: ...
 
@@ -64,8 +85,16 @@ def _is_wav_container(audio: bytes) -> bool:
     return len(audio) >= 12 and audio[:4] == b"RIFF" and audio[8:12] == b"WAVE"
 
 
+def _is_mp3_response(response: httpx.Response) -> bool:
+    """Only the documented audio content type may become spoken audio."""
+
+    value = str(response.headers.get("content-type", ""))
+    media_type = value.split(";", 1)[0].strip().casefold()
+    return media_type == AUDIO_MPEG_CONTENT_TYPE
+
+
 class OpenAISpeechAdapter:
-    """Minimal OpenAI `/v1/audio/transcriptions` adapter.
+    """Minimal OpenAI `/v1/audio/transcriptions` and `/v1/audio/speech` adapter.
 
     The adapter is constructed with a server-only key and never accepts a
     caller-chosen destination, redirect, or model outside the published
@@ -177,6 +206,93 @@ class OpenAISpeechAdapter:
             ):
                 raise SpeechAdapterFailure(ProviderError(code=ErrorCode.INVALID_RESPONSE))
         return text
+
+    def _speech_headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._api_key.get_secret_value()}",
+            "Content-Type": "application/json",
+            "Accept": AUDIO_MPEG_CONTENT_TYPE,
+        }
+
+    async def synthesize(
+        self, *, model: str, text: str, voice: str, timeout_seconds: float
+    ) -> bytes:
+        """One bounded MP3 answer for one bounded, already-derived speech string."""
+
+        if not 0 < timeout_seconds <= 300:
+            raise ValueError("Speech timeout must be positive, finite, and at most 300 seconds")
+        if not MODEL_IDENTIFIER.fullmatch(model):
+            raise SpeechAdapterFailure(ProviderError(code=ErrorCode.INVALID_REQUEST))
+        if (
+            not isinstance(text, str)
+            or not text.strip()
+            or len(text) > MAX_PROVIDER_SPEECH_CHARACTERS
+        ):
+            raise SpeechAdapterFailure(ProviderError(code=ErrorCode.INVALID_REQUEST))
+        if not VOICE_IDENTIFIER.fullmatch(voice):
+            raise SpeechAdapterFailure(ProviderError(code=ErrorCode.INVALID_REQUEST))
+
+        timeout = httpx.Timeout(
+            timeout_seconds,
+            connect=min(10.0, timeout_seconds),
+            write=timeout_seconds,
+            read=timeout_seconds,
+            pool=min(5.0, timeout_seconds),
+        )
+        client = self._client or httpx.AsyncClient(trust_env=False)
+        try:
+            # Redirects stay off: a provider response can never move the
+            # destination or forward the credential to another host.
+            async with asyncio.timeout(timeout_seconds):
+                async with client.stream(
+                    "POST",
+                    OPENAI_SPEECH_URL,
+                    headers=self._speech_headers(),
+                    json={
+                        "model": model,
+                        "input": text,
+                        "voice": voice,
+                        "response_format": "mp3",
+                    },
+                    timeout=timeout,
+                    follow_redirects=False,
+                ) as response:
+                    return await self._decode_audio(response)
+        except (TimeoutError, httpx.TimeoutException):
+            raise SpeechAdapterFailure(ProviderError(code=ErrorCode.TIMEOUT)) from None
+        except httpx.HTTPError:
+            raise SpeechAdapterFailure(ProviderError(code=ErrorCode.UNAVAILABLE)) from None
+        finally:
+            if self._client is None:
+                await client.aclose()
+
+    async def _decode_audio(self, response: httpx.Response) -> bytes:
+        if not 200 <= response.status_code < 300:
+            if response.status_code in {401, 403}:
+                code = ErrorCode.AUTHENTICATION
+            elif response.status_code == 429:
+                code = ErrorCode.RATE_LIMIT
+            elif response.status_code >= 500 or 300 <= response.status_code < 400:
+                code = ErrorCode.UNAVAILABLE
+            else:
+                code = ErrorCode.INVALID_REQUEST
+            raise SpeechAdapterFailure(
+                ProviderError(code=code, retry_after_ms=_retry_after_ms(response))
+            )
+        # The declared length is advisory; the streamed cap below is the bound.
+        declared = response.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > MAX_SPEECH_AUDIO_BYTES:
+            raise SpeechAdapterFailure(ProviderError(code=ErrorCode.INVALID_RESPONSE))
+        if not _is_mp3_response(response):
+            raise SpeechAdapterFailure(ProviderError(code=ErrorCode.INVALID_RESPONSE))
+        audio = bytearray()
+        async for chunk in response.aiter_bytes():
+            audio.extend(chunk)
+            if len(audio) > MAX_SPEECH_AUDIO_BYTES:
+                raise SpeechAdapterFailure(ProviderError(code=ErrorCode.INVALID_RESPONSE))
+        if not audio:
+            raise SpeechAdapterFailure(ProviderError(code=ErrorCode.INVALID_RESPONSE))
+        return bytes(audio)
 
 
 def configured_speech_adapters(settings: Settings) -> dict[Provider, SpeechAdapter]:

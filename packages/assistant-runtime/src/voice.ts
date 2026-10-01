@@ -1,4 +1,4 @@
-import type { AssistantVoiceState } from "@navox/contracts";
+import type { AssistantTurnView, AssistantVoiceState } from "@navox/contracts";
 import { AssistantError } from "./errors";
 import { LIMITS } from "./limits";
 import { clampText } from "./validate";
@@ -194,6 +194,35 @@ export function reduceVoiceState(
     case "RESET":
       return initialVoiceState();
   }
+}
+
+/** Longest spoken answer the runtime offers; mirrors `LIMITS.maxSpeechLength`. */
+export const MAX_SPEECH_LENGTH = LIMITS.maxSpeechLength;
+
+/**
+ * The bounded spoken text of one saved turn, derived from the saved
+ * presentation only. A question is never spoken, an answer that would need
+ * approval stays silent, and a turn with no answer or notice has nothing to
+ * say. The Next speech route uses this as the server-side source of truth and
+ * the client uses it to decide whether Read aloud is offered.
+ */
+export function spokenTextForTurn(turn: AssistantTurnView): string | null {
+  if (turn.decision?.requires_approval) return null;
+  if (turn.state !== "READY" && turn.state !== "CLARIFY") return null;
+  const speech = turn.presentation?.speech_text?.trim();
+  if (turn.presentation?.speak && speech) {
+    return clampText(speech, MAX_SPEECH_LENGTH);
+  }
+  const blocks = turn.presentation?.blocks ?? [];
+  const answer = blocks.find((block) => block.kind === "ANSWER");
+  if (answer?.kind === "ANSWER" && answer.text.trim()) {
+    return clampText(answer.text.trim(), MAX_SPEECH_LENGTH);
+  }
+  const notice = blocks.find((block) => block.kind === "NOTICE");
+  if (notice?.kind === "NOTICE" && notice.text.trim()) {
+    return clampText(notice.text.trim(), MAX_SPEECH_LENGTH);
+  }
+  return null;
 }
 
 export interface WakeWordEvent {

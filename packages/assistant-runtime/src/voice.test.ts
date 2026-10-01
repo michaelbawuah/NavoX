@@ -1,3 +1,4 @@
+import type { AssistantTurnView } from "@navox/contracts";
 import { describe, expect, it } from "vitest";
 import type { VoiceEvent, VoiceSessionState } from "./voice";
 import {
@@ -5,7 +6,31 @@ import {
   createInactiveWakeWordAdapter,
   initialVoiceState,
   reduceVoiceState,
+  spokenTextForTurn,
 } from "./voice";
+
+function savedTurn(
+  overrides: Partial<AssistantTurnView> = {},
+): AssistantTurnView {
+  return {
+    id: "11111111-1111-4111-8111-111111111111",
+    sequence: 1,
+    modality: "VOICE",
+    state: "READY",
+    question: "What am I missing today?",
+    plan: null,
+    decision: null,
+    presentation: {
+      presentation: "VOICE",
+      speak: true,
+      speech_text: "1 item needs attention now.",
+      blocks: [{ kind: "ANSWER", text: "1 item needs attention now." }],
+    },
+    action_refs: [],
+    created_at: "2026-09-30T12:00:00.000Z",
+    ...overrides,
+  };
+}
 
 function apply(
   state: VoiceSessionState,
@@ -280,6 +305,84 @@ describe("click-to-talk voice state", () => {
       "transcript",
       "turn",
     ]);
+  });
+});
+
+describe("saved-turn spoken text", () => {
+  it("returns the bounded saved answer, never the question", () => {
+    const turn = savedTurn();
+    expect(spokenTextForTurn(turn)).toBe("1 item needs attention now.");
+    expect(spokenTextForTurn(turn)).not.toContain(turn.question);
+  });
+
+  it("falls back to the answer block for a typed turn that asked to be read", () => {
+    const typed = savedTurn({
+      modality: "TEXT",
+      presentation: {
+        presentation: "TEXT",
+        speak: false,
+        speech_text: null,
+        blocks: [{ kind: "ANSWER", text: "  1 item needs attention now.  " }],
+      },
+    });
+    expect(spokenTextForTurn(typed)).toBe("1 item needs attention now.");
+  });
+
+  it("stays silent for approval, unavailable and answerless turns", () => {
+    const approved = savedTurn({
+      state: "WITHHELD",
+      decision: {
+        kind: "WITHHELD",
+        capability_id: null,
+        target: null,
+        reason: "approval.required",
+        requires_approval: true,
+        action_state: "PENDING_APPROVAL",
+        action_id: "action-1",
+        response_state: "WITHHELD",
+      },
+    });
+    expect(spokenTextForTurn(approved)).toBeNull();
+    expect(
+      spokenTextForTurn(
+        savedTurn({
+          state: "UNAVAILABLE",
+          presentation: {
+            presentation: "VOICE",
+            speak: false,
+            speech_text: null,
+            blocks: [],
+          },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("clamps long answer text to the runtime bound", () => {
+    const long = savedTurn({
+      presentation: {
+        presentation: "TEXT",
+        speak: false,
+        speech_text: null,
+        blocks: [{ kind: "ANSWER", text: "x".repeat(2_000) }],
+      },
+    });
+    expect(spokenTextForTurn(long)).toHaveLength(600);
+  });
+
+  it("speaks a bounded notice when the turn is a clarification without an answer", () => {
+    const clarify = savedTurn({
+      state: "CLARIFY",
+      presentation: {
+        presentation: "VOICE",
+        speak: true,
+        speech_text: "Which one did you mean?",
+        blocks: [
+          { kind: "NOTICE", state: "CLARIFY", text: "Which one did you mean?" },
+        ],
+      },
+    });
+    expect(spokenTextForTurn(clarify)).toBe("Which one did you mean?");
   });
 });
 

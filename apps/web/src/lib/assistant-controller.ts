@@ -2,6 +2,7 @@ import {
   automaticSpeechAllowed,
   initialVoiceState,
   reduceVoiceState,
+  spokenTextForTurn,
   type VoiceEvent,
   type VoiceSessionState,
 } from "@navox/assistant-runtime/voice";
@@ -11,33 +12,18 @@ import type {
   AssistantTurnView,
 } from "@navox/contracts";
 import type { AssistantTurnLedger } from "./assistant-client";
-import type { SpeechAdapter, TranscribeSpeech } from "./assistant-speech";
-
-/** Matches the runtime's spoken-text bound. */
-export const MAX_SPEECH_LENGTH = 600;
-
-function clampSpeech(text: string): string {
-  return text.length <= MAX_SPEECH_LENGTH
-    ? text
-    : text.slice(0, MAX_SPEECH_LENGTH);
-}
+import type {
+  SpeechAdapter,
+  SynthesizeSpeech,
+  TranscribeSpeech,
+} from "./assistant-speech";
 
 /**
- * Spoken text for a saved turn. The server speaks the first answer block;
- * a clicked Speak control uses the same text so a typed answer can be replayed
- * on demand without ever speaking by itself.
+ * Whether a saved turn may be spoken, and the bounded text a click would hear.
+ * The server derives the text it synthesizes from the same saved turn; this
+ * copy only decides whether the Read aloud control is offered at all.
  */
-export function speechTextForTurn(turn: AssistantTurnView): string | null {
-  const blocks = turn.presentation?.blocks ?? [];
-  const answer = blocks.find((block) => block.kind === "ANSWER");
-  if (answer?.kind === "ANSWER" && answer.text.trim()) {
-    return clampSpeech(answer.text.trim());
-  }
-  const speech = turn.presentation?.speak
-    ? turn.presentation.speech_text
-    : null;
-  return speech?.trim() ? clampSpeech(speech.trim()) : null;
-}
+export const speechTextForTurn = spokenTextForTurn;
 
 /** Eligible answer turns may offer a Speak control; notices alone do not. */
 export function canSpeakTurn(turn: AssistantTurnView): boolean {
@@ -65,7 +51,8 @@ export interface AssistantTurnRunnerDeps {
   onTurn: (turn: AssistantTurnView) => void;
   onNotice: NoticeHandler;
   onBusy: (busy: boolean) => void;
-  onSpeak: (text: string) => void;
+  /** The saved voice turn whose answer may speak. Selector only, never text. */
+  onSpeak: (turn: AssistantTurnView) => void;
   messageForError?: (error: unknown) => string;
 }
 
@@ -129,7 +116,7 @@ export function createAssistantTurnRunner(
           const speech = response.turn.presentation?.speak
             ? response.turn.presentation.speech_text
             : null;
-          if (speech) deps.onSpeak(speech);
+          if (speech) deps.onSpeak(response.turn);
         }
       } catch (error) {
         if (!current()) return;
@@ -170,6 +157,11 @@ export interface VoiceSessionDeps {
    * active session; the adapter owns the abort signal.
    */
   transcribe: TranscribeSpeech;
+  /**
+   * Session-scoped fetch of one bounded MP3 answer for a saved turn. The page
+   * binds it to the active session; the adapter owns the abort signal.
+   */
+  synthesize: SynthesizeSpeech;
   /** A finished transcript the page may submit as one voice turn. */
   onTranscript: (request: VoiceTurnRequest) => void;
   onNotice: (message: string) => void;
@@ -187,9 +179,9 @@ export interface VoiceSession {
   /** The pending voice turn failed before it produced an answer. */
   turnFailed(reason: string): void;
   /** Speaks an answer for a live turn only. Stale, muted and stopped ones stay silent. */
-  speakAutomatic(text: string, token: number): void;
+  speakAutomatic(turn: AssistantTurnView, token: number): void;
   /** The explicit Read aloud control. The page offers it only when unmuted. */
-  speakManually(text: string): void;
+  speakManually(turn: AssistantTurnView): void;
   listen(): void;
   /**
    * The microphone control: the first click starts capture, the second click
@@ -273,8 +265,8 @@ export function createVoiceSession(deps: VoiceSessionDeps): VoiceSession {
    * Starts playback only when the state machine accepts the transition, so the
    * UI state and the audio can never disagree about who is speaking.
    */
-  const startSpeech = (text: string, event: VoiceEvent) => {
-    if (disposed || !text.trim()) return;
+  const startSpeech = (turn: AssistantTurnView, event: VoiceEvent) => {
+    if (disposed || !speechTextForTurn(turn)) return;
     if (!adapter.synthesisSupported) {
       deps.onNotice(
         adapter.synthesisReason ??
@@ -285,13 +277,17 @@ export function createVoiceSession(deps: VoiceSessionDeps): VoiceSession {
     const next = reduceVoiceState(state, event);
     if (next.state !== "SPEAKING") return;
     publish(next);
-    adapter.speak(text, {
-      onEnd: () => dispatch({ type: "SPEAKING_ENDED" }),
-      onError: (reason) => {
-        deps.onNotice(reason);
-        dispatch({ type: "SPEAKING_ENDED" });
+    adapter.speak(
+      turn.id,
+      {
+        onEnd: () => dispatch({ type: "SPEAKING_ENDED" }),
+        onError: (reason) => {
+          deps.onNotice(reason);
+          dispatch({ type: "SPEAKING_ENDED" });
+        },
       },
-    });
+      deps.synthesize,
+    );
   };
 
   if (!adapter.captureSupported) {
@@ -323,13 +319,13 @@ export function createVoiceSession(deps: VoiceSessionDeps): VoiceSession {
       dispatch({ type: "TRANSCRIPT_FAILED", reason });
     },
 
-    speakAutomatic(text, token) {
+    speakAutomatic(turn, token) {
       if (disposed || token !== turnToken || token <= stoppedToken) return;
       if (!automaticSpeechAllowed(state)) return;
-      startSpeech(text, { type: "SPEAKING_STARTED" });
+      startSpeech(turn, { type: "SPEAKING_STARTED" });
     },
 
-    speakManually(text) {
+    speakManually(turn) {
       if (disposed || !voiceControls(state).readAloudAvailable) return;
       // Playback takes the session over: an open microphone is released and
       // its pending callbacks are invalidated before the answer is spoken.
@@ -337,7 +333,7 @@ export function createVoiceSession(deps: VoiceSessionDeps): VoiceSession {
         endAttempt();
         adapter.stopListening();
       }
-      startSpeech(text, { type: "READ_ALOUD_STARTED" });
+      startSpeech(turn, { type: "READ_ALOUD_STARTED" });
     },
 
     listen() {

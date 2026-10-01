@@ -202,3 +202,20 @@ skips, plus all lint, type, schema, metric, release and whitespace checks;
 see `/tmp/navox-spec008-m11c-api-gate.log`. A real
 microphone and a qualified live speech provider have not yet been exercised.
 `M11D-TTS-BRIEF.md` defines the next provider-backed speech phase.
+
+M11C was committed as `262070da0230d189f56e79d9d42fb55b1cc59b33`
+and pushed to draft PR #22. Hosted CI run `36835630157` is in progress on that
+exact head. M11D is implemented locally for root review: the TypeScript
+client requests speech by saved turn selector, the Next route derives the
+bounded answer after session ownership checks, and SPEC-005 selects a
+qualified synthesis model and returns bounded MP3. Browser playback is
+abortable and leaves the visual answer in place on failure. The worker's
+targeted tests, lint/typechecks and Web build passed. Its first full API gate
+had 2,718 passes and eight infrastructure-dependent skips, so the metric
+gates failed. Root reran `bash scripts/check-api.sh` with disposable
+PostgreSQL/Temporal: exit 0, 2,726 tests passed with zero skips and every
+lint, type, metric, schema, evaluation and whitespace check passed. The
+PostgreSQL-backed TypeScript runtime passed 238/238 tests, and its migration
+check passed 29 assertions. See `/tmp/navox-spec008-m11d-root-api-gate.log`.
+Hosted CI on the eventual M11D head is still required. No speech model was
+published and no live provider or device playback acceptance was performed.

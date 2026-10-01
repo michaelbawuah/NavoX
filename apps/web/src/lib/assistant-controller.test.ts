@@ -20,6 +20,7 @@ import {
 import type {
   SpeechAdapter,
   SpeechHandlers,
+  SynthesizeSpeech,
   TranscribeSpeech,
 } from "./assistant-speech";
 
@@ -31,9 +32,14 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+/** The saved turn selector every default fixture uses. */
+const TURN_ID = "88888888-8888-4888-8888-888888888888";
+/** One bounded MP3 stand-in for the injected saved-turn speech fetch. */
+const MP3 = Uint8Array.from([0x49, 0x44, 0x33, 0x04]);
+
 function turn(overrides: Partial<AssistantTurnView> = {}): AssistantTurnView {
   return {
-    id: "88888888-8888-4888-8888-888888888888",
+    id: TURN_ID,
     sequence: 1,
     modality: "VOICE",
     state: "READY",
@@ -70,7 +76,7 @@ function harness(
     onTurn: (value) => appended.push(value),
     onNotice: (message) => notices.push(message),
     onBusy: (value) => busy.push(value),
-    onSpeak: (text) => spoken.push(text),
+    onSpeak: (value) => spoken.push(value.id),
   });
   return { runner, ledger, appended, notices, spoken, busy };
 }
@@ -130,7 +136,7 @@ describe("assistant turn runner", () => {
       text: "What am I missing today?",
     });
     expect(context.appended).toHaveLength(1);
-    expect(context.spoken).toEqual(["1 item needs attention now."]);
+    expect(context.spoken).toEqual([TURN_ID]);
     expect(context.notices).toEqual([]);
     expect(context.busy).toEqual([true, false]);
   });
@@ -193,6 +199,30 @@ describe("assistant turn runner", () => {
       },
     });
     expect(speechTextForTurn(long)).toHaveLength(600);
+  });
+
+  it("never offers a spoken answer that would need approval", () => {
+    const withheld = turn({
+      state: "WITHHELD",
+      decision: {
+        kind: "WITHHELD",
+        capability_id: null,
+        target: null,
+        reason: "approval.required",
+        requires_approval: true,
+        action_state: "PENDING_APPROVAL",
+        action_id: "action-1",
+        response_state: "WITHHELD",
+      },
+      presentation: {
+        presentation: "VOICE",
+        speak: false,
+        speech_text: null,
+        blocks: [{ kind: "ANSWER", text: "Send the email now." }],
+      },
+    });
+    expect(canSpeakTurn(withheld)).toBe(false);
+    expect(speechTextForTurn(withheld)).toBeNull();
   });
 
   it("ignores an empty question and an empty session", async () => {
@@ -334,6 +364,8 @@ describe("assistant turn runner", () => {
 interface FakeAdapter extends SpeechAdapter {
   log: string[];
   spoken: string[];
+  /** The saved-turn fetcher the session handed to the last playback. */
+  synthesize: SynthesizeSpeech | null;
   /** What the next finish click reports: true only when an upload started. */
   finishResult: { value: boolean };
   /** Every microphone attempt, oldest first: its handlers and its uploader. */
@@ -364,6 +396,7 @@ function fakeAdapter(overrides: Partial<SpeechAdapter> = {}): FakeAdapter {
     synthesisReason: null,
     log,
     spoken,
+    synthesize: null,
     finishResult,
     capture,
     speech,
@@ -378,10 +411,11 @@ function fakeAdapter(overrides: Partial<SpeechAdapter> = {}): FakeAdapter {
     stopListening() {
       log.push("stopListening");
     },
-    speak(text, handlers) {
-      log.push(`speak:${text}`);
-      spoken.push(text);
+    speak(turnId, handlers, synthesize) {
+      log.push(`speak:${turnId}`);
+      spoken.push(turnId);
       speech.push(handlers);
+      this.synthesize = synthesize;
     },
     stopSpeaking() {
       log.push("stopSpeaking");
@@ -410,7 +444,7 @@ function voiceTurn(
   text: string,
 ): AssistantTurnView {
   return {
-    id: "88888888-8888-4888-8888-888888888888",
+    id: TURN_ID,
     sequence: 1,
     modality,
     state: "READY",
@@ -456,10 +490,12 @@ function voiceRig(
   const pendingToken = { current: 0 };
   let pending: Promise<void> | null = null;
   const transcribe = vi.fn(async () => "What am I missing today?");
+  const synthesize = vi.fn(async () => MP3);
 
   const session = createVoiceSession({
     adapter,
     transcribe,
+    synthesize,
     onState: (state) => states.push(state),
     onNotice: (message) => notices.push(message),
     onTranscript: (request) => {
@@ -488,7 +524,7 @@ function voiceRig(
       if (modality === "VOICE") session.turnFailed(message);
     },
     onBusy: () => {},
-    onSpeak: (text) => session.speakAutomatic(text, pendingToken.current),
+    onSpeak: (value) => session.speakAutomatic(value, pendingToken.current),
   });
 
   const settle = async () => {
@@ -501,6 +537,7 @@ function voiceRig(
     adapter,
     session,
     transcribe,
+    synthesize,
     states,
     notices,
     transcripts,
@@ -538,7 +575,7 @@ describe("voice session lifecycle", () => {
     expect(rig.session.current().state).toBe("IDLE");
 
     await rig.voiceTurn("What am I missing today?");
-    expect(rig.adapter.spoken).toEqual(["1 item needs attention now."]);
+    expect(rig.adapter.spoken).toEqual([TURN_ID]);
     expect(rig.session.current().state).toBe("SPEAKING");
   });
 
@@ -567,17 +604,14 @@ describe("voice session lifecycle", () => {
     expect(voiceControls(rig.session.current()).readAloudAvailable).toBe(false);
 
     await rig.voiceTurn("What am I missing today?");
-    expect(rig.adapter.spoken).toEqual(["1 item needs attention now."]);
+    expect(rig.adapter.spoken).toEqual([TURN_ID]);
     expect(rig.session.current().state).toBe("MUTED");
 
     rig.session.setMuted(false);
     expect(rig.session.current().state).toBe("IDLE");
     expect(voiceControls(rig.session.current()).readAloudAvailable).toBe(true);
     await rig.voiceTurn("What am I missing today?");
-    expect(rig.adapter.spoken).toEqual([
-      "1 item needs attention now.",
-      "1 item needs attention now.",
-    ]);
+    expect(rig.adapter.spoken).toEqual([TURN_ID, TURN_ID]);
   });
 
   it("stays silent when mute arrives before the answer", async () => {
@@ -650,7 +684,7 @@ describe("voice session lifecycle", () => {
     expect(rig.session.current().state).toBe("STOPPED");
 
     await rig.voiceTurn("What am I missing today?");
-    expect(rig.adapter.spoken).toEqual(["1 item needs attention now."]);
+    expect(rig.adapter.spoken).toEqual([TURN_ID]);
     expect(rig.session.current().state).toBe("SPEAKING");
   });
 
@@ -673,6 +707,7 @@ describe("voice session lifecycle", () => {
     const next = createVoiceSession({
       adapter: rig.adapter,
       transcribe: async () => "unused",
+      synthesize: async () => MP3,
       onState: (state) => rig.states.push(state),
       onNotice: (message) => rig.notices.push(message),
       onTranscript: (request) => rig.transcripts.push(request.text),
@@ -695,6 +730,7 @@ describe("voice session lifecycle", () => {
     const session = createVoiceSession({
       adapter,
       transcribe: async () => "unused",
+      synthesize: async () => MP3,
       onState: () => {},
       onNotice: () => {},
       onTranscript: () => {},
@@ -719,11 +755,12 @@ describe("voice session lifecycle", () => {
     const session = createVoiceSession({
       adapter,
       transcribe: async () => "unused",
+      synthesize: async () => MP3,
       onState: () => {},
       onNotice: (message) => notices.push(message),
       onTranscript: () => {},
     });
-    session.speakManually("1 item needs attention now.");
+    session.speakManually(turn());
     expect(notices).toEqual(["This browser cannot play spoken answers."]);
     expect(session.current().state).toBe("IDLE");
   });
@@ -883,11 +920,20 @@ describe("voice session lifecycle", () => {
     expect(rig.adapter.capture[0]?.transcribe).toBe(rig.transcribe);
   });
 
+  it("forwards the session-scoped saved-turn fetcher to playback", async () => {
+    const rig = voiceRig();
+    await rig.voiceTurn("What am I missing today?");
+    // The adapter receives a selector and the page's fetcher, never answer text.
+    expect(rig.adapter.synthesize).toBe(rig.synthesize);
+    expect(rig.adapter.spoken).toEqual([TURN_ID]);
+  });
+
   it("releases the session when the page refuses a delivered transcript", () => {
     const adapter = fakeAdapter();
     const session = createVoiceSession({
       adapter,
       transcribe: async () => "unused",
+      synthesize: async () => MP3,
       onState: () => {},
       onNotice: () => {},
       // The page can refuse a transcript while another turn is in flight.
@@ -961,12 +1007,9 @@ describe("voice session lifecycle", () => {
     expect(rig.session.current().state).toBe("STOPPED");
     expect(voiceControls(rig.session.current()).stopAvailable).toBe(false);
 
-    rig.session.speakManually("1 item needs attention now.");
+    rig.session.speakManually(turn());
     expect(rig.session.current().state).toBe("SPEAKING");
-    expect(rig.adapter.spoken).toEqual([
-      "1 item needs attention now.",
-      "1 item needs attention now.",
-    ]);
+    expect(rig.adapter.spoken).toEqual([TURN_ID, TURN_ID]);
     // The explicit control and the lifecycle now agree: Stop is live again.
     expect(voiceControls(rig.session.current()).stopAvailable).toBe(true);
     rig.session.stop();
@@ -979,14 +1022,15 @@ describe("voice session lifecycle", () => {
     const session = createVoiceSession({
       adapter,
       transcribe: async () => "unused",
+      synthesize: async () => MP3,
       onState: () => {},
       onNotice: () => {},
       onTranscript: () => {},
     });
     expect(session.current().state).toBe("UNSUPPORTED");
-    session.speakManually("1 item needs attention now.");
+    session.speakManually(turn());
     expect(session.current().state).toBe("SPEAKING");
-    expect(adapter.spoken).toEqual(["1 item needs attention now."]);
+    expect(adapter.spoken).toEqual([TURN_ID]);
     expect(voiceControls(session.current())).toEqual({
       listening: false,
       capturing: false,
@@ -1004,16 +1048,13 @@ describe("voice session lifecycle", () => {
     expect(adapter.log).not.toContain("startListening");
 
     // Mute still vetoes explicit playback.
-    session.speakManually("1 item needs attention now.");
+    session.speakManually(turn());
     expect(session.current().state).toBe("SPEAKING");
     session.setMuted(true);
     expect(session.current().state).toBe("MUTED");
-    session.speakManually("1 item needs attention now.");
+    session.speakManually(turn());
     expect(session.current().state).toBe("MUTED");
-    expect(adapter.spoken).toEqual([
-      "1 item needs attention now.",
-      "1 item needs attention now.",
-    ]);
+    expect(adapter.spoken).toEqual([TURN_ID, TURN_ID]);
   });
 
   it("releases the microphone when an explicit read aloud takes over", () => {
@@ -1022,7 +1063,7 @@ describe("voice session lifecycle", () => {
     const attempt = rig.adapter.capture[0]?.handlers;
     expect(attempt).toBeDefined();
 
-    rig.session.speakManually("1 item needs attention now.");
+    rig.session.speakManually(turn());
     expect(rig.adapter.log).toContain("stopListening");
     expect(rig.session.current().state).toBe("SPEAKING");
 

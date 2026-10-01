@@ -28,19 +28,20 @@ import {
   forgetAssistantSession,
   resumeOrCreateAssistantSession,
   submitAssistantTurn,
+  synthesizeAssistantSpeech,
   transcribeAssistantSpeech,
 } from "../lib/assistant-client";
 import {
   canSpeakTurn,
   createAssistantTurnRunner,
   createVoiceSession,
-  speechTextForTurn,
   type VoiceSession,
   voiceControls,
 } from "../lib/assistant-controller";
 import {
   createSpeechAdapter,
   type SpeechAdapter,
+  type SynthesizeSpeech,
   type TranscribeSpeech,
 } from "../lib/assistant-speech";
 import { safeSourceUrl } from "../lib/search";
@@ -472,6 +473,20 @@ export function NavoXAssistant() {
   }, []);
 
   /**
+   * The page binds the session to saved-turn speech. The adapter owns the
+   * abort signal, so an unset session is a typed failure rather than a request.
+   */
+  const synthesize = useCallback<SynthesizeSpeech>((turnId, signal) => {
+    const session = sessionIdRef.current;
+    if (!session) {
+      return Promise.reject(
+        new Error("Start a conversation before playing an answer."),
+      );
+    }
+    return synthesizeAssistantSpeech(session, turnId, signal);
+  }, []);
+
+  /**
    * One voice session per page. It is created on the client, so a browser
    * without microphone support reports the typed fallback before any click.
    */
@@ -480,6 +495,7 @@ export function NavoXAssistant() {
       voiceRef.current = createVoiceSession({
         adapter: adapter(),
         transcribe,
+        synthesize,
         onState: setVoice,
         onNotice: setNotice,
         onTranscript: (request) => {
@@ -488,7 +504,7 @@ export function NavoXAssistant() {
       });
     }
     return voiceRef.current;
-  }, [adapter, transcribe]);
+  }, [adapter, synthesize, transcribe]);
 
   const openSession = useCallback(async () => {
     setConnecting(true);
@@ -534,8 +550,8 @@ export function NavoXAssistant() {
         onBusy: setBusy,
         // Only a live voice turn may speak. The token refuses an answer the
         // operator already stopped, muted or replaced.
-        onSpeak: (speech) =>
-          voiceRef.current?.speakAutomatic(speech, pendingVoiceToken.current),
+        onSpeak: (turn) =>
+          voiceRef.current?.speakAutomatic(turn, pendingVoiceToken.current),
         messageForError: failureMessage,
       }),
     [],
@@ -585,7 +601,7 @@ export function NavoXAssistant() {
 
   /** The explicit Read aloud control exists only while the session is unmuted. */
   const speak = useCallback(
-    (speechText: string) => voiceSession().speakManually(speechText),
+    (target: AssistantTurnView) => voiceSession().speakManually(target),
     [voiceSession],
   );
 
@@ -677,10 +693,7 @@ export function NavoXAssistant() {
             sessionId={sessionId ?? undefined}
             onSpeak={
               controls.readAloudAvailable
-                ? (target) => {
-                    const speech = speechTextForTurn(target);
-                    if (speech) speak(speech);
-                  }
+                ? (target) => speak(target)
                 : undefined
             }
             onSelectEmail={(source, resourceId) => {

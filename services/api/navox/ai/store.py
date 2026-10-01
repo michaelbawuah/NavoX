@@ -196,21 +196,21 @@ class GatewayStore:
             await db.commit()
             return True
 
-    async def admit_transcription(
+    async def _admit_audio_attempt(
         self, task: AITask, *, limit: int, window: timedelta
     ) -> AITaskRun | None:
-        """Reserve one transcription attempt under the caller's user row lock.
+        """Reserve one bounded audio attempt under the caller's user row lock.
 
         Returns the committed ``STARTED`` trace row when the caller may attempt a
-        provider call, or ``None`` when the rolling-hour budget is already spent.
-        The user row is locked so the count and the insert serialize per user,
-        and the row is committed before the provider call, so a failed or
-        discarded attempt still consumes its slot. Audio and transcript text
-        never reach this row.
+        provider call, or ``None`` when the rolling-window budget is already
+        spent. The user row is locked so the count and the insert serialize per
+        user, and the row is committed before the provider call, so a failed or
+        discarded attempt still consumes its slot. Audio, transcript and speech
+        text never reach this row.
         """
 
         if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
-            raise ValueError("Transcription attempt limit must be a positive integer")
+            raise ValueError("Audio attempt limit must be a positive integer")
         moment = datetime.now(UTC)
         async with self.factory() as db:
             user = await db.scalar(
@@ -262,6 +262,20 @@ class GatewayStore:
             db.add(run)
             await db.commit()
         return run
+
+    async def admit_transcription(
+        self, task: AITask, *, limit: int, window: timedelta
+    ) -> AITaskRun | None:
+        """Reserve one transcription attempt; see ``_admit_audio_attempt``."""
+
+        return await self._admit_audio_attempt(task, limit=limit, window=window)
+
+    async def admit_synthesis(
+        self, task: AITask, *, limit: int, window: timedelta
+    ) -> AITaskRun | None:
+        """Reserve one speech-synthesis attempt; see ``_admit_audio_attempt``."""
+
+        return await self._admit_audio_attempt(task, limit=limit, window=window)
 
     async def health(self, model_id: str, error: ProviderError | None) -> None:
         async with self.factory() as db:
