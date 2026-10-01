@@ -578,8 +578,14 @@ async def test_exclusion_writes_reject_mixed_or_foreign_targets_without_500(
 @pytest.mark.asyncio
 async def test_search_returns_nonempty_news_evidence_through_the_owned_service(
     knowledge_api,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from types import SimpleNamespace
+
+    # The fixture's News item and two-day rights window are anchored to NOW.
+    # Keep the API read on that clock so the story does not expire as wall time
+    # advances, while the owned story service still enforces its real bounds.
+    monkeypatch.setattr("navox.knowledge.service.utc_now", lambda: NOW)
 
     world = SimpleNamespace(
         workspace_id=knowledge_api["workspace_id"],
