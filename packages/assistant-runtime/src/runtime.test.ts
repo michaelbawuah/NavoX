@@ -277,6 +277,13 @@ describe("assistant email action boundary", () => {
     context.upstream.getCommunicationDraft = vi.fn(async () => draft);
     context.upstream.getAction = vi.fn(async () => action);
     context.upstream.prepareCommunicationDraft = vi.fn(async () => action);
+    context.store.actions.set(actionId, {
+      user_id: SCOPE.user_id,
+      workspace_id: SCOPE.workspace_id,
+      status: "awaiting_approval",
+      executed_at: null,
+      verified_at: null,
+    });
     context.upstream.approveCommunicationDraft = vi.fn(async () => ({
       ...action,
       status: "approved",

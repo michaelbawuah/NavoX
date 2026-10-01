@@ -88,6 +88,21 @@ services:
     command: ["uv", "run", "--no-sync", "python", "-m", "navox.workflows.worker"]
     restart: unless-stopped
 
+  # Apply the TypeScript-owned assistant schema once before either Node
+  # process opens it. Concurrent CREATE TABLE runs can race on a fresh stack.
+  assistant-migrate:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      NAVOX_ASSISTANT_DATABASE_URL: postgres://navox:navox@postgres:5432/navox
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    command: ["npm", "run", "migrate", "--workspace=@navox/assistant-runtime"]
+
   web:
     build:
       context: .
@@ -97,16 +112,44 @@ services:
       NAVOX_API_BASE_URL: http://api:8000/api/v1
       NAVOX_ASSISTANT_DATABASE_URL: postgres://navox:navox@postgres:5432/navox
       NAVOX_ASSISTANT_ORIGIN: http://localhost:3000
+      NAVOX_ASSISTANT_TEMPORAL_TARGET: temporal:7233
+      NAVOX_ASSISTANT_TEMPORAL_TASK_QUEUE: navox-assistant-goals
     depends_on:
       api:
         condition: service_started
       migrate:
         condition: service_completed_successfully
+      assistant-migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
-    command: ["sh", "-c", "npm run migrate --workspace=@navox/assistant-runtime && npm run start --workspace=@navox/web"]
+    command: ["npm", "run", "start", "--workspace=@navox/web"]
     ports:
       - "3000:3000"
+
+  # SPEC-008 M14B bounded personal goals. It owns its own queue and worker, so
+  # the existing SPEC-001/003 agent queue is untouched. The worker only reads
+  # and writes its own assistant_runtime_goals rows; it never calls a provider,
+  # approves an action or executes one.
+  assistant-goals-worker:
+    build:
+      context: .
+      dockerfile: packages/assistant-runtime/Dockerfile
+    environment:
+      NAVOX_ASSISTANT_DATABASE_URL: postgres://navox:navox@postgres:5432/navox
+      NAVOX_ASSISTANT_TEMPORAL_TARGET: temporal:7233
+      NAVOX_ASSISTANT_TEMPORAL_TASK_QUEUE: navox-assistant-goals
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+      assistant-migrate:
+        condition: service_completed_successfully
+    command: ["npm", "run", "worker:goals", "--workspace=@navox/assistant-runtime"]
+    restart: unless-stopped
 
 volumes:
   postgres-data:

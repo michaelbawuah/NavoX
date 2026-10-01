@@ -2,6 +2,8 @@ import type {
   AssistantEmailAction,
   AssistantEmailDraft,
   AssistantErrorCode,
+  AssistantGoalDispatchResponse,
+  AssistantGoalView,
   AssistantMessageResponse,
   AssistantModality,
   AssistantSessionView,
@@ -73,6 +75,10 @@ async function assistantRequest<T>(
 export function assistantSessionPath(sessionId?: string): string {
   const base = "/api/v1/assistant/sessions";
   return sessionId ? `${base}/${encodeURIComponent(sessionId)}` : base;
+}
+
+export function assistantGoalPath(goalId: string): string {
+  return `/api/v1/assistant/goals/${encodeURIComponent(goalId)}`;
 }
 
 /** Raised when the browser cannot produce a UUID the server will accept. */
@@ -205,6 +211,40 @@ export async function deleteAssistantSession(sessionId: string): Promise<void> {
       method: "DELETE",
       body: {},
     },
+  );
+}
+
+/**
+ * The bounded goals this session recorded. The server decides what is visible
+ * from the stored rows; the client renders the truthful status it returns.
+ */
+export async function loadAssistantGoals(
+  sessionId: string,
+): Promise<AssistantGoalView[]> {
+  const body = await assistantRequest<{ goals: AssistantGoalView[] }>(
+    `${assistantSessionPath(sessionId)}/goals`,
+    { method: "GET" },
+  );
+  return body.goals;
+}
+
+export async function loadAssistantGoal(
+  goalId: string,
+): Promise<AssistantGoalView> {
+  const body = await assistantRequest<{ goal: AssistantGoalView }>(
+    assistantGoalPath(goalId),
+    { method: "GET" },
+  );
+  return body.goal;
+}
+
+/** The recoverable path after a workflow outage; it is idempotent server-side. */
+export async function dispatchAssistantGoal(
+  goalId: string,
+): Promise<AssistantGoalDispatchResponse> {
+  return assistantRequest<AssistantGoalDispatchResponse>(
+    `${assistantGoalPath(goalId)}/dispatch`,
+    { method: "POST", body: {} },
   );
 }
 

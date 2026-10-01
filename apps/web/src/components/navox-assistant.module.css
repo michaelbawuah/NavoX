@@ -354,3 +354,66 @@
 .emailBody {
   white-space: pre-wrap;
 }
+
+.goals {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.goal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.goalKind {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.goalStatus {
+  color: var(--aqua);
+}
+
+.goal[data-goal-status="COMPLETED"] .goalStatus {
+  color: var(--aqua-bright);
+}
+
+.goal[data-goal-status="FAILED"] .goalStatus {
+  color: var(--danger);
+}
+
+.goalDetail {
+  flex-basis: 100%;
+}
+
+.goalRetry {
+  margin-left: auto;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.goalRetry:hover:not(:disabled) {
+  border-color: rgb(97 223 196 / 45%);
+}
+
+.goalRetry:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

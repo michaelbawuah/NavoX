@@ -20,17 +20,18 @@ if (!connectionString) {
   process.exit(1);
 }
 
-const migrationPath = new URL(
+const migrationPaths = [
   "../migrations/0001_assistant_runtime.sql",
-  import.meta.url,
-);
-const sql = readFileSync(migrationPath, "utf8");
+  "../migrations/0002_assistant_goals.sql",
+].map((path) => new URL(path, import.meta.url));
 
 const client = new Client({ connectionString });
 try {
   await client.connect();
-  await client.query(sql);
-  console.log(`applied ${migrationPath.pathname.split("/").pop()}`);
+  for (const migrationPath of migrationPaths) {
+    await client.query(readFileSync(migrationPath, "utf8"));
+    console.log(`applied ${migrationPath.pathname.split("/").pop()}`);
+  }
 } catch (error) {
   console.error(
     `migration failed: ${error instanceof Error ? error.message : error}`,

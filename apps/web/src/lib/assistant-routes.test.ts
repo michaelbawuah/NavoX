@@ -2,10 +2,17 @@ import {
   AssistantError,
   type AssistantRuntime,
 } from "@navox/assistant-runtime";
-import type { AssistantSessionView, AssistantTurnView } from "@navox/contracts";
+import type {
+  AssistantGoalView,
+  AssistantSessionView,
+  AssistantTurnView,
+} from "@navox/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { POST as dispatchGoalRoute } from "../app/api/v1/assistant/goals/[goalId]/dispatch/route";
+import { GET as readGoalRoute } from "../app/api/v1/assistant/goals/[goalId]/route";
 import { POST as approveEmailRoute } from "../app/api/v1/assistant/sessions/[sessionId]/email-drafts/[draftId]/approve/route";
 import { POST as prepareEmailRoute } from "../app/api/v1/assistant/sessions/[sessionId]/email-drafts/[draftId]/prepare/route";
+import { GET as listGoalsRoute } from "../app/api/v1/assistant/sessions/[sessionId]/goals/route";
 import { POST as messageRoute } from "../app/api/v1/assistant/sessions/[sessionId]/messages/route";
 import {
   DELETE as deleteSessionRoute,
@@ -61,6 +68,9 @@ function fakeRuntime(
     prepareEmailDraft: vi.fn(),
     approveEmailDraft: vi.fn(),
     readEmailAction: vi.fn(),
+    readGoal: vi.fn(),
+    listSessionGoals: vi.fn(async () => []),
+    redispatchGoal: vi.fn(),
     ...overrides,
   };
 }
@@ -280,6 +290,91 @@ describe("assistant route handlers", () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
       error: { code: "invalid_request" },
+    });
+  });
+});
+
+const goalId = "99999999-9999-4999-8999-999999999999";
+const goal: AssistantGoalView = {
+  id: goalId,
+  kind: "BRIEFING",
+  status: "COMPLETED",
+  dispatch_state: "DISPATCHED",
+  detail: "goal.verified",
+  action_id: null,
+  created_at: "2026-10-01T12:00:00.000Z",
+  updated_at: "2026-10-01T12:01:00.000Z",
+  completed_at: "2026-10-01T12:01:00.000Z",
+};
+const goalContext = { params: Promise.resolve({ goalId }) };
+
+describe("assistant goal routes", () => {
+  it("lists the session's goals for an authenticated caller", async () => {
+    const runtime = fakeRuntime({
+      listSessionGoals: vi.fn(async () => [goal]),
+    });
+    setAssistantRuntimeForTests(runtime);
+    const response = await listGoalsRoute(
+      request(`/api/v1/assistant/sessions/${sessionId}/goals`, {
+        method: "GET",
+      }),
+      context,
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({ goals: [goal] });
+    expect(runtime.listSessionGoals).toHaveBeenCalledWith({
+      cookie: "navox_session=abc123",
+      session_id: sessionId,
+    });
+  });
+
+  it("reads one goal and refuses a caller without a session cookie", async () => {
+    const runtime = fakeRuntime({ readGoal: vi.fn(async () => goal) });
+    setAssistantRuntimeForTests(runtime);
+    const response = await readGoalRoute(
+      request(`/api/v1/assistant/goals/${goalId}`, { method: "GET" }),
+      goalContext,
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ goal });
+    expect(runtime.readGoal).toHaveBeenCalledWith({
+      cookie: "navox_session=abc123",
+      goal_id: goalId,
+    });
+
+    const anonymous = await readGoalRoute(
+      request(`/api/v1/assistant/goals/${goalId}`, {
+        method: "GET",
+        cookie: null,
+      }),
+      goalContext,
+    );
+    expect(anonymous.status).toBe(401);
+  });
+
+  it("guards goal re-dispatch as a same-origin mutation", async () => {
+    const runtime = fakeRuntime({
+      redispatchGoal: vi.fn(async () => ({ goal, dispatched: true })),
+    });
+    setAssistantRuntimeForTests(runtime);
+    const path = `/api/v1/assistant/goals/${goalId}/dispatch`;
+    const crossOrigin = await dispatchGoalRoute(
+      request(path, { origin: "https://evil.example" }),
+      goalContext,
+    );
+    expect(crossOrigin.status).toBe(403);
+    expect(runtime.redispatchGoal).not.toHaveBeenCalled();
+
+    const response = await dispatchGoalRoute(request(path), goalContext);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      goal,
+      dispatched: true,
+    });
+    expect(runtime.redispatchGoal).toHaveBeenCalledWith({
+      cookie: "navox_session=abc123",
+      goal_id: goalId,
     });
   });
 });

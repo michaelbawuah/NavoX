@@ -294,6 +294,73 @@ export interface AssistantGoalRef {
   created_at: string;
 }
 
+/**
+ * SPEC-008 M14B bounded personal goals.
+ *
+ * A goal is a durable, opaque UUID that names one bounded verification job. It
+ * carries no browser cookie, email body, source content, provider token or
+ * approval secret into Temporal history: the workflow payload is the goal ID
+ * alone, and the worker reads its own row and its referenced turn/action from
+ * the same PostgreSQL database.
+ */
+export type AssistantGoalKind =
+  | "BRIEFING"
+  | "MEETING_PREP"
+  | "COMMUNICATION_ACTION";
+
+/**
+ * The truthful state of one goal. Only a completed action with an independent
+ * `verified_at` may become `COMPLETED`; pending approval stays
+ * `WAITING_FOR_USER`, and an executed but unverified action stays
+ * `WAITING_FOR_EXTERNAL`.
+ */
+export type AssistantGoalStatus =
+  | "PENDING"
+  | "RUNNING"
+  | "WAITING_FOR_USER"
+  | "WAITING_FOR_EXTERNAL"
+  | "COMPLETED"
+  | "FAILED";
+
+/**
+ * Whether the durable workflow for this goal was ever accepted. A dispatch
+ * failure leaves the goal `PENDING` with `DISPATCH_FAILED`, never a claimed
+ * completion, and the operator may retry the bounded dispatch.
+ */
+export type AssistantGoalDispatchState =
+  | "NOT_DISPATCHED"
+  | "DISPATCHED"
+  | "DISPATCH_FAILED";
+
+/** A goal projection. No source content, payload or credential is included. */
+export interface AssistantGoalView {
+  id: string;
+  kind: AssistantGoalKind;
+  status: AssistantGoalStatus;
+  dispatch_state: AssistantGoalDispatchState;
+  /** Bounded, non-sensitive operator-facing detail from a fixed vocabulary. */
+  detail: string | null;
+  /** The SPEC-001/003 action a consequential-action goal tracks, if any. */
+  action_id: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export interface AssistantGoalResponse {
+  goal: AssistantGoalView;
+}
+
+export interface AssistantGoalListResponse {
+  goals: AssistantGoalView[];
+}
+
+export interface AssistantGoalDispatchResponse {
+  goal: AssistantGoalView;
+  /** False when no dispatcher is configured or the bounded retry was refused. */
+  dispatched: boolean;
+}
+
 export interface AssistantActionRef {
   action_id: string;
   state: AssistantActionState;

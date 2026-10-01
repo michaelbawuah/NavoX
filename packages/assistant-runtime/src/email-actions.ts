@@ -5,6 +5,7 @@ import type {
 } from "@navox/contracts";
 import { AssistantError } from "./errors";
 import type { AccountScope, NavoxUpstream } from "./gateway";
+import type { AssistantGoalService } from "./goal-service";
 import type { AssistantStore, AssistantTurnRecord } from "./store";
 import { isRecord, isUuid } from "./validate";
 
@@ -220,6 +221,12 @@ function assertActionMatchesDraft(
 export interface AssistantEmailActionDeps {
   store: AssistantStore;
   upstream: NavoxUpstream;
+  /**
+   * The bounded goal recorder. When present, preparing an action also records
+   * the durable verification goal for it. It adds no authority: the action
+   * still needs its own exact SPEC-001 approval before it can execute.
+   */
+  goals?: AssistantGoalService;
   now?: () => Date;
 }
 
@@ -379,6 +386,18 @@ export function createAssistantEmailActions(deps: AssistantEmailActionDeps) {
       // exact draft version and source response before returning it for review.
       const prepared = await boundDraft(input.cookie, resourceId, draft.id);
       assertActionMatchesDraft(action, prepared);
+      if (deps.goals) {
+        // Re-derive the scope for this write; the goal row is fenced by the
+        // session's own workspace and user, so a changed account fails closed.
+        const scope: AccountScope = await deps.upstream.fetchAccount(
+          input.cookie,
+        );
+        await deps.goals.recordActionGoal({
+          scope,
+          session_id: input.session_id,
+          action_id: action.id,
+        });
+      }
       return action;
     },
 

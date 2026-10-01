@@ -7,6 +7,9 @@ import {
 import type {
   AssistantBlock,
   AssistantCitation,
+  AssistantGoalKind,
+  AssistantGoalStatus,
+  AssistantGoalView,
   AssistantTurnView,
   AssistantVoiceState,
 } from "@navox/contracts";
@@ -25,7 +28,9 @@ import {
   AssistantTurnLedger,
   browserTimezone,
   deleteAssistantSession,
+  dispatchAssistantGoal,
   forgetAssistantSession,
+  loadAssistantGoals,
   resumeOrCreateAssistantSession,
   submitAssistantTurn,
   synthesizeAssistantSpeech,
@@ -456,6 +461,103 @@ function failureMessage(error: unknown): string {
   return "The assistant could not answer right now. Please try again.";
 }
 
+/** Operator-facing labels for a goal's truthful state; no raw code is shown. */
+export const GOAL_KIND_LABELS: Record<AssistantGoalKind, string> = {
+  BRIEFING: "Briefing",
+  MEETING_PREP: "Meeting prep",
+  COMMUNICATION_ACTION: "Communication action",
+};
+
+export const GOAL_STATUS_LABELS: Record<AssistantGoalStatus, string> = {
+  PENDING: "Not verified yet",
+  RUNNING: "In progress",
+  WAITING_FOR_USER: "Waiting for you",
+  WAITING_FOR_EXTERNAL: "Waiting for verification",
+  COMPLETED: "Verified",
+  FAILED: "Not verified",
+};
+
+const GOAL_DETAIL_TEXT: Record<string, string> = {
+  "goal.created": "Queued for verification.",
+  "goal.dispatch_unconfigured":
+    "Durable verification is not configured in this deployment.",
+  "goal.dispatch_failed": "Verification could not start.",
+  "goal.dispatched": "Verification is running.",
+  "goal.verified": "Confirmed by the owning service.",
+  "goal.turn_not_grounded": "The saved answer was not a grounded result.",
+  "goal.turn_unreadable": "The saved answer could not be re-validated.",
+  "goal.action_waiting_for_approval": "Waiting for your approval.",
+  "goal.action_in_flight": "The action is in progress.",
+  "goal.action_executed_unverified":
+    "Executed, waiting for independent verification.",
+  "goal.action_failed": "The action did not complete.",
+  "goal.action_uncertain": "The outcome is uncertain.",
+  "goal.action_ledger_inconsistent": "The action record could not be verified.",
+  "goal.action_status_unrecognized": "The action status could not be verified.",
+  "goal.verification_deadline_reached":
+    "Verification timed out before an outcome was recorded.",
+  "goal.window_ended_waiting_for_user":
+    "Verification paused while waiting for your approval.",
+  "goal.window_ended_waiting_for_external":
+    "Verification paused while waiting for an external result.",
+  "goal.window_ended_in_flight":
+    "Verification paused while the action was still in progress.",
+};
+
+function goalDetailText(detail: string | null): string | null {
+  if (!detail) return null;
+  return GOAL_DETAIL_TEXT[detail] ?? null;
+}
+
+/**
+ * The bounded, per-session goal states. It shows only what the server
+ * recorded: a goal is never described as verified here unless the owning
+ * service verified it.
+ */
+function AssistantGoalList({
+  goals,
+  busy,
+  onRetry,
+}: {
+  goals: readonly AssistantGoalView[];
+  busy: boolean;
+  onRetry: (goalId: string) => void;
+}) {
+  if (goals.length === 0) return null;
+  return (
+    <ul className={styles.goals} aria-label="Verification goals">
+      {goals.map((goal) => (
+        <li
+          key={goal.id}
+          className={styles.goal}
+          data-goal-status={goal.status}
+        >
+          <span className={styles.goalKind}>{GOAL_KIND_LABELS[goal.kind]}</span>
+          <span className={styles.goalStatus}>
+            {GOAL_STATUS_LABELS[goal.status]}
+          </span>
+          {goalDetailText(goal.detail) && (
+            <span className={styles.goalDetail}>
+              {goalDetailText(goal.detail)}
+            </span>
+          )}
+          {(goal.dispatch_state === "DISPATCH_FAILED" ||
+            goal.detail?.startsWith("goal.window_ended_")) && (
+            <button
+              type="button"
+              className={styles.goalRetry}
+              onClick={() => onRetry(goal.id)}
+              disabled={busy}
+            >
+              Retry verification
+            </button>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function browserSessionStorage(): Storage | null {
   try {
     return typeof window === "undefined" ? null : window.sessionStorage;
@@ -473,6 +575,7 @@ export function NavoXAssistant() {
     | "PAUSED";
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [turns, setTurns] = useState<AssistantTurnView[]>([]);
+  const [goals, setGoals] = useState<AssistantGoalView[]>([]);
   const [text, setText] = useState("");
   const [voice, setVoice] = useState<VoiceSessionState>(initialVoiceState);
   const [notice, setNotice] = useState<string | null>(null);
@@ -567,10 +670,34 @@ export function NavoXAssistant() {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
 
+  /**
+   * The server owns each goal's state. This only re-reads it, and a failed
+   * refresh leaves the last known state on screen instead of inventing a new
+   * one.
+   */
+  const refreshGoals = useCallback(async () => {
+    const session = sessionIdRef.current;
+    if (!session) return;
+    try {
+      setGoals(await loadAssistantGoals(session));
+    } catch {
+      // Leave the last known state; the next recorded turn refreshes it.
+    }
+  }, []);
+
   useEffect(() => {
     void openSession();
     voiceSession();
   }, [openSession, voiceSession]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    void refreshGoals();
+    const refreshTimer = window.setInterval(() => {
+      void refreshGoals();
+    }, 30_000);
+    return () => window.clearInterval(refreshTimer);
+  }, [refreshGoals, sessionId]);
 
   const runner = useMemo(
     () =>
@@ -582,6 +709,8 @@ export function NavoXAssistant() {
           setTurns((previous) => [...previous, turn]);
           setText("");
           if (turn.modality === "VOICE") voiceRef.current?.answerReady();
+          // A recorded turn may have created its bounded goal.
+          void refreshGoals();
         },
         onNotice: (message, modality) => {
           setNotice(message);
@@ -600,7 +729,7 @@ export function NavoXAssistant() {
         },
         messageForError: failureMessage,
       }),
-    [],
+    [refreshGoals],
   );
 
   const sendTurn = useCallback(
@@ -628,6 +757,19 @@ export function NavoXAssistant() {
       void sendTurn("VOICE", transcript);
     };
   }, [sendTurn]);
+
+  const retryGoal = useCallback(async (goalId: string) => {
+    try {
+      const result = await dispatchAssistantGoal(goalId);
+      setGoals((previous) =>
+        previous.map((goal) => (goal.id === goalId ? result.goal : goal)),
+      );
+      if (!result.dispatched)
+        setNotice("Verification could not be restarted right now.");
+    } catch (error) {
+      setNotice(failureMessage(error));
+    }
+  }, []);
 
   const startWakeListening = useCallback(async () => {
     if (!handsFreeEnabledRef.current || !sessionIdRef.current) return;
@@ -866,6 +1008,14 @@ export function NavoXAssistant() {
           />
         ))}
       </ol>
+
+      <AssistantGoalList
+        goals={goals}
+        busy={busy}
+        onRetry={(goalId) => {
+          void retryGoal(goalId);
+        }}
+      />
 
       {connecting && <p className={styles.status}>Starting a conversation…</p>}
       {!connecting && turns.length === 0 && (

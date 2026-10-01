@@ -6,6 +6,11 @@ const sql = readFileSync(
   "utf8",
 );
 const normalized = sql.replace(/\s+/g, " ");
+const goalsSql = readFileSync(
+  new URL("../migrations/0002_assistant_goals.sql", import.meta.url),
+  "utf8",
+);
+const goalsNormalized = goalsSql.replace(/\s+/g, " ");
 
 describe("TypeScript-owned NavoXbot migration", () => {
   it("adds only NavoXbot tables and leaves the Alembic head alone", () => {
@@ -68,6 +73,76 @@ describe("TypeScript-owned NavoXbot migration", () => {
     expect(normalized).toMatch(/modality IN \('TEXT', 'VOICE'\)/);
     expect(normalized).toMatch(
       /state IN \('READY', 'CLARIFY', 'UNAVAILABLE', 'WITHHELD'\)/,
+    );
+  });
+});
+
+describe("TypeScript-owned M14B goal migration", () => {
+  it("adds only its own table and leaves the Alembic head alone", () => {
+    expect(goalsSql).toMatch(
+      /CREATE TABLE IF NOT EXISTS assistant_runtime_goals/,
+    );
+    expect(goalsSql).not.toMatch(/ALTER TABLE assistant_sessions/i);
+    expect(goalsSql).not.toMatch(/\bDROP\s+(TABLE|COLUMN)\b/i);
+    expect(goalsSql).not.toMatch(/alembic_version/i);
+  });
+
+  it("fences a goal by its owning session, workspace and user", () => {
+    expect(goalsNormalized).toMatch(
+      /FOREIGN KEY \(session_id, workspace_id, user_id\) REFERENCES assistant_runtime_sessions \(id, workspace_id, user_id\)/,
+    );
+    expect(goalsNormalized).toMatch(
+      /FOREIGN KEY \(source_turn_id\) REFERENCES assistant_runtime_turns \(id\)/,
+    );
+    expect(goalsNormalized).toMatch(
+      /FOREIGN KEY \(action_id\) REFERENCES actions \(id\)/,
+    );
+  });
+
+  it("names exactly one bounded source per goal", () => {
+    expect(goalsNormalized).toMatch(
+      /\(source_turn_id IS NULL\) <> \(action_id IS NULL\)/,
+    );
+    expect(goalsNormalized).toMatch(
+      /\(kind = 'COMMUNICATION_ACTION'\) = \(action_id IS NOT NULL\)/,
+    );
+  });
+
+  it("keeps the status vocabulary in step with the shared contracts", () => {
+    expect(goalsNormalized).toMatch(
+      /kind IN \('BRIEFING', 'MEETING_PREP', 'COMMUNICATION_ACTION'\)/,
+    );
+    expect(goalsNormalized).toMatch(
+      /status IN \( 'PENDING', 'RUNNING', 'WAITING_FOR_USER', 'WAITING_FOR_EXTERNAL', 'COMPLETED', 'FAILED' \)/,
+    );
+    expect(goalsNormalized).toMatch(
+      /dispatch_state IN \('NOT_DISPATCHED', 'DISPATCHED', 'DISPATCH_FAILED'\)/,
+    );
+  });
+
+  it("bounds dispatch, verification and completion", () => {
+    expect(goalsNormalized).toMatch(/attempts BETWEEN 0 AND 8/);
+    expect(goalsNormalized).toMatch(/verify_attempts BETWEEN 0 AND 64/);
+    expect(goalsNormalized).toMatch(
+      /\(status = 'COMPLETED'\) = \(completed_at IS NOT NULL\)/,
+    );
+    expect(goalsNormalized).toMatch(
+      /detail IS NULL OR char_length\(detail\) <= 500/,
+    );
+  });
+
+  it("makes a replayed turn or action exactly one goal", () => {
+    expect(goalsSql).toMatch(
+      /CREATE UNIQUE INDEX IF NOT EXISTS assistant_runtime_goals_turn_unique/,
+    );
+    expect(goalsSql).toMatch(
+      /CREATE UNIQUE INDEX IF NOT EXISTS assistant_runtime_goals_action_unique/,
+    );
+    expect(goalsNormalized).toMatch(
+      /ON assistant_runtime_goals \(source_turn_id, kind\) WHERE source_turn_id IS NOT NULL/,
+    );
+    expect(goalsNormalized).toMatch(
+      /ON assistant_runtime_goals \(action_id\) WHERE action_id IS NOT NULL/,
     );
   });
 });

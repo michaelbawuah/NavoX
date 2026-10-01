@@ -1,8 +1,10 @@
 import { AssistantError } from "../errors";
 import type { AccountScope, NavoxUpstream } from "../gateway";
 import { PLANNER_NO_PROVIDER } from "../gateway";
+import { GOAL_DETAIL } from "../goals";
 import { LIMITS } from "../limits";
 import type {
+  AssistantGoalRecord,
   AssistantRequestClaim,
   AssistantScope,
   AssistantSessionRecord,
@@ -26,16 +28,29 @@ export const SESSION_ID = "66666666-6666-4666-8666-666666666666";
 export const REQUEST_ID = "77777777-7777-4777-8777-777777777777";
 
 /** In-memory stand-in for the PostgreSQL store that mirrors its constraints. */
+export interface MemoryActionRow {
+  user_id: string;
+  workspace_id: string;
+  status: string;
+  executed_at: string | null;
+  verified_at: string | null;
+}
+
 export interface MemoryStore extends AssistantStore {
   readonly sessions: AssistantSessionRecord[];
   readonly turns: AssistantTurnRecord[];
   readonly claims: Map<string, AssistantRequestClaim>;
+  readonly goals: AssistantGoalRecord[];
+  /** Seedable SPEC-001/003 action rows the worker-facing read joins against. */
+  readonly actions: Map<string, MemoryActionRow>;
 }
 
 export function createMemoryStore(): MemoryStore {
   const sessions: AssistantSessionRecord[] = [];
   const turns: AssistantTurnRecord[] = [];
   const claims = new Map<string, AssistantRequestClaim>();
+  const goals: AssistantGoalRecord[] = [];
+  const actions = new Map<string, MemoryActionRow>();
   const claimKey = (sessionId: string, requestId: string) =>
     `${sessionId}:${requestId}`;
 
@@ -43,6 +58,8 @@ export function createMemoryStore(): MemoryStore {
     sessions,
     turns,
     claims,
+    goals,
+    actions,
 
     async createSession(input) {
       if (
@@ -253,6 +270,202 @@ export function createMemoryStore(): MemoryStore {
         }
       }
       return purged;
+    },
+
+    async createGoal(input) {
+      // The source must belong to this exact session, workspace and user. The
+      // PostgreSQL store enforces the same rule inside its insert statement.
+      const session = sessions.find(
+        (candidate) =>
+          candidate.id === input.session_id &&
+          candidate.workspace_id === input.scope.workspace_id &&
+          candidate.user_id === input.scope.user_id,
+      );
+      const sourceTurn =
+        input.source_turn_id === null
+          ? null
+          : (turns.find((turn) => turn.id === input.source_turn_id) ?? null);
+      const sourceAction =
+        input.action_id === null
+          ? null
+          : (actions.get(input.action_id) ?? null);
+      const owned =
+        session !== undefined &&
+        (input.source_turn_id !== null
+          ? sourceTurn?.session_id === input.session_id
+          : sourceAction !== null &&
+            sourceAction.user_id === input.scope.user_id &&
+            sourceAction.workspace_id === input.scope.workspace_id);
+      if (!owned)
+        throw new AssistantError(
+          "forbidden",
+          "That goal source is not available for this account.",
+        );
+      const existing = goals.find((goal) =>
+        input.source_turn_id !== null
+          ? goal.source_turn_id === input.source_turn_id &&
+            goal.kind === input.kind
+          : goal.action_id === input.action_id,
+      );
+      if (existing) {
+        if (
+          existing.session_id !== input.session_id ||
+          existing.workspace_id !== input.scope.workspace_id ||
+          existing.user_id !== input.scope.user_id
+        )
+          throw new AssistantError(
+            "forbidden",
+            "This account cannot use that goal.",
+          );
+        return { created: false, goal: { ...existing } };
+      }
+      const record: AssistantGoalRecord = {
+        id: input.id,
+        session_id: input.session_id,
+        workspace_id: input.scope.workspace_id,
+        user_id: input.scope.user_id,
+        kind: input.kind,
+        status: "PENDING",
+        dispatch_state: "NOT_DISPATCHED",
+        source_turn_id: input.source_turn_id,
+        action_id: input.action_id,
+        detail: GOAL_DETAIL.pendingDispatch,
+        attempts: 0,
+        verify_attempts: 0,
+        created_at: input.created_at,
+        updated_at: input.created_at,
+        completed_at: null,
+      };
+      goals.push(record);
+      return { created: true, goal: { ...record } };
+    },
+
+    async readGoal(input) {
+      const found = goals.find(
+        (goal) =>
+          goal.id === input.goal_id &&
+          goal.workspace_id === input.scope.workspace_id &&
+          goal.user_id === input.scope.user_id,
+      );
+      return found ? { ...found } : null;
+    },
+
+    async listGoals(input) {
+      return goals
+        .filter(
+          (goal) =>
+            goal.session_id === input.session_id &&
+            goal.workspace_id === input.scope.workspace_id &&
+            goal.user_id === input.scope.user_id,
+        )
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .slice(0, LIMITS.maxTurnsPerSession)
+        .map((goal) => ({ ...goal }));
+    },
+
+    async readGoalSourceCheck(input) {
+      const found = goals.find((goal) => goal.id === input.goal_id);
+      if (!found) return null;
+      const turn =
+        found.source_turn_id === null
+          ? null
+          : (turns.find((candidate) => candidate.id === found.source_turn_id) ??
+            null);
+      const session = sessions.find(
+        (candidate) => candidate.id === found.session_id,
+      );
+      const action =
+        found.action_id === null
+          ? null
+          : (actions.get(found.action_id) ?? null);
+      const turnOwned =
+        turn !== null &&
+        session !== undefined &&
+        turn.session_id === found.session_id &&
+        session.workspace_id === found.workspace_id &&
+        session.user_id === found.user_id;
+      const actionOwned =
+        action !== null &&
+        action.user_id === found.user_id &&
+        action.workspace_id === found.workspace_id;
+      return {
+        goal: { ...found },
+        source_owned: found.source_turn_id !== null ? turnOwned : actionOwned,
+        turn: turn
+          ? {
+              state: turn.state,
+              plan: turn.plan,
+              decision: turn.decision,
+              presentation: turn.presentation,
+            }
+          : null,
+        action: action
+          ? {
+              status: action.status,
+              executed_at: action.executed_at,
+              verified_at: action.verified_at,
+            }
+          : null,
+      };
+    },
+
+    async markGoalDispatched(input) {
+      const found = goals.find(
+        (goal) =>
+          goal.id === input.goal_id &&
+          goal.workspace_id === input.scope.workspace_id &&
+          goal.user_id === input.scope.user_id &&
+          goal.status !== "COMPLETED",
+      );
+      if (!found) return null;
+      found.dispatch_state = "DISPATCHED";
+      found.detail = GOAL_DETAIL.dispatched;
+      found.updated_at = input.now;
+      return { ...found };
+    },
+
+    async markGoalDispatchFailed(input) {
+      const found = goals.find(
+        (goal) =>
+          goal.id === input.goal_id &&
+          goal.workspace_id === input.scope.workspace_id &&
+          goal.user_id === input.scope.user_id &&
+          goal.status !== "COMPLETED",
+      );
+      if (!found) return null;
+      found.dispatch_state = "DISPATCH_FAILED";
+      found.detail = input.detail;
+      found.updated_at = input.now;
+      return { ...found };
+    },
+
+    async claimGoalDispatchAttempt(input) {
+      // A single synchronous check-and-increment, mirroring the atomic UPDATE.
+      const found = goals.find(
+        (goal) =>
+          goal.id === input.goal_id &&
+          goal.workspace_id === input.scope.workspace_id &&
+          goal.user_id === input.scope.user_id &&
+          goal.status !== "COMPLETED" &&
+          goal.attempts < input.max_attempts,
+      );
+      if (!found) return null;
+      found.attempts += 1;
+      found.updated_at = input.now;
+      return { ...found };
+    },
+
+    async applyGoalVerification(input) {
+      const found = goals.find(
+        (goal) => goal.id === input.goal_id && goal.status !== "COMPLETED",
+      );
+      if (!found) return null;
+      found.status = input.status;
+      found.detail = input.detail;
+      found.completed_at = input.completed_at;
+      found.updated_at = input.now;
+      found.verify_attempts = Math.min(found.verify_attempts + 1, 64);
+      return { ...found };
     },
   };
 }

@@ -6,6 +6,8 @@ export * from "./email";
 export * from "./email-actions";
 export * from "./errors";
 export * from "./gateway";
+export * from "./goal-service";
+export * from "./goals";
 export * from "./http";
 export * from "./ledger";
 export * from "./limits";

@@ -5,23 +5,33 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./voice": "./src/voice.ts"
+    "./voice": "./src/voice.ts",
+    "./temporal": "./src/temporal/index.ts",
+    "./temporal/client": "./src/temporal/client.ts",
+    "./temporal/config": "./src/temporal/config.ts"
   },
   "scripts": {
     "lint": "biome check .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "migrate": "node scripts/migrate.mjs",
-    "migration:check": "node scripts/migration-check.mjs"
+    "migration:check": "node scripts/migration-check.mjs",
+    "worker:goals": "tsx src/temporal/worker.ts"
   },
   "dependencies": {
     "@navox/contracts": "0.1.0",
+    "@temporalio/activity": "1.24.0",
+    "@temporalio/client": "1.24.0",
+    "@temporalio/common": "1.24.0",
+    "@temporalio/worker": "1.24.0",
+    "@temporalio/workflow": "1.24.0",
     "pg": "^8.23.1"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
     "@types/node": "26.6.2",
     "@types/pg": "^8.23.1",
+    "tsx": "4.23.15",
     "typescript": "5.9.3",
     "vitest": "5.0.1"
   }

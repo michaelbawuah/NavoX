@@ -1,5 +1,6 @@
 import {
   AssistantError,
+  type AssistantGoalDispatcher,
   type AssistantRuntime,
   createAssistantRuntime,
   createNavoxUpstream,
@@ -8,11 +9,14 @@ import {
   createPurgeScheduler,
   type PurgeScheduler,
 } from "@navox/assistant-runtime";
+import { createLazyTemporalGoalDispatcher } from "@navox/assistant-runtime/temporal/client";
+import { assistantTemporalConfig } from "@navox/assistant-runtime/temporal/config";
 
 interface AssistantRuntimeGlobal {
   __navoxAssistantRuntime?: AssistantRuntime;
   __navoxAssistantClose?: () => Promise<void>;
   __navoxAssistantPurge?: PurgeScheduler;
+  __navoxAssistantGoals?: AssistantGoalDispatcher | null;
 }
 
 const globalScope = globalThis as AssistantRuntimeGlobal;
@@ -38,6 +42,22 @@ export function assistantOrigin(): string | null {
 }
 
 /**
+ * The durable goal dispatcher, or null when this deployment has no Temporal
+ * target. It opens nothing until the first goal is recorded, so a build or a
+ * read-only request never contacts Temporal.
+ */
+function assistantGoalDispatcher(): AssistantGoalDispatcher | null {
+  if (globalScope.__navoxAssistantGoals !== undefined)
+    return globalScope.__navoxAssistantGoals;
+  const config = assistantTemporalConfig();
+  const dispatcher = config.target
+    ? createLazyTemporalGoalDispatcher(config)
+    : null;
+  globalScope.__navoxAssistantGoals = dispatcher;
+  return dispatcher;
+}
+
+/**
  * Builds the runtime once per Node process. The pool is cached on `globalThis`
  * so a dev reload does not leak connections.
  */
@@ -58,6 +78,7 @@ export function getAssistantRuntime(): AssistantRuntime {
   const runtime = createAssistantRuntime({
     store: createPostgresStore(executor),
     upstream: createNavoxUpstream({ baseUrl: assistantApiBaseUrl() }),
+    goalDispatcher: assistantGoalDispatcher(),
   });
   // Bounded, non-overlapping retention purge. The timer is unref'd, so row
   // expiry is an access bound with scheduled cleanup, not an exact deadline.

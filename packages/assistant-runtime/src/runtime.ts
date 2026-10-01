@@ -3,6 +3,7 @@ import type {
   AssistantBlock,
   AssistantEmailAction,
   AssistantEmailDraft,
+  AssistantGoalView,
   AssistantMessageRequest,
   AssistantMessageResponse,
   AssistantResponseState,
@@ -35,6 +36,12 @@ import {
   type NavoxUpstream,
   PLANNER_NO_PROVIDER,
 } from "./gateway";
+import {
+  type AssistantGoalDispatcher,
+  type AssistantGoalService,
+  createAssistantGoalService,
+  goalView,
+} from "./goal-service";
 import {
   assertTurnBudget,
   fingerprintTurn,
@@ -105,6 +112,14 @@ const PLAN_FAILURE_TEXT: Record<string, string> = {
 export interface AssistantRuntimeDeps {
   store: AssistantStore;
   upstream: NavoxUpstream;
+  /**
+   * The durable goal dispatcher. Absent, or null, when this deployment has no
+   * configured Temporal target; a goal then stays truthfully pending with an
+   * explicit failed dispatch instead of a claimed completion.
+   */
+  goalDispatcher?: AssistantGoalDispatcher | null;
+  /** Test seam. Production builds the goal service from the store. */
+  goals?: AssistantGoalService;
   now?: () => Date;
   newId?: () => string;
   sleep?: (ms: number) => Promise<void>;
@@ -161,6 +176,24 @@ export interface AssistantRuntime {
     source_turn_id: string;
     draft_id: string;
   }): Promise<AssistantEmailAction>;
+  /** Reads one durable goal, fenced by the owning session's scope. */
+  readGoal(input: {
+    cookie: string;
+    goal_id: string;
+  }): Promise<AssistantGoalView>;
+  /** Lists a bounded number of durable goals for one owned session. */
+  listSessionGoals(input: {
+    cookie: string;
+    session_id: string;
+  }): Promise<AssistantGoalView[]>;
+  /**
+   * The recoverable dispatch path for one goal. Re-starting is idempotent, so
+   * a duplicate never becomes a second durable job.
+   */
+  redispatchGoal(input: {
+    cookie: string;
+    goal_id: string;
+  }): Promise<{ goal: AssistantGoalView; dispatched: boolean }>;
 }
 
 function sessionView(
@@ -207,6 +240,19 @@ export function createAssistantRuntime(
   const claimWaitMs = deps.claimWaitMs ?? LIMITS.claimWaitMs;
   const claimPollMs = deps.claimPollMs ?? LIMITS.claimPollMs;
   const claimStaleMs = deps.claimStaleMs ?? LIMITS.claimStaleMs;
+  /**
+   * Bounded personal goals. The service is derived from the same store and the
+   * same scope checks as a turn; it grants no new authority and no provider
+   * call, and it never approves or executes a consequential action.
+   */
+  const goals =
+    deps.goals ??
+    createAssistantGoalService({
+      store: deps.store,
+      dispatcher: deps.goalDispatcher ?? null,
+      now,
+      newId,
+    });
 
   function replayOf(
     existing: AssistantTurnRecord,
@@ -1160,7 +1206,7 @@ export function createAssistantRuntime(
   }
 
   return {
-    ...createAssistantEmailActions(deps),
+    ...createAssistantEmailActions({ ...deps, goals }),
     async createSession(input) {
       const scope = await scopeFor(input.cookie);
       const navoxSessionId = await deps.upstream.createAssistantSession(
@@ -1397,6 +1443,14 @@ export function createAssistantRuntime(
       }
 
       await resolveClaim(sessionId, scope, request.request_id, turn.id);
+      // A bounded goal is derived from the saved turn. The turn is already the
+      // operator's answer, so goal bookkeeping never fails it: the goals route
+      // reports only goals that were actually recorded.
+      try {
+        await goals.recordTurnGoal({ scope, session_id: sessionId, turn });
+      } catch {
+        // A later turn naming the same saved turn retries this bounded write.
+      }
       return { session_id: sessionId, turn: toTurnView(turn), replay: false };
     },
 
@@ -1420,6 +1474,32 @@ export function createAssistantRuntime(
         now().toISOString(),
         LIMITS.purgeBatchSize,
       );
+    },
+
+    async readGoal(input) {
+      const scope = await scopeFor(input.cookie);
+      const goalId = assertUuid(input.goal_id, "goal ID");
+      return goalView(await goals.readGoal({ goal_id: goalId, scope }));
+    },
+
+    async listSessionGoals(input) {
+      const scope = await scopeFor(input.cookie);
+      const sessionId = assertUuid(input.session_id, "session ID");
+      // Ownership is re-derived here, so a foreign session is a not-found and
+      // never an empty list that implies the session exists.
+      await loadSession(sessionId, scope);
+      const records = await goals.listGoals({
+        session_id: sessionId,
+        scope,
+      });
+      return records.map(goalView);
+    },
+
+    async redispatchGoal(input) {
+      const scope = await scopeFor(input.cookie);
+      const goalId = assertUuid(input.goal_id, "goal ID");
+      const result = await goals.redispatch({ goal_id: goalId, scope });
+      return { goal: goalView(result.goal), dispatched: result.dispatched };
     },
   };
 }

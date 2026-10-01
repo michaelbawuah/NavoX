@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * SPEC-008 M1 schema check.
+ * SPEC-008 NavoXbot schema check (M1 runtime tables + M14B goals).
  *
  * Always: static assertions on the TypeScript-owned migration SQL (deterministic,
  * no database). When ASSISTANT_TEST_DATABASE_URL points at a disposable
@@ -11,11 +11,14 @@
  */
 import { readFileSync } from "node:fs";
 
-const migrationPath = new URL(
+const migrationPaths = [
   "../migrations/0001_assistant_runtime.sql",
-  import.meta.url,
+  "../migrations/0002_assistant_goals.sql",
+].map((path) => new URL(path, import.meta.url));
+const [runtimeSql, goalsSql] = migrationPaths.map((path) =>
+  readFileSync(path, "utf8"),
 );
-const sql = readFileSync(migrationPath, "utf8");
+const sql = runtimeSql;
 
 const failures = [];
 const passed = [];
@@ -112,6 +115,71 @@ check(
   !/ALTER TABLE assistant_sessions\b/i.test(sql),
 );
 
+// ---- M14B bounded personal goals -------------------------------------------
+
+const goalsNormalized = goalsSql.replace(/\s+/g, " ");
+
+check(
+  "goals migration creates assistant_runtime_goals",
+  /CREATE TABLE IF NOT EXISTS assistant_runtime_goals/.test(goalsSql),
+);
+check(
+  "a goal is fenced by its owning session, workspace and user",
+  /FOREIGN KEY \(session_id, workspace_id, user_id\) REFERENCES assistant_runtime_sessions \(id, workspace_id, user_id\)/.test(
+    goalsNormalized,
+  ),
+);
+check(
+  "a goal names at most one saved turn or one SPEC-001/003 action",
+  /\(source_turn_id IS NULL\) <> \(action_id IS NULL\)/.test(goalsNormalized),
+);
+check(
+  "only a consequential-action goal may name an action",
+  /\(kind = 'COMMUNICATION_ACTION'\) = \(action_id IS NOT NULL\)/.test(
+    goalsNormalized,
+  ),
+);
+check(
+  "goal kinds match the shared contracts",
+  /kind IN \('BRIEFING', 'MEETING_PREP', 'COMMUNICATION_ACTION'\)/.test(
+    goalsNormalized,
+  ),
+);
+check(
+  "goal statuses match the shared contracts",
+  /status IN \( 'PENDING', 'RUNNING', 'WAITING_FOR_USER', 'WAITING_FOR_EXTERNAL', 'COMPLETED', 'FAILED' \)/.test(
+    goalsNormalized,
+  ),
+);
+check(
+  "a goal is completed only with a recorded completion instant",
+  /\(status = 'COMPLETED'\) = \(completed_at IS NOT NULL\)/.test(
+    goalsNormalized,
+  ),
+);
+check(
+  "dispatch and verification attempts are bounded",
+  /attempts BETWEEN 0 AND 8/.test(goalsNormalized) &&
+    /verify_attempts BETWEEN 0 AND 64/.test(goalsNormalized),
+);
+check(
+  "one goal per saved turn is enforced by a partial unique index",
+  /CREATE UNIQUE INDEX IF NOT EXISTS assistant_runtime_goals_turn_unique/.test(
+    goalsSql,
+  ),
+);
+check(
+  "one goal per action is enforced by a partial unique index",
+  /CREATE UNIQUE INDEX IF NOT EXISTS assistant_runtime_goals_action_unique/.test(
+    goalsSql,
+  ),
+);
+check(
+  "the goals migration does not alter the Alembic head",
+  !/\balembic_version\b/.test(goalsSql) &&
+    !/\bDROP\s+(TABLE|COLUMN)\b/i.test(goalsSql),
+);
+
 for (const label of passed) console.log(`PASS: ${label}`);
 
 const databaseUrl =
@@ -126,11 +194,12 @@ if (!databaseUrl) {
   const client = new Client({ connectionString: databaseUrl });
   try {
     await client.connect();
-    await client.query(sql);
+    for (const migration of [runtimeSql, goalsSql])
+      await client.query(migration);
     const { rows: tables } = await client.query(
-      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('assistant_runtime_sessions','assistant_runtime_turns','assistant_runtime_requests')",
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('assistant_runtime_sessions','assistant_runtime_turns','assistant_runtime_requests','assistant_runtime_goals')",
     );
-    check("live: all three runtime tables exist", tables.length === 3);
+    check("live: all four runtime tables exist", tables.length === 4);
 
     const { rows: foreignKeys } = await client.query(
       `SELECT con.conname AS name, rel.relname AS target
@@ -185,9 +254,23 @@ if (!databaseUrl) {
       "assistant_runtime_turns_fingerprint_length",
       "assistant_runtime_requests_resolution",
       "assistant_runtime_requests_fingerprint_length",
+      "assistant_runtime_goals_status_valid",
+      "assistant_runtime_goals_completion",
+      "assistant_runtime_goals_exactly_one_source",
     ]) {
       check(`live: constraint ${name} exists`, checkNames.includes(name));
     }
+
+    const { rows: goalIndexes } = await client.query(
+      `SELECT indexname AS name FROM pg_indexes
+        WHERE schemaname = 'public' AND tablename = 'assistant_runtime_goals'`,
+    );
+    const indexNames = goalIndexes.map((row) => row.name);
+    check(
+      "live: one goal per saved turn and per action is unique",
+      indexNames.includes("assistant_runtime_goals_turn_unique") &&
+        indexNames.includes("assistant_runtime_goals_action_unique"),
+    );
     console.log("live schema check ran against ASSISTANT_TEST_DATABASE_URL");
   } catch (error) {
     failures.push(
