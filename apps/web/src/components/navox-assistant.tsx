@@ -926,7 +926,9 @@ export function NavoXAssistant() {
               ? "Turn Hands-Free on"
               : "Turn Hands-Free off"
           }
-          disabled={connecting || !sessionId || (handsFreePhase === "OFF" && busy)}
+          disabled={
+            connecting || !sessionId || (handsFreePhase === "OFF" && busy)
+          }
         >
           {handsFreePhase === "OFF" ? "Hands-Free On" : "Hands-Free Off"}
         </button>
