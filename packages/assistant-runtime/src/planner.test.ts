@@ -156,6 +156,20 @@ describe("SPEC-005 intent bridge", () => {
     expect(plan.intents[0]?.question).toBe("What time is it right now?");
   });
 
+  it("accepts the action.history route in the current plan version", () => {
+    const plan = parseUpstreamIntentPlan(
+      upstreamPlan({
+        route: "action.history",
+        entity: { kind: "NONE", value: null, confidence: 1 },
+        time: { kind: "RELATIVE", expression: "today", confidence: 0.9 },
+      }),
+      { utterance: "What did you do today?", recentTurns: RECENT_TURNS },
+    );
+    expect(plan.intents[0]?.kind).toBe("action.history");
+    expect(plan.intents[0]?.capability_id).toBe("action.history");
+    expect(plan.intents[0]?.question).toBe("What did you do today?");
+  });
+
   it("binds a follow-up ordinal to a session-owned turn selector", () => {
     const plan = parseUpstreamIntentPlan(
       upstreamPlan({

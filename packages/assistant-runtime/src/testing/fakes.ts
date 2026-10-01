@@ -275,6 +275,7 @@ export interface FakeUpstream extends NavoxUpstream {
     newsSummary: { cookie: string; id: string }[];
     weather: string[];
     classSources: string[];
+    actions: { cookie: string; limit: number }[];
     meeting: string[];
   };
   account: AccountScope;
@@ -298,6 +299,8 @@ export interface FakeUpstream extends NavoxUpstream {
   weatherError: AssistantError | null;
   classSources: unknown | (() => Promise<unknown>);
   classSourcesError: AssistantError | null;
+  actions: unknown | (() => Promise<unknown>);
+  actionsError: AssistantError | null;
   meeting: Awaited<ReturnType<NavoxUpstream["getMeetingPrep"]>>;
   meetingError: AssistantError | null;
 }
@@ -429,6 +432,7 @@ export function createFakeUpstream(
       newsSummary: [],
       weather: [],
       classSources: [],
+      actions: [],
       meeting: [],
     },
     account: {
@@ -462,6 +466,8 @@ export function createFakeUpstream(
     weatherError: null,
     classSources: { complete: true, courses: [], events: [] },
     classSourcesError: null,
+    actions: [],
+    actionsError: null,
     meeting: null,
     meetingError: null,
     async fetchAccount(cookie) {
@@ -537,6 +543,12 @@ export function createFakeUpstream(
       upstream.calls.classSources.push(cookie);
       if (upstream.classSourcesError) throw upstream.classSourcesError;
       const result = upstream.classSources;
+      return typeof result === "function" ? await result() : result;
+    },
+    async listActions(cookie, input) {
+      upstream.calls.actions.push({ cookie, limit: input.limit });
+      if (upstream.actionsError) throw upstream.actionsError;
+      const result = upstream.actions;
       return typeof result === "function" ? await result() : result;
     },
     async getMeetingPrep(cookie) {

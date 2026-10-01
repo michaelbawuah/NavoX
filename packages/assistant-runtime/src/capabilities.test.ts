@@ -22,6 +22,7 @@ describe("capability registry", () => {
       "weather.read",
       "class.next",
       "time.now",
+      "action.history",
     ]);
     expect(
       CAPABILITIES.every((capability) => capability.mode === "read_only"),
@@ -53,9 +54,14 @@ describe("capability registry", () => {
     expect(resolveCapability("time.now").delegate_target).toBe("runtime.clock");
     expect(resolveCapability("time.now").mode).toBe("read_only");
     expect(resolveCapability("time.now").requires_approval).toBe(false);
+    expect(resolveCapability("action.history").delegate_target).toBe(
+      "actions.query",
+    );
+    expect(resolveCapability("action.history").mode).toBe("read_only");
+    expect(resolveCapability("action.history").requires_approval).toBe(false);
     expect(() => resolveCapability("email.send")).toThrow(/not available/i);
     expect(() => resolveCapability(null)).toThrow(/not available/i);
-    expect(listCapabilities()).toHaveLength(7);
+    expect(listCapabilities()).toHaveLength(8);
   });
 
   it("maps every planned route to an owned capability or a clarification", () => {
@@ -68,6 +74,9 @@ describe("capability registry", () => {
     expect(capabilityForIntentKind("weather.read")?.id).toBe("weather.read");
     expect(capabilityForIntentKind("class.next")?.id).toBe("class.next");
     expect(capabilityForIntentKind("time.now")?.id).toBe("time.now");
+    expect(capabilityForIntentKind("action.history")?.id).toBe(
+      "action.history",
+    );
     expect(capabilityForIntentKind("assistant.clarify")).toBeNull();
     expect(() => capabilityForIntentKind("files.delete" as never)).toThrow(
       /no capability registry entry/i,

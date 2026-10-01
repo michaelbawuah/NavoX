@@ -53,6 +53,12 @@ export interface NavoxUpstream {
   getNewsSummary(cookie: string, id: string): Promise<unknown>;
   getWeather(cookie: string): Promise<unknown>;
   getClassSources(cookie: string): Promise<unknown>;
+  /**
+   * Raw read-only list from the existing authenticated SPEC-001/003 action
+   * ledger. The route is already scoped by workspace and user; this runtime
+   * binds only the minimal facts and never copies an action payload.
+   */
+  listActions(cookie: string, input: { limit: number }): Promise<unknown>;
   createKnowledgeEmailDraft(
     cookie: string,
     input: { sourceId: string; instructions: string },
@@ -470,6 +476,18 @@ export function createNavoxUpstream(
         throw new AssistantError(
           "unavailable",
           "Class sources returned an unreadable result.",
+        );
+      });
+    },
+
+    async listActions(cookie, input): Promise<unknown> {
+      const path = `/actions?limit=${encodeURIComponent(String(input.limit))}`;
+      const response = await send(path, { method: "GET", cookie });
+      if (!response.ok) throw statusError(response.status, "/actions");
+      return response.json().catch(() => {
+        throw new AssistantError(
+          "unavailable",
+          "The action ledger returned an unreadable result.",
         );
       });
     },

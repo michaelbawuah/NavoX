@@ -28,7 +28,7 @@ accepted end to end yet. The current mapping is:
 | M6 Communication Assistant | Partially built locally | Live Gmail thread/draft/send verification and cross-domain flow |
 | M7 Voice Input & NavoX Voice | Partially built locally | Streaming speech, provider-routed voice, two-way session acceptance |
 | M8 Adaptive Conversation | Partially built locally | Provider-backed modality switching and acoustic barge-in with retained context |
-| M9 Hey NavoX Hands-Free | Open | In-app wake detection and visible state; only an isolated adapter contract exists |
+| M9 Hey NavoX Hands-Free | Partially built locally | Real-device wake, greeting, voice continuity and false-action acceptance |
 | M10 Personal Intelligence & Briefings | Partially built locally | Live Today/meeting/News/Calendar evidence and coherent briefings |
 | M11 Production Hardening | Open | Security/voice corpus, accessibility, latency/quality targets and hosted CI |
 
@@ -260,3 +260,21 @@ language-pack installation, wake recognition, microphone capture, provider
 STT/TTS, playback or barge-in quality. The R3 connected-app, controlled action,
 bounded-goal/workflow and end-to-end acceptance gates remain open. Draft PR
 #22 must stay unmerged until those mandatory checks pass.
+
+## M14A bounded personal Activity under acceptance
+
+`M14A-ACTIVITY-REPORT.md` records the read-only Activity route over the existing
+authenticated SPEC-001/003 action ledger. It reports independently verified
+outcomes as done, separates completed but unverified records, preserves pending
+and failed statuses, and uses the operator's local day for “today.” The answer
+retains only minimal action facts, bounds the list, and qualifies a full source
+page as potentially partial. Root review additionally orders visible records by
+their source-backed event time and refuses completed rows with no execution
+timestamp. Focused runtime tests and TypeScript typecheck pass on this tree.
+The required full PostgreSQL/Temporal API gate passed: 2,726 API tests with
+zero skips, plus Ruff, strict mypy, schema/metric/release evaluation and
+whitespace checks (`/tmp/navox-spec008-m14a-root-api-gate.log`). Root npm
+lint/typecheck/tests and production Web build passed; the PostgreSQL-backed
+runtime passed 294/294 tests and the live migration check passed 29
+assertions. M14A is not yet committed or accepted by hosted CI. No live
+action-ledger observation or consequential action was performed.

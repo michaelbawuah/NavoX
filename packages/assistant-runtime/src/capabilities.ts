@@ -88,6 +88,17 @@ const definitions = [
     description:
       "Read the current time from the runtime's injected clock and validated timezone.",
   },
+  {
+    id: "action.history",
+    version: "1",
+    mode: "read_only",
+    requires_approval: false,
+    // The existing authenticated SPEC-001/003 GET /actions list, already
+    // scoped by workspace and user. The runtime never duplicates action rules.
+    delegate_target: "actions.query",
+    description:
+      "Read the signed-in user's recent action records from the existing action ledger.",
+  },
 ] as const satisfies readonly CapabilityDefinition[];
 
 /**
@@ -106,6 +117,7 @@ const ROUTE_CAPABILITIES: Record<
   "weather.read": "weather.read",
   "class.next": "class.next",
   "time.now": "time.now",
+  "action.history": "action.history",
   // A delivery request only speaks an already-saved answer; it delegates to no
   // capability and never reaches the planner.
   "assistant.delivery": null,

@@ -51,8 +51,8 @@ MAX_RECENT_REFERENCES = 4
 MAX_REFERENCE_LENGTH = 240
 MAX_INTENTS = 4
 
-INTENT_PLAN_PROMPT = VersionedRef(name="assistant_intent_plan", version="v7")
-INTENT_PLAN_SCHEMA = VersionedRef(name="assistant_intent_plan", version="v7")
+INTENT_PLAN_PROMPT = VersionedRef(name="assistant_intent_plan", version="v8")
+INTENT_PLAN_SCHEMA = VersionedRef(name="assistant_intent_plan", version="v8")
 
 
 class IntentRoute(StrEnum):
@@ -69,6 +69,7 @@ class IntentRoute(StrEnum):
     WEATHER_READ = "weather.read"
     NEXT_CLASS = "class.next"
     TIME_NOW = "time.now"
+    ACTION_HISTORY = "action.history"
     ASSISTANT_CLARIFY = "assistant.clarify"
 
 
@@ -281,6 +282,15 @@ INTENT_PLAN_INSTRUCTIONS = INTENT_PLAN_INSTRUCTIONS_V6.replace(
     "current time. Use today.read for the user's day, tasks or commitments.\n"
     "- assistant.clarify: anything you cannot map to the routes above, including any request\n",
 )
+INTENT_PLAN_INSTRUCTIONS_V7 = INTENT_PLAN_INSTRUCTIONS
+INTENT_PLAN_INSTRUCTIONS = INTENT_PLAN_INSTRUCTIONS_V7.replace(
+    "- assistant.clarify: anything you cannot map to the routes above, including any request\n",
+    "- action.history: a read-only question about what NavoX itself did, is doing or "
+    'attempted, for example "What did you do today?". Use only the user\'s own time '
+    "words; never resolve a date, never claim an action succeeded, and never describe a "
+    "planned, pending, failed or unverified action as done.\n"
+    "- assistant.clarify: anything you cannot map to the routes above, including any request\n",
+)
 
 
 def intent_plan_json_schema(
@@ -291,10 +301,24 @@ def intent_plan_json_schema(
     legacy_v4: bool = False,
     legacy_v5: bool = False,
     legacy_v6: bool = False,
+    legacy_v7: bool = False,
 ) -> dict[str, Any]:
     """OpenAI-compatible strict schema; Pydantic still performs final validation."""
 
-    if sum((legacy_v1, legacy_v2, legacy_v3, legacy_v4, legacy_v5, legacy_v6)) > 1:
+    if (
+        sum(
+            (
+                legacy_v1,
+                legacy_v2,
+                legacy_v3,
+                legacy_v4,
+                legacy_v5,
+                legacy_v6,
+                legacy_v7,
+            )
+        )
+        > 1
+    ):
         raise ValueError("Choose one historical intent schema version")
     excluded_routes = (
         {IntentRoute.SUBSCRIPTION_SEARCH, IntentRoute.NEWS_READ, IntentRoute.WEATHER_READ}
@@ -311,6 +335,8 @@ def intent_plan_json_schema(
         # Every published historical schema stays frozen: a route added later
         # must never appear in an older artifact.
         excluded_routes = set(excluded_routes) | {IntentRoute.TIME_NOW}
+    if legacy_v1 or legacy_v2 or legacy_v3 or legacy_v4 or legacy_v5 or legacy_v6 or legacy_v7:
+        excluded_routes = set(excluded_routes) | {IntentRoute.ACTION_HISTORY}
 
     nullable_string = {"anyOf": [{"type": "string"}, {"type": "null"}]}
     entity = {

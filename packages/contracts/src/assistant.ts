@@ -62,7 +62,8 @@ export type AssistantCapabilityId =
   | "news.read"
   | "weather.read"
   | "class.next"
-  | "time.now";
+  | "time.now"
+  | "action.history";
 
 /**
  * Bounded planning vocabulary. Unknown values are rejected by the validators,
@@ -76,6 +77,7 @@ export type AssistantIntentKind =
   | "weather.read"
   | "class.next"
   | "time.now"
+  | "action.history"
   | "assistant.delivery"
   | "assistant.clarify";
 

@@ -12,6 +12,12 @@ import type {
   PlannedIntent,
 } from "@navox/contracts";
 import {
+  ACTION_HISTORY_LIMIT,
+  actionHistorySelector,
+  answerActionHistory,
+  parseActionHistory,
+} from "./activity";
+import {
   assertRegistryIntegrity,
   capabilityForIntentKind,
 } from "./capabilities";
@@ -481,7 +487,8 @@ export function createAssistantRuntime(
       | "subscription"
       | "news"
       | "class"
-      | "weather" = "plan",
+      | "weather"
+      | "activity" = "plan",
   ): {
     state: AssistantResponseState;
     decision: CapabilityDecision;
@@ -856,6 +863,43 @@ export function createAssistantRuntime(
             return { plan, ...planFailure(error, "class") };
           }
         }
+        // The Activity route reuses the existing authenticated SPEC-001/003
+        // action ledger. It binds minimal facts only and never reads a payload.
+        if (definition.id === "action.history") {
+          const scope = actionHistorySelector(intent);
+          if (!scope) {
+            return {
+              plan,
+              state: "CLARIFY",
+              decision: clarifyDecision("action.history.unsupported_selector"),
+              blocks: noticeBlocks(
+                "CLARIFY",
+                "I can report what NavoX did today or list your most recent actions. I cannot filter activity by that name or date yet.",
+              ),
+            };
+          }
+          try {
+            const records = parseActionHistory(
+              await deps.upstream.listActions(input.cookie, {
+                limit: ACTION_HISTORY_LIMIT,
+              }),
+              { scope: input.scope, now: now() },
+            );
+            return {
+              plan,
+              ...answerActionHistory({
+                records,
+                scope,
+                timezone: input.request.timezone,
+                now: now(),
+              }),
+            };
+          } catch (error) {
+            if (isAssistantError(error) && error.code === "unauthorized")
+              throw error;
+            return { plan, ...planFailure(error, "activity") };
+          }
+        }
         let resolved: ReturnType<typeof decideEmailSearch>;
         try {
           const search = await deps.upstream.searchEmail(input.cookie, {
@@ -918,6 +962,7 @@ export function createAssistantRuntime(
       "weather.read": "Weather",
       "class.next": "Next class",
       "time.now": "Time",
+      "action.history": "Activity",
       "assistant.delivery": "Request",
       "assistant.clarify": "Request",
     };

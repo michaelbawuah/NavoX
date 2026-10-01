@@ -38,6 +38,7 @@ export const CAPABILITY_IDS = [
   "weather.read",
   "class.next",
   "time.now",
+  "action.history",
 ] as const satisfies readonly AssistantCapabilityId[];
 export const INTENT_KINDS = [
   "today.read",
@@ -47,6 +48,7 @@ export const INTENT_KINDS = [
   "weather.read",
   "class.next",
   "time.now",
+  "action.history",
   "assistant.delivery",
   "assistant.clarify",
 ] as const satisfies readonly AssistantIntentKind[];

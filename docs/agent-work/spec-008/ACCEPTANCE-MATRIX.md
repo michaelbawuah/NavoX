@@ -21,7 +21,7 @@ contract or synthetic unit test alone.
 | L | Typed input with Voice off stays silent | M1 | In progress: local modality and suppression tests pass; live browser observation remains |
 | M | Authorized referent navigation | Other domains | Open |
 | N | Provider/source failure is qualified, never fabricated success | Every phase | Open |
-| O | Activity reports only verified ledger outcomes | Voice/activity | Open |
+| O | Activity reports only verified ledger outcomes | Voice/activity | In progress: bounded, scoped ledger read and verified/unverified status handling pass local tests; live ledger observation remains |
 
 Security corpus, 98% grounded answer target, 95% multi-intent/reference targets,
 99% voice/text continuity, wake false-action zero and human accessibility remain

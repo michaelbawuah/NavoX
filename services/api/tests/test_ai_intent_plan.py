@@ -241,6 +241,7 @@ def test_catalog_registers_one_bounded_plan_artifact():
     current_routes = intents["items"]["properties"]["route"]["enum"]
     assert "class.next" in current_routes
     assert "time.now" in current_routes
+    assert "action.history" in current_routes
 
 
 def test_historical_read_only_plan_artifacts_remain_bounded():
@@ -275,7 +276,12 @@ def test_historical_read_only_plan_artifacts_remain_bounded():
         for item in snapshot.schemas
         if item.reference.name == "assistant_intent_plan" and item.reference.version == "v6"
     )
-    v7 = next(item for item in snapshot.schemas if item.reference == INTENT_PLAN_SCHEMA)
+    v7 = next(
+        item
+        for item in snapshot.schemas
+        if item.reference.name == "assistant_intent_plan" and item.reference.version == "v7"
+    )
+    v8 = next(item for item in snapshot.schemas if item.reference == INTENT_PLAN_SCHEMA)
     old_routes = json.loads(v1.document.text)["properties"]["intents"]["items"]["properties"][
         "route"
     ]["enum"]
@@ -297,6 +303,9 @@ def test_historical_read_only_plan_artifacts_remain_bounded():
     time_routes = json.loads(v7.document.text)["properties"]["intents"]["items"]["properties"][
         "route"
     ]["enum"]
+    history_routes = json.loads(v8.document.text)["properties"]["intents"]["items"]["properties"][
+        "route"
+    ]["enum"]
     assert "subscription.search" not in old_routes
     assert "news.read" not in old_routes
     assert "subscription.search" in middle_routes
@@ -308,6 +317,9 @@ def test_historical_read_only_plan_artifacts_remain_bounded():
     assert "class.next" in class_routes
     assert "time.now" not in class_routes
     assert "time.now" in time_routes
+    assert "action.history" not in time_routes
+    assert "action.history" in history_routes
+    assert "time.now" in history_routes
     old_fields = json.loads(v4.document.text)["properties"]["intents"]["items"]["properties"]
     assert "question" not in old_fields
     assert "subscription.search" in new_routes
@@ -323,9 +335,17 @@ def test_historical_read_only_plan_artifacts_remain_bounded():
     assert "exact contiguous question span" in prompt.instructions
     assert "class.next" in prompt.instructions
     assert "time.now" in prompt.instructions
+    assert "action.history" in prompt.instructions
     v6_prompt = next(item for item in snapshot.prompts if item.reference == v6.reference)
     assert "class.next" in v6_prompt.instructions
     assert "time.now" not in v6_prompt.instructions
+    assert "action.history" not in v6_prompt.instructions
+    v7_prompt = next(item for item in snapshot.prompts if item.reference == v7.reference)
+    assert "time.now" in v7_prompt.instructions
+    assert "action.history" not in v7_prompt.instructions
+    assert IntentPlan.model_validate(plan_payload(route="action.history")).intents[0].route == (
+        "action.history"
+    )
     assert IntentPlan.model_validate(plan_payload(route="time.now")).intents[0].route == "time.now"
     with pytest.raises(ValidationError):
         IntentPlan.model_validate(plan_payload(route="clock.now"))
@@ -353,8 +373,8 @@ def test_historical_read_only_plan_artifacts_remain_bounded():
     )
 
 
-def test_no_historical_plan_schema_names_the_current_time_route():
-    """A route added in v7 must stay out of every published v1-v6 artifact."""
+def test_no_historical_plan_schema_names_a_later_route():
+    """A route added later must stay out of every published historical artifact."""
 
     snapshot = catalog_template()
 
@@ -370,9 +390,14 @@ def test_no_historical_plan_schema_names_the_current_time_route():
 
     for version in ("v1", "v2", "v3", "v4", "v5", "v6"):
         assert "time.now" not in route_enum(version), version
+        assert "action.history" not in route_enum(version), version
     assert "class.next" in route_enum("v6")
+    assert "class.next" in route_enum("v7")
+    assert "time.now" in route_enum("v7")
+    assert "action.history" not in route_enum("v7")
     assert "time.now" in route_enum(INTENT_PLAN_SCHEMA.version)
-    assert INTENT_PLAN_SCHEMA.version == "v7"
+    assert "action.history" in route_enum(INTENT_PLAN_SCHEMA.version)
+    assert INTENT_PLAN_SCHEMA.version == "v8"
 
 
 @pytest.mark.parametrize(
@@ -477,8 +502,8 @@ async def test_authenticated_plan_returns_routes_and_audits_the_task(intent_env)
     async with env.factory() as database:
         run = await database.scalar(select(AITaskRun))
         assert run is not None
-        assert run.prompt == "assistant_intent_plan@v7"
-        assert run.schema == "assistant_intent_plan@v7"
+        assert run.prompt == "assistant_intent_plan@v8"
+        assert run.schema == "assistant_intent_plan@v8"
         assert run.profile == Profile.PLANNING_HIGH.value
         assert run.status == "COMPLETED" and run.shadow is False
 
