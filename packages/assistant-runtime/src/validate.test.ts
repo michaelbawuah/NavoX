@@ -246,8 +246,22 @@ describe("block and presentation validation", () => {
       presentation: "TEXT",
       speak: false,
       speech_text: null,
+      // A row saved before delivery was recorded reads as the pre-M12 default.
+      delivery: "AUTOMATIC",
       blocks: [],
     });
+  });
+
+  it("refuses an unknown delivery preference in a stored plan", () => {
+    expectInvalid(() =>
+      parsePresentationPlan({
+        presentation: "TEXT",
+        speak: false,
+        speech_text: null,
+        delivery: "SHOUT",
+        blocks: [],
+      }),
+    );
   });
 });
 

@@ -35,6 +35,7 @@ const turn: AssistantTurnView = {
     presentation: "TEXT",
     speak: false,
     speech_text: null,
+    delivery: "AUTOMATIC",
     blocks: [],
   },
   action_refs: [],

@@ -5,6 +5,7 @@ import {
   spokenTextForTurn,
   type VoiceEvent,
   type VoiceSessionState,
+  voiceModeAllowsSpeech,
 } from "@navox/assistant-runtime/voice";
 import type {
   AssistantMessageResponse,
@@ -51,8 +52,13 @@ export interface AssistantTurnRunnerDeps {
   onTurn: (turn: AssistantTurnView) => void;
   onNotice: NoticeHandler;
   onBusy: (busy: boolean) => void;
-  /** The saved voice turn whose answer may speak. Selector only, never text. */
-  onSpeak: (turn: AssistantTurnView) => void;
+  /**
+   * The saved turn whose answer may speak. `explicit` is the server-recorded
+   * delivery preference: `true` only for an answer the operator asked for in
+   * words, so the page honors it ahead of the Voice Mode default. The page never
+   * derives this from the question text.
+   */
+  onSpeak: (turn: AssistantTurnView, explicit: boolean) => void;
   messageForError?: (error: unknown) => string;
 }
 
@@ -112,11 +118,13 @@ export function createAssistantTurnRunner(
         if (!current()) return;
         deps.ledger.resolve();
         deps.onTurn(response.turn);
-        if (modality === "VOICE") {
-          const speech = response.turn.presentation?.speak
-            ? response.turn.presentation.speech_text
-            : null;
-          if (speech) deps.onSpeak(response.turn);
+        if (response.turn.presentation?.speak) {
+          // Only a server-recorded SPEAK preference is an explicit request; a
+          // spoken question follows the Voice Mode preference.
+          deps.onSpeak(
+            response.turn,
+            response.turn.presentation.delivery === "SPEAK",
+          );
         }
       } catch (error) {
         if (!current()) return;
@@ -192,6 +200,8 @@ export interface VoiceSession {
   stop(): void;
   setMuted(muted: boolean): void;
   toggleMuted(): void;
+  /** The visible Voice Mode preference; it never carries authority. */
+  setVoiceMode(enabled: boolean): void;
   dispose(): void;
 }
 
@@ -203,9 +213,32 @@ export interface VoiceControls {
   transcribing: boolean;
   speaking: boolean;
   muted: boolean;
+  /** Voice Mode: may a spoken question's answer start playing by itself? */
+  voiceModeEnabled: boolean;
   microphoneDisabled: boolean;
   stopAvailable: boolean;
   readAloudAvailable: boolean;
+}
+
+/** How one saved answer should start speaking, if at all. */
+export type SpeechStart = "AUTOMATIC" | "MANUAL" | "NONE";
+
+/**
+ * The one rule the page uses to start spoken playback.
+ *
+ * An explicit "read it to me" is the operator's own instruction, so it outranks
+ * the Voice Mode default and works after Stop and without a microphone; mute
+ * still vetoes it. A spoken question's answer is automatic only while Voice Mode
+ * is on, mute is off and the session is neither stopped nor unsupported.
+ */
+export function speechStartForTurn(
+  state: VoiceSessionState,
+  explicit: boolean,
+): SpeechStart {
+  if (explicit) return state.muted ? "NONE" : "MANUAL";
+  if (!automaticSpeechAllowed(state)) return "NONE";
+  if (!voiceModeAllowsSpeech(state)) return "NONE";
+  return "AUTOMATIC";
 }
 
 /** One source of truth for the microphone, mute, stop and read-aloud controls. */
@@ -219,6 +252,7 @@ export function voiceControls(state: VoiceSessionState): VoiceControls {
     transcribing,
     speaking,
     muted: state.muted,
+    voiceModeEnabled: state.voiceMode,
     // The browser capability survives explicit playback, so a session that
     // cannot capture audio never offers an openable microphone.
     microphoneDisabled:
@@ -417,6 +451,13 @@ export function createVoiceSession(deps: VoiceSessionDeps): VoiceSession {
 
     toggleMuted() {
       this.setMuted(!state.muted);
+    },
+
+    setVoiceMode(enabled) {
+      if (disposed || state.voiceMode === enabled) return;
+      // Turning Voice Mode off never interrupts playback already under way;
+      // it changes whether the next voice answer starts by itself.
+      dispatch({ type: "SET_VOICE_MODE", enabled });
     },
 
     dispose() {

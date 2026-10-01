@@ -491,6 +491,7 @@ describe("recorded-clip voice flow", () => {
         presentation: "VOICE",
         speak: false,
         speech_text: null,
+        delivery: "AUTOMATIC",
         blocks: [{ kind: "ANSWER", text: "1 item needs attention now." }],
       },
       action_refs: [],

@@ -204,8 +204,9 @@ microphone and a qualified live speech provider have not yet been exercised.
 `M11D-TTS-BRIEF.md` defines the next provider-backed speech phase.
 
 M11C was committed as `262070da0230d189f56e79d9d42fb55b1cc59b33`
-and pushed to draft PR #22. Hosted CI run `36835630157` is in progress on that
-exact head. M11D is implemented locally for root review: the TypeScript
+and pushed to draft PR #22. Hosted CI run `36835630157` completed successfully
+on that exact head across all six jobs, including Compose. M11D then added the
+provider-backed spoken-answer path: the TypeScript
 client requests speech by saved turn selector, the Next route derives the
 bounded answer after session ownership checks, and SPEC-005 selects a
 qualified synthesis model and returns bounded MP3. Browser playback is
@@ -217,5 +218,21 @@ PostgreSQL/Temporal: exit 0, 2,726 tests passed with zero skips and every
 lint, type, metric, schema, evaluation and whitespace check passed. The
 PostgreSQL-backed TypeScript runtime passed 238/238 tests, and its migration
 check passed 29 assertions. See `/tmp/navox-spec008-m11d-root-api-gate.log`.
-Hosted CI on the eventual M11D head is still required. No speech model was
-published and no live provider or device playback acceptance was performed.
+M11D was committed as `8cd61b683ab69ec00b6f15028021644fb24d1b5f` and
+pushed to draft PR #22. Hosted CI run `36840848212` is in progress on that
+exact head. No speech model was published and no live provider or device
+playback acceptance was performed.
+
+M12 adds adaptive `TEXT`/`BOTH` delivery, a visible Voice Mode preference,
+explicit same-session read-aloud turns, spoken summaries and suppression cues.
+The root correction review preserved explicit spoken read-aloud requests with
+Voice Mode off, ordered spoken blocks by their saved sequence, constrained cue
+matching and resolved delivery-only failures without stranding request claims.
+The full API gate passed on the staged tree: 2,726 tests, zero skipped, plus
+all lint, type, schema, evaluation and whitespace checks; see
+`/tmp/navox-spec008-m12-root-api-gate.log`. Root JavaScript lint/typecheck,
+368 Web tests, 268 PostgreSQL-backed runtime tests, eight extension tests and
+the Web build passed. The TypeScript migration check passed 29 assertions.
+`M12-ADAPTIVE-MODALITY-WORKER-REPORT.md` records the implementation and limits.
+No live microphone, TTS provider, on-device wake phrase or acoustic barge-in
+has been accepted yet.

@@ -7,6 +7,7 @@ import {
   initialVoiceState,
   reduceVoiceState,
   spokenTextForTurn,
+  voiceModeAllowsSpeech,
 } from "./voice";
 
 function savedTurn(
@@ -24,6 +25,7 @@ function savedTurn(
       presentation: "VOICE",
       speak: true,
       speech_text: "1 item needs attention now.",
+      delivery: "AUTOMATIC",
       blocks: [{ kind: "ANSWER", text: "1 item needs attention now." }],
     },
     action_refs: [],
@@ -304,7 +306,22 @@ describe("click-to-talk voice state", () => {
       "state",
       "transcript",
       "turn",
+      "voiceMode",
     ]);
+  });
+
+  it("owns the visible Voice Mode preference without granting authority", () => {
+    const off = apply(initialVoiceState(), {
+      type: "SET_VOICE_MODE",
+      enabled: false,
+    });
+    expect(off.voiceMode).toBe(false);
+    expect(voiceModeAllowsSpeech(off)).toBe(false);
+    // Voice Mode is presentation only: mute and Stop still veto playback.
+    expect(automaticSpeechAllowed(off)).toBe(true);
+    const unmuted = apply(off, { type: "SET_VOICE_MODE", enabled: true });
+    expect(voiceModeAllowsSpeech(unmuted)).toBe(true);
+    expect(apply(unmuted, { type: "STOP" }).voiceMode).toBe(true);
   });
 });
 
@@ -322,6 +339,7 @@ describe("saved-turn spoken text", () => {
         presentation: "TEXT",
         speak: false,
         speech_text: null,
+        delivery: "SPEAK",
         blocks: [{ kind: "ANSWER", text: "  1 item needs attention now.  " }],
       },
     });
@@ -351,6 +369,7 @@ describe("saved-turn spoken text", () => {
             presentation: "VOICE",
             speak: false,
             speech_text: null,
+            delivery: "AUTOMATIC",
             blocks: [],
           },
         }),
@@ -364,6 +383,7 @@ describe("saved-turn spoken text", () => {
         presentation: "TEXT",
         speak: false,
         speech_text: null,
+        delivery: "AUTOMATIC",
         blocks: [{ kind: "ANSWER", text: "x".repeat(2_000) }],
       },
     });
@@ -377,6 +397,7 @@ describe("saved-turn spoken text", () => {
         presentation: "VOICE",
         speak: true,
         speech_text: "Which one did you mean?",
+        delivery: "AUTOMATIC",
         blocks: [
           { kind: "NOTICE", state: "CLARIFY", text: "Which one did you mean?" },
         ],

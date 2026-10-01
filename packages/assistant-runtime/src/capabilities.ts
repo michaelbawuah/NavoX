@@ -106,6 +106,9 @@ const ROUTE_CAPABILITIES: Record<
   "weather.read": "weather.read",
   "class.next": "class.next",
   "time.now": "time.now",
+  // A delivery request only speaks an already-saved answer; it delegates to no
+  // capability and never reaches the planner.
+  "assistant.delivery": null,
   "assistant.clarify": null,
 };
 

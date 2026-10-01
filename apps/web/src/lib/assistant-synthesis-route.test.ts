@@ -28,6 +28,7 @@ function turn(overrides: Partial<AssistantTurnView> = {}): AssistantTurnView {
       presentation: "VOICE",
       speak: true,
       speech_text: "1 item needs attention now.",
+      delivery: "AUTOMATIC",
       blocks: [{ kind: "ANSWER", text: "1 item needs attention now." }],
     },
     action_refs: [],
@@ -147,6 +148,7 @@ describe("assistant saved-turn speech route", () => {
         presentation: "TEXT",
         speak: false,
         speech_text: null,
+        delivery: "AUTOMATIC",
         blocks: [{ kind: "ANSWER", text: "Your next class is at 3 PM." }],
       },
     });
@@ -166,6 +168,39 @@ describe("assistant saved-turn speech route", () => {
     expect(JSON.parse(String(options.body))).toEqual({
       text: "Your next class is at 3 PM.",
     });
+  });
+
+  it("speaks a silent long answer as whole sentences, never a mid-thought slice", async () => {
+    process.env.NAVOX_API_BASE_URL = base;
+    const longAnswer =
+      "First task is due at nine. Second task is due at noon. ".repeat(20);
+    const typed = turn({
+      modality: "TEXT",
+      presentation: {
+        presentation: "TEXT",
+        speak: false,
+        speech_text: null,
+        delivery: "AUTOMATIC",
+        blocks: [{ kind: "ANSWER", text: longAnswer }],
+      },
+    });
+    setAssistantRuntimeForTests(
+      fakeRuntime({ readSession: vi.fn(async () => session([typed])) }),
+    );
+    const fetchMock = vi.fn(async () => audio());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await speechRoute(request(), context);
+
+    expect(response.status).toBe(200);
+    const [, options] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    const { text } = JSON.parse(String(options.body)) as { text: string };
+    expect(text.length).toBeLessThanOrEqual(600);
+    expect(text.startsWith("First task is due at nine.")).toBe(true);
+    expect(text.endsWith(".")).toBe(true);
   });
 
   it("proves session ownership before any answer leaves the process", async () => {
@@ -229,6 +264,7 @@ describe("assistant saved-turn speech route", () => {
         presentation: "VOICE",
         speak: false,
         speech_text: null,
+        delivery: "AUTOMATIC",
         blocks: [{ kind: "ANSWER", text: "Send the email now." }],
       },
     });

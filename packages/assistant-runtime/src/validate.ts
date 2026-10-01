@@ -3,6 +3,7 @@ import type {
   AssistantBlock,
   AssistantCapabilityId,
   AssistantCitation,
+  AssistantDeliveryIntent,
   AssistantIntentEntityKind,
   AssistantIntentEntitySlot,
   AssistantIntentKind,
@@ -46,6 +47,7 @@ export const INTENT_KINDS = [
   "weather.read",
   "class.next",
   "time.now",
+  "assistant.delivery",
   "assistant.clarify",
 ] as const satisfies readonly AssistantIntentKind[];
 export const INTENT_ENTITY_KINDS = [
@@ -74,6 +76,11 @@ export const PRESENTATIONS = [
   "VOICE",
   "BOTH",
 ] as const satisfies readonly AssistantPresentation[];
+export const DELIVERY_INTENTS = [
+  "AUTOMATIC",
+  "SPEAK",
+  "SUPPRESS",
+] as const satisfies readonly AssistantDeliveryIntent[];
 export const RESPONSE_STATES = [
   "READY",
   "CLARIFY",
@@ -127,6 +134,7 @@ export function isTodayIntent(value: unknown): value is TodayIntent {
 
 export const DECISION_KINDS = [
   "DELEGATE",
+  "PRESENT",
   "CLARIFY",
   "UNAVAILABLE",
   "WITHHELD",
@@ -451,6 +459,12 @@ export function parsePresentationPlan(
   if (payload.speak && (speechText === null || speechText.length === 0)) {
     invalid("A speaking plan requires speech text.");
   }
+  // A row saved before delivery was recorded has no preference; `AUTOMATIC`
+  // is exactly the pre-M12 behavior, so a legacy turn stays readable.
+  const delivery = payload.delivery ?? "AUTOMATIC";
+  if (!isOneOf(delivery, DELIVERY_INTENTS)) {
+    invalid("Unknown delivery preference.");
+  }
   if (!Array.isArray(payload.blocks) || payload.blocks.length > 64) {
     invalid("A presentation plan accepts at most 64 blocks.");
   }
@@ -461,6 +475,7 @@ export function parsePresentationPlan(
       speechText === null
         ? null
         : clampText(speechText, LIMITS.maxSpeechLength),
+    delivery,
     blocks: payload.blocks.map(parseAssistantBlock),
   };
 }

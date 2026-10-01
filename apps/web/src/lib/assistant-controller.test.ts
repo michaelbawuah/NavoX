@@ -1,4 +1,7 @@
-import type { VoiceSessionState } from "@navox/assistant-runtime/voice";
+import {
+  initialVoiceState,
+  type VoiceSessionState,
+} from "@navox/assistant-runtime/voice";
 import type {
   AssistantMessageResponse,
   AssistantModality,
@@ -13,6 +16,7 @@ import {
   canSpeakTurn,
   createAssistantTurnRunner,
   createVoiceSession,
+  speechStartForTurn,
   speechTextForTurn,
   voiceControls,
   voiceTurnRequest,
@@ -50,6 +54,7 @@ function turn(overrides: Partial<AssistantTurnView> = {}): AssistantTurnView {
       presentation: "VOICE",
       speak: true,
       speech_text: "1 item needs attention now.",
+      delivery: "AUTOMATIC",
       blocks: [{ kind: "ANSWER", text: "1 item needs attention now." }],
     },
     action_refs: [],
@@ -68,6 +73,7 @@ function harness(
   const appended: AssistantTurnView[] = [];
   const notices: string[] = [];
   const spoken: string[] = [];
+  const explicit: boolean[] = [];
   const busy: boolean[] = [];
   const runner = createAssistantTurnRunner({
     submit: submit as never,
@@ -76,9 +82,12 @@ function harness(
     onTurn: (value) => appended.push(value),
     onNotice: (message) => notices.push(message),
     onBusy: (value) => busy.push(value),
-    onSpeak: (value) => spoken.push(value.id),
+    onSpeak: (value, requested) => {
+      spoken.push(value.id);
+      explicit.push(requested);
+    },
   });
-  return { runner, ledger, appended, notices, spoken, busy };
+  return { runner, ledger, appended, notices, spoken, explicit, busy };
 }
 
 describe("assistant turn runner", () => {
@@ -137,8 +146,106 @@ describe("assistant turn runner", () => {
     });
     expect(context.appended).toHaveLength(1);
     expect(context.spoken).toEqual([TURN_ID]);
+    // A spoken question's answer follows Voice Mode rather than an explicit ask.
+    expect(context.explicit).toEqual([false]);
     expect(context.notices).toEqual([]);
     expect(context.busy).toEqual([true, false]);
+  });
+
+  it("flags a typed read-aloud request as explicit operator speech", async () => {
+    const context = harness(async () => ({
+      session_id: "session-a",
+      turn: turn({
+        modality: "TEXT",
+        presentation: {
+          presentation: "BOTH",
+          speak: true,
+          speech_text: "1 item needs attention now.",
+          delivery: "SPEAK",
+          blocks: [{ kind: "ANSWER", text: "1 item needs attention now." }],
+        },
+      }),
+      replay: false,
+    }));
+    await context.runner.run({
+      sessionId: "session-a",
+      modality: "TEXT",
+      text: "read it to me",
+    });
+    expect(context.spoken).toEqual([TURN_ID]);
+    expect(context.explicit).toEqual([true]);
+  });
+
+  it("treats an explicit cue in a voice turn as request, not Voice Mode", async () => {
+    // The server records SPEAK for a spoken "read it to me", so the page must
+    // not lose that intent just because the turn arrived by voice.
+    const context = harness(async () => ({
+      session_id: "session-a",
+      turn: turn({
+        modality: "VOICE",
+        presentation: {
+          presentation: "BOTH",
+          speak: true,
+          speech_text: "1 item needs attention now.",
+          delivery: "SPEAK",
+          blocks: [{ kind: "ANSWER", text: "1 item needs attention now." }],
+        },
+      }),
+      replay: false,
+    }));
+    await context.runner.run({
+      sessionId: "session-a",
+      modality: "VOICE",
+      text: "read it to me",
+    });
+    expect(context.spoken).toEqual([TURN_ID]);
+    expect(context.explicit).toEqual([true]);
+  });
+
+  it("keeps a spoken question automatic rather than explicit", async () => {
+    const context = harness(async () => ({
+      session_id: "session-a",
+      turn: turn({
+        modality: "VOICE",
+        presentation: {
+          presentation: "BOTH",
+          speak: true,
+          speech_text: "1 item needs attention now.",
+          delivery: "AUTOMATIC",
+          blocks: [{ kind: "ANSWER", text: "1 item needs attention now." }],
+        },
+      }),
+      replay: false,
+    }));
+    await context.runner.run({
+      sessionId: "session-a",
+      modality: "VOICE",
+      text: "what am I missing today",
+    });
+    expect(context.explicit).toEqual([false]);
+  });
+
+  it("never asks to speak a suppressed visual answer", async () => {
+    const context = harness(async () => ({
+      session_id: "session-a",
+      turn: turn({
+        presentation: {
+          presentation: "TEXT",
+          speak: false,
+          speech_text: null,
+          delivery: "SUPPRESS",
+          blocks: [{ kind: "ANSWER", text: "1 item needs attention now." }],
+        },
+      }),
+      replay: false,
+    }));
+    await context.runner.run({
+      sessionId: "session-a",
+      modality: "VOICE",
+      text: "what am I missing today - don't read it aloud",
+    });
+    expect(context.spoken).toEqual([]);
+    expect(context.appended).toHaveLength(1);
   });
 
   it("keeps a typed answer silent until the operator asks for it", async () => {
@@ -148,6 +255,7 @@ describe("assistant turn runner", () => {
         presentation: "TEXT",
         speak: false,
         speech_text: null,
+        delivery: "AUTOMATIC",
         blocks: [{ kind: "ANSWER", text: "1 item needs attention now." }],
       },
     });
@@ -176,6 +284,7 @@ describe("assistant turn runner", () => {
         presentation: "TEXT",
         speak: false,
         speech_text: null,
+        delivery: "AUTOMATIC",
         blocks: [
           {
             kind: "NOTICE",
@@ -195,6 +304,7 @@ describe("assistant turn runner", () => {
         presentation: "TEXT",
         speak: false,
         speech_text: null,
+        delivery: "AUTOMATIC",
         blocks: [{ kind: "ANSWER", text: "x".repeat(2000) }],
       },
     });
@@ -218,6 +328,7 @@ describe("assistant turn runner", () => {
         presentation: "VOICE",
         speak: false,
         speech_text: null,
+        delivery: "AUTOMATIC",
         blocks: [{ kind: "ANSWER", text: "Send the email now." }],
       },
     });
@@ -455,6 +566,7 @@ function voiceTurn(
       presentation: modality === "VOICE" ? "VOICE" : "TEXT",
       speak: modality === "VOICE",
       speech_text: modality === "VOICE" ? "1 item needs attention now." : null,
+      delivery: "AUTOMATIC",
       blocks: [{ kind: "ANSWER", text: "1 item needs attention now." }],
     },
     action_refs: [],
@@ -577,6 +689,28 @@ describe("voice session lifecycle", () => {
     await rig.voiceTurn("What am I missing today?");
     expect(rig.adapter.spoken).toEqual([TURN_ID]);
     expect(rig.session.current().state).toBe("SPEAKING");
+  });
+
+  it("gates automatic speech on Voice Mode, mute and an explicit request", () => {
+    const state = initialVoiceState();
+    expect(speechStartForTurn(state, false)).toBe("AUTOMATIC");
+    // Voice Mode off: a spoken answer waits for the Read aloud control.
+    expect(speechStartForTurn({ ...state, voiceMode: false }, false)).toBe(
+      "NONE",
+    );
+    // An explicit request still speaks: it is the operator's own instruction.
+    expect(speechStartForTurn({ ...state, voiceMode: false }, true)).toBe(
+      "MANUAL",
+    );
+    // Mute always wins, even for an explicit request.
+    expect(speechStartForTurn({ ...state, muted: true }, true)).toBe("NONE");
+    expect(speechStartForTurn({ ...state, state: "STOPPED" }, false)).toBe(
+      "NONE",
+    );
+    // Stop does not silence an explicit click, and neither does a dead mic.
+    expect(speechStartForTurn({ ...state, state: "STOPPED" }, true)).toBe(
+      "MANUAL",
+    );
   });
 
   it("cancels playback and listens when the microphone is pressed during speech", async () => {
@@ -716,6 +850,7 @@ describe("voice session lifecycle", () => {
       state: "IDLE",
       microphoneSupported: true,
       muted: false,
+      voiceMode: true,
       transcript: null,
       error: null,
       turn: 0,
@@ -786,6 +921,7 @@ describe("voice session lifecycle", () => {
       "state",
       "transcript",
       "turn",
+      "voiceMode",
     ]);
     expect(rig.notices).toEqual([]);
   });
@@ -798,6 +934,7 @@ describe("voice session lifecycle", () => {
       transcribing: false,
       speaking: false,
       muted: false,
+      voiceModeEnabled: true,
       microphoneDisabled: false,
       stopAvailable: false,
       readAloudAvailable: true,
@@ -1037,6 +1174,7 @@ describe("voice session lifecycle", () => {
       transcribing: false,
       speaking: true,
       muted: false,
+      voiceModeEnabled: true,
       microphoneDisabled: true,
       stopAvailable: true,
       readAloudAvailable: true,

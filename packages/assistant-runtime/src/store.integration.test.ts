@@ -150,6 +150,7 @@ suite("assistant persistence against disposable PostgreSQL", () => {
         presentation: "TEXT",
         speak: false,
         speech_text: null,
+        delivery: "AUTOMATIC",
         blocks: [{ kind: "ANSWER", text: "1 item needs attention now." }],
       },
       action_refs: [],

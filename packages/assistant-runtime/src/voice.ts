@@ -1,6 +1,7 @@
 import type { AssistantTurnView, AssistantVoiceState } from "@navox/contracts";
 import { AssistantError } from "./errors";
 import { LIMITS } from "./limits";
+import { hasSpokenBlock, summarizeForSpeech } from "./presentation";
 import { clampText } from "./validate";
 
 export interface VoiceSessionState {
@@ -13,6 +14,12 @@ export interface VoiceSessionState {
   microphoneSupported: boolean;
   /** Automatic answer speech is suppressed until the operator unmutes. */
   muted: boolean;
+  /**
+   * The visible Voice Mode preference. When it is off a spoken question still
+   * returns the full visual answer, but playback waits for an explicit Read
+   * aloud click instead of starting by itself.
+   */
+  voiceMode: boolean;
   transcript: string | null;
   error: string | null;
   turn: number;
@@ -23,6 +30,7 @@ export function initialVoiceState(): VoiceSessionState {
     state: "IDLE",
     microphoneSupported: true,
     muted: false,
+    voiceMode: true,
     transcript: null,
     error: null,
     turn: 0,
@@ -43,6 +51,7 @@ export type VoiceEvent =
   | { type: "BARGE_IN" }
   | { type: "MUTE" }
   | { type: "UNMUTE" }
+  | { type: "SET_VOICE_MODE"; enabled: boolean }
   | { type: "STOP" }
   | { type: "MICROPHONE_UNSUPPORTED"; reason: string }
   | { type: "RESET" };
@@ -98,6 +107,15 @@ function restingState(state: VoiceSessionState): AssistantVoiceState {
  */
 export function automaticSpeechAllowed(state: VoiceSessionState): boolean {
   return !state.muted && !isSettled(state);
+}
+
+/**
+ * Whether a spoken question's answer may start playback by itself. Voice Mode
+ * is the operator's own preference and never carries authority; mute, Stop and
+ * an unsupported browser still veto playback.
+ */
+export function voiceModeAllowsSpeech(state: VoiceSessionState): boolean {
+  return state.voiceMode;
 }
 
 /**
@@ -181,6 +199,10 @@ export function reduceVoiceState(
       return state.muted ? state : mutedState(state);
     case "UNMUTE":
       return state.muted ? unmutedState(state) : state;
+    case "SET_VOICE_MODE":
+      return state.voiceMode === event.enabled
+        ? state
+        : { ...state, voiceMode: event.enabled };
     case "STOP":
       return { ...state, state: "STOPPED", transcript: null };
     case "MICROPHONE_UNSUPPORTED":
@@ -210,19 +232,13 @@ export function spokenTextForTurn(turn: AssistantTurnView): string | null {
   if (turn.decision?.requires_approval) return null;
   if (turn.state !== "READY" && turn.state !== "CLARIFY") return null;
   const speech = turn.presentation?.speech_text?.trim();
-  if (turn.presentation?.speak && speech) {
-    return clampText(speech, MAX_SPEECH_LENGTH);
-  }
+  // The saved summary is the coherent, bounded text both the automatic path
+  // and an explicit Read aloud use. It is present whenever the answer is
+  // speakable, including turns that stayed silent on their own.
+  if (speech) return clampText(speech, MAX_SPEECH_LENGTH);
   const blocks = turn.presentation?.blocks ?? [];
-  const answer = blocks.find((block) => block.kind === "ANSWER");
-  if (answer?.kind === "ANSWER" && answer.text.trim()) {
-    return clampText(answer.text.trim(), MAX_SPEECH_LENGTH);
-  }
-  const notice = blocks.find((block) => block.kind === "NOTICE");
-  if (notice?.kind === "NOTICE" && notice.text.trim()) {
-    return clampText(notice.text.trim(), MAX_SPEECH_LENGTH);
-  }
-  return null;
+  if (!hasSpokenBlock(blocks)) return null;
+  return summarizeForSpeech(blocks, MAX_SPEECH_LENGTH);
 }
 
 export interface WakeWordEvent {

@@ -17,6 +17,16 @@ export type AssistantModality = "TEXT" | "VOICE";
 export type AssistantPresentation = "TEXT" | "VOICE" | "BOTH";
 
 /**
+ * The delivery preference the server recorded for one answer.
+ *
+ * `SPEAK` means the operator asked for that answer in words ("read it to me"),
+ * so the client treats it as an explicit request; `SUPPRESS` means the answer
+ * stays silent; `AUTOMATIC` follows the session's Voice Mode preference. The
+ * client never supplies this value and it carries no authority.
+ */
+export type AssistantDeliveryIntent = "AUTOMATIC" | "SPEAK" | "SUPPRESS";
+
+/**
  * Terminal state of an assistant turn.
  *
  * - `READY`      an owning service answered from its current facts.
@@ -66,6 +76,7 @@ export type AssistantIntentKind =
   | "weather.read"
   | "class.next"
   | "time.now"
+  | "assistant.delivery"
   | "assistant.clarify";
 
 /**
@@ -243,7 +254,17 @@ export interface IntentPlan {
 
 /** The runtime's validated decision about one capability invocation. */
 export interface CapabilityDecision {
-  kind: "DELEGATE" | "CLARIFY" | "UNAVAILABLE" | "WITHHELD" | "REFUSED";
+  /**
+   * `PRESENT` is a read-only re-presentation of an already-saved answer, such
+   * as an explicit Read aloud request. It delegates to no capability.
+   */
+  kind:
+    | "DELEGATE"
+    | "PRESENT"
+    | "CLARIFY"
+    | "UNAVAILABLE"
+    | "WITHHELD"
+    | "REFUSED";
   capability_id: AssistantCapabilityId | null;
   target: string | null;
   reason: string;
@@ -258,6 +279,11 @@ export interface AssistantPresentationPlan {
   presentation: AssistantPresentation;
   speak: boolean;
   speech_text: string | null;
+  /**
+   * Server-recorded delivery preference. The client reads it to decide whether
+   * this answer was explicitly requested; it never sends or overrides it.
+   */
+  delivery: AssistantDeliveryIntent;
   blocks: AssistantBlock[];
 }
 

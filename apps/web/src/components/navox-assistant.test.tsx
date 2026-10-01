@@ -21,6 +21,7 @@ const turn: AssistantTurnView = {
     presentation: "VOICE",
     speak: true,
     speech_text: "1 item needs attention now.",
+    delivery: "AUTOMATIC",
     blocks: [
       { kind: "ANSWER", text: "1 item needs attention now." },
       {
@@ -95,6 +96,7 @@ describe("assistant transcript rendering", () => {
             presentation: "VOICE",
             speak: false,
             speech_text: null,
+            delivery: "AUTOMATIC",
             blocks: [
               {
                 kind: "NOTICE",
@@ -149,6 +151,7 @@ describe("assistant transcript rendering", () => {
         presentation: "TEXT",
         speak: false,
         speech_text: null,
+        delivery: "AUTOMATIC",
         blocks: [{ kind: "ITEM", item }],
       },
     };
@@ -216,6 +219,7 @@ describe("assistant transcript rendering", () => {
             presentation: "TEXT",
             speak: false,
             speech_text: null,
+            delivery: "AUTOMATIC",
             blocks: [
               {
                 kind: "ANSWER",
@@ -265,6 +269,7 @@ describe("assistant transcript rendering", () => {
             presentation: "TEXT",
             speak: false,
             speech_text: null,
+            delivery: "AUTOMATIC",
             blocks: [
               {
                 kind: "ANSWER",
@@ -351,6 +356,7 @@ describe("click-to-speak replay control", () => {
         presentation: "TEXT",
         speak: false,
         speech_text: null,
+        delivery: "AUTOMATIC",
         blocks: [{ kind: "ANSWER", text: "1 item needs attention now." }],
       },
     };
@@ -369,6 +375,7 @@ describe("click-to-speak replay control", () => {
         presentation: "TEXT",
         speak: false,
         speech_text: null,
+        delivery: "AUTOMATIC",
         blocks: [
           {
             kind: "NOTICE",
@@ -436,6 +443,7 @@ describe("voice controls", () => {
         presentation: "VOICE",
         speak: true,
         speech_text: "This reply cannot be sent from here.",
+        delivery: "AUTOMATIC",
         blocks: [
           {
             kind: "ANSWER",
@@ -456,5 +464,20 @@ describe("voice controls", () => {
     );
     expect(markup).toContain("yes");
     expect(markup).not.toMatch(/approve|draft reply|review exact send/i);
+  });
+
+  it("shows Voice Mode and Mute as separate visible preferences", () => {
+    const markup = renderToStaticMarkup(createElement(NavoXAssistant));
+    // Voice Mode starts on, so its control offers to turn it off.
+    expect(markup).toContain(
+      'aria-pressed="true" aria-label="Turn Voice Mode off; answers stay on screen"',
+    );
+    // Mute stays its own control.
+    expect(markup).toContain('aria-label="Mute spoken answers"');
+    expect(markup).toContain(
+      "Voice Mode on — spoken questions are answered aloud",
+    );
+    // A real control, not a caption.
+    expect(markup).toMatch(/<button[^>]*Voice Mode/);
   });
 });

@@ -201,7 +201,8 @@ describe("SPEC-006 News evidence", () => {
       buildPresentationPlan({
         decision: answer.decision,
         blocks: answer.blocks,
-        presentation: "TEXT",
+        modality: "TEXT",
+        delivery: "AUTOMATIC",
       }),
     ).not.toThrow();
     const details = answer.blocks.find((block) => block.kind === "DETAILS");

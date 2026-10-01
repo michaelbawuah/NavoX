@@ -16,6 +16,7 @@ import {
   capabilityForIntentKind,
 } from "./capabilities";
 import { answerNextClass, parseClassSourceSnapshot } from "./class-meetings";
+import { type DeliveryResolution, resolveDeliveryIntent } from "./delivery";
 import {
   decideEmailSearch,
   decideEmailSelection,
@@ -74,7 +75,9 @@ import {
   clampText,
   parseAssistantMessageRequest,
   parseCapabilityDecision,
+  parseIntentPlan,
 } from "./validate";
+import { spokenTextForTurn } from "./voice";
 import { parseWeather, weatherAnswer, weatherSelector } from "./weather";
 
 /** Qualified planning failures. A plan is a proposal, never a fallback route. */
@@ -357,6 +360,106 @@ export function createAssistantRuntime(
       action_id: null,
       response_state: "CLARIFY",
     });
+  }
+
+  /** A presentation-only decision. It never delegates and never needs approval. */
+  function presentDecision(reason: string): CapabilityDecision {
+    return parseCapabilityDecision({
+      kind: "PRESENT",
+      capability_id: null,
+      target: null,
+      reason,
+      requires_approval: false,
+      action_state: "NONE",
+      action_id: null,
+      response_state: "READY",
+    });
+  }
+
+  /**
+   * The plan of a delivery-only turn. `assistant.delivery` resolves to no
+   * capability, so this plan can never delegate or reach a source.
+   */
+  function deliveryPlan(text: string): IntentPlan {
+    return parseIntentPlan({
+      version: 1,
+      intents: [
+        {
+          kind: "assistant.delivery",
+          capability_id: null,
+          question: text,
+          confidence: 1,
+        },
+      ],
+    });
+  }
+
+  /**
+   * Answers a delivery-only utterance from the saved conversation. It never
+   * reaches the SPEC-005 planner, never calls a source and never speaks an
+   * ineligible turn: an unknown, out-of-range or unspeakable referent asks for
+   * a clarification instead.
+   */
+  function deliveryTurnOutcome(input: {
+    text: string;
+    delivery: DeliveryResolution;
+    turns: readonly AssistantTurnRecord[];
+  }): {
+    plan: IntentPlan;
+    state: AssistantResponseState;
+    decision: CapabilityDecision;
+    blocks: AssistantBlock[];
+  } {
+    const plan = deliveryPlan(input.text);
+    const clarify = (reason: string, text: string) => ({
+      plan,
+      state: "CLARIFY" as AssistantResponseState,
+      decision: clarifyDecision(reason),
+      blocks: noticeBlocks("CLARIFY", text),
+    });
+    // A successful read-aloud re-presents the saved answer: its blocks, its
+    // bounded summary and a PRESENT decision that delegates nothing.
+    const present = (source: AssistantTurnRecord) => ({
+      plan,
+      state: "READY" as AssistantResponseState,
+      decision: presentDecision("delivery.read_aloud"),
+      blocks: source.presentation.blocks,
+    });
+    if (input.delivery.intent === "SUPPRESS") {
+      return clarify(
+        "delivery.suppressed",
+        "Okay — I won't read answers aloud unless you ask me to.",
+      );
+    }
+    const eligible = input.turns.filter(
+      (turn) => spokenTextForTurn(toTurnView(turn)) !== null,
+    );
+    const ordinal = input.delivery.ordinal;
+    if (ordinal !== null) {
+      const referenced =
+        ordinal > 0 ? input.turns[ordinal - 1] : eligible.at(-1);
+      if (!referenced) {
+        return clarify(
+          "delivery.unknown_referent",
+          "I don't have that many answers in this conversation yet. Tell me which answer to read aloud.",
+        );
+      }
+      if (spokenTextForTurn(toTurnView(referenced)) === null) {
+        return clarify(
+          "delivery.ineligible_referent",
+          "That turn has no finished answer I can read aloud.",
+        );
+      }
+      return present(referenced);
+    }
+    const last = eligible.at(-1);
+    if (!last) {
+      return clarify(
+        "delivery.no_eligible_answer",
+        "I don't have an answer in this conversation to read aloud yet. Ask me something first.",
+      );
+    }
+    return present(last);
   }
 
   /** Converts a planning or delegation failure into a qualified turn outcome. */
@@ -807,6 +910,7 @@ export function createAssistantRuntime(
       "weather.read": "Weather",
       "class.next": "Next class",
       "time.now": "Time",
+      "assistant.delivery": "Request",
       "assistant.clarify": "Request",
     };
     const parts: {
@@ -1100,39 +1204,69 @@ export function createAssistantRuntime(
         );
       }
 
-      let plan = planTurn({ text: request.text });
-
+      /**
+       * A delivery cue is classified before any planning. A cue-only utterance
+       * is answered from this same session's saved turns and never reaches the
+       * planner or a source; an embedded cue leaves general routing untouched.
+       */
+      const delivery = resolveDeliveryIntent(request.text);
+      /**
+       * The plan of record if the turn never reaches its owning service. It is
+       * built before any store call, so a failure path can never throw a second
+       * time while it is converting an error into a qualified turn.
+       */
+      const fallbackPlan = delivery.cue_only
+        ? deliveryPlan(request.text)
+        : planTurn({ text: request.text });
+      let plan: IntentPlan;
       let state: AssistantResponseState;
       let decision: CapabilityDecision;
       let blocks: AssistantBlock[];
       try {
-        if (request.referents.length > 0) {
-          const selected = await selectEmail({
-            cookie: input.cookie,
-            scope,
-            sessionId,
-            request,
-          });
-          plan = selected.plan;
-          state = selected.state;
-          decision = selected.decision;
-          blocks = selected.blocks;
-        } else {
+        if (delivery.cue_only) {
+          // Reading the saved conversation is a store call like any other, so
+          // it shares the routing branch's failure handling: the catch below
+          // turns a failure into a qualified turn, which resolves the durable
+          // claim through the normal insert instead of leaving it to expire.
           const turns = await deps.store.listTurns({
             session_id: sessionId,
             scope,
           });
-          const planned = await planFreeformTurn({
-            cookie: input.cookie,
-            scope,
-            record,
-            request,
+          ({ plan, state, decision, blocks } = deliveryTurnOutcome({
+            text: request.text,
+            delivery,
             turns,
-          });
-          plan = planned.plan;
-          state = planned.state;
-          decision = planned.decision;
-          blocks = planned.blocks;
+          }));
+        } else {
+          plan = fallbackPlan;
+          if (request.referents.length > 0) {
+            const selected = await selectEmail({
+              cookie: input.cookie,
+              scope,
+              sessionId,
+              request,
+            });
+            plan = selected.plan;
+            state = selected.state;
+            decision = selected.decision;
+            blocks = selected.blocks;
+          } else {
+            const turns = await deps.store.listTurns({
+              session_id: sessionId,
+              scope,
+            });
+            const planned = await planFreeformTurn({
+              cookie: input.cookie,
+              scope,
+              record,
+              request,
+              turns,
+            });
+            plan = planned.plan;
+            state = planned.state;
+            decision = planned.decision;
+            blocks = planned.blocks;
+          }
         }
       } catch (error) {
         const failure = isAssistantError(error)
@@ -1142,23 +1276,21 @@ export function createAssistantRuntime(
           await releaseClaim(sessionId, scope, request.request_id);
           throw failure;
         }
-        if (request.referents.length > 0) {
-          const refused = planFailure(error, "search");
-          state = refused.state;
-          decision = refused.decision;
-          blocks = refused.blocks;
-        } else {
-          const refused = planFailure(error);
-          state = refused.state;
-          decision = refused.decision;
-          blocks = refused.blocks;
-        }
+        const refused =
+          request.referents.length > 0 && !delivery.cue_only
+            ? planFailure(error, "search")
+            : planFailure(error);
+        plan = fallbackPlan;
+        state = refused.state;
+        decision = refused.decision;
+        blocks = refused.blocks;
       }
 
       const presentation = buildPresentationPlan({
         decision,
         blocks,
-        presentation: request.modality === "VOICE" ? "VOICE" : "TEXT",
+        modality: request.modality,
+        delivery: delivery.intent,
       });
 
       const answer = blocks.find((block) => block.kind === "ANSWER");

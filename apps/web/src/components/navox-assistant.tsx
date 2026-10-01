@@ -35,6 +35,7 @@ import {
   canSpeakTurn,
   createAssistantTurnRunner,
   createVoiceSession,
+  speechStartForTurn,
   type VoiceSession,
   voiceControls,
 } from "../lib/assistant-controller";
@@ -420,6 +421,31 @@ function MutedIcon() {
   );
 }
 
+/** Voice Mode is a preference, so its on and off shapes read differently. */
+function VoiceModeIcon({ enabled }: { enabled: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      focusable="false"
+    >
+      <path d="M4 4.75h16v11.5H9.5L5 19.5V4.75Z" />
+      {enabled ? (
+        <path d="M9.5 9.5v3M12 8.5v5M14.5 9.5v3" />
+      ) : (
+        <path d="M4.5 3.5 19.5 20" />
+      )}
+    </svg>
+  );
+}
+
 function failureMessage(error: unknown): string {
   if (error instanceof AssistantClientError) return error.message;
   if (error instanceof AssistantRequestIdError) return error.message;
@@ -550,8 +576,14 @@ export function NavoXAssistant() {
         onBusy: setBusy,
         // Only a live voice turn may speak. The token refuses an answer the
         // operator already stopped, muted or replaced.
-        onSpeak: (turn) =>
-          voiceRef.current?.speakAutomatic(turn, pendingVoiceToken.current),
+        onSpeak: (turn, explicit) => {
+          const session = voiceRef.current;
+          if (!session) return;
+          const start = speechStartForTurn(session.current(), explicit);
+          if (start === "MANUAL") session.speakManually(turn);
+          if (start === "AUTOMATIC")
+            session.speakAutomatic(turn, pendingVoiceToken.current);
+        },
         messageForError: failureMessage,
       }),
     [],
@@ -611,6 +643,10 @@ export function NavoXAssistant() {
 
   const toggleMute = useCallback(() => {
     voiceSession().toggleMuted();
+  }, [voiceSession]);
+
+  const toggleVoiceMode = useCallback(() => {
+    voiceSession().setVoiceMode(!voiceSession().current().voiceMode);
   }, [voiceSession]);
 
   const stopEverything = useCallback(() => {
@@ -715,6 +751,12 @@ export function NavoXAssistant() {
           {status}
         </p>
       )}
+      {!controls.voiceModeEnabled && (
+        <p className={styles.status} data-voice-mode="off">
+          Voice Mode is off. Answers are shown on screen; press Read aloud on
+          one to hear it.
+        </p>
+      )}
 
       <form className={styles.form} onSubmit={onSubmit}>
         <label className={styles.field}>
@@ -750,6 +792,25 @@ export function NavoXAssistant() {
           }
         >
           {controls.capturing ? <StopIcon /> : <MicIcon />}
+        </button>
+        <button
+          type="button"
+          className={styles.iconButton}
+          onClick={toggleVoiceMode}
+          aria-pressed={controls.voiceModeEnabled}
+          aria-label={
+            controls.voiceModeEnabled
+              ? "Turn Voice Mode off; answers stay on screen"
+              : "Turn Voice Mode on; spoken questions are answered aloud"
+          }
+          title={
+            controls.voiceModeEnabled
+              ? "Voice Mode on — spoken questions are answered aloud"
+              : "Voice Mode off — answers stay on screen"
+          }
+          disabled={connecting || !sessionId}
+        >
+          <VoiceModeIcon enabled={controls.voiceModeEnabled} />
         </button>
         <button
           type="button"

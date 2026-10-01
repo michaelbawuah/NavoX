@@ -16,6 +16,7 @@ import {
   SCOPE,
 } from "./testing/fakes";
 import type { TodayQueryResult } from "./today";
+import { spokenTextForTurn } from "./voice";
 
 const NOW = new Date("2026-09-30T12:00:00.000Z");
 const COOKIE = "navox_session=abc123";
@@ -2545,5 +2546,350 @@ describe("real SPEC-005 and SPEC-007 wire shapes", () => {
         session_id: NAVOX_SESSION_ID,
       },
     ]);
+  });
+});
+
+describe("adaptive response modality", () => {
+  it("answers a spoken turn with the same visual blocks plus a bounded summary", async () => {
+    const context = await withSession();
+    const response = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "What am I missing today?",
+        modality: "VOICE",
+      },
+    });
+    expect(response.turn.presentation?.presentation).toBe("BOTH");
+    expect(response.turn.presentation?.speak).toBe(true);
+    // A spoken question follows the client's Voice Mode preference.
+    expect(response.turn.presentation?.delivery).toBe("AUTOMATIC");
+    expect(response.turn.presentation?.speech_text).toBe(
+      "1 item needs attention now.",
+    );
+    // One coherent turn: the detailed visual blocks survive alongside speech.
+    expect(response.turn.presentation?.blocks).toEqual([
+      { kind: "ANSWER", text: "1 item needs attention now." },
+    ]);
+  });
+
+  it("speaks the most recent eligible answer in the same session on request", async () => {
+    const context = await withSession();
+    await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "What am I missing today?",
+        modality: "TEXT",
+      },
+    });
+    const plannerCalls = context.upstream.calls.plan.length;
+    const todayCalls = context.upstream.calls.today.length;
+    const response = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: "77777777-7777-4777-8777-777777777778",
+        text: "read it to me",
+        modality: "TEXT",
+      },
+    });
+    // The delivery turn is resolved from saved state; it makes no provider call.
+    expect(context.upstream.calls.plan).toHaveLength(plannerCalls);
+    expect(context.upstream.calls.today).toHaveLength(todayCalls);
+    expect(response.turn.plan?.intents[0]?.kind).toBe("assistant.delivery");
+    expect(response.turn.decision?.kind).toBe("PRESENT");
+    expect(response.turn.decision?.capability_id).toBeNull();
+    expect(response.turn.decision?.requires_approval).toBe(false);
+    expect(response.turn.action_refs).toEqual([]);
+    expect(response.turn.presentation?.presentation).toBe("BOTH");
+    expect(response.turn.presentation?.speak).toBe(true);
+    // The canonical signal the client reads: this answer was asked for in words.
+    expect(response.turn.presentation?.delivery).toBe("SPEAK");
+    expect(response.turn.presentation?.speech_text).toBe(
+      "1 item needs attention now.",
+    );
+    expect(response.turn.presentation?.blocks).toEqual([
+      { kind: "ANSWER", text: "1 item needs attention now." },
+    ]);
+  });
+
+  it("asks for clarification when no saved answer can be read aloud", async () => {
+    const context = await withSession();
+    const plannerCalls = context.upstream.calls.plan.length;
+    const response = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "read it to me",
+        modality: "VOICE",
+      },
+    });
+    expect(context.upstream.calls.plan).toHaveLength(plannerCalls);
+    expect(context.upstream.calls.today).toHaveLength(0);
+    expect(response.turn.state).toBe("CLARIFY");
+    expect(response.turn.decision?.reason).toBe("delivery.no_eligible_answer");
+    // The operator asked in words, so the clarification is read back too.
+    expect(response.turn.presentation?.presentation).toBe("BOTH");
+    expect(response.turn.presentation?.speak).toBe(true);
+  });
+
+  it("clarifies an out-of-range referent without a provider call", async () => {
+    const context = await withSession();
+    await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "What am I missing today?",
+        modality: "TEXT",
+      },
+    });
+    const plannerCalls = context.upstream.calls.plan.length;
+    const response = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: "77777777-7777-4777-8777-777777777778",
+        text: "read the third one to me",
+        modality: "VOICE",
+      },
+    });
+    expect(context.upstream.calls.plan).toHaveLength(plannerCalls);
+    expect(response.turn.state).toBe("CLARIFY");
+    expect(response.turn.decision?.reason).toBe("delivery.unknown_referent");
+  });
+
+  it("refuses a referent that has no speakable answer", async () => {
+    const context = await withSession({
+      planError: new AssistantError("unavailable", "Planner is offline."),
+      todayError: new AssistantError("unavailable", "Today is offline."),
+    });
+    await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "A question that cannot be answered",
+        modality: "TEXT",
+      },
+    });
+    const response = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: "77777777-7777-4777-8777-777777777778",
+        text: "read the first one to me",
+        modality: "TEXT",
+      },
+    });
+    expect(response.turn.state).toBe("CLARIFY");
+    expect(response.turn.decision?.reason).toBe("delivery.ineligible_referent");
+  });
+
+  it("suppresses automatic speech for the answer it belongs to", async () => {
+    const context = await withSession({
+      planError: null,
+      plan: intentEnvelope({
+        version: 1,
+        intents: [
+          {
+            route: "today.read",
+            entity: { kind: "NONE", value: null, confidence: 0.5 },
+            time: { kind: "NONE", expression: null, confidence: 1 },
+            reference: { kind: "NONE", ordinal: null },
+            confidence: 0.5,
+            requires_clarification: false,
+            clarification: null,
+          },
+        ],
+      }),
+    });
+    const response = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "What am I missing today? Don't read it aloud.",
+        modality: "VOICE",
+      },
+    });
+    // The question still reached the owning service; only playback is dropped.
+    expect(context.upstream.calls.today[0]?.query).toContain(
+      "Don't read it aloud",
+    );
+    expect(response.turn.state).toBe("READY");
+    expect(response.turn.presentation?.presentation).toBe("TEXT");
+    expect(response.turn.presentation?.speak).toBe(false);
+    expect(response.turn.presentation?.delivery).toBe("SUPPRESS");
+    expect(response.turn.presentation?.speech_text).toBeNull();
+  });
+
+  it("records an explicit cue inside a spoken question and still routes it", async () => {
+    const context = await withSession({
+      planError: null,
+      plan: intentEnvelope({
+        version: 1,
+        intents: [
+          {
+            route: "today.read",
+            question: "what am I missing today",
+            entity: { kind: "NONE", value: null, confidence: 0.5 },
+            time: { kind: "NONE", expression: null, confidence: 1 },
+            reference: { kind: "NONE", ordinal: null },
+            confidence: 0.5,
+            requires_clarification: false,
+            clarification: null,
+          },
+        ],
+      }),
+    });
+    const response = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "what am I missing today, and read it to me",
+        modality: "VOICE",
+      },
+    });
+    // The question reached its owning service with the operator's own words.
+    expect(context.upstream.calls.today[0]?.query).toBe(
+      "what am I missing today",
+    );
+    expect(response.turn.state).toBe("READY");
+    expect(response.turn.presentation?.presentation).toBe("BOTH");
+    expect(response.turn.presentation?.speak).toBe(true);
+    // Voice Mode is a client default; an explicit request outranks it.
+    expect(response.turn.presentation?.delivery).toBe("SPEAK");
+  });
+
+  it("prefers suppression over the read-aloud phrase it contains", async () => {
+    const context = await withSession({
+      planError: null,
+      plan: intentEnvelope({
+        version: 1,
+        intents: [
+          {
+            route: "today.read",
+            question: "what am I missing today",
+            entity: { kind: "NONE", value: null, confidence: 0.5 },
+            time: { kind: "NONE", expression: null, confidence: 1 },
+            reference: { kind: "NONE", ordinal: null },
+            confidence: 0.5,
+            requires_clarification: false,
+            clarification: null,
+          },
+        ],
+      }),
+    });
+    const response = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "what am I missing today, but don't read it to me",
+        modality: "VOICE",
+      },
+    });
+    expect(response.turn.presentation?.delivery).toBe("SUPPRESS");
+    expect(response.turn.presentation?.speak).toBe(false);
+    expect(response.turn.presentation?.speech_text).toBeNull();
+    // The visual answer is untouched.
+    expect(
+      response.turn.presentation?.blocks.some(
+        (block) => block.kind === "ANSWER",
+      ),
+    ).toBe(true);
+  });
+
+  it("speaks a silent long answer as whole sentences on explicit request", async () => {
+    const context = await withSession({
+      today: {
+        intent: "today",
+        answer:
+          "First task is due at nine. Second task is due at noon. ".repeat(20),
+        items: [],
+        supported_queries: ["What am I missing today?"],
+        details: [],
+      },
+    });
+    const response = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "What am I missing today?",
+        modality: "TEXT",
+      },
+    });
+    expect(response.turn.presentation?.speak).toBe(false);
+    const spoken = spokenTextForTurn(response.turn);
+    expect(spoken).not.toBeNull();
+    expect(spoken?.length).toBeLessThanOrEqual(LIMITS.maxSpeechLength);
+    // The summary keeps whole sentences instead of slicing the answer.
+    expect(spoken?.startsWith("First task is due at nine.")).toBe(true);
+    expect(spoken?.endsWith(".")).toBe(true);
+  });
+
+  it("acknowledges a standalone suppression cue without a provider call", async () => {
+    const context = await withSession();
+    const response = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "don't read it aloud",
+        modality: "VOICE",
+      },
+    });
+    expect(context.upstream.calls.plan).toHaveLength(0);
+    expect(context.upstream.calls.today).toHaveLength(0);
+    expect(response.turn.state).toBe("CLARIFY");
+    expect(response.turn.decision?.reason).toBe("delivery.suppressed");
+    expect(response.turn.presentation?.presentation).toBe("TEXT");
+    expect(response.turn.presentation?.speak).toBe(false);
+  });
+
+  it("resolves its claim when a delivery turn cannot read the session", async () => {
+    const context = await withSession();
+    const failure = new AssistantError(
+      "unavailable",
+      "The conversation store is unavailable.",
+    );
+    const listTurns = vi.spyOn(context.store, "listTurns");
+    listTurns.mockRejectedValueOnce(failure);
+
+    const response = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "read it to me",
+        modality: "VOICE",
+      },
+    });
+    expect(listTurns).toHaveBeenCalledTimes(1);
+    // A store failure is a qualified turn, never a stranded durable claim.
+    expect(response.turn.state).toBe("UNAVAILABLE");
+    expect(response.turn.plan?.intents[0]?.kind).toBe("assistant.delivery");
+    expect(context.upstream.calls.plan).toHaveLength(0);
+    expect(context.upstream.calls.today).toHaveLength(0);
+
+    // The same request replays the saved turn instead of waiting on the claim.
+    const replay = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "read it to me",
+        modality: "VOICE",
+      },
+    });
+    expect(replay.replay).toBe(true);
+    expect(replay.turn.state).toBe("UNAVAILABLE");
   });
 });
