@@ -34,6 +34,70 @@ describe("click-to-talk voice state", () => {
     expect(state.state).toBe("IDLE");
   });
 
+  it("enters transcription the moment a recorded clip is uploading", () => {
+    let state = reduceVoiceState(initialVoiceState(), {
+      type: "REQUEST_LISTENING",
+    });
+    expect(state.state).toBe("LISTENING");
+
+    state = reduceVoiceState(state, { type: "TRANSCRIPTION_STARTED" });
+    expect(state.state).toBe("TRANSCRIBING");
+    expect(state.transcript).toBeNull();
+
+    // A duplicated finish click cannot re-enter or reopen the upload.
+    expect(reduceVoiceState(state, { type: "TRANSCRIPTION_STARTED" })).toEqual(
+      state,
+    );
+
+    // The upload still resolves through the existing transcript path.
+    state = reduceVoiceState(state, {
+      type: "TRANSCRIPT",
+      text: " Any updates? ",
+    });
+    expect(state.state).toBe("TRANSCRIBING");
+    expect(state.transcript).toBe("Any updates?");
+  });
+
+  it("refuses a transcription start outside an open listening session", () => {
+    const settled = [
+      initialVoiceState(),
+      apply(initialVoiceState(), { type: "MUTE" }),
+      apply(initialVoiceState(), { type: "SPEAKING_STARTED" }),
+      apply(initialVoiceState(), { type: "STOP" }),
+      apply(initialVoiceState(), {
+        type: "MICROPHONE_UNSUPPORTED",
+        reason: "No microphone.",
+      }),
+      apply(
+        initialVoiceState(),
+        { type: "REQUEST_LISTENING" },
+        { type: "SUBMITTED" },
+      ),
+      apply(
+        initialVoiceState(),
+        { type: "REQUEST_LISTENING" },
+        { type: "TRANSCRIPT", text: "Any updates?" },
+      ),
+    ];
+    for (const state of settled) {
+      expect(
+        reduceVoiceState(state, { type: "TRANSCRIPTION_STARTED" }),
+      ).toEqual(state);
+    }
+  });
+
+  it("keeps mute through an upload and a stop after it", () => {
+    const uploading = apply(
+      initialVoiceState(),
+      { type: "REQUEST_LISTENING" },
+      { type: "MUTE" },
+      { type: "TRANSCRIPTION_STARTED" },
+    );
+    expect(uploading.state).toBe("TRANSCRIBING");
+    expect(uploading.muted).toBe(true);
+    expect(reduceVoiceState(uploading, { type: "STOP" }).state).toBe("STOPPED");
+  });
+
   it("interrupts playback when a new utterance starts", () => {
     let state = reduceVoiceState(initialVoiceState(), {
       type: "SPEAKING_STARTED",

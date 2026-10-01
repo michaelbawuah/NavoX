@@ -235,6 +235,59 @@ export async function submitAssistantTurn(
   );
 }
 
+/** Mirrors the SPEC-005 transcript bound on the assistant question text. */
+export const MAX_TRANSCRIPT_LENGTH = 500;
+
+/**
+ * Uploads one already-validated WAV clip to the session-scoped Next route.
+ * The body is the raw container: no provider, model, credential or URL ever
+ * travels from the browser, and an abort rejects the request unread.
+ */
+export async function transcribeAssistantSpeech(
+  sessionId: string,
+  wav: Uint8Array<ArrayBuffer>,
+  signal?: AbortSignal,
+): Promise<string> {
+  const response = await fetch(
+    `${assistantSessionPath(sessionId)}/speech/transcribe`,
+    {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+      headers: { "content-type": "audio/wav" },
+      body: wav,
+      signal,
+    },
+  );
+  if (!response.ok) throw await readError(response);
+  let payload: { text?: unknown };
+  try {
+    payload = (await response.json()) as { text?: unknown };
+  } catch {
+    throw new AssistantClientError(
+      "unavailable",
+      502,
+      "The recording could not be transcribed. Type your question instead.",
+    );
+  }
+  const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+  if (!text) {
+    throw new AssistantClientError(
+      "unavailable",
+      502,
+      "No speech was heard. Type your question instead.",
+    );
+  }
+  if (text.length > MAX_TRANSCRIPT_LENGTH) {
+    throw new AssistantClientError(
+      "unavailable",
+      502,
+      "That recording was too long. Record a shorter question.",
+    );
+  }
+  return text;
+}
+
 function draftPath(sessionId: string, draftId?: string): string {
   const base = `${assistantSessionPath(sessionId)}/email-drafts`;
   return draftId ? `${base}/${encodeURIComponent(draftId)}` : base;

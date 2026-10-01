@@ -178,7 +178,27 @@ bounded suggestions contract to sixteen and preserves rejection beyond that
 limit. Root npm lint/typecheck/tests and Web build passed; all 228 assistant
 runtime tests passed against disposable PostgreSQL. The full API preflight
 passed again with 2,687 tests and zero skips on the correction tree; see
-`/tmp/navox-spec008-foundation-ci-fix-api-gate.log`. A follow-up PR run must
-verify Compose on the new exact head before the foundation checkpoint is
-accepted as CI green. `M11C-VOICE-CLIENT-BRIEF.md` defines the next microphone
-integration phase; it must not start until this CI failure is resolved.
+`/tmp/navox-spec008-foundation-ci-fix-api-gate.log`. Correction commit
+`afb0fe1d87a5cd680a64fc32bd844b6e4f84a2ad` was pushed to the draft PR.
+Hosted CI run `36828936849` completed on that exact head with all six jobs
+successful: Web quality, Chrome extension quality, API quality, dependency
+security, evaluation/hardening and Compose integration. The foundation is now
+a committed and CI-green branch checkpoint, while PR #22 remains draft because
+the broader R3 voice, wake, workflow, live-source and action acceptance gates
+are still open.
+
+## M11C microphone client under acceptance
+
+`M11C-VOICE-CLIENT-BRIEF.md` and `M11C-VOICE-CLIENT-WORKER-REPORT.md` describe
+the TypeScript recorded-clip path: browser microphone to bounded 16 kHz WAV,
+same-origin session route, SPEC-005 transcription and one VOICE AssistantTurn.
+Root review corrected browser `MediaDevices` receiver binding, upload-state
+display, the 30-second microphone ceiling and abort propagation from a
+cancelled Next request to the upstream call. Root JavaScript lint/typecheck,
+346 Web tests, 233 runtime tests with disposable PostgreSQL and Web/extension
+builds pass on the current working tree. The TypeScript migration check passes
+29 assertions. The full API pre-push gate passed with 2,687 tests and zero
+skips, plus all lint, type, schema, metric, release and whitespace checks;
+see `/tmp/navox-spec008-m11c-api-gate.log`. A real
+microphone and a qualified live speech provider have not yet been exercised.
+`M11D-TTS-BRIEF.md` defines the next provider-backed speech phase.

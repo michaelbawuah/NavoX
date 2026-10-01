@@ -11,6 +11,14 @@ export interface MutationGuardInput {
   secFetchSite: string | null;
   contentType: string | null;
   configuredOrigin: string | null;
+  /**
+   * The exact request content type this route accepts. Mutating assistant
+   * routes take JSON; the raw speech route takes a WAV container. Defaults to
+   * `application/json`; a media-type parameter is ignored on both sides.
+   */
+  expectedContentType?: string;
+  /** Bounded refusal copy for a wrong content type. Never echoes the body. */
+  contentTypeMessage?: string;
 }
 
 const FORBIDDEN = "This request must come from the NavoX app.";
@@ -45,10 +53,14 @@ export function assertSameOriginMutation(input: MutationGuardInput): void {
 
   const contentType =
     (input.contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
-  if (contentType !== "application/json") {
+  const expectedContentType = (input.expectedContentType ?? "application/json")
+    .split(";")[0]
+    ?.trim()
+    .toLowerCase();
+  if (contentType !== expectedContentType) {
     throw new AssistantError(
       "invalid_request",
-      "A JSON request body is required.",
+      input.contentTypeMessage ?? "A JSON request body is required.",
     );
   }
 

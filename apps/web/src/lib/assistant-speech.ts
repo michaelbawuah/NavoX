@@ -1,10 +1,23 @@
 /**
  * Isolated browser speech adapters for the `/navox` page.
  *
- * These wrap `SpeechRecognition` and `speechSynthesis` only. They carry no
- * authority, they never run in the background, and every failure is reported
- * to the caller so the page can fall back to typed input.
+ * Microphone capture is a click-to-talk recording: the first click opens the
+ * microphone and buffers PCM frames in memory, the second click encodes one
+ * bounded 16 kHz mono WAV clip and hands it to an injected uploader. The reply
+ * text is the only thing that leaves this module. `speechSynthesis` stays the
+ * provisional browser playback for this phase; it is not SPEC-005 TTS.
+ *
+ * Nothing here carries authority, runs in the background, persists audio or
+ * logs it, and every failure is reported to the caller so the page can fall
+ * back to typed input.
  */
+
+import {
+  encodeWavPcm16,
+  MAX_WAV_MILLISECONDS,
+  parseAssistantWav,
+  SpeechClipError,
+} from "./assistant-wav";
 
 export interface SpeechHandlers {
   onStart?: () => void;
@@ -13,35 +26,76 @@ export interface SpeechHandlers {
   onEnd: () => void;
 }
 
+/**
+ * Uploads one bounded WAV clip and resolves the bounded question text. The
+ * implementation owns the same-origin fetch; the adapter owns the abort.
+ */
+export type TranscribeSpeech = (
+  wav: Uint8Array<ArrayBuffer>,
+  signal: AbortSignal,
+) => Promise<string>;
+
 export interface SpeechAdapter {
-  readonly recognitionSupported: boolean;
-  readonly synthesisSupported: boolean;
+  readonly captureSupported: boolean;
   /** Typed fallback copy when the microphone is unavailable. */
-  readonly reason: string | null;
+  readonly captureReason: string | null;
+  readonly synthesisSupported: boolean;
   /** Typed fallback copy when spoken answers are unavailable. */
   readonly synthesisReason: string | null;
-  startListening(handlers: SpeechHandlers): void;
-  /** Cancels listening. A buffered transcript is discarded, never submitted. */
+  /** Opens the microphone and starts buffering one clip. */
+  startListening(handlers: SpeechHandlers, transcribe: TranscribeSpeech): void;
+  /**
+   * The operator's second click: finish the clip and transcribe it. Returns
+   * true only when this call really ended a recording and started the upload,
+   * so the page never claims a transcription that is not running.
+   */
+  finishListening(): boolean;
+  /** Stop, clear or unmount: abort capture or the in-flight upload. */
   stopListening(): void;
   speak(text: string, handlers: Omit<SpeechHandlers, "onTranscript">): void;
   stopSpeaking(): void;
 }
 
-interface RecognitionEvent {
-  results?: ArrayLike<ArrayLike<{ transcript?: string }>>;
-  error?: string;
+interface MediaStreamTrackLike {
+  stop(): void;
 }
 
-interface RecognitionLike {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  start(): void;
-  stop(): void;
-  abort(): void;
-  onresult: ((event: RecognitionEvent) => void) | null;
-  onerror: ((event: RecognitionEvent) => void) | null;
-  onend: (() => void) | null;
+interface MediaStreamLike {
+  getTracks(): MediaStreamTrackLike[];
+}
+
+interface AudioProcessEventLike {
+  inputBuffer: { getChannelData(channel: number): Float32Array };
+}
+
+interface ScriptProcessorLike {
+  onaudioprocess: ((event: AudioProcessEventLike) => void) | null;
+  connect(node: unknown): void;
+  disconnect(): void;
+}
+
+interface MediaStreamSourceLike {
+  connect(node: unknown): void;
+  disconnect(): void;
+}
+
+interface GainLike {
+  gain: { value: number };
+  connect(node: unknown): void;
+  disconnect(): void;
+}
+
+interface AudioContextLike {
+  sampleRate: number;
+  destination: unknown;
+  createMediaStreamSource(stream: MediaStreamLike): MediaStreamSourceLike;
+  createScriptProcessor?(
+    bufferSize: number,
+    inputChannels: number,
+    outputChannels: number,
+  ): ScriptProcessorLike;
+  createGain?(): GainLike;
+  close?(): Promise<void> | void;
 }
 
 interface UtteranceLike {
@@ -51,9 +105,16 @@ interface UtteranceLike {
   onerror: (() => void) | null;
 }
 
-interface SpeechScope {
-  SpeechRecognition?: new () => RecognitionLike;
-  webkitSpeechRecognition?: new () => RecognitionLike;
+interface CaptureScope {
+  navigator?: {
+    mediaDevices?: {
+      getUserMedia?: (constraints: {
+        audio: boolean;
+      }) => Promise<MediaStreamLike>;
+    };
+  };
+  AudioContext?: new () => AudioContextLike;
+  webkitAudioContext?: new () => AudioContextLike;
   speechSynthesis?: {
     speak(utterance: UtteranceLike): void;
     cancel(): void;
@@ -61,36 +122,73 @@ interface SpeechScope {
   SpeechSynthesisUtterance?: new (text: string) => UtteranceLike;
 }
 
-function errorText(reason: string | undefined): string {
-  if (reason === "not-allowed" || reason === "service-not-allowed") {
+const BUFFER_FRAMES = 4_096;
+/** Small slack so the frame cap, not the timer, wins a 30-second tie. */
+const CEILING_SLACK_MS = 250;
+const CEILING_REASON =
+  "That recording reached 30 seconds and was not sent. Record a shorter question.";
+const CAPTURE_REASON =
+  "This browser cannot record from the microphone. Type your question instead.";
+const SYNTHESIS_REASON =
+  "This browser cannot play spoken answers. Read the answer instead.";
+
+/** One live or in-flight microphone attempt. Audio never leaves this object. */
+interface Attempt {
+  controller: AbortController;
+  handlers: SpeechHandlers;
+  transcribe: TranscribeSpeech;
+  phase: "opening" | "recording" | "uploading";
+  settled: boolean;
+  buffered: number;
+  frames: Float32Array[];
+  context: AudioContextLike | null;
+  source: MediaStreamSourceLike | null;
+  processor: ScriptProcessorLike | null;
+  sink: GainLike | null;
+  stream: MediaStreamLike | null;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+function permissionMessage(error: unknown): string {
+  const name =
+    error && typeof error === "object" && "name" in error
+      ? String((error as { name?: unknown }).name)
+      : "";
+  if (name === "NotAllowedError" || name === "SecurityError") {
     return "Microphone access was blocked. Type your question instead.";
   }
-  if (reason === "no-speech")
-    return "No speech was heard. Try again or type instead.";
-  if (reason === "aborted") return "Listening stopped.";
-  return "Speech input stopped unexpectedly. Type your question instead.";
+  if (name === "NotFoundError" || name === "OverconstrainedError") {
+    return "No microphone was found. Type your question instead.";
+  }
+  return "The microphone could not start. Type your question instead.";
+}
+
+function failureMessage(error: unknown): string {
+  if (error instanceof SpeechClipError) return error.message;
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return "The recording could not be transcribed. Type your question instead.";
 }
 
 export function createSpeechAdapter(scope: unknown): SpeechAdapter {
-  const environment = (scope ?? {}) as SpeechScope;
-  const Recognition =
-    environment.SpeechRecognition ?? environment.webkitSpeechRecognition;
+  const environment = (scope ?? {}) as CaptureScope;
+  const mediaDevices = environment.navigator?.mediaDevices;
+  const AudioContextCtor =
+    environment.AudioContext ?? environment.webkitAudioContext;
   const synthesis = environment.speechSynthesis;
   const Utterance = environment.SpeechSynthesisUtterance;
-  const recognitionSupported = typeof Recognition === "function";
+  const captureSupported =
+    typeof mediaDevices?.getUserMedia === "function" &&
+    typeof AudioContextCtor === "function" &&
+    typeof AudioContextCtor.prototype?.createScriptProcessor === "function";
   const synthesisSupported =
     typeof Utterance === "function" && Boolean(synthesis);
-  let recognition: RecognitionLike | null = null;
-  let cancelCurrent: (() => void) | null = null;
+
+  const captureReason = captureSupported ? null : CAPTURE_REASON;
+  const synthesisReason = synthesisSupported ? null : SYNTHESIS_REASON;
+
+  let attempt: Attempt | null = null;
   let activeSpeech: { utterance: UtteranceLike; release: () => void } | null =
     null;
-
-  const reason = recognitionSupported
-    ? null
-    : "This browser cannot capture microphone input. Type your question instead.";
-  const synthesisReason = synthesisSupported
-    ? null
-    : "This browser cannot play spoken answers. Read the answer instead.";
 
   /**
    * Detaches first: a cancelled utterance must not report a late end or error
@@ -103,78 +201,247 @@ export function createSpeechAdapter(scope: unknown): SpeechAdapter {
     synthesis?.cancel();
   };
 
+  const releaseRecording = (target: Attempt) => {
+    if (target.timer !== null) {
+      clearTimeout(target.timer);
+      target.timer = null;
+    }
+    if (target.processor) {
+      target.processor.onaudioprocess = null;
+      target.processor.disconnect();
+    }
+    target.source?.disconnect();
+    target.sink?.disconnect();
+    void target.context?.close?.();
+    for (const track of target.stream?.getTracks() ?? []) {
+      try {
+        track.stop();
+      } catch {
+        // A track that already ended needs no further release.
+      }
+    }
+    target.phase = "uploading";
+  };
+
+  /** Terminal callback for one attempt: never twice, never after it is over. */
+  const settle = (
+    target: Attempt,
+    outcome: { text: string } | { error: string } | null,
+  ) => {
+    if (target.settled) return;
+    target.settled = true;
+    if (target.timer !== null) {
+      clearTimeout(target.timer);
+      target.timer = null;
+    }
+    if (attempt === target) attempt = null;
+    if (outcome && "text" in outcome)
+      target.handlers.onTranscript(outcome.text);
+    if (outcome && "error" in outcome) target.handlers.onError(outcome.error);
+    target.handlers.onEnd();
+  };
+
+  const abandonAttempt = (target: Attempt) => {
+    if (attempt === target) attempt = null;
+    // An in-flight upload loses its right to answer before the tracks close.
+    target.controller.abort();
+    releaseRecording(target);
+    if (!target.settled) {
+      target.settled = true;
+      target.handlers.onEnd();
+    }
+  };
+
+  /**
+   * The microphone never stays open past the contract's ceiling: the graph is
+   * closed, every track is stopped, and the operator gets bounded typed copy
+   * instead of a clip SPEC-005 would refuse.
+   */
+  const stopAtCeiling = (target: Attempt) => {
+    if (attempt !== target || target.settled || target.phase !== "recording") {
+      return;
+    }
+    releaseRecording(target);
+    settle(target, { error: CEILING_REASON });
+  };
+
+  const upload = async (target: Attempt, wav: Uint8Array<ArrayBuffer>) => {
+    try {
+      const text = await target.transcribe(wav, target.controller.signal);
+      if (attempt !== target || target.controller.signal.aborted) return;
+      const question = typeof text === "string" ? text.trim() : "";
+      if (!question) {
+        settle(target, {
+          error: "No speech was heard. Type your question instead.",
+        });
+        return;
+      }
+      settle(target, { text: question });
+    } catch (error) {
+      if (attempt !== target || target.controller.signal.aborted) return;
+      settle(target, { error: failureMessage(error) });
+    }
+  };
+
+  const openMicrophone = async (target: Attempt) => {
+    const devices = mediaDevices;
+    const ContextCtor = AudioContextCtor;
+    if (
+      !devices ||
+      typeof devices.getUserMedia !== "function" ||
+      typeof ContextCtor !== "function"
+    ) {
+      settle(target, { error: CAPTURE_REASON });
+      return;
+    }
+    let stream: MediaStreamLike;
+    try {
+      // Called on the MediaDevices object: a bare function reference loses the
+      // receiver a WebIDL brand check requires.
+      stream = await devices.getUserMedia({ audio: true });
+    } catch (error) {
+      if (attempt !== target || target.settled) return;
+      settle(target, { error: permissionMessage(error) });
+      return;
+    }
+    // The operator may have stopped, cleared or restarted while the browser
+    // was still asking: release the tracks instead of recording them.
+    if (
+      attempt !== target ||
+      target.settled ||
+      target.controller.signal.aborted
+    ) {
+      for (const track of stream.getTracks?.() ?? []) {
+        try {
+          track.stop();
+        } catch {
+          // Nothing to release.
+        }
+      }
+      return;
+    }
+    target.stream = stream;
+    try {
+      const context = new ContextCtor();
+      const source = context.createMediaStreamSource(stream);
+      const processor = context.createScriptProcessor?.(BUFFER_FRAMES, 1, 1);
+      if (!processor) throw new Error("no script processor");
+      // A silent sink keeps the graph pulling frames in browsers that only
+      // run a processor node while it reaches the destination.
+      const sink = context.createGain?.() ?? null;
+      // The contract's 30-second ceiling is enforced on both the buffered
+      // frames and the wall clock, so a forgotten recording can neither grow
+      // without bound nor leave the microphone open.
+      const maxFrames = Math.ceil(
+        (MAX_WAV_MILLISECONDS / 1_000) * context.sampleRate,
+      );
+      processor.onaudioprocess = (event) => {
+        if (target.settled || attempt !== target) return;
+        const remaining = maxFrames - target.buffered;
+        if (remaining <= 0) return;
+        const channel = event.inputBuffer.getChannelData(0);
+        const chunk =
+          channel.length > remaining ? channel.subarray(0, remaining) : channel;
+        target.frames.push(Float32Array.from(chunk));
+        target.buffered += chunk.length;
+        if (target.buffered >= maxFrames) stopAtCeiling(target);
+      };
+      source.connect(processor);
+      if (sink) {
+        sink.gain.value = 0;
+        processor.connect(sink);
+        sink.connect(context.destination);
+      } else {
+        processor.connect(context.destination);
+      }
+      target.context = context;
+      target.source = source;
+      target.processor = processor;
+      target.sink = sink;
+      target.phase = "recording";
+      target.timer = setTimeout(
+        () => stopAtCeiling(target),
+        MAX_WAV_MILLISECONDS + CEILING_SLACK_MS,
+      );
+    } catch {
+      releaseRecording(target);
+      settle(target, {
+        error: "The microphone could not start. Type your question instead.",
+      });
+    }
+  };
+
   return {
-    recognitionSupported,
+    captureSupported,
+    captureReason,
     synthesisSupported,
-    reason,
     synthesisReason,
 
-    startListening(handlers) {
-      if (!Recognition) {
-        handlers.onError(reason ?? "Speech input is unavailable.");
+    startListening(handlers, transcribe) {
+      // A new operator utterance takes the turn: any speech in flight stops.
+      cancelSpeech();
+      const previous = attempt;
+      if (previous) abandonAttempt(previous);
+      if (!captureSupported) {
+        handlers.onError(captureReason ?? CAPTURE_REASON);
         handlers.onEnd();
         return;
       }
-      // A new operator utterance takes the turn: any speech in flight stops.
-      cancelSpeech();
-      if (recognition) {
-        recognition.onend = null;
-        recognition.onerror = null;
-        recognition.onresult = null;
-        recognition.abort();
-        recognition = null;
-      }
-      cancelCurrent = null;
-      const instance = new Recognition();
-      instance.lang = "en-US";
-      instance.continuous = false;
-      instance.interimResults = false;
-      let transcript = "";
-      let failed = false;
-      let cancelled = false;
-      instance.onresult = (event) => {
-        const first = event.results?.[0]?.[0]?.transcript;
-        if (typeof first === "string") transcript = first;
+      const target: Attempt = {
+        controller: new AbortController(),
+        handlers,
+        transcribe,
+        phase: "opening",
+        settled: false,
+        buffered: 0,
+        frames: [],
+        context: null,
+        source: null,
+        processor: null,
+        sink: null,
+        stream: null,
+        timer: null,
       };
-      instance.onerror = (event) => {
-        failed = true;
-        handlers.onError(errorText(event.error));
-      };
-      instance.onend = () => {
-        recognition = null;
-        cancelCurrent = null;
-        if (!failed && !cancelled && transcript.trim()) {
-          handlers.onTranscript(transcript);
-        }
-        handlers.onEnd();
-      };
-      cancelCurrent = () => {
-        cancelled = true;
-        transcript = "";
-        try {
-          instance.abort();
-        } catch {
-          // Already stopped; nothing else to release.
-        }
-      };
-      recognition = instance;
+      attempt = target;
       handlers.onStart?.();
-      try {
-        instance.start();
-      } catch {
-        recognition = null;
-        cancelCurrent = null;
-        handlers.onError(
-          "Speech input could not start. Type your question instead.",
-        );
-        handlers.onEnd();
+      void openMicrophone(target);
+    },
+
+    finishListening() {
+      const target = attempt;
+      // Only a live capture can finish. A second click while the browser is
+      // still asking for permission is ignored, and Stop owns cancellation.
+      if (!target || target.settled || target.phase !== "recording") {
+        return false;
       }
+      // The caller may only claim a transcription once this call really owns
+      // the clip; an encode failure settles with its own typed fallback.
+      const sampleRate = target.context?.sampleRate ?? 0;
+      const frames = target.frames;
+      target.frames = [];
+      releaseRecording(target);
+      let wav: Uint8Array<ArrayBuffer>;
+      try {
+        const total = frames.reduce((sum, frame) => sum + frame.length, 0);
+        const merged = new Float32Array(total);
+        let offset = 0;
+        for (const frame of frames) {
+          merged.set(frame, offset);
+          offset += frame.length;
+        }
+        wav = encodeWavPcm16(merged, sampleRate);
+        parseAssistantWav(wav);
+      } catch (error) {
+        settle(target, { error: failureMessage(error) });
+        return false;
+      }
+      void upload(target, wav);
+      return true;
     },
 
     stopListening() {
-      const cancel = cancelCurrent;
-      cancelCurrent = null;
-      cancel?.();
+      const target = attempt;
+      if (target) abandonAttempt(target);
     },
 
     speak(text, handlers) {
@@ -190,17 +457,17 @@ export function createSpeechAdapter(scope: unknown): SpeechAdapter {
         utterance.onend = null;
         utterance.onerror = null;
       };
-      const settle = () => {
+      const end = () => {
         activeSpeech = null;
         release();
       };
       utterance.onstart = () => handlers.onStart?.();
       utterance.onend = () => {
-        settle();
+        end();
         handlers.onEnd();
       };
       utterance.onerror = () => {
-        settle();
+        end();
         handlers.onError("The spoken answer could not be played.");
         handlers.onEnd();
       };

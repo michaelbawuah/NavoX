@@ -388,7 +388,10 @@ describe("click-to-speak replay control", () => {
 
 describe("voice status copy", () => {
   it("names every visible state", () => {
-    expect(assistantVoiceLabel("LISTENING")).toMatch(/listening/i);
+    expect(assistantVoiceLabel("LISTENING")).toMatch(/recording/i);
+    expect(assistantVoiceLabel("LISTENING")).toMatch(
+      /press the microphone again/i,
+    );
     expect(assistantVoiceLabel("TRANSCRIBING")).toMatch(/transcribing/i);
     expect(assistantVoiceLabel("THINKING")).toMatch(/navox information/i);
     expect(assistantVoiceLabel("SPEAKING")).toMatch(/interrupts it/i);
@@ -405,7 +408,7 @@ describe("voice controls", () => {
   it("renders the microphone, mute and stop controls before any turn", () => {
     const markup = renderToStaticMarkup(createElement(NavoXAssistant));
     expect(markup).toContain(
-      'aria-pressed="false" aria-label="Start listening"',
+      'aria-pressed="false" aria-label="Start recording"',
     );
     expect(markup).toContain(
       'aria-pressed="false" aria-label="Mute spoken answers"',
@@ -418,6 +421,9 @@ describe("voice controls", () => {
       markup.indexOf(">", labelIndex),
     );
     expect(stopTag).not.toContain("aria-pressed");
+    // The microphone is the start/finish toggle; Stop is the separate command.
+    expect(markup).toContain("Recording starts only when you press");
+    expect(markup).not.toContain("Finish recording and transcribe");
   });
 
   it("never presents an approval control for a spoken yes", () => {

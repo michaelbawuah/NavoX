@@ -11,7 +11,7 @@ import type {
   AssistantTurnView,
 } from "@navox/contracts";
 import type { AssistantTurnLedger } from "./assistant-client";
-import type { SpeechAdapter } from "./assistant-speech";
+import type { SpeechAdapter, TranscribeSpeech } from "./assistant-speech";
 
 /** Matches the runtime's spoken-text bound. */
 export const MAX_SPEECH_LENGTH = 600;
@@ -165,6 +165,11 @@ export function voiceTurnRequest(transcript: string): VoiceTurnRequest {
 
 export interface VoiceSessionDeps {
   adapter: SpeechAdapter;
+  /**
+   * Session-scoped upload of one bounded WAV clip. The page binds it to the
+   * active session; the adapter owns the abort signal.
+   */
+  transcribe: TranscribeSpeech;
   /** A finished transcript the page may submit as one voice turn. */
   onTranscript: (request: VoiceTurnRequest) => void;
   onNotice: (message: string) => void;
@@ -186,7 +191,10 @@ export interface VoiceSession {
   /** The explicit Read aloud control. The page offers it only when unmuted. */
   speakManually(text: string): void;
   listen(): void;
-  /** A microphone click while playback runs cancels speech first. */
+  /**
+   * The microphone control: the first click starts capture, the second click
+   * finishes and transcribes it. Clicking during playback cancels speech first.
+   */
   toggleListening(): void;
   /** Cancels microphone and speech and suppresses the in-flight answer. */
   stop(): void;
@@ -197,6 +205,10 @@ export interface VoiceSession {
 
 export interface VoiceControls {
   listening: boolean;
+  /** The microphone is open and buffering a clip. */
+  capturing: boolean;
+  /** The clip is uploaded and transcribed; the microphone control is inert. */
+  transcribing: boolean;
   speaking: boolean;
   muted: boolean;
   microphoneDisabled: boolean;
@@ -206,18 +218,21 @@ export interface VoiceControls {
 
 /** One source of truth for the microphone, mute, stop and read-aloud controls. */
 export function voiceControls(state: VoiceSessionState): VoiceControls {
-  const listening =
-    state.state === "LISTENING" || state.state === "TRANSCRIBING";
+  const capturing = state.state === "LISTENING";
+  const transcribing = state.state === "TRANSCRIBING";
   const speaking = state.state === "SPEAKING";
   return {
-    listening,
+    listening: capturing || transcribing,
+    capturing,
+    transcribing,
     speaking,
     muted: state.muted,
     // The browser capability survives explicit playback, so a session that
     // cannot capture audio never offers an openable microphone.
     microphoneDisabled:
       state.state === "UNSUPPORTED" || !state.microphoneSupported,
-    stopAvailable: listening || speaking || state.state === "THINKING",
+    stopAvailable:
+      capturing || transcribing || speaking || state.state === "THINKING",
     readAloudAvailable: !state.muted,
   };
 }
@@ -279,11 +294,11 @@ export function createVoiceSession(deps: VoiceSessionDeps): VoiceSession {
     });
   };
 
-  if (!adapter.recognitionSupported) {
+  if (!adapter.captureSupported) {
     publish(
       reduceVoiceState(state, {
         type: "MICROPHONE_UNSUPPORTED",
-        reason: adapter.reason ?? "",
+        reason: adapter.captureReason ?? "",
       }),
     );
   }
@@ -327,10 +342,10 @@ export function createVoiceSession(deps: VoiceSessionDeps): VoiceSession {
 
     listen() {
       if (disposed) return;
-      if (!adapter.recognitionSupported) {
+      if (!adapter.captureSupported) {
         dispatch({
           type: "MICROPHONE_UNSUPPORTED",
-          reason: adapter.reason ?? "",
+          reason: adapter.captureReason ?? "",
         });
         return;
       }
@@ -340,38 +355,50 @@ export function createVoiceSession(deps: VoiceSessionDeps): VoiceSession {
       // Manual interruption: cancel playback first, then open the microphone.
       adapter.stopSpeaking();
       dispatch({ type: "BARGE_IN" });
-      adapter.startListening({
-        onTranscript: (text) => {
-          if (!live()) return;
-          // The session decides whether this transcript is still current; a
-          // late result after Stop or unmount is never submitted.
-          const next = reduceVoiceState(state, { type: "TRANSCRIPT", text });
-          publish(next);
-          if (next.state !== "TRANSCRIBING" || !next.transcript) return;
-          deps.onTranscript(voiceTurnRequest(next.transcript));
+      adapter.startListening(
+        {
+          onTranscript: (text) => {
+            if (!live()) return;
+            // The session decides whether this transcript is still current; a
+            // late result after Stop or unmount is never submitted.
+            const next = reduceVoiceState(state, { type: "TRANSCRIPT", text });
+            publish(next);
+            if (next.state !== "TRANSCRIBING" || !next.transcript) return;
+            deps.onTranscript(voiceTurnRequest(next.transcript));
+            // The page may refuse the turn, for example while another turn is
+            // in flight. A refused transcript must not leave the microphone
+            // session resting mid-transcription.
+            if (state.state === "TRANSCRIBING") dispatch({ type: "STOP" });
+          },
+          onError: (reason) => {
+            if (!live()) return;
+            deps.onNotice(reason);
+          },
+          onEnd: () => {
+            if (!live()) return;
+            // A finished capture whose transcript already opened a turn leaves
+            // the pending answer alone; a failed or refused upload releases the
+            // microphone instead of resting mid-transcription.
+            if (state.state === "THINKING") return;
+            dispatch({ type: "STOP" });
+          },
         },
-        onError: (reason) => {
-          if (!live()) return;
-          deps.onNotice(reason);
-        },
-        onEnd: () => {
-          if (!live()) return;
-          // A finished recognition session that produced a turn leaves the
-          // pending answer alone; anything else releases the microphone.
-          if (state.state === "TRANSCRIBING" || state.state === "THINKING")
-            return;
-          dispatch({ type: "STOP" });
-        },
-      });
+        deps.transcribe,
+      );
     },
 
     toggleListening() {
-      if (voiceControls(state).listening) {
-        endAttempt();
-        adapter.stopListening();
-        dispatch({ type: "STOP" });
+      if (disposed) return;
+      // The microphone control is a start/finish toggle: the first click opens
+      // the microphone, the second ends capture and transcribes the clip. The
+      // separate Stop control owns canceling a capture or an in-flight upload.
+      if (state.state === "LISTENING") {
+        // Only a capture that really became an upload may show transcription.
+        if (adapter.finishListening())
+          dispatch({ type: "TRANSCRIPTION_STARTED" });
         return;
       }
+      if (state.state === "TRANSCRIBING") return;
       this.listen();
     },
 

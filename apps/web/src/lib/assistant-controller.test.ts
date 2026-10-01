@@ -17,7 +17,11 @@ import {
   voiceControls,
   voiceTurnRequest,
 } from "./assistant-controller";
-import type { SpeechAdapter, SpeechHandlers } from "./assistant-speech";
+import type {
+  SpeechAdapter,
+  SpeechHandlers,
+  TranscribeSpeech,
+} from "./assistant-speech";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -330,14 +334,17 @@ describe("assistant turn runner", () => {
 interface FakeAdapter extends SpeechAdapter {
   log: string[];
   spoken: string[];
-  /** Handler sets of every microphone attempt, oldest first. */
-  recognition: SpeechHandlers[];
+  /** What the next finish click reports: true only when an upload started. */
+  finishResult: { value: boolean };
+  /** Every microphone attempt, oldest first: its handlers and its uploader. */
+  capture: { handlers: SpeechHandlers; transcribe: TranscribeSpeech }[];
   /** Handler sets of every utterance, oldest first. */
   speech: Omit<SpeechHandlers, "onTranscript">[];
-  /** Simulates the browser ending recognition with a final transcript. */
+  /** Simulates the Next route returning a bounded transcript. */
   deliverTranscript(text: string): void;
-  /** Simulates recognition ending without a usable transcript. */
-  endRecognition(): void;
+  /** Simulates a capture ending without a usable transcript. */
+  failCapture(reason: string): void;
+  endCapture(): void;
   /** Simulates the browser finishing or failing the current utterance. */
   finishSpeech(): void;
   failSpeech(): void;
@@ -346,20 +353,27 @@ interface FakeAdapter extends SpeechAdapter {
 function fakeAdapter(overrides: Partial<SpeechAdapter> = {}): FakeAdapter {
   const log: string[] = [];
   const spoken: string[] = [];
-  const recognition: SpeechHandlers[] = [];
+  const capture: { handlers: SpeechHandlers; transcribe: TranscribeSpeech }[] =
+    [];
   const speech: Omit<SpeechHandlers, "onTranscript">[] = [];
+  const finishResult = { value: true };
   return {
-    recognitionSupported: true,
+    captureSupported: true,
     synthesisSupported: true,
-    reason: null,
+    captureReason: null,
     synthesisReason: null,
     log,
     spoken,
-    recognition,
+    finishResult,
+    capture,
     speech,
-    startListening(handlers) {
+    startListening(handlers, transcribe) {
       log.push("startListening");
-      recognition.push(handlers);
+      capture.push({ handlers, transcribe });
+    },
+    finishListening() {
+      log.push("finishListening");
+      return finishResult.value;
     },
     stopListening() {
       log.push("stopListening");
@@ -373,10 +387,13 @@ function fakeAdapter(overrides: Partial<SpeechAdapter> = {}): FakeAdapter {
       log.push("stopSpeaking");
     },
     deliverTranscript(text) {
-      recognition.at(-1)?.onTranscript(text);
+      capture.at(-1)?.handlers.onTranscript(text);
     },
-    endRecognition() {
-      recognition.at(-1)?.onEnd();
+    failCapture(reason) {
+      capture.at(-1)?.handlers.onError(reason);
+    },
+    endCapture() {
+      capture.at(-1)?.handlers.onEnd();
     },
     finishSpeech() {
       speech.at(-1)?.onEnd();
@@ -438,9 +455,11 @@ function voiceRig(
   const appended: AssistantTurnView[] = [];
   const pendingToken = { current: 0 };
   let pending: Promise<void> | null = null;
+  const transcribe = vi.fn(async () => "What am I missing today?");
 
   const session = createVoiceSession({
     adapter,
+    transcribe,
     onState: (state) => states.push(state),
     onNotice: (message) => notices.push(message),
     onTranscript: (request) => {
@@ -481,6 +500,7 @@ function voiceRig(
   return {
     adapter,
     session,
+    transcribe,
     states,
     notices,
     transcripts,
@@ -501,6 +521,10 @@ function voiceRig(
       });
     },
     startListening() {
+      session.toggleListening();
+    },
+    /** The operator's second click: finish the clip and transcribe it. */
+    finish() {
       session.toggleListening();
     },
   };
@@ -588,7 +612,7 @@ describe("voice session lifecycle", () => {
 
     // A transcript that arrives after Stop never opens a turn.
     rig.adapter.deliverTranscript("late words");
-    rig.adapter.endRecognition();
+    rig.adapter.endCapture();
     expect(rig.transcripts).toEqual([]);
     expect(rig.appended).toEqual([]);
     expect(rig.session.current().state).toBe("STOPPED");
@@ -630,7 +654,7 @@ describe("voice session lifecycle", () => {
     expect(rig.session.current().state).toBe("SPEAKING");
   });
 
-  it("drops late recognition and synthesis callbacks after clear or unmount", async () => {
+  it("drops late capture and synthesis callbacks after clear or unmount", async () => {
     const rig = voiceRig();
     await rig.voiceTurn("What am I missing today?");
     const published = rig.states.length;
@@ -641,13 +665,14 @@ describe("voice session lifecycle", () => {
 
     rig.adapter.finishSpeech();
     rig.adapter.deliverTranscript("late words");
-    rig.adapter.endRecognition();
+    rig.adapter.endCapture();
     expect(rig.states).toHaveLength(published);
     expect(rig.transcripts).toEqual(["What am I missing today?"]);
 
     // A cleared page starts from a fresh, silent session.
     const next = createVoiceSession({
       adapter: rig.adapter,
+      transcribe: async () => "unused",
       onState: (state) => rig.states.push(state),
       onNotice: (message) => rig.notices.push(message),
       onTranscript: (request) => rig.transcripts.push(request.text),
@@ -664,17 +689,20 @@ describe("voice session lifecycle", () => {
 
   it("falls back to typed input when the browser cannot capture audio", () => {
     const adapter = fakeAdapter({
-      recognitionSupported: false,
-      reason: "This browser cannot capture microphone input.",
+      captureSupported: false,
+      captureReason: "This browser cannot record from the microphone.",
     });
     const session = createVoiceSession({
       adapter,
+      transcribe: async () => "unused",
       onState: () => {},
       onNotice: () => {},
       onTranscript: () => {},
     });
     expect(session.current().state).toBe("UNSUPPORTED");
-    expect(session.current().error).toMatch(/cannot capture microphone input/i);
+    expect(session.current().error).toMatch(
+      /cannot record from the microphone/i,
+    );
     expect(voiceControls(session.current()).microphoneDisabled).toBe(true);
 
     session.toggleListening();
@@ -690,6 +718,7 @@ describe("voice session lifecycle", () => {
     const notices: string[] = [];
     const session = createVoiceSession({
       adapter,
+      transcribe: async () => "unused",
       onState: () => {},
       onNotice: (message) => notices.push(message),
       onTranscript: () => {},
@@ -728,6 +757,8 @@ describe("voice session lifecycle", () => {
     const rig = voiceRig();
     expect(voiceControls(rig.session.current())).toEqual({
       listening: false,
+      capturing: false,
+      transcribing: false,
       speaking: false,
       muted: false,
       microphoneDisabled: false,
@@ -747,7 +778,7 @@ describe("voice session lifecycle", () => {
   it("ignores a stopped microphone attempt's transcript, error and end", () => {
     const rig = voiceRig();
     rig.startListening();
-    const stoppedAttempt = rig.adapter.recognition[0];
+    const stoppedAttempt = rig.adapter.capture[0]?.handlers;
     expect(stoppedAttempt).toBeDefined();
 
     rig.session.stop();
@@ -766,7 +797,7 @@ describe("voice session lifecycle", () => {
   it("ignores the previous attempt's callbacks after a new listen", async () => {
     const rig = voiceRig();
     rig.startListening();
-    const previous = rig.adapter.recognition[0];
+    const previous = rig.adapter.capture[0]?.handlers;
     expect(previous).toBeDefined();
     rig.session.stop();
 
@@ -786,6 +817,115 @@ describe("voice session lifecycle", () => {
     await rig.settle();
     expect(rig.transcripts).toEqual(["What am I missing today?"]);
     expect(rig.appended).toHaveLength(1);
+  });
+
+  it("finishes the clip on the second microphone click instead of canceling it", async () => {
+    const rig = voiceRig();
+    rig.startListening();
+    expect(rig.session.current().state).toBe("LISTENING");
+
+    rig.finish();
+    expect(rig.adapter.log).toContain("finishListening");
+    expect(rig.adapter.log).not.toContain("stopListening");
+    // The clip is uploading: the finish affordance is gone but Stop stays live.
+    expect(rig.session.current().state).toBe("TRANSCRIBING");
+    expect(voiceControls(rig.session.current())).toMatchObject({
+      capturing: false,
+      transcribing: true,
+      listening: true,
+      stopAvailable: true,
+    });
+    // A second microphone click cannot finish the same clip twice.
+    rig.finish();
+    expect(
+      rig.adapter.log.filter((entry) => entry === "finishListening"),
+    ).toHaveLength(1);
+
+    rig.adapter.deliverTranscript("What am I missing today?");
+    await rig.settle();
+    expect(rig.transcripts).toEqual(["What am I missing today?"]);
+    expect(rig.appended).toHaveLength(1);
+    expect(rig.appended[0]?.modality).toBe("VOICE");
+  });
+
+  it("keeps listening when the recorder cannot start the upload", () => {
+    const rig = voiceRig();
+    rig.adapter.finishResult.value = false;
+    rig.startListening();
+    rig.finish();
+
+    // The adapter still owns the microphone open, so the page must not claim
+    // that a transcription is running.
+    expect(rig.adapter.log).toContain("finishListening");
+    expect(rig.session.current().state).toBe("LISTENING");
+    expect(voiceControls(rig.session.current()).transcribing).toBe(false);
+  });
+
+  it("releases the session when an upload fails without a transcript", () => {
+    const rig = voiceRig();
+    rig.startListening();
+    rig.finish();
+    expect(rig.session.current().state).toBe("TRANSCRIBING");
+
+    rig.adapter.failCapture("The recording could not be transcribed.");
+    rig.adapter.endCapture();
+
+    expect(rig.notices).toEqual(["The recording could not be transcribed."]);
+    expect(rig.transcripts).toEqual([]);
+    expect(rig.session.current().state).toBe("STOPPED");
+    expect(voiceControls(rig.session.current()).stopAvailable).toBe(false);
+  });
+
+  it("forwards the session-scoped uploader to the capture attempt", () => {
+    const rig = voiceRig();
+    rig.startListening();
+    expect(rig.adapter.capture).toHaveLength(1);
+    expect(rig.adapter.capture[0]?.transcribe).toBe(rig.transcribe);
+  });
+
+  it("releases the session when the page refuses a delivered transcript", () => {
+    const adapter = fakeAdapter();
+    const session = createVoiceSession({
+      adapter,
+      transcribe: async () => "unused",
+      onState: () => {},
+      onNotice: () => {},
+      // The page can refuse a transcript while another turn is in flight.
+      onTranscript: () => {},
+    });
+    session.toggleListening();
+    adapter.deliverTranscript("What am I missing today?");
+    expect(session.current().state).toBe("STOPPED");
+    expect(voiceControls(session.current()).stopAvailable).toBe(false);
+  });
+
+  it("aborts a finished clip's in-flight transcription on Stop", async () => {
+    const rig = voiceRig();
+    rig.startListening();
+    rig.finish();
+
+    rig.session.stop();
+    expect(rig.adapter.log).toContain("stopListening");
+    expect(rig.session.current().state).toBe("STOPPED");
+
+    rig.adapter.deliverTranscript("late words");
+    await rig.settle();
+    expect(rig.transcripts).toEqual([]);
+    expect(rig.appended).toEqual([]);
+  });
+
+  it("aborts capture and an in-flight upload on dispose with zero late turn", async () => {
+    const rig = voiceRig();
+    rig.startListening();
+    rig.finish();
+
+    rig.session.dispose();
+    expect(rig.adapter.log).toContain("stopListening");
+
+    rig.adapter.deliverTranscript("late words");
+    await rig.settle();
+    expect(rig.transcripts).toEqual([]);
+    expect(rig.appended).toEqual([]);
   });
 
   it("keeps a stopped session stopped through mute and unmute", async () => {
@@ -833,11 +973,12 @@ describe("voice session lifecycle", () => {
     expect(rig.session.current().state).toBe("STOPPED");
 
     const adapter = fakeAdapter({
-      recognitionSupported: false,
-      reason: "This browser cannot capture microphone input.",
+      captureSupported: false,
+      captureReason: "This browser cannot record from the microphone.",
     });
     const session = createVoiceSession({
       adapter,
+      transcribe: async () => "unused",
       onState: () => {},
       onNotice: () => {},
       onTranscript: () => {},
@@ -848,6 +989,8 @@ describe("voice session lifecycle", () => {
     expect(adapter.spoken).toEqual(["1 item needs attention now."]);
     expect(voiceControls(session.current())).toEqual({
       listening: false,
+      capturing: false,
+      transcribing: false,
       speaking: true,
       muted: false,
       microphoneDisabled: true,
@@ -876,7 +1019,7 @@ describe("voice session lifecycle", () => {
   it("releases the microphone when an explicit read aloud takes over", () => {
     const rig = voiceRig();
     rig.startListening();
-    const attempt = rig.adapter.recognition[0];
+    const attempt = rig.adapter.capture[0]?.handlers;
     expect(attempt).toBeDefined();
 
     rig.session.speakManually("1 item needs attention now.");

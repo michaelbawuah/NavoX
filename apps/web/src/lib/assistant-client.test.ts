@@ -11,6 +11,7 @@ import {
   newAssistantRequestId,
   resumeOrCreateAssistantSession,
   submitAssistantTurn,
+  transcribeAssistantSpeech,
 } from "./assistant-client";
 
 const UUID_V4 =
@@ -172,6 +173,102 @@ describe("assistant client", () => {
     );
     const failure = await createAssistantSession().catch((error) => error);
     expect(failure.code).toBe("unavailable");
+  });
+});
+
+describe("assistant speech transcription", () => {
+  const wav = Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0x00, 0x00]);
+
+  it("uploads the raw WAV container to the session-scoped route only", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(json({ text: "  What am I missing today?  " }));
+    vi.stubGlobal("fetch", fetcher);
+
+    expect(await transcribeAssistantSpeech(session.id, wav)).toBe(
+      "What am I missing today?",
+    );
+    const [url, init] = fetcher.mock.calls[0];
+    expect(url).toBe(`${assistantSessionPath(session.id)}/speech/transcribe`);
+    expect(init.method).toBe("POST");
+    expect(init.credentials).toBe("include");
+    expect(init.cache).toBe("no-store");
+    expect(init.headers).toEqual({ "content-type": "audio/wav" });
+    // The same bytes leave the encoder; nothing is re-encoded or relabelled.
+    expect(init.body).toBe(wav);
+    // No provider, model, credential, URL or client scope field exists.
+    const wire = JSON.stringify({ url, headers: init.headers, body: "wav" });
+    expect(wire).not.toMatch(/model|provider|credential|api_key|base_url/i);
+  });
+
+  it("carries the abort signal so Stop cancels an in-flight upload", async () => {
+    const controller = new AbortController();
+    const fetcher = vi.fn((_url: string, init: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () =>
+          reject(new DOMException("aborted", "AbortError")),
+        );
+      });
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const pending = transcribeAssistantSpeech(
+      session.id,
+      wav,
+      controller.signal,
+    );
+    expect(fetcher.mock.calls[0][1].signal).toBe(controller.signal);
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("refuses a blank, overlong or unreadable transcript", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ text: "   " })));
+    await expect(transcribeAssistantSpeech(session.id, wav)).rejects.toThrow(
+      /no speech was heard/i,
+    );
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(json({ text: "x".repeat(501) })),
+    );
+    await expect(transcribeAssistantSpeech(session.id, wav)).rejects.toThrow(
+      /too long/i,
+    );
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("{", { status: 200 })),
+    );
+    await expect(transcribeAssistantSpeech(session.id, wav)).rejects.toThrow(
+      /could not be transcribed/i,
+    );
+  });
+
+  it("surfaces the route's typed refusal for a typed-input fallback", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        json(
+          {
+            error: {
+              code: "unsupported",
+              message:
+                "Speech transcription is not available right now. Type your question instead.",
+              retryable: false,
+            },
+          },
+          422,
+        ),
+      ),
+    );
+    const failure = await transcribeAssistantSpeech(session.id, wav).catch(
+      (error) => error,
+    );
+    expect(failure).toBeInstanceOf(AssistantClientError);
+    expect(failure.code).toBe("unsupported");
+    expect(failure.status).toBe(422);
+    expect(failure.message).toMatch(/type your question instead/i);
   });
 });
 

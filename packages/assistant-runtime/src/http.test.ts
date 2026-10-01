@@ -158,6 +158,50 @@ describe("same-origin mutation guard", () => {
     );
   });
 
+  it("accepts an audio body only on a route that asks for one", () => {
+    const audio = {
+      ...base,
+      contentType: "audio/wav",
+      expectedContentType: "audio/wav",
+      contentTypeMessage: "A raw audio/wav body is required.",
+    };
+    expect(() => assertSameOriginMutation(audio)).not.toThrow();
+    // The declared type survives a parameter list, exactly like JSON.
+    expect(() =>
+      assertSameOriginMutation({
+        ...audio,
+        contentType: "audio/wav; charset=binary",
+      }),
+    ).not.toThrow();
+    // JSON is the default, so an audio body cannot slip into a JSON route.
+    expect(
+      failureOf({ ...base, contentType: "audio/wav", configuredOrigin: null })
+        .code,
+    ).toBe("invalid_request");
+    // And a JSON body cannot satisfy the audio route.
+    const wrongType = failureOf({ ...audio, contentType: "application/json" });
+    expect(wrongType.code).toBe("invalid_request");
+    expect(wrongType.message).toBe("A raw audio/wav body is required.");
+  });
+
+  it("keeps the same origin, scheme and port rules for an audio route", () => {
+    const audio = {
+      ...base,
+      contentType: "audio/wav",
+      expectedContentType: "audio/wav",
+    };
+    expect(failureOf({ ...audio, origin: null }).code).toBe("forbidden");
+    expect(failureOf({ ...audio, origin: "https://evil.example" }).code).toBe(
+      "forbidden",
+    );
+    expect(failureOf({ ...audio, origin: "http://navox.example" }).code).toBe(
+      "forbidden",
+    );
+    expect(failureOf({ ...audio, secFetchSite: "cross-site" }).code).toBe(
+      "forbidden",
+    );
+  });
+
   it("does not require an origin for safe reads", () => {
     expect(() =>
       assertSameOriginMutation({

@@ -32,6 +32,7 @@ export function initialVoiceState(): VoiceSessionState {
 export type VoiceEvent =
   | { type: "REQUEST_LISTENING" }
   | { type: "LISTENING_STARTED" }
+  | { type: "TRANSCRIPTION_STARTED" }
   | { type: "TRANSCRIPT"; text: string }
   | { type: "TRANSCRIPT_FAILED"; reason: string }
   | { type: "SUBMITTED" }
@@ -118,6 +119,15 @@ export function reduceVoiceState(
      */
     case "LISTENING_STARTED":
       return state;
+    /**
+     * The operator's second microphone click: capture really ended and the
+     * clip is uploading. Only an open listening session may enter
+     * transcription, so a duplicated click, a late callback or a click after
+     * Stop can never move a settled session.
+     */
+    case "TRANSCRIPTION_STARTED":
+      if (state.state !== "LISTENING") return state;
+      return { ...state, state: "TRANSCRIBING", transcript: null };
     case "TRANSCRIPT": {
       // A transcript that arrives after Stop or an unsupported fallback is
       // stale input and must never open a new turn.

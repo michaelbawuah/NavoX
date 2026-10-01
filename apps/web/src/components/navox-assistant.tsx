@@ -28,6 +28,7 @@ import {
   forgetAssistantSession,
   resumeOrCreateAssistantSession,
   submitAssistantTurn,
+  transcribeAssistantSpeech,
 } from "../lib/assistant-client";
 import {
   canSpeakTurn,
@@ -40,6 +41,7 @@ import {
 import {
   createSpeechAdapter,
   type SpeechAdapter,
+  type TranscribeSpeech,
 } from "../lib/assistant-speech";
 import { safeSourceUrl } from "../lib/search";
 import { AssistantEmailActions } from "./assistant-email-actions";
@@ -48,7 +50,7 @@ import styles from "./navox-assistant.module.css";
 export function assistantVoiceLabel(state: AssistantVoiceState): string {
   switch (state) {
     case "LISTENING":
-      return "Listening. Speak your question, then pause.";
+      return "Recording. Press the microphone again to send it, or Stop to cancel.";
     case "TRANSCRIBING":
       return "Transcribing your question.";
     case "THINKING":
@@ -444,6 +446,7 @@ export function NavoXAssistant() {
   const voiceRef = useRef<VoiceSession | null>(null);
   const submitTranscriptRef = useRef<(transcript: string) => void>(() => {});
   const pendingVoiceToken = useRef(0);
+  const sessionIdRef = useRef<string | null>(null);
 
   const adapter = useCallback((): SpeechAdapter => {
     if (!adapterRef.current) {
@@ -455,6 +458,20 @@ export function NavoXAssistant() {
   }, []);
 
   /**
+   * The page binds the session to the clip upload. The adapter owns the abort
+   * signal, so an unset session is a typed failure rather than a request.
+   */
+  const transcribe = useCallback<TranscribeSpeech>((wav, signal) => {
+    const session = sessionIdRef.current;
+    if (!session) {
+      return Promise.reject(
+        new Error("Start a conversation before recording. Type your question."),
+      );
+    }
+    return transcribeAssistantSpeech(session, wav, signal);
+  }, []);
+
+  /**
    * One voice session per page. It is created on the client, so a browser
    * without microphone support reports the typed fallback before any click.
    */
@@ -462,6 +479,7 @@ export function NavoXAssistant() {
     if (!voiceRef.current) {
       voiceRef.current = createVoiceSession({
         adapter: adapter(),
+        transcribe,
         onState: setVoice,
         onNotice: setNotice,
         onTranscript: (request) => {
@@ -470,7 +488,7 @@ export function NavoXAssistant() {
       });
     }
     return voiceRef.current;
-  }, [adapter]);
+  }, [adapter, transcribe]);
 
   const openSession = useCallback(async () => {
     setConnecting(true);
@@ -488,6 +506,10 @@ export function NavoXAssistant() {
       setConnecting(false);
     }
   }, []);
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
 
   useEffect(() => {
     void openSession();
@@ -554,6 +576,12 @@ export function NavoXAssistant() {
   );
 
   const controls = voiceControls(voice);
+  /** The microphone control never offers a second finish during an upload. */
+  const microphoneLabel = controls.transcribing
+    ? "Transcribing the recording"
+    : controls.capturing
+      ? "Finish recording and transcribe"
+      : "Start recording";
 
   /** The explicit Read aloud control exists only while the session is unmuted. */
   const speak = useCallback(
@@ -630,8 +658,9 @@ export function NavoXAssistant() {
         Answers use your saved Today state and connected sources you can access.
         Questions and answers expire after 30 days of session access, and
         expired rows are purged on a bounded schedule. Clear conversation
-        removes this history right away. Listening starts only when you press
-        the microphone control.
+        removes this history right away. Recording starts only when you press
+        the microphone control, and only the finished clip is sent for
+        transcription.
       </p>
 
       {notice && (
@@ -664,7 +693,8 @@ export function NavoXAssistant() {
       {connecting && <p className={styles.status}>Starting a conversation…</p>}
       {!connecting && turns.length === 0 && (
         <p className={styles.status}>
-          Ask what you are missing today, or hold the microphone and speak.
+          Ask what you are missing today, or press the microphone to record a
+          question.
         </p>
       )}
       {status && (
@@ -696,13 +726,17 @@ export function NavoXAssistant() {
           className={styles.iconButton}
           onClick={toggleMicrophone}
           aria-pressed={controls.listening}
-          aria-label={controls.listening ? "Stop listening" : "Start listening"}
-          title={controls.listening ? "Stop listening" : "Start listening"}
+          aria-label={microphoneLabel}
+          title={microphoneLabel}
           disabled={
-            connecting || !sessionId || busy || controls.microphoneDisabled
+            connecting ||
+            !sessionId ||
+            busy ||
+            controls.microphoneDisabled ||
+            controls.transcribing
           }
         >
-          {controls.listening ? <StopIcon /> : <MicIcon />}
+          {controls.capturing ? <StopIcon /> : <MicIcon />}
         </button>
         <button
           type="button"
