@@ -469,6 +469,18 @@ export function createNavoxUpstream(
     async getTrendingNews(cookie): Promise<unknown> {
       const path = "/news/trending";
       const response = await send(path, { method: "GET", cookie });
+      if (response.status === 503) {
+        const payload: unknown = await response.json().catch(() => null);
+        if (
+          isRecord(payload) &&
+          payload.detail === "News is not available yet."
+        )
+          throw new AssistantError(
+            "unsupported",
+            "News is not connected yet.",
+            { reason: "news_disabled" },
+          );
+      }
       if (!response.ok) throw statusError(response.status, path);
       return response.json().catch(() => {
         throw new AssistantError(

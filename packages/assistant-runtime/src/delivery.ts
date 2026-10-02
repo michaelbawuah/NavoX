@@ -9,6 +9,7 @@ export type { AssistantDeliveryIntent };
  * never decides what the assistant may do, and it cannot suppress or trigger a
  * delegation. It only recognises whether the operator asked for the answer to
  * be read aloud, asked for it to stay silent, or said nothing about delivery.
+ * Standalone social acknowledgments carry no question or action authority.
  * Every general question still reaches the SPEC-005 planner unchanged, and the
  * utterance is never rewritten, so upstream question spans stay exact.
  */
@@ -27,6 +28,8 @@ export interface DeliveryResolution {
   ordinal: number | null;
   /** An app-open wake greeting; it carries no capability or action authority. */
   wake_only?: boolean;
+  /** A standalone social cue; it cannot consume a compound request. */
+  conversation_only?: "ACKNOWLEDGMENT" | "CHECK_IN";
 }
 
 /**
@@ -297,6 +300,29 @@ export function resolveDeliveryIntent(text: string): DeliveryResolution {
   const normalized = normalizeUtterance(text);
   if (normalized === "hey navox") {
     return { intent: "SPEAK", cue_only: true, ordinal: null, wake_only: true };
+  }
+  const conversationOnly = [
+    "thank you",
+    "thanks",
+    "thank you navox",
+    "thanks navox",
+  ].includes(normalized)
+    ? "ACKNOWLEDGMENT"
+    : [
+          "how are you",
+          "how are you today",
+          "how are you doing",
+          "how are you doing today",
+        ].includes(normalized)
+      ? "CHECK_IN"
+      : null;
+  if (conversationOnly) {
+    return {
+      intent: "AUTOMATIC",
+      cue_only: true,
+      ordinal: null,
+      conversation_only: conversationOnly,
+    };
   }
   const stripped = stripFillers(normalized);
   const cueOnly = CUE_ONLY.has(stripped);

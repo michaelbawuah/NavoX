@@ -64,6 +64,29 @@ describe("NavoX API gateway", () => {
     }
   });
 
+  it("distinguishes disabled News from a transient upstream failure", async () => {
+    const disabled = createNavoxUpstream({
+      baseUrl: base,
+      fetchImpl: async () =>
+        json({ detail: "News is not available yet." }, 503),
+    });
+    await expect(disabled.getTrendingNews(cookie)).rejects.toMatchObject({
+      code: "unsupported",
+      reason: "news_disabled",
+      retryable: false,
+    });
+    const failed = createNavoxUpstream({
+      baseUrl: base,
+      fetchImpl: async () =>
+        json({ detail: "private upstream diagnostic" }, 503),
+    });
+    await expect(failed.getTrendingNews(cookie)).rejects.toMatchObject({
+      code: "unavailable",
+      reason: null,
+      retryable: true,
+    });
+  });
+
   it("turns a network failure into an unavailable failure", async () => {
     const upstream = createNavoxUpstream({
       baseUrl: base,

@@ -3,13 +3,60 @@
 Status: local voice integration works; mandatory acceptance and public deployment remain pending.
 This is not SPEC-008 acceptance, a merge, or a production deployment.
 
+## Screenshot follow-up: conversation and News
+
+The owner's 11:43 EDT screenshot and its saved turn records demonstrated real
+microphone questions reaching STT and planning, with completed TTS calls.
+Time and weather answered. The first standalone "Thank you" hit a planner
+timeout; a later attempt and "How are you doing today?" received awkward
+clarifications. News reached its capability but the feed was disabled.
+
+- Standalone acknowledgments and check-ins now use the existing saved-session
+  PRESENT path, with no planner dependency and no action authority. They retain
+  adaptive voice/text presentation. Compound questions and action requests are
+  not consumed by these whole-utterance cues.
+- A grounded TOPIC selector equal to "news" now means the generic headline
+  feed. Named people and topics such as News Corp remain exact selectors.
+- The exact disabled-News upstream response produces a specific connection
+  notice. Transient failures still fail closed, and private diagnostics do not
+  reach the answer.
+- Runtime lint and typecheck passed; all 388 tests passed with disposable
+  PostgreSQL and Temporal, zero skips. Web lint/typecheck, all 416 tests and
+  the production build passed. The full locked API preflight passed: 2,750
+  tests, zero skips, five retained warnings, and all lint/type/schema/metrics,
+  deterministic release and whitespace gates. API tests took 18m37s.
+- The local Docker web was rebuilt with these fixes. Web /navox, API live/ready
+  and normal owner authentication returned 200.
+- A deployed synthetic saved-session canary returned READY for the voice
+  acknowledgment and typed check-in, with zero action references and the
+  expected modality. Acknowledgment synthesis returned 200, audio/mpeg,
+  11,904 bytes, SHA-256
+  ee88a8879af6d427a3142350130d97692bdc0f37c6a3659f108361ccf00b385d.
+  Device playback was not observed by automation. Test session
+  ecfb3587-993d-4d42-983b-08a7716c8a1d was deleted after preserving evidence.
+  The News turn truthfully returned UNAVAILABLE with its connection notice.
+- The owner explicitly requires broader News coverage, not an earthquake-only
+  substitute. A Perigon free account is now created with 150 trial requests,
+  but no broad source API key or licensed feed is configured in NavoX yet.
+  Perigon was identified as one candidate for a controlled source integration,
+  not enabled or declared qualified. Its free plan is for trial evaluation;
+  production needs the applicable commercial license and source permissions.
+  Official setup: https://perigon.io/sign-up
+  API: https://perigon.io/products/apis
+  License: https://perigon.io/CSA.pdf
+  No source grant, News provider route, paid plan, X connection or API key was
+  activated. Broad headlines and named-person/topic explanation remain required.
+- These fixes add no migrations and do not alter provider scopes, approvals,
+  execution, credentials or unrelated work. Main merge and public deployment
+  remain pending; the working test URL is http://localhost:3000/navox.
+
 ## Latest integration state
 
 This section supersedes the earlier credential and worker status below.
 The earlier observations remain historical evidence, not current limitations.
 
-- Source parent 3b45963776e4ac73595156ea3bd9a0821ab722e0 is pushed.
-  All six hosted CI jobs passed in run 37010958637. PR #22 remains draft;
+- Source parent 85b058cfb79ccb06324359a7bb9b1b0b5d04b761 is pushed.
+  All six hosted CI jobs passed in run 37026723129. PR #22 remains draft;
   SPEC-008 has not merged and no public deployment is claimed.
 - The owner's speech-generation permission now works. Revision-9 TTS
   qualification reused the existing 12 synthetic speech fixtures: 12/12

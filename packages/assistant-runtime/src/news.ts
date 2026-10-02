@@ -122,6 +122,13 @@ export function newsSelector(intent: PlannedIntent): string | null | undefined {
       .includes(value.toLocaleLowerCase("en-US"))
   )
     return undefined;
+  // The planner may name the medium itself for a generic headlines request.
+  // Preserve named people and topics such as News Corp as exact selectors.
+  if (
+    intent.entity.kind === "TOPIC" &&
+    value.toLocaleLowerCase("en-US") === "news"
+  )
+    return null;
   return value;
 }
 

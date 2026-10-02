@@ -1443,6 +1443,26 @@ describe("SPEC-006 News lookup in a turn", () => {
     expect(response.turn.action_refs).toEqual([]);
   });
 
+  it("reads headlines when the planner names news as the generic topic", async () => {
+    const planned = intentEnvelope(
+      emailPlan({
+        route: "news.read",
+        entity: { kind: "TOPIC", value: "news", confidence: 0.9 },
+      }),
+    );
+    const context = await withSession({
+      today: UNSUPPORTED_TODAY,
+      planError: null,
+      plan: planned,
+    });
+    context.upstream.trendingNews = [NEWS_STORY];
+    const response = await newsTurn(context, "What's on the news today?");
+    expect(response.turn.state).toBe("READY");
+    expect(context.upstream.calls.trendingNews).toEqual([COOKIE]);
+    expect(context.upstream.calls.newsStory).toEqual([]);
+    expect(response.turn.action_refs).toEqual([]);
+  });
+
   it("explains one grounded story through a fresh detail and source-backed summary", async () => {
     const context = await withSession({
       today: UNSUPPORTED_TODAY,
@@ -1542,6 +1562,29 @@ describe("SPEC-006 News lookup in a turn", () => {
     expect(
       (await newsTurn(pending, "Why is Jane Doe trending?")).turn.state,
     ).toBe("UNAVAILABLE");
+  });
+
+  it("explains disabled News without exposing upstream details", async () => {
+    const context = await withSession({
+      today: UNSUPPORTED_TODAY,
+      planError: null,
+      plan: newsPlan(null),
+    });
+    context.upstream.trendingNewsError = new AssistantError(
+      "unsupported",
+      "Private operator diagnostic",
+      { reason: "news_disabled" },
+    );
+    const response = await newsTurn(context, "What's trending?");
+    expect(response.turn.state).toBe("UNAVAILABLE");
+    expect(JSON.stringify(response.turn.presentation?.blocks)).toContain(
+      "News is not connected yet.",
+    );
+    expect(JSON.stringify(response.turn.presentation?.blocks)).not.toContain(
+      "Private operator",
+    );
+    expect(response.turn.action_refs).toEqual([]);
+    expect(context.upstream.calls.newsStory).toEqual([]);
   });
 
   it("qualifies a SPEC-006 feed outage without inventing an answer", async () => {
@@ -2596,6 +2639,53 @@ describe("real SPEC-005 and SPEC-007 wire shapes", () => {
 });
 
 describe("adaptive response modality", () => {
+  it.each([
+    {
+      text: "Thank you.",
+      modality: "VOICE",
+      answer: "You're welcome.",
+      speak: true,
+    },
+    {
+      text: "Thanks",
+      modality: "TEXT",
+      answer: "You're welcome.",
+      speak: false,
+    },
+    {
+      text: "How are you doing today?",
+      modality: "VOICE",
+      answer: "I'm ready to help. What's on your mind?",
+      speak: true,
+    },
+  ])(
+    "saves and replays a $modality social reply without a planner dependency",
+    async ({ text, modality, answer, speak }) => {
+      const context = await withSession({
+        planError: new AssistantError("unavailable", "Planner timed out."),
+      });
+      const input = {
+        cookie: COOKIE,
+        session_id: context.sessionId,
+        body: { request_id: REQUEST_ID, text, modality },
+      };
+      const response = await context.runtime.submitTurn(input);
+      expect(response.turn.state).toBe("READY");
+      expect(response.turn.decision?.kind).toBe("PRESENT");
+      expect(response.turn.decision?.requires_approval).toBe(false);
+      expect(response.turn.action_refs).toEqual([]);
+      expect(response.turn.presentation?.blocks).toEqual([
+        { kind: "ANSWER", text: answer },
+      ]);
+      expect(response.turn.presentation?.speak).toBe(speak);
+      expect(context.upstream.calls.plan).toEqual([]);
+      expect(context.upstream.calls.today).toEqual([]);
+      const replay = await context.runtime.submitTurn(input);
+      expect(replay.turn.id).toBe(response.turn.id);
+      expect(context.upstream.calls.plan).toEqual([]);
+    },
+  );
+
   it("saves a wake greeting in the same session without planning or action authority", async () => {
     const context = await withSession();
     const response = await context.runtime.submitTurn({

@@ -535,6 +535,25 @@ export function createAssistantRuntime(
         blocks: [{ kind: "ANSWER" as const, text: "Hi, I'm listening." }],
       };
     }
+    if (input.delivery.conversation_only) {
+      const acknowledgment =
+        input.delivery.conversation_only === "ACKNOWLEDGMENT";
+      return {
+        plan,
+        state: "READY" as AssistantResponseState,
+        decision: presentDecision(
+          acknowledgment ? "delivery.acknowledgment" : "delivery.check_in",
+        ),
+        blocks: [
+          {
+            kind: "ANSWER" as const,
+            text: acknowledgment
+              ? "You're welcome."
+              : "I'm ready to help. What's on your mind?",
+          },
+        ],
+      };
+    }
     if (input.delivery.intent === "SUPPRESS") {
       return clarify(
         "delivery.suppressed",
@@ -613,8 +632,10 @@ export function createAssistantRuntime(
       }),
       blocks: noticeBlocks(
         state,
-        PLAN_FAILURE_TEXT[failure.code] ??
-          "The assistant could not plan that request. Nothing was changed.",
+        phase === "news" && failure.reason === "news_disabled"
+          ? "News is not connected yet. I need a news source before I can give you current headlines."
+          : (PLAN_FAILURE_TEXT[failure.code] ??
+              "The assistant could not plan that request. Nothing was changed."),
       ),
     };
   }

@@ -13,6 +13,31 @@ describe("delivery preference", () => {
       resolveDeliveryIntent("Hey NavoX, what is next?").wake_only,
     ).toBeUndefined();
   });
+  it("handles standalone social cues without consuming questions or actions", () => {
+    expect(resolveDeliveryIntent("Thank you.")).toMatchObject({
+      cue_only: true,
+      intent: "AUTOMATIC",
+      conversation_only: "ACKNOWLEDGMENT",
+    });
+    expect(resolveDeliveryIntent("How are you doing today?")).toMatchObject({
+      cue_only: true,
+      conversation_only: "CHECK_IN",
+    });
+    for (const text of [
+      "Thank you, and send it.",
+      "Thanks. What is the news today?",
+      "How are you doing today, and what's the weather?",
+    ]) {
+      expect(resolveDeliveryIntent(text), text).toMatchObject({
+        cue_only: false,
+      });
+      expect(
+        resolveDeliveryIntent(text).conversation_only,
+        text,
+      ).toBeUndefined();
+    }
+  });
+
   it("leaves an ordinary question alone", () => {
     expect(resolveDeliveryIntent("What am I missing today?")).toEqual({
       intent: "AUTOMATIC",

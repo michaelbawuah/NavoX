@@ -79,6 +79,29 @@ describe("SPEC-006 News evidence", () => {
     ).toBeNull();
   });
 
+  it("keeps the generic News topic separate from a named publisher", () => {
+    const intent = {
+      kind: "news.read",
+      question: "What's on the news today?",
+      entity: { kind: "TOPIC", value: "news", confidence: 0.9 },
+    } as Parameters<typeof newsSelector>[0];
+    expect(newsSelector(intent)).toBeNull();
+    expect(
+      newsSelector({
+        ...intent,
+        question: "What's happening at News Corp?",
+        entity: { kind: "TOPIC", value: "News Corp", confidence: 0.9 },
+      }),
+    ).toBe("News Corp");
+    expect(
+      newsSelector({
+        ...intent,
+        question: "What's happening with News?",
+        entity: { kind: "PERSON", value: "News", confidence: 0.9 },
+      }),
+    ).toBe("News");
+  });
+
   it("rejects stale, duplicate and malformed feed data", () => {
     expect(parseNewsFeed([story], NOW)).toHaveLength(1);
     expect(() => parseNewsFeed([story, story], NOW)).toThrow();
