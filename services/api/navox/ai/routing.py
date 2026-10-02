@@ -25,8 +25,35 @@ from navox.ai.foundation.persistence import model_key
 from navox.ai.foundation.registry import ModelDefinition, RegistrySnapshot
 
 
+class RoutingTaskScope(Contract):
+    """An optional operator allowlist entry; it can narrow grants, never add them."""
+
+    workspace_id: UUID
+    user_id: UUID
+    task_type: TaskType
+    profile: Profile
+    prompt: VersionedRef
+    output_schema: VersionedRef
+    sensitivity: Sensitivity
+
+    def matches(self, task: AITask) -> bool:
+        return all(
+            getattr(self, field) == getattr(task, field)
+            for field in (
+                "workspace_id",
+                "user_id",
+                "task_type",
+                "profile",
+                "prompt",
+                "output_schema",
+                "sensitivity",
+            )
+        )
+
+
 class PolicyRules(Contract):
     grants: tuple[ProviderGrant, ...] = ()
+    task_scopes: tuple[RoutingTaskScope, ...] | None = Field(default=None, max_length=100)
     preferred_provider: Provider | None = None
     allow_fallback: bool = False
     max_fallbacks: Annotated[int, Field(strict=True, ge=0, le=3)] = 0
@@ -83,6 +110,10 @@ class RoutingWeights(Contract):
 
 
 def intersect_policy(task: AITask, rules: tuple[PolicyRules, ...]) -> ProviderPolicy:
+    scope_permitted = all(
+        rule.task_scopes is None or any(scope.matches(task) for scope in rule.task_scopes)
+        for rule in rules
+    )
     grants = []
     for provider in Provider:
         allowed = set(Sensitivity)
@@ -90,7 +121,7 @@ def intersect_policy(task: AITask, rules: tuple[PolicyRules, ...]) -> ProviderPo
             allowed &= next(
                 (set(p.sensitivities) for p in policies if p.provider == provider), set()
             )
-        if allowed:
+        if allowed and scope_permitted:
             grants.append(ProviderGrant(provider=provider, sensitivities=frozenset(allowed)))
     fallback = task.provider_policy.allow_fallback and all(r.allow_fallback for r in rules)
     return ProviderPolicy(
