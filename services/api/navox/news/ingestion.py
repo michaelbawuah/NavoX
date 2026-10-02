@@ -11,6 +11,7 @@ import httpx
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from navox.core.settings import Settings
 from navox.db.news import (
     NewsClaim,
     NewsClaimEvidence,
@@ -20,8 +21,10 @@ from navox.db.news import (
     NewsSource,
     NewsSourceFeed,
 )
+from navox.news.api_feeds import fetch_api_items
 from navox.news.contracts import (
     Category,
+    FeedType,
     NewsError,
     NewsItemInput,
     NewsItemRead,
@@ -120,6 +123,8 @@ async def ingest_source(
     user_id: UUID,
     request_id: UUID,
     now: datetime,
+    settings: Settings | None = None,
+    api_transport: httpx.AsyncBaseTransport | None = None,
 ) -> NewsIngestionReceipt:
     source = await owned_source(
         database, source_id, workspace_id=workspace_id, user_id=user_id, lock=True
@@ -155,11 +160,23 @@ async def ingest_source(
     await database.flush()
     try:
         started = monotonic()
-        data = await fetch_feed(client, definition)
+        if definition.feed_type == FeedType.API:
+            if settings is None:
+                raise NewsError("invalid_source")
+            items, rejected = await fetch_api_items(
+                database,
+                settings,
+                definition,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                transport=api_transport,
+            )
+        else:
+            data = await fetch_feed(client, definition)
+            items, rejected = parse_feed(data, definition)
         completed_at = now + timedelta(seconds=monotonic() - started)
         # A permission may expire while the network request is in flight.
         policy_for(rights, now=completed_at)
-        items, rejected = parse_feed(data, definition)
         receipt.rejected_count = rejected
         for item in items:
             try:

@@ -70,6 +70,7 @@ import {
   namedNewsMatches,
   newsSelector,
   newsTrends,
+  normalizeGenericNewsPlan,
   parseNewsFeed,
   parseNewsStory,
   parseNewsSummary,
@@ -872,6 +873,7 @@ export function createAssistantRuntime(
           question: turn.question,
         })),
       });
+      plan = normalizeGenericNewsPlan(plan);
     } catch (error) {
       if (isAssistantError(error) && error.code === "unauthorized") throw error;
       const failure = isAssistantError(error) ? error : toAssistantError(error);

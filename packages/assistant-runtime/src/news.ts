@@ -2,11 +2,17 @@ import type {
   AssistantBlock,
   AssistantResponseState,
   CapabilityDecision,
+  IntentPlan,
   PlannedIntent,
 } from "@navox/contracts";
 import { AssistantError } from "./errors";
 import { LIMITS } from "./limits";
-import { isRecord, isUuid, parseCapabilityDecision } from "./validate";
+import {
+  isRecord,
+  isUuid,
+  parseCapabilityDecision,
+  parseIntentPlan,
+} from "./validate";
 
 const VERIFICATION = new Set([
   "VERIFIED",
@@ -107,6 +113,58 @@ function positiveInt(value: unknown, max: number): number {
   )
     unreadable();
   return value;
+}
+
+/** Exact general-headline spans do not need a named topic. This runs only
+ * after the qualified planner envelope has passed all scope/authority checks. */
+export function normalizeGenericNewsPlan(plan: IntentPlan): IntentPlan {
+  const genericSlots = new Set([
+    "news",
+    "trending",
+    "today",
+    "headlines",
+    "latest news",
+    "current news",
+    "trending today",
+  ]);
+  return parseIntentPlan(
+    {
+      ...plan,
+      intents: plan.intents.map((intent) => {
+        const question = intent.question
+          .toLocaleLowerCase("en-US")
+          .replaceAll("’", "'")
+          .replace(/^what's\b/, "what is")
+          .replace(/[?!.]+$/, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        const generic =
+          /^(?:what is trending(?: today| right now)?|what is (?:on|in) the news(?: today)?|what (?:is|are) the (?:latest )?headlines(?: today)?|what is the latest news)$/.test(
+            question,
+          );
+        if (
+          !generic ||
+          !["news.read", "assistant.clarify"].includes(intent.kind) ||
+          intent.reference.kind !== "NONE" ||
+          (intent.entity.kind !== "NONE" &&
+            (intent.entity.kind !== "TOPIC" ||
+              !genericSlots.has(
+                intent.entity.value?.toLocaleLowerCase("en-US") ?? "",
+              )))
+        )
+          return intent;
+        return {
+          ...intent,
+          kind: "news.read",
+          capability_id: "news.read",
+          entity: { kind: "NONE", value: null, confidence: 1 },
+          requires_clarification: false,
+          clarification: null,
+        };
+      }),
+    },
+    { allowBoundTurn: true },
+  );
 }
 
 /** `undefined` means an ungrounded proposal; `null` means a generic trends request. */

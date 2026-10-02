@@ -124,6 +124,7 @@ async def activate(
             workspace_id=account.workspace.id,
             user_id=account.user.id,
             now=datetime.now(UTC),
+            settings=settings,
         )
         await purge_unavailable(
             database,
@@ -189,6 +190,7 @@ async def refresh(
                 user_id=account.user.id,
                 request_id=command.request_id,
                 now=datetime.now(UTC),
+                settings=settings,
             )
         if result.status == "COMPLETED":
             await index_source(

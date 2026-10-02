@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.core.settings import Settings
 from navox.db.news import NewsContentRights, NewsItem, NewsSource, NewsSourceFeed
+from navox.news.api_feeds import approved_api_connection
 from navox.news.contracts import FeedType, NewsError, SourceDefinition
 from navox.news.rights import Operation, policy_digest, policy_for, require_operation
 
@@ -71,10 +72,17 @@ async def activate_source(
     workspace_id: UUID,
     user_id: UUID,
     now: datetime,
+    settings: Settings | None = None,
 ) -> NewsSource:
     """The caller obtains definition from trusted deployment configuration, never request data."""
-    if definition.feed_type not in {FeedType.RSS, FeedType.ATOM}:
+    if definition.feed_type not in {FeedType.RSS, FeedType.ATOM, FeedType.API}:
         raise NewsError("invalid_source")
+    if definition.feed_type == FeedType.API:
+        if settings is None:
+            raise NewsError("invalid_source")
+        await approved_api_connection(
+            database, settings, definition, workspace_id=workspace_id, user_id=user_id
+        )
     require_operation(Operation.METADATA, definition.rights)
     if not definition.rights.reviewed_at <= now < definition.rights.expires_at:
         raise NewsError("rights_expired")

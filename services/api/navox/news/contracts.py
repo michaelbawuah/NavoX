@@ -190,9 +190,16 @@ class SourceDefinition(Contract):
     independence_group: str = Field(min_length=1, max_length=128)
     rights: ContentRights
     evidence_policy: SourceEvidencePolicy | None = None
+    api_connection_id: UUID | None = None
+    api_endpoint_name: str | None = Field(default=None, min_length=1, max_length=80)
 
     @model_validator(mode="after")
     def evidence_authority(self) -> SourceDefinition:
+        if self.feed_type == FeedType.API:
+            if self.api_connection_id is None or self.api_endpoint_name is None:
+                raise ValueError("API feeds require an owned approved credential connection")
+        elif self.api_connection_id is not None or self.api_endpoint_name is not None:
+            raise ValueError("Only API feeds can reference API credentials")
         policy = self.evidence_policy
         if policy is not None:
             if not self.identity_verified:
@@ -229,6 +236,9 @@ class SourceDefinition(Contract):
     @property
     def fingerprint(self) -> str:
         payload = self.model_dump(mode="json")
+        if self.api_connection_id is None:
+            payload.pop("api_connection_id")
+            payload.pop("api_endpoint_name")
         if self.evidence_policy is None:
             payload.pop("evidence_policy")
         else:

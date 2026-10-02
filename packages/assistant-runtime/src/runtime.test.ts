@@ -1443,6 +1443,42 @@ describe("SPEC-006 News lookup in a turn", () => {
     expect(response.turn.action_refs).toEqual([]);
   });
 
+  it.each([
+    ["What's trending today?", "assistant.clarify", "NONE", null],
+    ["What is trending today?", "news.read", "TOPIC", "today"],
+  ])(
+    "reads current headlines for %s without a required topic",
+    async (question, route, kind, value) => {
+      const context = await withSession({
+        today: UNSUPPORTED_TODAY,
+        planError: null,
+        plan: intentEnvelope({
+          version: 1,
+          intents: [
+            {
+              route,
+              question,
+              entity: { kind, value, confidence: 0.99 },
+              time: { kind: "RELATIVE", expression: "today", confidence: 0.99 },
+              reference: { kind: "NONE", ordinal: null },
+              confidence: 0.98,
+              requires_clarification: route === "assistant.clarify",
+              clarification:
+                route === "assistant.clarify" ? "Which topic?" : null,
+            },
+          ],
+        }),
+      });
+      context.upstream.trendingNews = [NEWS_STORY];
+      const response = await newsTurn(context, question);
+      expect(response.turn.state).toBe("READY");
+      expect(response.turn.plan?.intents[0]?.kind).toBe("news.read");
+      expect(context.upstream.calls.trendingNews).toEqual([COOKIE]);
+      expect(context.upstream.calls.newsStory).toEqual([]);
+      expect(response.turn.action_refs).toEqual([]);
+    },
+  );
+
   it("reads headlines when the planner names news as the generic topic", async () => {
     const planned = intentEnvelope(
       emailPlan({

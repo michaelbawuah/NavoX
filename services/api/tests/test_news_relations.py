@@ -46,6 +46,9 @@ def test_absent_policy_preserves_original_source_fingerprint():
     source = definition()
     old_payload = source.model_dump(mode="json")
     old_payload.pop("evidence_policy")
+    # The legacy catalog predates these optional API credential bindings.
+    old_payload.pop("api_connection_id")
+    old_payload.pop("api_endpoint_name")
     expected = hashlib.sha256(
         json.dumps(old_payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

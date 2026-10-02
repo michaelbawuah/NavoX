@@ -199,8 +199,18 @@ async def queue(
         str(request_id),
         "manual",
     )
+    registered = await database.get(ConnectorDefinition, connection.connector_definition_id)
+    source_managed = any(
+        approved.usage == "NEWS"
+        and registered is not None
+        and registered.connector_key == approved.connector_key
+        and connection.config == approved.config.model_dump(mode="json")
+        and connection.provider == approved.config.provider
+        for approved in configurations(settings)
+    )
     await database.commit()
-    if settings.ai_provider == "disabled":
+    if settings.ai_provider == "disabled" or source_managed:
+        # Activated News sources are refreshed by the existing News workflow.
         return "pending"
     try:
         await dispatch_connector_sync(work, settings=settings, initial=True)

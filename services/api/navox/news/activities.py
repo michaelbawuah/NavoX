@@ -162,6 +162,7 @@ async def ingest_news_source_activity(payload: NewsSourceWork) -> NewsWorkResult
                     user_id=source.user_id,
                     request_id=UUID(payload.request_id),
                     now=now,
+                    settings=settings,
                 )
             deferred = receipt.status == "COMPLETED" and should_defer(
                 payload, settings, definitions, now=datetime.now(UTC)
