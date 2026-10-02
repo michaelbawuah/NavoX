@@ -1,9 +1,63 @@
 # SPEC-008 deployment checkpoint — 2026-10-02
 
-Status: integration is blocked by credentials and current task qualification.
+Status: local voice integration works; mandatory acceptance and public deployment remain pending.
 This is not SPEC-008 acceptance, a merge, or a production deployment.
 
-## Completed during this continuation
+## Latest integration state
+
+This section supersedes the earlier credential and worker status below.
+The earlier observations remain historical evidence, not current limitations.
+
+- Source parent 3b45963776e4ac73595156ea3bd9a0821ab722e0 is pushed.
+  All six hosted CI jobs passed in run 37010958637. PR #22 remains draft;
+  SPEC-008 has not merged and no public deployment is claimed.
+- The owner's speech-generation permission now works. Revision-9 TTS
+  qualification reused the existing 12 synthetic speech fixtures: 12/12
+  decoded and passed bounded STT-roundtrip checks, p95 2,150 ms, reserved
+  cost USD 0.0068694. This is not a real-device acoustic/accessibility score.
+  Report SHA-256: cf263a7af0ec9cb1ab799d43a495502de37f7ff45f4861f01a444c015a6f8420.
+- TTS canary observed successes at 5/25/50/100%, rollback to 0% denied
+  synthesis, and the observed stages were restored within the allowed scope.
+- Only qualified OpenAI planner, STT and TTS bindings are enabled for the
+  verified owner and synthetic canary: six exact principal/task scopes.
+  Planning binds v10/schema v9; speech binds v1/schema v1. The USD 0.01
+  request ceiling, sensitivity enforcement, no fallback and no shadow remain.
+  Drafting, News, Gemini, xAI and RESTRICTED routing are not enabled.
+- The same scoped policy is persisted in the private untracked runtime
+  environment. Only AI_PROVIDER, AI_PROVIDER_POLICY and KNOWLEDGE_ENABLED
+  changed. The effective API environment matched the tested override exactly.
+  Policy SHA-256: 0f45cb583ba4c08d563089e5184edaf3d052bff899676014a3a6277be0210103.
+  A private backup/hash audit was preserved; no credential was committed.
+- Owner saved-session synthetic voice flow: transcription 200 and fixture
+  match; time answer READY with zero actions; saved-answer synthesis 200,
+  audio/mpeg, 90,240 bytes; typed follow-up READY, sequence 2, silent.
+  Session e0b7ce24-45d5-4d79-bbbe-0d2b3a04883d;
+  voice turn f32cd5bf-10dc-49c6-a262-96945491ed27.
+- Web /navox and API live/ready returned 200, with database and Temporal
+  ready. The normal owner session returned 200. Both navox-foundation and
+  navox-assistant-goals have active workflow/activity pollers.
+  Existing migrations remain at 0034_knowledge_email_drafts; no new migration.
+- The existing 16-case current-revision drafting run completed, with 16
+  schema-valid successful provider results. It is not recorded or promoted:
+  the validator requires human review of this exact report. The owner review
+  sheet preserves every source, instruction, prior edit and exact candidate.
+  Report digest: 9e3819e82d1f740c7f667059a2c018c907e67476a08f6a356cc445dc455d9558.
+- No controlled Gmail send occurred in this continuation. Historical uncertain
+  sends must not be retried. The exact approval/send/provider-verification
+  acceptance remains pending after drafting eligibility.
+- Public NavoX hosting/domain routing and Canvas source credentials remain
+  unresolved; News is disabled. navox.net registration does not establish an
+  application deployment. The unrelated MarketLab project was not modified.
+- The owner's actual page screenshot exposed tiny voice-control icons.
+  A minimal CSS specificity fix restores zero padding on compact buttons and
+  prevents SVG shrinkage. Web lint/typecheck, 416 tests and production build
+  passed; the local Docker web was rebuilt and serves the corrected CSS.
+- Full locked API preflight for this CSS/documentation tree passed: 2,750
+  tests, zero skips, five retained deprecation warnings; all lint/type/schema,
+  metrics, deterministic release and whitespace gates passed.
+  Real microphone/playback/wake/barge-in remain device checks for the owner.
+
+## Earlier completed observations
 
 - Confirmed branch `spec-008-navoxbot`, draft PR #22, head
   `98c5c6c77de64d2327ebcffb423f42100863827c`, and successful exact-head
@@ -38,7 +92,7 @@ This is not SPEC-008 acceptance, a merge, or a production deployment.
 Both attempts used OpenAI GPT-5.6 Luna, registry revision 9, planner prompt
 v10 and schema v9. Combined recorded estimated cost: USD 0.0013676.
 
-## Remaining blockers and limits
+## Earlier blockers and limits (historical)
 
 - The configured OpenAI credential has a recorded speech-generation
   permission failure. TTS is at 0% and has no qualifying revision-9 record;
@@ -77,7 +131,7 @@ The full locked API preflight passed. Hosted CI on the new commit must
 still be checked before declaring this checkpoint ready. PR #22 remains
 an integration draft until the credential and deployment blockers close.
 
-## Owner-scoped integration after sign-in
+## Earlier owner-scoped integration after sign-in
 
 The operator ceiling now includes PERSONAL and SENSITIVE solely for four
 exact task scopes: the synthetic canary and the verified owner, each with

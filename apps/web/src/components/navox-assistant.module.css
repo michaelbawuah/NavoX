@@ -279,7 +279,7 @@
   cursor: not-allowed;
 }
 
-.iconButton {
+.form > .iconButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -291,6 +291,10 @@
   background: transparent;
   color: var(--muted);
   cursor: pointer;
+}
+
+.iconButton > svg {
+  flex-shrink: 0;
 }
 
 .iconButton[aria-pressed="true"] {
