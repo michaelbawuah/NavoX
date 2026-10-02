@@ -3,6 +3,7 @@ import type {
   AssistantBlock,
   AssistantEmailAction,
   AssistantEmailDraft,
+  AssistantEvidenceResponse,
   AssistantGoalView,
   AssistantMessageRequest,
   AssistantMessageResponse,
@@ -27,7 +28,13 @@ import { type DeliveryResolution, resolveDeliveryIntent } from "./delivery";
 import {
   decideEmailSearch,
   decideEmailSelection,
+  type EmailContent,
+  type EmailContentIssue,
+  type EmailSourceType,
+  emailContentTarget,
+  parseEmailResourceDetail,
   parseEmailSearchOutcome,
+  selectedEmailTarget,
 } from "./email";
 import { createAssistantEmailActions } from "./email-actions";
 import { AssistantError, isAssistantError, toAssistantError } from "./errors";
@@ -50,6 +57,13 @@ import {
 } from "./ledger";
 import { LIMITS } from "./limits";
 import { meetingBlocks } from "./meeting";
+import {
+  type NavigationSourceType,
+  navigationHref,
+  navigationTargets,
+  parseClassNavigationTarget,
+  parseResourceNavigation,
+} from "./navigation";
 import {
   answerNews,
   clarifyNews,
@@ -90,7 +104,7 @@ import {
   parseCapabilityDecision,
   parseIntentPlan,
 } from "./validate";
-import { spokenTextForTurn } from "./voice";
+import { type DraftSpeech, spokenTextForTurn } from "./voice";
 import { parseWeather, weatherAnswer, weatherSelector } from "./weather";
 
 /** Qualified planning failures. A plan is a proposal, never a fallback route. */
@@ -176,6 +190,42 @@ export interface AssistantRuntime {
     source_turn_id: string;
     draft_id: string;
   }): Promise<AssistantEmailAction>;
+  /**
+   * The bounded spoken text of the current, source-turn bound draft version.
+   * The browser supplies selectors and the version it reviewed; a stale version
+   * or an unreadable draft is refused rather than spoken.
+   */
+  readEmailDraftSpeech(input: {
+    cookie: string;
+    session_id: string;
+    source_turn_id: string;
+    draft_id: string;
+    version: number;
+  }): Promise<DraftSpeech>;
+  /**
+   * Resolves one guarded navigation target from a saved in-session turn.
+   * Ownership is re-derived from the cookie and every authority is re-checked
+   * live; a missing, stale or mismatched target fails closed.
+   */
+  resolveNavigationTarget(input: {
+    cookie: string;
+    session_id: string;
+    turn_id: string;
+    item_id: string;
+  }): Promise<{ url: string }>;
+  /**
+   * Re-reads the current content of one saved evidence selector.
+   *
+   * Ownership is re-derived from the cookie and the exact selector is re-found
+   * in the saved turn, so a foreign session, a retired turn, a moved revision
+   * or a revoked source all fail closed instead of replaying stored text.
+   */
+  readEmailEvidence(input: {
+    cookie: string;
+    session_id: string;
+    turn_id: string;
+    item_id: string;
+  }): Promise<AssistantEvidenceResponse>;
   /** Reads one durable goal, fenced by the owning session's scope. */
   readGoal(input: {
     cookie: string;
@@ -630,6 +680,138 @@ export function createAssistantRuntime(
   }
 
   /**
+   * Reads the verified current content of the one candidate a complete search
+   * named. Anything else (incomplete coverage, more than one hit, a thread, or
+   * a refused detail read) is qualified, so a title or a listing is never
+   * presented as the message.
+   */
+  async function emailContentFor(input: {
+    cookie: string;
+    target: {
+      resource_id: string;
+      source_type: EmailSourceType;
+      source_version: string | null;
+      fresh_until: string | null;
+    } | null;
+  }): Promise<EmailContent> {
+    const target = input.target;
+    if (!target) return { state: "UNAVAILABLE", reason: "unverified" };
+    if (target.source_type === "EMAIL_THREAD") return { state: "THREAD_ONLY" };
+    try {
+      return parseEmailResourceDetail(
+        await deps.upstream.getResourceDetail(input.cookie, target.resource_id),
+        {
+          resource_id: target.resource_id,
+          source_type: target.source_type,
+          source_version: target.source_version,
+          fresh_until: target.fresh_until,
+        },
+        { now: now() },
+      );
+    } catch (error) {
+      if (isAssistantError(error) && error.code === "unauthorized") throw error;
+      return { state: "UNAVAILABLE", reason: "unverified" };
+    }
+  }
+
+  /**
+   * Resolves a planner-recognised navigation follow-up against this session's
+   * own saved turn. The runtime names the guarded path; nothing here navigates
+   * by itself and nothing delegates to a capability.
+   */
+  function navigationTurn(input: {
+    sessionId: string;
+    intent: PlannedIntent;
+    turns: readonly AssistantTurnRecord[];
+  }): {
+    state: AssistantResponseState;
+    decision: CapabilityDecision;
+    blocks: AssistantBlock[];
+  } {
+    const clarify = (reason: string, text: string) => ({
+      state: "CLARIFY" as AssistantResponseState,
+      decision: clarifyDecision(reason),
+      blocks: noticeBlocks("CLARIFY", text),
+    });
+    const reference = input.intent.reference;
+    if (reference.kind !== "RECENT_TURN" || reference.turn_id === null) {
+      return clarify(
+        "navigation.missing_reference",
+        "Tell me which earlier answer or item you mean, and I can point you to it.",
+      );
+    }
+    const source = input.turns.find((turn) => turn.id === reference.turn_id);
+    if (!source) {
+      return clarify(
+        "navigation.unknown_reference",
+        "That earlier answer is not in this conversation. Ask again and I can point you to it.",
+      );
+    }
+    const targets = navigationTargets(source.presentation.blocks);
+    if (targets.length === 0) {
+      return clarify(
+        "navigation.no_target",
+        "That answer did not include an item I can open in NavoX. Nothing was changed.",
+      );
+    }
+    if (targets.length > 1) {
+      return clarify(
+        "navigation.ambiguous",
+        "That answer cited more than one item. Tell me which one to open.",
+      );
+    }
+    const target = targets[0] as ReturnType<typeof navigationTargets>[number];
+    return {
+      state: "READY",
+      decision: presentDecision("navigation.resolved"),
+      blocks: [
+        { kind: "ANSWER", text: "Here is the item from your conversation." },
+        {
+          kind: "NAVIGATION",
+          label: target.label,
+          href: navigationHref(input.sessionId, source.id, target.item_id),
+          source_type: target.source_type,
+          evidence_id: target.item_id,
+        },
+        ...(target.citations.length > 0
+          ? [
+              {
+                kind: "CITATIONS" as const,
+                citations: target.citations.slice(0, LIMITS.maxCitations),
+              },
+            ]
+          : []),
+      ],
+    };
+  }
+
+  /** The one qualified failure for a content state that cannot be shown. */
+  function evidenceUnavailable(reason: EmailContentIssue): AssistantError {
+    switch (reason) {
+      case "changed":
+        return new AssistantError(
+          "conflict",
+          "This message changed since the answer. Search again to read its current content.",
+        );
+      case "stale":
+        return new AssistantError(
+          "unavailable",
+          "This indexed message is no longer fresh. Search again to read its current content.",
+        );
+      case "no_content":
+        return new AssistantError(
+          "unavailable",
+          "This indexed message has no readable content. Nothing was changed.",
+        );
+      default:
+        return new AssistantError(
+          "unavailable",
+          "The current content of this message could not be verified. Nothing was changed.",
+        );
+    }
+  }
+
+  /**
    * Free-form questions reach the registered SPEC-005 planner first. SPEC-002's
    * keyword classifier cannot establish that a whole question belongs to Today
    * (for example, weather "today" or a named subscription "renewal"). The
@@ -706,7 +888,7 @@ export function createAssistantRuntime(
     }> {
       try {
         const definition = capabilityForIntentKind(intent.kind);
-        if (intent.requires_clarification || definition === null) {
+        if (intent.requires_clarification) {
           return {
             plan,
             state: "CLARIFY",
@@ -715,6 +897,30 @@ export function createAssistantRuntime(
               "CLARIFY",
               intent.clarification ??
                 "I need a little more detail before I can look that up.",
+            ),
+          };
+        }
+        // A navigation follow-up only points at an item an earlier saved turn
+        // already cited. It delegates to no capability and resolves solely from
+        // this session's own saved turns.
+        if (intent.kind === "assistant.navigate") {
+          return {
+            plan,
+            ...navigationTurn({
+              sessionId: input.record.id,
+              intent,
+              turns: input.turns,
+            }),
+          };
+        }
+        if (definition === null) {
+          return {
+            plan,
+            state: "CLARIFY",
+            decision: clarifyDecision("plan.clarify"),
+            blocks: noticeBlocks(
+              "CLARIFY",
+              "I need a little more detail before I can look that up.",
             ),
           };
         }
@@ -952,9 +1158,14 @@ export function createAssistantRuntime(
             query: intent.question,
             limit: LIMITS.maxEmailResults,
           });
-          resolved = decideEmailSearch(parseEmailSearchOutcome(search), {
-            now: now(),
+          const outcome = parseEmailSearchOutcome(search);
+          // A unique complete hit reads its current content from the owning
+          // service before anything is shown as the message itself.
+          const content = await emailContentFor({
+            cookie: input.cookie,
+            target: emailContentTarget(outcome),
           });
+          resolved = decideEmailSearch(outcome, { now: now(), content });
         } catch (error) {
           if (isAssistantError(error) && error.code === "unauthorized")
             throw error;
@@ -1010,6 +1221,7 @@ export function createAssistantRuntime(
       "time.now": "Time",
       "action.history": "Activity",
       "assistant.delivery": "Request",
+      "assistant.navigate": "Open",
       "assistant.clarify": "Request",
     };
     const parts: {
@@ -1192,11 +1404,15 @@ export function createAssistantRuntime(
       query: source.question,
       limit: LIMITS.maxEmailResults,
     });
-    const resolved = decideEmailSelection(
-      parseEmailSearchOutcome(search),
-      selectedId,
-      { now: now() },
-    );
+    const outcome = parseEmailSearchOutcome(search);
+    const content = await emailContentFor({
+      cookie: input.cookie,
+      target: selectedEmailTarget(outcome, selectedId),
+    });
+    const resolved = decideEmailSelection(outcome, selectedId, {
+      now: now(),
+      content,
+    });
     return {
       plan: source.plan,
       state: resolved.state,
@@ -1205,8 +1421,119 @@ export function createAssistantRuntime(
     };
   }
 
+  const emailActions = createAssistantEmailActions({ ...deps, goals });
+
   return {
-    ...createAssistantEmailActions({ ...deps, goals }),
+    ...emailActions,
+    async readEmailDraftSpeech(input) {
+      return emailActions.readEmailDraftSpeech(input);
+    },
+    async readEmailEvidence(input) {
+      const scope = await scopeFor(input.cookie);
+      const sessionId = assertUuid(input.session_id, "session ID");
+      // Ownership is re-derived from the cookie before any saved selector is
+      // trusted, so another account cannot read this conversation's evidence.
+      await loadSession(sessionId, scope);
+      const turnId = assertUuid(input.turn_id, "turn ID");
+      const itemId = assertUuid(input.item_id, "item ID");
+      const turns = await deps.store.listTurns({
+        session_id: sessionId,
+        scope,
+      });
+      const turn = turns.find((candidate) => candidate.id === turnId);
+      if (!turn) {
+        throw new AssistantError(
+          "not_found",
+          "That answer is no longer in this conversation.",
+        );
+      }
+      const evidence = turn.presentation.blocks.filter(
+        (block): block is Extract<AssistantBlock, { kind: "EVIDENCE" }> =>
+          block.kind === "EVIDENCE" && block.evidence_id === itemId,
+      );
+      const block = evidence[0];
+      if (
+        evidence.length !== 1 ||
+        !block ||
+        block.source_type !== "EMAIL" ||
+        block.source_version === null
+      ) {
+        throw new AssistantError(
+          "not_found",
+          "That source is not part of this answer. Nothing was changed.",
+        );
+      }
+      const content = await emailContentFor({
+        cookie: input.cookie,
+        target: {
+          resource_id: itemId,
+          source_type: "EMAIL",
+          source_version: block.source_version,
+          fresh_until: block.fresh_until,
+        },
+      });
+      if (content.state === "READY") {
+        return {
+          evidence_id: itemId,
+          source_type: "EMAIL",
+          excerpts: content.excerpts,
+        };
+      }
+      throw evidenceUnavailable(
+        content.state === "UNAVAILABLE" ? content.reason : "unverified",
+      );
+    },
+    async resolveNavigationTarget(input) {
+      const scope = await scopeFor(input.cookie);
+      const sessionId = assertUuid(input.session_id, "session ID");
+      // Ownership is re-derived from the cookie and the session row before any
+      // saved item is trusted; a foreign or expired session fails closed.
+      await loadSession(sessionId, scope);
+      const turnId = assertUuid(input.turn_id, "turn ID");
+      const itemId = assertUuid(input.item_id, "item ID");
+      const turns = await deps.store.listTurns({
+        session_id: sessionId,
+        scope,
+      });
+      const turn = turns.find((candidate) => candidate.id === turnId);
+      if (!turn) {
+        throw new AssistantError(
+          "not_found",
+          "That item is no longer in this conversation.",
+        );
+      }
+      const matches = navigationTargets(turn.presentation.blocks).filter(
+        (target) => target.item_id === itemId,
+      );
+      if (matches.length !== 1) {
+        throw new AssistantError(
+          "not_found",
+          "That item is no longer available to open.",
+        );
+      }
+      const target = matches[0] as ReturnType<typeof navigationTargets>[number];
+      if (target.source_type === "CLASS_MEETING") {
+        if (!target.connection_id) {
+          throw new AssistantError(
+            "not_found",
+            "That class link is no longer available.",
+          );
+        }
+        return parseClassNavigationTarget(
+          await deps.upstream.getClassNavigationTarget(input.cookie, {
+            connectionId: target.connection_id,
+            resourceId: target.item_id,
+          }),
+        );
+      }
+      return parseResourceNavigation(
+        await deps.upstream.getResourceDetail(input.cookie, target.item_id),
+        {
+          resource_id: target.item_id,
+          source_type: target.source_type as NavigationSourceType,
+        },
+      );
+    },
     async createSession(input) {
       const scope = await scopeFor(input.cookie);
       const navoxSessionId = await deps.upstream.createAssistantSession(

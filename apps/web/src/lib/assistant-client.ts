@@ -2,6 +2,7 @@ import type {
   AssistantEmailAction,
   AssistantEmailDraft,
   AssistantErrorCode,
+  AssistantEvidenceResponse,
   AssistantGoalDispatchResponse,
   AssistantGoalView,
   AssistantMessageResponse,
@@ -58,7 +59,11 @@ async function readError(response: Response): Promise<AssistantClientError> {
 
 async function assistantRequest<T>(
   path: string,
-  options: { method: "GET" | "POST" | "PATCH" | "DELETE"; body?: unknown },
+  options: {
+    method: "GET" | "POST" | "PATCH" | "DELETE";
+    body?: unknown;
+    signal?: AbortSignal;
+  },
 ): Promise<T> {
   const response = await fetch(path, {
     method: options.method,
@@ -66,6 +71,7 @@ async function assistantRequest<T>(
     cache: "no-store",
     headers: { "content-type": "application/json" },
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    signal: options.signal,
   });
   if (!response.ok) throw await readError(response);
   if (response.status === 204) return undefined as T;
@@ -228,6 +234,24 @@ export async function loadAssistantGoals(
   return body.goals;
 }
 
+/**
+ * Re-reads the current, re-authorized content of one saved evidence selector.
+ * The response carries no durable copy: the server re-checks session ownership
+ * and the SPEC-007 source authority on every call.
+ */
+export async function loadAssistantEvidence(
+  sessionId: string,
+  turnId: string,
+  itemId: string,
+  signal?: AbortSignal,
+): Promise<AssistantEvidenceResponse> {
+  const query = new URLSearchParams({ turn_id: turnId, item_id: itemId });
+  return assistantRequest<AssistantEvidenceResponse>(
+    `${assistantSessionPath(sessionId)}/evidence?${query.toString()}`,
+    { method: "GET", signal },
+  );
+}
+
 export async function loadAssistantGoal(
   goalId: string,
 ): Promise<AssistantGoalView> {
@@ -335,28 +359,10 @@ export function assistantTurnPath(sessionId: string, turnId: string): string {
   return `${assistantSessionPath(sessionId)}/turns/${encodeURIComponent(turnId)}`;
 }
 
-/**
- * Requests the saved-turn speech route with session and turn selectors only.
- * The server derives and bounds the spoken text; no answer text, provider,
- * model, voice or destination ever travels from the browser.
- */
-export async function synthesizeAssistantSpeech(
-  sessionId: string,
-  turnId: string,
-  signal?: AbortSignal,
+/** Validates and reads one bounded MP3 body; a malformed answer is refused. */
+async function readSpeechAudio(
+  response: Response,
 ): Promise<Uint8Array<ArrayBuffer>> {
-  const response = await fetch(
-    `${assistantTurnPath(sessionId, turnId)}/speech`,
-    {
-      method: "POST",
-      credentials: "include",
-      cache: "no-store",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-      signal,
-    },
-  );
-  if (!response.ok) throw await readError(response);
   const mediaType = (response.headers.get("content-type") ?? "")
     .split(";")[0]
     ?.trim()
@@ -385,6 +391,55 @@ export async function synthesizeAssistantSpeech(
     );
   }
   return audio;
+}
+
+/**
+ * Requests the saved-turn speech route with session and turn selectors only.
+ * The server derives and bounds the spoken text; no answer text, provider,
+ * model, voice or destination ever travels from the browser.
+ */
+export async function synthesizeAssistantSpeech(
+  sessionId: string,
+  turnId: string,
+  signal?: AbortSignal,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const response = await fetch(
+    `${assistantTurnPath(sessionId, turnId)}/speech`,
+    {
+      method: "POST",
+      credentials: "include",
+      cache: "no-store",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+      signal,
+    },
+  );
+  if (!response.ok) throw await readError(response);
+  return readSpeechAudio(response);
+}
+
+/**
+ * Requests spoken playback of one saved draft version. The browser supplies
+ * the source turn, draft and exact reviewed version only; the server derives
+ * the bounded spoken text from the authenticated, bound draft.
+ */
+export async function synthesizeAssistantEmailDraftSpeech(
+  sessionId: string,
+  sourceTurnId: string,
+  draftId: string,
+  version: number,
+  signal?: AbortSignal,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const response = await fetch(`${draftPath(sessionId, draftId)}/speech`, {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ source_turn_id: sourceTurnId, version }),
+    signal,
+  });
+  if (!response.ok) throw await readError(response);
+  return readSpeechAudio(response);
 }
 
 function draftPath(sessionId: string, draftId?: string): string {

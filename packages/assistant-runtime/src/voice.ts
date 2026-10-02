@@ -237,6 +237,33 @@ export function reduceVoiceState(
 export const MAX_SPEECH_LENGTH = LIMITS.maxSpeechLength;
 
 /**
+ * The bounded spoken text of one saved draft version, or an honest refusal.
+ *
+ * The subject and body are read in full when they fit the shared synthesis
+ * bound. A draft that does not fit is refused instead of truncated, because
+ * the spoken words must never disagree with the exact text a send would use.
+ * The caller keeps the full visual text available either way.
+ */
+export type DraftSpeech =
+  | { speakable: true; text: string }
+  | { speakable: false; reason: "empty" | "too_long" };
+
+export function draftSpeechFor(input: {
+  subject: string;
+  body: string;
+}): DraftSpeech {
+  const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+  const subject = normalize(input.subject).replace(/[.\s]+$/, "");
+  const body = normalize(input.body);
+  if (!subject && !body) return { speakable: false, reason: "empty" };
+  const text = [subject, body].filter(Boolean).join(". ");
+  if (text.length > LIMITS.maxSpeechLength) {
+    return { speakable: false, reason: "too_long" };
+  }
+  return { speakable: true, text };
+}
+
+/**
  * The bounded spoken text of one saved turn, derived from the saved
  * presentation only. A question is never spoken, an answer that would need
  * approval stays silent, and a turn with no answer or notice has nothing to

@@ -8,6 +8,7 @@ import type { AccountScope, NavoxUpstream } from "./gateway";
 import type { AssistantGoalService } from "./goal-service";
 import type { AssistantStore, AssistantTurnRecord } from "./store";
 import { isRecord, isUuid } from "./validate";
+import { type DraftSpeech, draftSpeechFor } from "./voice";
 
 const HASH = /^[0-9a-f]{64}$/;
 
@@ -485,6 +486,37 @@ export function createAssistantEmailActions(deps: AssistantEmailActionDeps) {
       );
       assertActionMatchesDraft(action, draft);
       return action;
+    },
+
+    /**
+     * The bounded spoken words of the current saved draft version.
+     *
+     * The browser supplies selectors and the version it reviewed; the text is
+     * derived here from the authenticated, source-turn bound draft, so the
+     * browser can never dictate speech content. A stale version is refused and
+     * an over-long draft is returned unspeakable instead of truncated.
+     */
+    async readEmailDraftSpeech(input: {
+      cookie: string;
+      session_id: string;
+      source_turn_id: string;
+      draft_id: string;
+      version: number;
+    }): Promise<DraftSpeech> {
+      const resourceId = await context(
+        input.cookie,
+        input.session_id,
+        input.source_turn_id,
+      );
+      const draft = await boundDraft(input.cookie, resourceId, input.draft_id);
+      const current = draft.versions.at(-1);
+      if (!current || input.version !== draft.current_version) {
+        throw new AssistantError(
+          "conflict",
+          "The draft changed. Reload it before reading it aloud.",
+        );
+      }
+      return draftSpeechFor({ subject: current.subject, body: current.body });
     },
   };
 }

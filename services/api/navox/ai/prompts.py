@@ -23,6 +23,7 @@ from navox.ai.intent_plan import (
     INTENT_PLAN_INSTRUCTIONS_V6,
     INTENT_PLAN_INSTRUCTIONS_V7,
     INTENT_PLAN_INSTRUCTIONS_V8,
+    INTENT_PLAN_INSTRUCTIONS_V9,
     INTENT_PLAN_PROMPT,
     INTENT_PLAN_SCHEMA,
     intent_plan_json_schema,
@@ -246,11 +247,26 @@ def builtin_prompts() -> tuple[tuple[PromptDefinition, ...], tuple[SchemaDefinit
         )
     )
     previous_plan_v8 = VersionedRef(name="assistant_intent_plan", version="v8")
+    schemas.append(
+        SchemaDefinition(
+            reference=previous_plan_v8,
+            document=JSONDocument(text=json.dumps(intent_plan_json_schema(legacy_v8=True))),
+        )
+    )
     prompts.append(
         PromptDefinition(
             reference=previous_plan_v8,
-            output_schema=INTENT_PLAN_SCHEMA,
+            output_schema=previous_plan_v8,
             instructions=UNTRUSTED_BOUNDARY + INTENT_PLAN_INSTRUCTIONS_V8,
+        )
+    )
+    # The v9 prompt (the pre-M16 instructions) reused the frozen v8 schema.
+    previous_plan_v9 = VersionedRef(name="assistant_intent_plan", version="v9")
+    prompts.append(
+        PromptDefinition(
+            reference=previous_plan_v9,
+            output_schema=previous_plan_v8,
+            instructions=UNTRUSTED_BOUNDARY + INTENT_PLAN_INSTRUCTIONS_V9,
         )
     )
     schemas.append(

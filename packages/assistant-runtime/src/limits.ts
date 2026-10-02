@@ -26,6 +26,10 @@ export const LIMITS = {
   maxItems: 50,
   /** Citation selectors rendered for one answer. */
   maxCitations: 50,
+  /** Verified source excerpts rendered for one answer. */
+  maxExcerpts: 8,
+  /** Longest single verified excerpt; mirrors the SPEC-007 resource detail. */
+  maxExcerptLength: 512,
   /** Clarify suggestions echoed from the owning service; SPEC-002 publishes eleven. */
   maxSuggestions: 16,
   /** Client referents accepted but unused in M1. */

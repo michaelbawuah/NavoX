@@ -8,6 +8,7 @@ import {
   CLARIFY_PLAN,
   createFakeUpstream,
   createMemoryStore,
+  emailResourceDetailPayload,
   emailSearchPayload,
   intentEnvelope,
   NAVOX_SESSION_ID,
@@ -16,6 +17,11 @@ import {
   SCOPE,
 } from "./testing/fakes";
 import type { TodayQueryResult } from "./today";
+import {
+  parseCapabilityDecision,
+  parseIntentPlan,
+  parsePresentationPlan,
+} from "./validate";
 import { spokenTextForTurn } from "./voice";
 
 const NOW = new Date("2026-09-30T12:00:00.000Z");
@@ -64,6 +70,9 @@ interface SetupOverrides {
   planError?: AssistantError | null;
   email?: unknown;
   emailError?: AssistantError | null;
+  resourceDetail?: unknown;
+  resourceDetailError?: AssistantError | null;
+  classNavigation?: unknown;
 }
 
 function setup(overrides?: SetupOverrides) {
@@ -78,6 +87,12 @@ function setup(overrides?: SetupOverrides) {
   if (overrides && "email" in overrides) fake.email = overrides.email;
   if (overrides && "emailError" in overrides)
     fake.emailError = overrides.emailError ?? null;
+  if (overrides && "resourceDetail" in overrides)
+    fake.resourceDetail = overrides.resourceDetail;
+  if (overrides && "resourceDetailError" in overrides)
+    fake.resourceDetailError = overrides.resourceDetailError ?? null;
+  if (overrides && "classNavigation" in overrides)
+    fake.classNavigation = overrides.classNavigation;
   const upstream = createFakeUpstream(fake);
   const runtime = createAssistantRuntime({
     store,
@@ -92,6 +107,30 @@ async function withSession(overrides?: SetupOverrides) {
   const context = setup(overrides);
   const session = await context.runtime.createSession({ cookie: COOKIE });
   return { ...context, sessionId: session.id };
+}
+
+/** One session with exactly one resolved, content-backed email turn. */
+async function readyEmail() {
+  const context = await withSession({
+    today: UNSUPPORTED_TODAY,
+    planError: null,
+    plan: intentEnvelope(emailPlan()),
+    email: emailSearchPayload([{ resource_id: EMAIL_RESULT }]),
+    resourceDetail: emailResourceDetailPayload({
+      resource_id: EMAIL_RESULT,
+    }),
+  });
+  const answer = await context.runtime.submitTurn({
+    cookie: COOKIE,
+    session_id: context.sessionId,
+    body: {
+      request_id: REQUEST_ID,
+      text: "What did Sarah email me?",
+      modality: "TEXT",
+    },
+  });
+  expect(answer.turn.state).toBe("READY");
+  return { ...context, turnId: answer.turn.id };
 }
 
 describe("assistant session lifecycle", () => {
@@ -192,26 +231,6 @@ describe("assistant email action boundary", () => {
     });
     expect(parsed.versions.at(-1)?.subject).toBe("New");
   });
-  async function readyEmail() {
-    const context = await withSession({
-      today: UNSUPPORTED_TODAY,
-      planError: null,
-      plan: intentEnvelope(emailPlan()),
-      email: emailSearchPayload([{ resource_id: EMAIL_RESULT }]),
-    });
-    const answer = await context.runtime.submitTurn({
-      cookie: COOKIE,
-      session_id: context.sessionId,
-      body: {
-        request_id: REQUEST_ID,
-        text: "What did Sarah email me?",
-        modality: "TEXT",
-      },
-    });
-    expect(answer.turn.state).toBe("READY");
-    return { ...context, turnId: answer.turn.id };
-  }
-
   it("requires a session-owned resolved email before invoking draft generation", async () => {
     const context = await readyEmail();
     const generate = vi.fn(async () => ({}));
@@ -1821,6 +1840,11 @@ describe("SPEC-005 intent bridge in a turn", () => {
           external_resource_id: "message-1",
         },
       ]),
+      resourceDetail: emailResourceDetailPayload({
+        resource_id: EMAIL_RESULT,
+        title: "Renewal confirmation",
+        chunks: [{ text_content: "Your renewal is confirmed." }],
+      }),
     });
     const response = await context.runtime.submitTurn({
       cookie: COOKIE,
@@ -1887,6 +1911,9 @@ describe("SPEC-005 intent bridge in a turn", () => {
     context.upstream.email = emailSearchPayload([
       { resource_id: EMAIL_RESULT, title: "Renewal confirmation" },
     ]);
+    context.upstream.resourceDetail = emailResourceDetailPayload({
+      resource_id: EMAIL_RESULT,
+    });
     const response = await context.runtime.submitTurn({
       cookie: COOKIE,
       session_id: context.sessionId,
@@ -1951,6 +1978,9 @@ describe("SPEC-005 intent bridge in a turn", () => {
         { resource_id: EMAIL_RESULT, title: "Renewal notice" },
         { resource_id: SECOND_RESULT, title: "Renewal receipt" },
       ]),
+      resourceDetail: emailResourceDetailPayload({
+        resource_id: SECOND_RESULT,
+      }),
     });
     const ambiguous = await context.runtime.submitTurn({
       cookie: COOKIE,
@@ -2513,6 +2543,15 @@ describe("real SPEC-005 and SPEC-007 wire shapes", () => {
             ]),
           );
         }
+        if (path.includes("/knowledge/resources/")) {
+          return jsonResponse(
+            emailResourceDetailPayload({
+              resource_id: EMAIL_RESULT,
+              title: "Renewal confirmation",
+              chunks: [{ text_content: "Your renewal is confirmed." }],
+            }),
+          );
+        }
         throw new Error(`unexpected path ${path}`);
       },
     });
@@ -2919,5 +2958,689 @@ describe("adaptive response modality", () => {
     });
     expect(replay.replay).toBe(true);
     expect(replay.turn.state).toBe("UNAVAILABLE");
+  });
+});
+
+const EMAIL_HREF = "https://mail.google.com/mail/u/0/#inbox/message-1";
+
+function navigatePlan(intent: Record<string, unknown> = {}) {
+  return intentEnvelope(
+    emailPlan({
+      route: "assistant.navigate",
+      entity: { kind: "NONE", value: null, confidence: 1 },
+      time: { kind: "NONE", expression: null, confidence: 1 },
+      reference: { kind: "RECENT_TURN", ordinal: 1 },
+      ...intent,
+    }),
+  );
+}
+
+describe("SPEC-008 M16 conversation closure", () => {
+  it("shows only the verified current content of one exact email", async () => {
+    const context = await withSession({
+      today: UNSUPPORTED_TODAY,
+      planError: null,
+      plan: intentEnvelope(emailPlan()),
+      email: emailSearchPayload([
+        { resource_id: EMAIL_RESULT, title: "Renewal confirmation" },
+      ]),
+      resourceDetail: emailResourceDetailPayload({
+        resource_id: EMAIL_RESULT,
+        title: "Renewal confirmation",
+        chunks: [{ text_content: "Your renewal is confirmed." }],
+      }),
+    });
+    const response = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "What did Sarah email me?",
+        modality: "TEXT",
+      },
+    });
+    expect(response.turn.state).toBe("READY");
+    expect(response.turn.decision?.reason).toBe("email.search.found_one");
+    expect(context.upstream.calls.resourceDetail).toEqual([
+      { cookie: COOKIE, id: EMAIL_RESULT },
+    ]);
+    const evidence = response.turn.presentation?.blocks.find(
+      (block) => block.kind === "EVIDENCE",
+    );
+    expect(evidence).toMatchObject({
+      kind: "EVIDENCE",
+      evidence_id: EMAIL_RESULT,
+      source_type: "EMAIL",
+      source_version: "v1",
+      fresh_until: "2026-10-01T12:00:00.000Z",
+    });
+    expect(response.turn.action_refs).toEqual([]);
+    // The durable assistant row keeps selectors and version metadata only: no
+    // search listing text, no resource-detail excerpt text, no canonical URL.
+    const persisted = context.store.turns.map((turn) =>
+      JSON.stringify(turn.presentation),
+    );
+    const joined = persisted.join("\n");
+    expect(joined).toContain(EMAIL_RESULT);
+    expect(joined).not.toContain("Your renewal is confirmed.");
+    expect(joined).not.toContain("excerpt text that must never be copied");
+    expect(joined).not.toContain("canonical_url");
+  });
+
+  it("re-reads and re-authorizes evidence, and revocation removes it on replay", async () => {
+    const context = await withSession({
+      today: UNSUPPORTED_TODAY,
+      planError: null,
+      plan: intentEnvelope(emailPlan()),
+      email: emailSearchPayload([{ resource_id: EMAIL_RESULT }]),
+      resourceDetail: emailResourceDetailPayload({
+        resource_id: EMAIL_RESULT,
+        chunks: [{ text_content: "Your renewal is confirmed." }],
+      }),
+    });
+    const answer = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "What did Sarah email me?",
+        modality: "TEXT",
+      },
+    });
+    expect(answer.turn.state).toBe("READY");
+    await expect(
+      context.runtime.readEmailEvidence({
+        cookie: COOKIE,
+        session_id: context.sessionId,
+        turn_id: answer.turn.id,
+        item_id: EMAIL_RESULT,
+      }),
+    ).resolves.toEqual({
+      evidence_id: EMAIL_RESULT,
+      source_type: "EMAIL",
+      excerpts: [{ source: "content", text: "Your renewal is confirmed." }],
+    });
+
+    // A revoked source removes the content on replay instead of serving a
+    // stored copy.
+    context.upstream.resourceDetailError = new AssistantError(
+      "forbidden",
+      "The source was revoked.",
+    );
+    await expect(
+      context.runtime.readEmailEvidence({
+        cookie: COOKIE,
+        session_id: context.sessionId,
+        turn_id: answer.turn.id,
+        item_id: EMAIL_RESULT,
+      }),
+    ).rejects.toMatchObject({ code: "unavailable" });
+
+    // A moved revision is a conflict, never the stale text.
+    context.upstream.resourceDetailError = null;
+    context.upstream.resourceDetail = emailResourceDetailPayload({
+      resource_id: EMAIL_RESULT,
+      source_version: "v2",
+      chunks: [{ text_content: "Changed text" }],
+    });
+    await expect(
+      context.runtime.readEmailEvidence({
+        cookie: COOKIE,
+        session_id: context.sessionId,
+        turn_id: answer.turn.id,
+        item_id: EMAIL_RESULT,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    // Ownership is re-derived: a foreign session cannot read the same turn.
+    const before = context.upstream.calls.resourceDetail.length;
+    await expect(
+      context.runtime.readEmailEvidence({
+        cookie: COOKIE,
+        session_id: SECOND_RESULT,
+        turn_id: answer.turn.id,
+        item_id: EMAIL_RESULT,
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(context.upstream.calls.resourceDetail).toHaveLength(before);
+  });
+
+  it("qualifies a unique email when its current source is revoked or changed", async () => {
+    for (const detailError of [
+      new AssistantError("forbidden", "The source was revoked."),
+      new AssistantError("unavailable", "The source changed."),
+    ]) {
+      const context = await withSession({
+        today: UNSUPPORTED_TODAY,
+        planError: null,
+        plan: intentEnvelope(emailPlan()),
+        email: emailSearchPayload([{ resource_id: EMAIL_RESULT }]),
+        resourceDetailError: detailError,
+      });
+      const response = await context.runtime.submitTurn({
+        cookie: COOKIE,
+        session_id: context.sessionId,
+        body: {
+          request_id: REQUEST_ID,
+          text: "What did Sarah email me?",
+          modality: "TEXT",
+        },
+      });
+      expect(response.turn.state).toBe("CLARIFY");
+      expect(response.turn.decision?.reason).toBe("email.search.unverified");
+      expect(
+        response.turn.presentation?.blocks.some(
+          (block) => block.kind === "EVIDENCE",
+        ),
+      ).toBe(false);
+      await expect(
+        context.runtime.createEmailDraft({
+          cookie: COOKIE,
+          session_id: context.sessionId,
+          body: {
+            source_turn_id: response.turn.id,
+            instructions: "Reply",
+          },
+        }),
+      ).rejects.toMatchObject({ code: "invalid_request" });
+    }
+  });
+
+  it("keeps a thread-only hit qualified and never quotes it as a message", async () => {
+    const context = await withSession({
+      today: UNSUPPORTED_TODAY,
+      planError: null,
+      plan: intentEnvelope(emailPlan()),
+      email: emailSearchPayload([
+        { resource_id: EMAIL_RESULT, source_type: "EMAIL_THREAD" },
+      ]),
+      resourceDetail: emailResourceDetailPayload({
+        resource_id: EMAIL_RESULT,
+        source_type: "EMAIL_THREAD",
+        chunks: [{ text_content: "Thread listing text." }],
+      }),
+    });
+    const response = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "What did Sarah email me?",
+        modality: "TEXT",
+      },
+    });
+    expect(response.turn.state).toBe("CLARIFY");
+    expect(response.turn.decision?.reason).toBe("email.search.thread_only");
+    const blocks = response.turn.presentation?.blocks ?? [];
+    expect(blocks.some((block) => block.kind === "EVIDENCE")).toBe(false);
+    expect(JSON.stringify(blocks)).not.toContain("Thread listing text.");
+    expect(blocks.some((block) => block.kind === "CITATIONS")).toBe(true);
+  });
+
+  it("resolves a natural follow-up to exactly one guarded navigation link", async () => {
+    const context = await withSession({
+      today: UNSUPPORTED_TODAY,
+      planError: null,
+      plan: intentEnvelope(emailPlan()),
+      email: emailSearchPayload([{ resource_id: EMAIL_RESULT }]),
+      resourceDetail: emailResourceDetailPayload({
+        resource_id: EMAIL_RESULT,
+      }),
+    });
+    const first = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "What did Sarah email me?",
+        modality: "TEXT",
+      },
+    });
+    expect(first.turn.state).toBe("READY");
+    context.upstream.plan = navigatePlan();
+    const searches = context.upstream.calls.email.length;
+    const response = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: "77777777-7777-4777-8777-777777777778",
+        text: "take me to that",
+        modality: "TEXT",
+      },
+    });
+    expect(response.turn.state).toBe("READY");
+    expect(response.turn.decision?.kind).toBe("PRESENT");
+    expect(response.turn.decision?.capability_id).toBeNull();
+    expect(response.turn.action_refs).toEqual([]);
+    // Navigation never runs a second search or drafts anything.
+    expect(context.upstream.calls.email).toHaveLength(searches);
+    const navigation = response.turn.presentation?.blocks.find(
+      (block) => block.kind === "NAVIGATION",
+    );
+    expect(navigation).toMatchObject({
+      kind: "NAVIGATION",
+      label: "Open that email",
+      source_type: "EMAIL",
+      evidence_id: EMAIL_RESULT,
+    });
+    const href = navigation?.kind === "NAVIGATION" ? navigation.href : "";
+    expect(href.startsWith("/api/v1/assistant/navigation?")).toBe(true);
+    expect(href).toContain(`session_id=${context.sessionId}`);
+    expect(href).toContain(`turn_id=${first.turn.id}`);
+    expect(href).toContain(`item_id=${EMAIL_RESULT}`);
+  });
+
+  it("clarifies an ambiguous or unknown navigation referent without acting", async () => {
+    const ambiguous = await withSession({
+      today: UNSUPPORTED_TODAY,
+      planError: null,
+      plan: intentEnvelope(emailPlan()),
+      email: emailSearchPayload([
+        { resource_id: EMAIL_RESULT, title: "Renewal notice" },
+        { resource_id: SECOND_RESULT, title: "Renewal receipt" },
+      ]),
+    });
+    await ambiguous.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: ambiguous.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "What did Sarah email me?",
+        modality: "TEXT",
+      },
+    });
+    ambiguous.upstream.plan = navigatePlan();
+    const twoTargets = await ambiguous.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: ambiguous.sessionId,
+      body: {
+        request_id: "77777777-7777-4777-8777-777777777778",
+        text: "take me to that",
+        modality: "TEXT",
+      },
+    });
+    expect(twoTargets.turn.state).toBe("CLARIFY");
+    expect(twoTargets.turn.decision?.reason).toBe("navigation.ambiguous");
+    expect(
+      twoTargets.turn.presentation?.blocks.some(
+        (block) => block.kind === "NAVIGATION",
+      ),
+    ).toBe(false);
+
+    const empty = await withSession({
+      today: UNSUPPORTED_TODAY,
+      planError: null,
+      plan: navigatePlan({ reference: { kind: "RECENT_TURN", ordinal: 1 } }),
+    });
+    const noReference = await empty.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: empty.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "take me to that",
+        modality: "TEXT",
+      },
+    });
+    expect(noReference.turn.state).not.toBe("READY");
+    expect(
+      noReference.turn.presentation?.blocks.some(
+        (block) => block.kind === "NAVIGATION",
+      ),
+    ).toBe(false);
+    expect(empty.upstream.calls.email).toHaveLength(0);
+  });
+
+  it("refuses a planner that tries to name a URL or resource itself", async () => {
+    const context = await withSession({
+      today: UNSUPPORTED_TODAY,
+      planError: null,
+      plan: navigatePlan({ url: "https://evil.example" }),
+    });
+    const response = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "take me to that",
+        modality: "TEXT",
+      },
+    });
+    expect(response.turn.state).toBe("UNAVAILABLE");
+    expect(
+      response.turn.presentation?.blocks.some(
+        (block) => block.kind === "NAVIGATION",
+      ),
+    ).toBe(false);
+    expect(JSON.stringify(response.turn.presentation?.blocks)).not.toContain(
+      "evil.example",
+    );
+  });
+
+  it("re-checks ownership and current authority before redirecting", async () => {
+    const context = await withSession({
+      today: UNSUPPORTED_TODAY,
+      planError: null,
+      plan: intentEnvelope(emailPlan()),
+      email: emailSearchPayload([{ resource_id: EMAIL_RESULT }]),
+      resourceDetail: emailResourceDetailPayload({
+        resource_id: EMAIL_RESULT,
+        canonical_url: EMAIL_HREF,
+      }),
+    });
+    const first = await context.runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      body: {
+        request_id: REQUEST_ID,
+        text: "What did Sarah email me?",
+        modality: "TEXT",
+      },
+    });
+    const resolved = await context.runtime.resolveNavigationTarget({
+      cookie: COOKIE,
+      session_id: context.sessionId,
+      turn_id: first.turn.id,
+      item_id: EMAIL_RESULT,
+    });
+    expect(resolved).toEqual({ url: EMAIL_HREF });
+
+    // A foreign session id is a not-found before any source is read.
+    const before = context.upstream.calls.resourceDetail.length;
+    await expect(
+      context.runtime.resolveNavigationTarget({
+        cookie: COOKIE,
+        session_id: SECOND_RESULT,
+        turn_id: first.turn.id,
+        item_id: EMAIL_RESULT,
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    expect(context.upstream.calls.resourceDetail).toHaveLength(before);
+
+    // A revoked or mismatched target fails closed without a redirect URL.
+    context.upstream.resourceDetailError = new AssistantError(
+      "forbidden",
+      "The source was revoked.",
+    );
+    await expect(
+      context.runtime.resolveNavigationTarget({
+        cookie: COOKIE,
+        session_id: context.sessionId,
+        turn_id: first.turn.id,
+        item_id: EMAIL_RESULT,
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+
+    context.upstream.resourceDetailError = null;
+    context.upstream.resourceDetail = emailResourceDetailPayload({
+      resource_id: SECOND_RESULT,
+    });
+    await expect(
+      context.runtime.resolveNavigationTarget({
+        cookie: COOKIE,
+        session_id: context.sessionId,
+        turn_id: first.turn.id,
+        item_id: EMAIL_RESULT,
+      }),
+    ).rejects.toMatchObject({ code: "unavailable" });
+
+    context.upstream.resourceDetail = emailResourceDetailPayload({
+      resource_id: EMAIL_RESULT,
+      canonical_url: "javascript:alert(1)",
+    });
+    await expect(
+      context.runtime.resolveNavigationTarget({
+        cookie: COOKIE,
+        session_id: context.sessionId,
+        turn_id: first.turn.id,
+        item_id: EMAIL_RESULT,
+      }),
+    ).rejects.toMatchObject({ code: "unavailable" });
+
+    // A changed account cannot open another workspace's saved item.
+    context.upstream.resourceDetail = emailResourceDetailPayload({
+      resource_id: EMAIL_RESULT,
+      canonical_url: EMAIL_HREF,
+    });
+    context.upstream.account = {
+      user_id: OTHER_SCOPE.user_id,
+      workspace_id: OTHER_SCOPE.workspace_id,
+      email: "other@example.com",
+    };
+    await expect(
+      context.runtime.resolveNavigationTarget({
+        cookie: COOKIE,
+        session_id: context.sessionId,
+        turn_id: first.turn.id,
+        item_id: EMAIL_RESULT,
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("resolves a saved class-navigation block through the class authority", async () => {
+    const context = await withSession({ today: UNSUPPORTED_TODAY });
+    const classResource = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const connectionId = "88888888-8888-4888-8888-888888888888";
+    const turnId = "cccccccc-1111-4111-8111-111111111111";
+    context.store.turns.push({
+      id: turnId,
+      session_id: context.sessionId,
+      sequence: 1,
+      modality: "TEXT",
+      state: "READY",
+      request_id: REQUEST_ID,
+      request_fingerprint: "seeded",
+      question: "When is my next class?",
+      response_text: "Your next class is on the calendar.",
+      plan: parseIntentPlan({
+        version: 1,
+        intents: [
+          {
+            kind: "class.next",
+            capability_id: "class.next",
+            question: "When is my next class?",
+            confidence: 1,
+          },
+        ],
+      }),
+      decision: parseCapabilityDecision({
+        kind: "DELEGATE",
+        capability_id: "class.next",
+        target: "knowledge.class-sources",
+        reason: "class.next.resolved",
+        requires_approval: false,
+        action_state: "NONE",
+        action_id: null,
+        response_state: "READY",
+      }),
+      presentation: parsePresentationPlan({
+        presentation: "TEXT",
+        speak: false,
+        speech_text: null,
+        delivery: "AUTOMATIC",
+        blocks: [
+          { kind: "ANSWER", text: "Your next class is on the calendar." },
+          {
+            kind: "CLASS_NAVIGATION",
+            label: "Open Calendar",
+            connection_id: connectionId,
+            resource_id: classResource,
+          },
+        ],
+      }),
+      action_refs: [],
+      created_at: NOW.toISOString(),
+    });
+    context.upstream.classNavigation = {
+      url: "https://calendar.google.com/calendar/event?eid=2",
+    };
+    await expect(
+      context.runtime.resolveNavigationTarget({
+        cookie: COOKIE,
+        session_id: context.sessionId,
+        turn_id: turnId,
+        item_id: classResource,
+      }),
+    ).resolves.toEqual({
+      url: "https://calendar.google.com/calendar/event?eid=2",
+    });
+    expect(context.upstream.calls.classNavigation).toEqual([
+      { cookie: COOKIE, connectionId, resourceId: classResource },
+    ]);
+
+    // An unsafe class destination fails closed rather than redirecting.
+    context.upstream.classNavigation = { url: "javascript:alert(1)" };
+    await expect(
+      context.runtime.resolveNavigationTarget({
+        cookie: COOKIE,
+        session_id: context.sessionId,
+        turn_id: turnId,
+        item_id: classResource,
+      }),
+    ).rejects.toMatchObject({ code: "unavailable" });
+
+    // Canvas is deferred: an "Open Class" block is not an openable target, and
+    // a foreign https host is refused even when the authority returns one.
+    context.store.turns[0] = {
+      ...(context.store.turns[0] as (typeof context.store.turns)[number]),
+      presentation: parsePresentationPlan({
+        presentation: "TEXT",
+        speak: false,
+        speech_text: null,
+        delivery: "AUTOMATIC",
+        blocks: [
+          { kind: "ANSWER", text: "Your next class is on Canvas." },
+          {
+            kind: "CLASS_NAVIGATION",
+            label: "Open Class",
+            connection_id: connectionId,
+            resource_id: classResource,
+          },
+        ],
+      }),
+    };
+    await expect(
+      context.runtime.resolveNavigationTarget({
+        cookie: COOKIE,
+        session_id: context.sessionId,
+        turn_id: turnId,
+        item_id: classResource,
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+
+    context.store.turns[0] = {
+      ...(context.store.turns[0] as (typeof context.store.turns)[number]),
+      presentation: parsePresentationPlan({
+        presentation: "TEXT",
+        speak: false,
+        speech_text: null,
+        delivery: "AUTOMATIC",
+        blocks: [
+          { kind: "ANSWER", text: "Your next class is on the calendar." },
+          {
+            kind: "CLASS_NAVIGATION",
+            label: "Open Calendar",
+            connection_id: connectionId,
+            resource_id: classResource,
+          },
+        ],
+      }),
+    };
+    context.upstream.classNavigation = {
+      url: "https://evil.example/calendar/event",
+    };
+    await expect(
+      context.runtime.resolveNavigationTarget({
+        cookie: COOKIE,
+        session_id: context.sessionId,
+        turn_id: turnId,
+        item_id: classResource,
+      }),
+    ).rejects.toMatchObject({ code: "unavailable" });
+  });
+
+  it("reads aloud only the current, source-turn bound draft version", async () => {
+    const context = await readyEmail();
+    const draftId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    context.upstream.getCommunicationDraft = vi.fn(async () => ({
+      id: draftId,
+      binding_kind: "KNOWLEDGE_EMAIL",
+      commitment_id: null,
+      source_id: EMAIL_RESULT,
+      current_version: 2,
+      status: "review",
+      action_id: null,
+      versions: [
+        {
+          version: 1,
+          to: ["sarah@example.com"],
+          subject: "Re: Renewal",
+          body: "Old text",
+          created_by: "AI",
+          payload_hash: "a".repeat(64),
+        },
+        {
+          version: 2,
+          to: ["sarah@example.com"],
+          subject: "Re: Renewal",
+          body: "Thanks, Sarah.",
+          created_by: "AI",
+          payload_hash: "b".repeat(64),
+        },
+      ],
+    }));
+    await expect(
+      context.runtime.readEmailDraftSpeech({
+        cookie: COOKIE,
+        session_id: context.sessionId,
+        source_turn_id: context.turnId,
+        draft_id: draftId,
+        version: 2,
+      }),
+    ).resolves.toEqual({
+      speakable: true,
+      text: "Re: Renewal. Thanks, Sarah.",
+    });
+    await expect(
+      context.runtime.readEmailDraftSpeech({
+        cookie: COOKIE,
+        session_id: context.sessionId,
+        source_turn_id: context.turnId,
+        draft_id: draftId,
+        version: 1,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("refuses to speak a draft longer than the synthesis bound", async () => {
+    const context = await readyEmail();
+    const draftId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    context.upstream.getCommunicationDraft = vi.fn(async () => ({
+      id: draftId,
+      binding_kind: "KNOWLEDGE_EMAIL",
+      commitment_id: null,
+      source_id: EMAIL_RESULT,
+      current_version: 1,
+      status: "review",
+      action_id: null,
+      versions: [
+        {
+          version: 1,
+          to: ["sarah@example.com"],
+          subject: "Re: Renewal",
+          body: "word ".repeat(300),
+          created_by: "AI",
+          payload_hash: "a".repeat(64),
+        },
+      ],
+    }));
+    await expect(
+      context.runtime.readEmailDraftSpeech({
+        cookie: COOKIE,
+        session_id: context.sessionId,
+        source_turn_id: context.turnId,
+        draft_id: draftId,
+        version: 1,
+      }),
+    ).resolves.toEqual({ speakable: false, reason: "too_long" });
   });
 });

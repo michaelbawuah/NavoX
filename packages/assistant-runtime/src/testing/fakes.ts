@@ -481,6 +481,12 @@ export interface FakeUpstream extends NavoxUpstream {
       sessionId: string | null;
     }[];
     email: { query: string; limit: number | undefined }[];
+    resourceDetail: { cookie: string; id: string }[];
+    classNavigation: {
+      cookie: string;
+      connectionId: string;
+      resourceId: string;
+    }[];
     subscriptions: { cookie: string; selector: string }[];
     cancellation: { cookie: string; id: string }[];
     trendingNews: string[];
@@ -498,6 +504,10 @@ export interface FakeUpstream extends NavoxUpstream {
   planError: AssistantError | null;
   email: unknown | (() => Promise<unknown>);
   emailError: AssistantError | null;
+  resourceDetail: unknown | (() => Promise<unknown>);
+  resourceDetailError: AssistantError | null;
+  classNavigation: unknown | (() => Promise<unknown>);
+  classNavigationError: AssistantError | null;
   subscriptions: unknown | (() => Promise<unknown>);
   subscriptionsError: AssistantError | null;
   cancellation: unknown | (() => Promise<unknown>);
@@ -627,6 +637,51 @@ export function emailSearchPayload(
   };
 }
 
+export interface FakeResourceDetailInput {
+  resource_id: string;
+  source_type?: "EMAIL" | "EMAIL_THREAD";
+  title?: string | null;
+  canonical_url?: string | null;
+  source_version?: string | null;
+  chunks?: { text_content: string | null; section_title?: string | null }[];
+  provenance?: Record<string, string>;
+}
+
+/** One SPEC-007-shaped resource detail the runtime may read verified content from. */
+export function emailResourceDetailPayload(input: FakeResourceDetailInput) {
+  return {
+    resource_id: input.resource_id,
+    source_type: input.source_type ?? "EMAIL",
+    title: input.title === undefined ? "Renewal confirmation" : input.title,
+    canonical_url:
+      input.canonical_url === undefined
+        ? "https://mail.google.com/mail/u/0/#inbox/message-1"
+        : input.canonical_url,
+    sensitivity: "PERSONAL",
+    source_updated_at: "2026-09-29T12:00:00.000Z",
+    source_version:
+      input.source_version === undefined ? "v1" : input.source_version,
+    fresh_until: "2026-10-01T12:00:00.000Z",
+    indexed_at: "2026-09-29T12:05:00.000Z",
+    index_state: "INDEXED",
+    structured_kind: null,
+    structured_at: null,
+    chunks: (
+      input.chunks ?? [{ text_content: "Your renewal is confirmed." }]
+    ).map((chunk, index) => ({
+      chunk_index: index,
+      section_title: chunk.section_title ?? null,
+      page_number: null,
+      text_content: chunk.text_content,
+      token_count: 8,
+    })),
+    provenance: input.provenance ?? {
+      connection_id: "88888888-8888-4888-8888-888888888888",
+      external_resource_id: "message-1",
+    },
+  };
+}
+
 export function createFakeUpstream(
   overrides?: Partial<FakeUpstream>,
 ): FakeUpstream {
@@ -638,6 +693,8 @@ export function createFakeUpstream(
       today: [],
       plan: [],
       email: [],
+      resourceDetail: [],
+      classNavigation: [],
       subscriptions: [],
       cancellation: [],
       trendingNews: [],
@@ -665,6 +722,10 @@ export function createFakeUpstream(
     planError: UNCONFIGURED_PLANNER,
     email: emailSearchPayload([]),
     emailError: null,
+    resourceDetail: null,
+    resourceDetailError: null,
+    classNavigation: null,
+    classNavigationError: null,
     subscriptions: { intent: "SEARCH", subscriptions: [] },
     subscriptionsError: null,
     cancellation: null,
@@ -715,6 +776,34 @@ export function createFakeUpstream(
       if (upstream.emailError) throw upstream.emailError;
       const email = upstream.email;
       return typeof email === "function" ? await email() : email;
+    },
+    async getResourceDetail(cookie, resourceId) {
+      upstream.calls.resourceDetail.push({ cookie, id: resourceId });
+      if (upstream.resourceDetailError) throw upstream.resourceDetailError;
+      const detail = upstream.resourceDetail;
+      if (detail === null) {
+        throw new AssistantError(
+          "unsupported",
+          "No fake resource detail configured.",
+        );
+      }
+      return typeof detail === "function" ? await detail() : detail;
+    },
+    async getClassNavigationTarget(cookie, input) {
+      upstream.calls.classNavigation.push({
+        cookie,
+        connectionId: input.connectionId,
+        resourceId: input.resourceId,
+      });
+      if (upstream.classNavigationError) throw upstream.classNavigationError;
+      const target = upstream.classNavigation;
+      if (target === null) {
+        throw new AssistantError(
+          "unsupported",
+          "No fake class navigation configured.",
+        );
+      }
+      return typeof target === "function" ? await target() : target;
     },
     async querySubscriptions(cookie, selector) {
       upstream.calls.subscriptions.push({ cookie, selector });

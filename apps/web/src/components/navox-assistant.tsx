@@ -10,6 +10,7 @@ import type {
   AssistantGoalKind,
   AssistantGoalStatus,
   AssistantGoalView,
+  AssistantSourceExcerpt,
   AssistantTurnView,
   AssistantVoiceState,
 } from "@navox/contracts";
@@ -30,6 +31,7 @@ import {
   deleteAssistantSession,
   dispatchAssistantGoal,
   forgetAssistantSession,
+  loadAssistantEvidence,
   loadAssistantGoals,
   resumeOrCreateAssistantSession,
   submitAssistantTurn,
@@ -55,7 +57,11 @@ import {
   createBrowserWakeWordAdapter,
 } from "../lib/assistant-wake";
 import { safeSourceUrl } from "../lib/search";
-import { AssistantEmailActions } from "./assistant-email-actions";
+import {
+  AssistantEmailActions,
+  activeDraftSpeechKey,
+  type DraftSpeechRequest,
+} from "./assistant-email-actions";
 import styles from "./navox-assistant.module.css";
 
 export function assistantVoiceLabel(state: AssistantVoiceState): string {
@@ -143,6 +149,10 @@ function blockBase(block: AssistantBlock): string {
       return `suggestions:${block.queries[0] ?? ""}`;
     case "MEETING_BRIEFING":
       return `meeting:${block.meeting.commitment_id}`;
+    case "EVIDENCE":
+      return `evidence:${block.evidence_id}`;
+    case "NAVIGATION":
+      return `navigation:${block.evidence_id}`;
     case "CLASS_NAVIGATION":
       return `class-navigation:${block.connection_id}:${block.resource_id}`;
   }
@@ -152,7 +162,114 @@ function blockBases(blocks: AssistantBlock[]): string[] {
   return blocks.map(blockBase);
 }
 
-export function AssistantBlockView({ block }: { block: AssistantBlock }) {
+interface EvidenceState {
+  status: "loading" | "ready" | "unavailable";
+  excerpts: AssistantSourceExcerpt[];
+  message: string | null;
+}
+
+/**
+ * Re-reads one saved evidence selector and renders the current, re-authorized
+ * excerpts. The durable turn holds selectors and version metadata only, so a
+ * revoked or changed source removes its content instead of replaying it.
+ */
+function AssistantEvidenceBlock({
+  sessionId,
+  turnId,
+  block,
+}: {
+  sessionId?: string;
+  turnId?: string;
+  block: Extract<AssistantBlock, { kind: "EVIDENCE" }>;
+}) {
+  const [state, setState] = useState<EvidenceState>({
+    status: "loading",
+    excerpts: [],
+    message: null,
+  });
+
+  useEffect(() => {
+    if (!sessionId || !turnId) {
+      setState({
+        status: "unavailable",
+        excerpts: [],
+        message: "Reopen this conversation to load the saved source.",
+      });
+      return;
+    }
+    const controller = new AbortController();
+    setState({ status: "loading", excerpts: [], message: null });
+    void (async () => {
+      try {
+        const evidence = await loadAssistantEvidence(
+          sessionId,
+          turnId,
+          block.evidence_id,
+          controller.signal,
+        );
+        if (controller.signal.aborted) return;
+        setState({
+          status: "ready",
+          excerpts: evidence.excerpts,
+          message: null,
+        });
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setState({
+          status: "unavailable",
+          excerpts: [],
+          message:
+            error instanceof Error
+              ? error.message
+              : "The saved source is no longer available.",
+        });
+      }
+    })();
+    return () => controller.abort();
+  }, [sessionId, turnId, block.evidence_id]);
+
+  if (state.status === "loading") {
+    return (
+      <p className={styles.itemMeta} role="status">
+        Loading the saved source...
+      </p>
+    );
+  }
+  if (state.status === "unavailable") {
+    return (
+      <p className={styles.notice} data-state="UNAVAILABLE">
+        {state.message ?? "The saved source is no longer available."}
+      </p>
+    );
+  }
+  const excerptKeys = uniqueKeys(
+    state.excerpts.map(
+      (excerpt) => `${excerpt.source}:${excerpt.text.slice(0, 48)}`,
+    ),
+  );
+  return (
+    <ul className={styles.evidence}>
+      {state.excerpts.map((excerpt, index) => (
+        <li key={excerptKeys[index] ?? excerpt.source}>
+          <span className={styles.evidenceSource}>
+            {excerpt.source === "subject" ? "Subject" : "Content"}
+          </span>{" "}
+          {excerpt.text}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export function AssistantBlockView({
+  block,
+  sessionId,
+  turnId,
+}: {
+  block: AssistantBlock;
+  sessionId?: string;
+  turnId?: string;
+}) {
   switch (block.kind) {
     case "ANSWER":
       return <p className={styles.answer}>{block.text}</p>;
@@ -230,6 +347,28 @@ export function AssistantBlockView({ block }: { block: AssistantBlock }) {
           ))}
         </ul>
       );
+    case "EVIDENCE": {
+      return (
+        <AssistantEvidenceBlock
+          sessionId={sessionId}
+          turnId={turnId}
+          block={block}
+        />
+      );
+    }
+    case "NAVIGATION":
+      return (
+        <a
+          className={styles.navigationLink}
+          href={block.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          referrerPolicy="no-referrer"
+        >
+          {block.label}
+          <span className={styles.srOnly}> (opens in a new tab)</span>
+        </a>
+      );
     case "CITATIONS": {
       const keys = citationKeys(block.citations);
       return (
@@ -289,11 +428,17 @@ export function AssistantTurnViewBlock({
   turn,
   onSpeak,
   onSelectEmail,
+  onSpeakDraft,
+  onStopDraftSpeech,
+  draftSpeakingKey,
   sessionId,
 }: {
   turn: AssistantTurnView;
   onSpeak?: (turn: AssistantTurnView) => void;
   onSelectEmail?: (turn: AssistantTurnView, resourceId: string) => void;
+  onSpeakDraft?: (request: DraftSpeechRequest) => void;
+  onStopDraftSpeech?: () => void;
+  draftSpeakingKey?: string | null;
   sessionId?: string;
 }) {
   const blocks = turn.presentation?.blocks ?? [];
@@ -310,7 +455,11 @@ export function AssistantTurnViewBlock({
         <div className={styles.blocks}>
           {blocks.map((block, index) => (
             <Fragment key={keys[index] ?? "block"}>
-              <AssistantBlockView block={block} />
+              <AssistantBlockView
+                block={block}
+                sessionId={sessionId}
+                turnId={turn.id}
+              />
               {onSelectEmail &&
                 turn.state === "CLARIFY" &&
                 turn.decision?.reason === "email.search.ambiguous" &&
@@ -341,7 +490,15 @@ export function AssistantTurnViewBlock({
           <span className={styles.srOnly}>Speak</span>
         </button>
       ) : null}
-      {sessionId && <AssistantEmailActions sessionId={sessionId} turn={turn} />}
+      {sessionId && (
+        <AssistantEmailActions
+          sessionId={sessionId}
+          turn={turn}
+          speakDraft={onSpeakDraft}
+          stopDraftSpeech={onStopDraftSpeech}
+          speakingKey={draftSpeakingKey}
+        />
+      )}
     </li>
   );
 }
@@ -582,6 +739,7 @@ export function NavoXAssistant() {
   const [busy, setBusy] = useState(false);
   const [connecting, setConnecting] = useState(true);
   const [handsFreePhase, setHandsFreePhase] = useState<HandsFreePhase>("OFF");
+  const [speakingDraftKey, setSpeakingDraftKey] = useState<string | null>(null);
   const ledger = useRef(new AssistantTurnLedger());
   const adapterRef = useRef<SpeechAdapter | null>(null);
   const voiceRef = useRef<VoiceSession | null>(null);
@@ -897,6 +1055,43 @@ export function NavoXAssistant() {
     [voiceSession],
   );
 
+  /**
+   * Explicit read-aloud of one saved draft version. The component binds the
+   * selector to its own synthesize closure; the server still derives the text,
+   * and mute, Stop and unmount cancel playback through the same voice session.
+   */
+  const speakDraft = useCallback(
+    (request: DraftSpeechRequest) => {
+      setSpeakingDraftKey(request.key);
+      voiceSession().speakSaved({
+        synthesize: request.synthesize,
+        onEnd: () => {
+          setSpeakingDraftKey((key) => (key === request.key ? null : key));
+          request.onEnd();
+        },
+        onError: (reason) => {
+          setSpeakingDraftKey((key) => (key === request.key ? null : key));
+          request.onError(reason);
+        },
+      });
+    },
+    [voiceSession],
+  );
+
+  /**
+   * The voice controller owns playback. A global Stop, Mute, barge-in, a
+   * finished read or a failed start leaves nothing to claim as speaking, so the
+   * draft control can never keep showing "Stop reading" on its own.
+   */
+  useEffect(() => {
+    setSpeakingDraftKey((key) => activeDraftSpeechKey(key, controls.speaking));
+  }, [controls.speaking]);
+
+  const stopDraftSpeech = useCallback(() => {
+    voiceRef.current?.cancelSpeech();
+    setSpeakingDraftKey(null);
+  }, []);
+
   const toggleMicrophone = useCallback(() => {
     if (handsFreeEnabledRef.current && handsFreePhase === "WAKE_LISTENING") {
       wakeGenerationRef.current += 1;
@@ -1005,6 +1200,9 @@ export function NavoXAssistant() {
             onSelectEmail={(source, resourceId) => {
               void sendTurn("TEXT", "Select an email", [source.id, resourceId]);
             }}
+            onSpeakDraft={controls.readAloudAvailable ? speakDraft : undefined}
+            onStopDraftSpeech={stopDraftSpeech}
+            draftSpeakingKey={speakingDraftKey}
           />
         ))}
       </ol>

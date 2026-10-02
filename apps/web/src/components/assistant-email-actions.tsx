@@ -1,5 +1,6 @@
 "use client";
 
+import { draftSpeechFor } from "@navox/assistant-runtime/voice";
 import type {
   AssistantEmailAction,
   AssistantEmailDraft,
@@ -13,6 +14,7 @@ import {
   loadAssistantEmailDraft,
   prepareAssistantEmailDraft,
   reviseAssistantEmailDraft,
+  synthesizeAssistantEmailDraftSpeech,
 } from "../lib/assistant-client";
 import styles from "./navox-assistant.module.css";
 
@@ -22,12 +24,89 @@ function errorText(error: unknown): string {
     : "The email action could not finish. Please retry.";
 }
 
+export interface DraftSpeechRequest {
+  /** Stable identity of the exact saved draft version being read. */
+  key: string;
+  synthesize: (signal: AbortSignal) => Promise<Uint8Array<ArrayBuffer>>;
+  onEnd: () => void;
+  onError: (reason: string) => void;
+}
+
+/** Identity of one saved draft version, so only its own control shows "Stop". */
+export function draftSpeechKey(
+  draft: AssistantEmailDraft,
+  version: number,
+): string {
+  return `${draft.id}:${version}`;
+}
+
+/**
+ * The draft control's speaking state follows the voice controller: a global
+ * Stop, Mute, barge-in or finished read leaves nothing to claim as speaking.
+ */
+export function activeDraftSpeechKey(
+  selected: string | null,
+  voiceSpeaking: boolean,
+): string | null {
+  return voiceSpeaking ? selected : null;
+}
+
+/**
+ * The explicit Read draft aloud control. It never starts by itself, never
+ * approves a send, and offers an honest note instead of audio when the current
+ * saved version is longer than the spoken bound.
+ */
+export function DraftSpeechControl({
+  edited,
+  speakable,
+  busy,
+  speaking,
+  onStart,
+  onStop,
+}: {
+  edited: boolean;
+  speakable: boolean;
+  busy: boolean;
+  speaking: boolean;
+  onStart: () => void;
+  onStop: () => void;
+}) {
+  if (edited) return null;
+  return (
+    <>
+      <button
+        type="button"
+        disabled={busy || (speaking ? false : !speakable)}
+        aria-label="Read this saved draft aloud"
+        onClick={() => (speaking ? onStop() : onStart())}
+      >
+        {speaking ? "Stop reading" : "Read draft aloud"}
+      </button>
+      {!speakable && (
+        <p className={styles.itemMeta}>
+          This draft is longer than the spoken limit, so only the full text
+          below is available. Reading it never sends it.
+        </p>
+      )}
+    </>
+  );
+}
+
 export function AssistantEmailActions({
   sessionId,
   turn,
+  speakDraft,
+  stopDraftSpeech,
+  speakingKey,
 }: {
   sessionId: string;
   turn: AssistantTurnView;
+  /** Starts explicit playback of the reviewed draft version, when available. */
+  speakDraft?: (request: DraftSpeechRequest) => void;
+  /** Cancels any draft playback on edit, stop or unmount. */
+  stopDraftSpeech?: () => void;
+  /** The draft version the voice controller is currently speaking, if any. */
+  speakingKey?: string | null;
 }) {
   const [instructions, setInstructions] = useState(
     "Reply to this email clearly and concisely.",
@@ -80,6 +159,30 @@ export function AssistantEmailActions({
     };
   }, [pointerKey, sessionId, turn.id]);
 
+  const current = draft?.versions.at(-1);
+  const edited = current
+    ? subject !== current.subject || body !== current.body
+    : false;
+
+  const speakingDraftKey =
+    draft && current ? draftSpeechKey(draft, current.version) : null;
+  const speakingDraft =
+    speakingDraftKey !== null && speakingKey === speakingDraftKey;
+
+  // Unsaved edits change the exact content; never keep speaking the saved
+  // version the operator has moved past.
+  useEffect(() => {
+    if (!edited || !speakingDraft) return;
+    stopDraftSpeech?.();
+  }, [edited, speakingDraft, stopDraftSpeech]);
+
+  useEffect(
+    () => () => {
+      stopDraftSpeech?.();
+    },
+    [stopDraftSpeech],
+  );
+
   const emailItems =
     turn.presentation?.blocks.filter(
       (block) => block.kind === "ITEM" && block.item.type === "EMAIL",
@@ -104,13 +207,17 @@ export function AssistantEmailActions({
     }
   }
 
-  const current = draft?.versions.at(-1);
-  const edited = current
-    ? subject !== current.subject || body !== current.body
-    : false;
   const canApprove =
     action?.status === "awaiting_approval" &&
     action.approval?.status === "pending";
+  const draftSpeech = current
+    ? draftSpeechFor({ subject: current.subject, body: current.body })
+    : null;
+  const canReadDraft =
+    current !== undefined &&
+    !edited &&
+    draftSpeech?.speakable === true &&
+    speakDraft !== undefined;
 
   return (
     <section className={styles.emailAction} aria-label="Email reply action">
@@ -201,6 +308,33 @@ export function AssistantEmailActions({
             >
               Save changes
             </button>
+          )}
+          {!edited && (
+            <DraftSpeechControl
+              edited={edited}
+              speakable={draftSpeech?.speakable === true && canReadDraft}
+              busy={busy}
+              speaking={speakingDraft}
+              onStart={() => {
+                if (!current || !draftSpeech?.speakable || !speakDraft) return;
+                const version = current.version;
+                setError(null);
+                speakDraft({
+                  key: draftSpeechKey(draft, version),
+                  synthesize: (signal) =>
+                    synthesizeAssistantEmailDraftSpeech(
+                      sessionId,
+                      turn.id,
+                      draft.id,
+                      version,
+                      signal,
+                    ),
+                  onEnd: () => {},
+                  onError: (reason) => setError(reason),
+                });
+              }}
+              onStop={() => stopDraftSpeech?.()}
+            />
           )}
           {!action && !edited && (
             <button

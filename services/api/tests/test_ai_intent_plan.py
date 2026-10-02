@@ -226,9 +226,19 @@ def test_catalog_registers_one_bounded_plan_artifact():
         for item in snapshot.prompts
         if item.reference.name == "assistant_intent_plan" and item.reference.version == "v8"
     )
-    assert previous.output_schema == INTENT_PLAN_SCHEMA
+    assert previous.output_schema.version == "v8"
     assert "What's the weather today?" not in previous.instructions
     assert "What's the weather today?" in prompt.instructions
+    # The v9 prompt reused the frozen v8 schema; the active v10 prompt names the
+    # M16 navigation route and points at the new v9 schema.
+    previous_v9 = next(
+        item
+        for item in snapshot.prompts
+        if item.reference.name == "assistant_intent_plan" and item.reference.version == "v9"
+    )
+    assert previous_v9.output_schema.version == "v8"
+    assert "assistant.navigate" not in previous_v9.instructions
+    assert "assistant.navigate" in prompt.instructions
     assert next(item for item in snapshot.schemas if item.reference == INTENT_PLAN_SCHEMA)
     profile = next(item for item in snapshot.profiles if item.profile == Profile.PLANNING_HIGH)
     assert TaskType.PLAN in profile.task_types
@@ -250,6 +260,7 @@ def test_catalog_registers_one_bounded_plan_artifact():
     assert "class.next" in current_routes
     assert "time.now" in current_routes
     assert "action.history" in current_routes
+    assert "assistant.navigate" in current_routes
 
 
 def test_historical_read_only_plan_artifacts_remain_bounded():
@@ -289,7 +300,12 @@ def test_historical_read_only_plan_artifacts_remain_bounded():
         for item in snapshot.schemas
         if item.reference.name == "assistant_intent_plan" and item.reference.version == "v7"
     )
-    v8 = next(item for item in snapshot.schemas if item.reference == INTENT_PLAN_SCHEMA)
+    v8 = next(
+        item
+        for item in snapshot.schemas
+        if item.reference.name == "assistant_intent_plan" and item.reference.version == "v8"
+    )
+    v9 = next(item for item in snapshot.schemas if item.reference == INTENT_PLAN_SCHEMA)
     old_routes = json.loads(v1.document.text)["properties"]["intents"]["items"]["properties"][
         "route"
     ]["enum"]
@@ -314,6 +330,9 @@ def test_historical_read_only_plan_artifacts_remain_bounded():
     history_routes = json.loads(v8.document.text)["properties"]["intents"]["items"]["properties"][
         "route"
     ]["enum"]
+    navigate_routes = json.loads(v9.document.text)["properties"]["intents"]["items"]["properties"][
+        "route"
+    ]["enum"]
     assert "subscription.search" not in old_routes
     assert "news.read" not in old_routes
     assert "subscription.search" in middle_routes
@@ -328,6 +347,8 @@ def test_historical_read_only_plan_artifacts_remain_bounded():
     assert "action.history" not in time_routes
     assert "action.history" in history_routes
     assert "time.now" in history_routes
+    assert "assistant.navigate" not in history_routes
+    assert "assistant.navigate" in navigate_routes
     old_fields = json.loads(v4.document.text)["properties"]["intents"]["items"]["properties"]
     assert "question" not in old_fields
     assert "subscription.search" in new_routes
@@ -344,6 +365,7 @@ def test_historical_read_only_plan_artifacts_remain_bounded():
     assert "class.next" in prompt.instructions
     assert "time.now" in prompt.instructions
     assert "action.history" in prompt.instructions
+    assert "assistant.navigate" in prompt.instructions
     v6_prompt = next(item for item in snapshot.prompts if item.reference == v6.reference)
     assert "class.next" in v6_prompt.instructions
     assert "time.now" not in v6_prompt.instructions
@@ -399,13 +421,17 @@ def test_no_historical_plan_schema_names_a_later_route():
     for version in ("v1", "v2", "v3", "v4", "v5", "v6"):
         assert "time.now" not in route_enum(version), version
         assert "action.history" not in route_enum(version), version
+    for version in ("v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8"):
+        assert "assistant.navigate" not in route_enum(version), version
     assert "class.next" in route_enum("v6")
     assert "class.next" in route_enum("v7")
     assert "time.now" in route_enum("v7")
     assert "action.history" not in route_enum("v7")
     assert "time.now" in route_enum(INTENT_PLAN_SCHEMA.version)
     assert "action.history" in route_enum(INTENT_PLAN_SCHEMA.version)
-    assert INTENT_PLAN_SCHEMA.version == "v8"
+    assert "assistant.navigate" in route_enum(INTENT_PLAN_SCHEMA.version)
+    assert INTENT_PLAN_SCHEMA.version == "v9"
+    assert INTENT_PLAN_PROMPT.version == "v10"
 
 
 @pytest.mark.parametrize(
@@ -510,8 +536,8 @@ async def test_authenticated_plan_returns_routes_and_audits_the_task(intent_env)
     async with env.factory() as database:
         run = await database.scalar(select(AITaskRun))
         assert run is not None
-        assert run.prompt == "assistant_intent_plan@v9"
-        assert run.schema == "assistant_intent_plan@v8"
+        assert run.prompt == "assistant_intent_plan@v10"
+        assert run.schema == "assistant_intent_plan@v9"
         assert run.profile == Profile.PLANNING_HIGH.value
         assert run.status == "COMPLETED" and run.shadow is False
 

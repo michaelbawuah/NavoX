@@ -3,6 +3,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
+  activeDraftSpeechKey,
+  DraftSpeechControl,
+} from "./assistant-email-actions";
+import {
   AssistantBlockView,
   AssistantTurnViewBlock,
   assistantVoiceLabel,
@@ -71,6 +75,111 @@ describe("assistant transcript rendering", () => {
     );
     expect(markup).toContain('rel="noopener noreferrer"');
     expect(markup).not.toContain("calendar.google.com");
+  });
+
+  it("renders a metadata-only evidence block without any excerpt text", () => {
+    const markup = renderToStaticMarkup(
+      createElement(AssistantBlockView, {
+        block: {
+          kind: "EVIDENCE",
+          evidence_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          source_type: "EMAIL",
+          source_version: "v1",
+          fresh_until: "2026-10-01T12:00:00.000Z",
+        },
+        sessionId: "66666666-6666-4666-8666-666666666666",
+        turnId: "88888888-8888-4888-8888-888888888888",
+      }),
+    );
+    // The durable block carries no excerpt text; the current content is loaded
+    // from the guarded evidence route after mount.
+    expect(markup).toContain("Loading the saved source");
+    expect(markup).not.toContain("Your renewal is confirmed.");
+    expect(markup).not.toContain("canonical_url");
+  });
+
+  it("renders a navigation target as a same-origin guarded link", () => {
+    const markup = renderToStaticMarkup(
+      createElement(AssistantBlockView, {
+        block: {
+          kind: "NAVIGATION",
+          label: "Open that email",
+          href: "/api/v1/assistant/navigation?session_id=1&turn_id=2&item_id=3",
+          source_type: "EMAIL",
+          evidence_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        },
+      }),
+    );
+    expect(markup).toContain("Open that email");
+    expect(markup).toContain("/api/v1/assistant/navigation?");
+    expect(markup).toContain('rel="noopener noreferrer"');
+    expect(markup).not.toContain("mail.google.com");
+  });
+
+  it("offers an explicit draft read-aloud control only for a saved draft", () => {
+    const speakable = renderToStaticMarkup(
+      createElement(DraftSpeechControl, {
+        edited: false,
+        speakable: true,
+        busy: false,
+        speaking: false,
+        onStart: () => {},
+        onStop: () => {},
+      }),
+    );
+    expect(speakable).toContain("Read draft aloud");
+    expect(speakable).not.toContain("Stop reading");
+
+    const speaking = renderToStaticMarkup(
+      createElement(DraftSpeechControl, {
+        edited: false,
+        speakable: true,
+        busy: false,
+        speaking: true,
+        onStart: () => {},
+        onStop: () => {},
+      }),
+    );
+    expect(speaking).toContain("Stop reading");
+
+    // Unsaved edits hide the control entirely: it must never speak a version
+    // the operator has moved past.
+    const edited = renderToStaticMarkup(
+      createElement(DraftSpeechControl, {
+        edited: true,
+        speakable: true,
+        busy: false,
+        speaking: false,
+        onStart: () => {},
+        onStop: () => {},
+      }),
+    );
+    expect(edited).not.toContain("Read draft aloud");
+  });
+
+  it("offers an honest note instead of audio for an over-long draft", () => {
+    const markup = renderToStaticMarkup(
+      createElement(DraftSpeechControl, {
+        edited: false,
+        speakable: false,
+        busy: false,
+        speaking: false,
+        onStart: () => {},
+        onStop: () => {},
+      }),
+    );
+    expect(markup).toContain("Read draft aloud");
+    expect(markup).toContain('disabled=""');
+    expect(markup).toMatch(/longer than the spoken limit/i);
+  });
+
+  it("follows the voice controller instead of claiming a stuck playback", () => {
+    // The control is speaking only while the controller really is.
+    expect(activeDraftSpeechKey("draft-1:2", true)).toBe("draft-1:2");
+    // Global Stop, Mute, barge-in, a finished read or a failed start all leave
+    // the controller not speaking, so nothing keeps claiming to read.
+    expect(activeDraftSpeechKey("draft-1:2", false)).toBeNull();
+    expect(activeDraftSpeechKey(null, true)).toBeNull();
   });
 
   it("renders the question, answer, item and citation selectors", () => {

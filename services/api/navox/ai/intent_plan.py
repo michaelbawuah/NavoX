@@ -51,8 +51,8 @@ MAX_RECENT_REFERENCES = 4
 MAX_REFERENCE_LENGTH = 240
 MAX_INTENTS = 4
 
-INTENT_PLAN_PROMPT = VersionedRef(name="assistant_intent_plan", version="v9")
-INTENT_PLAN_SCHEMA = VersionedRef(name="assistant_intent_plan", version="v8")
+INTENT_PLAN_PROMPT = VersionedRef(name="assistant_intent_plan", version="v10")
+INTENT_PLAN_SCHEMA = VersionedRef(name="assistant_intent_plan", version="v9")
 
 
 class IntentRoute(StrEnum):
@@ -70,6 +70,7 @@ class IntentRoute(StrEnum):
     NEXT_CLASS = "class.next"
     TIME_NOW = "time.now"
     ACTION_HISTORY = "action.history"
+    ASSISTANT_NAVIGATE = "assistant.navigate"
     ASSISTANT_CLARIFY = "assistant.clarify"
 
 
@@ -309,6 +310,18 @@ INTENT_PLAN_INSTRUCTIONS = INTENT_PLAN_INSTRUCTIONS_V8.replace(
     "must be copied from the utterance and checked against the configured city by the "
     "runtime. Never guess a city or claim a live observation before lookup.",
 )
+# Freeze the v9 prompt (pre-M16 instructions) before extending the vocabulary;
+# the published v9 artifact must stay exactly what shipped.
+INTENT_PLAN_INSTRUCTIONS_V9 = INTENT_PLAN_INSTRUCTIONS
+INTENT_PLAN_INSTRUCTIONS = INTENT_PLAN_INSTRUCTIONS_V9.replace(
+    "- assistant.clarify: anything you cannot map to the routes above, including any request\n",
+    "- assistant.navigate: a natural follow-up that points back at an item already shown in "
+    'this conversation - for example, "take me to that" or "open that email". Never name a '
+    "URL, resource ID, workspace, connector or action; the runtime resolves only the "
+    "referenced saved turn and refuses an ambiguous or missing target. Put the 1-based "
+    "position of that earlier answer in the reference slot.\n"
+    "- assistant.clarify: anything you cannot map to the routes above, including any request\n",
+)
 
 
 def intent_plan_json_schema(
@@ -320,6 +333,7 @@ def intent_plan_json_schema(
     legacy_v5: bool = False,
     legacy_v6: bool = False,
     legacy_v7: bool = False,
+    legacy_v8: bool = False,
 ) -> dict[str, Any]:
     """OpenAI-compatible strict schema; Pydantic still performs final validation."""
 
@@ -333,6 +347,7 @@ def intent_plan_json_schema(
                 legacy_v5,
                 legacy_v6,
                 legacy_v7,
+                legacy_v8,
             )
         )
         > 1
@@ -355,6 +370,19 @@ def intent_plan_json_schema(
         excluded_routes = set(excluded_routes) | {IntentRoute.TIME_NOW}
     if legacy_v1 or legacy_v2 or legacy_v3 or legacy_v4 or legacy_v5 or legacy_v6 or legacy_v7:
         excluded_routes = set(excluded_routes) | {IntentRoute.ACTION_HISTORY}
+    if (
+        legacy_v1
+        or legacy_v2
+        or legacy_v3
+        or legacy_v4
+        or legacy_v5
+        or legacy_v6
+        or legacy_v7
+        or legacy_v8
+    ):
+        # The navigation route was added after the v8 schema; every published
+        # historical artifact stays frozen without it.
+        excluded_routes = set(excluded_routes) | {IntentRoute.ASSISTANT_NAVIGATE}
 
     nullable_string = {"anyOf": [{"type": "string"}, {"type": "null"}]}
     entity = {

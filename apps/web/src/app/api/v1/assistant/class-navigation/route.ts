@@ -1,4 +1,7 @@
-import { AssistantError } from "@navox/assistant-runtime";
+import {
+  AssistantError,
+  parseClassNavigationTarget,
+} from "@navox/assistant-runtime";
 import {
   assistantResponse,
   sessionCookie,
@@ -60,36 +63,12 @@ export async function GET(request: Request): Promise<Response> {
         "Class navigation is unavailable.",
       );
     }
-    const url =
-      typeof payload === "object" && payload !== null && "url" in payload
-        ? payload.url
-        : null;
-    if (typeof url !== "string" || url.length > 2048)
-      throw new AssistantError(
-        "unavailable",
-        "Class navigation is unavailable.",
-      );
-    let destination: URL;
-    try {
-      destination = new URL(url);
-    } catch {
-      throw new AssistantError(
-        "unavailable",
-        "Class navigation is unavailable.",
-      );
-    }
-    if (
-      destination.protocol !== "https:" ||
-      destination.username ||
-      destination.password
-    )
-      throw new AssistantError(
-        "unavailable",
-        "Class navigation is unavailable.",
-      );
+    // Class redirects are restricted to the expected Google Calendar hosts;
+    // Canvas is deferred, and a foreign https host is refused here too.
+    const destination = parseClassNavigationTarget(payload).url;
     return new Response(null, {
       status: 303,
-      headers: { Location: destination.href, "referrer-policy": "no-referrer" },
+      headers: { Location: destination, "referrer-policy": "no-referrer" },
     });
   });
 }

@@ -46,6 +46,21 @@ export interface NavoxUpstream {
     cookie: string,
     input: { query: string; limit?: number },
   ): Promise<unknown>;
+  /**
+   * Raw SPEC-007 resource detail for one exact selector. The owning service
+   * re-checks workspace, exclusions and the stored revision, so this is the
+   * fresh current-source read a content or navigation answer is built from.
+   * The runtime validates every field before any excerpt or URL is used.
+   */
+  getResourceDetail(cookie: string, resourceId: string): Promise<unknown>;
+  /**
+   * Raw SPEC-007 class-navigation target for one exact selector. The owning
+   * service re-checks the connection owner and returns only a verified URL.
+   */
+  getClassNavigationTarget(
+    cookie: string,
+    input: { connectionId: string; resourceId: string },
+  ): Promise<unknown>;
   querySubscriptions(cookie: string, selector: string): Promise<unknown>;
   getSubscriptionCancellation(cookie: string, id: string): Promise<unknown>;
   getTrendingNews(cookie: string): Promise<unknown>;
@@ -390,6 +405,37 @@ export function createNavoxUpstream(
           "Connected search did not return a readable result.",
         );
       }
+    },
+
+    async getResourceDetail(
+      cookie: string,
+      resourceId: string,
+    ): Promise<unknown> {
+      const path = `/knowledge/resources/${encodeURIComponent(resourceId)}`;
+      const response = await send(path, { method: "GET", cookie });
+      if (!response.ok) throw statusError(response.status, path);
+      return response.json().catch(() => {
+        throw new AssistantError(
+          "unavailable",
+          "The source detail was unreadable.",
+        );
+      });
+    },
+
+    async getClassNavigationTarget(cookie, input): Promise<unknown> {
+      const query = new URLSearchParams({
+        connection_id: input.connectionId,
+        resource_id: input.resourceId,
+      });
+      const path = `/knowledge/class-navigation?${query.toString()}`;
+      const response = await send(path, { method: "GET", cookie });
+      if (!response.ok) throw statusError(response.status, path);
+      return response.json().catch(() => {
+        throw new AssistantError(
+          "unavailable",
+          "Class navigation was unreadable.",
+        );
+      });
     },
 
     async querySubscriptions(cookie, selector): Promise<unknown> {

@@ -4,6 +4,7 @@ import type { VoiceEvent, VoiceSessionState, WakeWordEvent } from "./voice";
 import {
   automaticSpeechAllowed,
   createInactiveWakeWordAdapter,
+  draftSpeechFor,
   initialVoiceState,
   reduceVoiceState,
   spokenTextForTurn,
@@ -419,6 +420,47 @@ describe("saved-turn spoken text", () => {
       },
     });
     expect(spokenTextForTurn(clarify)).toBe("Which one did you mean?");
+  });
+});
+
+describe("draft spoken text", () => {
+  it("reads the subject and body in full when they fit the bound", () => {
+    expect(
+      draftSpeechFor({
+        subject: "  Re: Renewal  ",
+        body: "Thanks, Sarah.\n\nI will confirm today.",
+      }),
+    ).toEqual({
+      speakable: true,
+      text: "Re: Renewal. Thanks, Sarah. I will confirm today.",
+    });
+  });
+
+  it("refuses an empty draft instead of speaking silence", () => {
+    expect(draftSpeechFor({ subject: "   ", body: "" })).toEqual({
+      speakable: false,
+      reason: "empty",
+    });
+  });
+
+  it("refuses a draft longer than the bound instead of truncating it", () => {
+    const result = draftSpeechFor({
+      subject: "Re: Renewal",
+      body: "word ".repeat(300),
+    });
+    expect(result).toEqual({ speakable: false, reason: "too_long" });
+  });
+
+  it("speaks exactly at the bound and refuses one character past it", () => {
+    const atBound = "x".repeat(600);
+    expect(draftSpeechFor({ subject: "", body: atBound })).toEqual({
+      speakable: true,
+      text: atBound,
+    });
+    expect(draftSpeechFor({ subject: "", body: `${atBound}x` })).toEqual({
+      speakable: false,
+      reason: "too_long",
+    });
   });
 });
 

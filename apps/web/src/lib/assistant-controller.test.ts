@@ -917,6 +917,95 @@ describe("voice session lifecycle", () => {
     expect(session.current().state).toBe("UNSUPPORTED");
   });
 
+  it("reads one saved draft selector through the same playback lifecycle", async () => {
+    const rig = voiceRig();
+    const starter = {
+      synthesize: vi.fn(async () => MP3),
+      onEnd: vi.fn(),
+      onError: vi.fn(),
+    };
+    rig.session.speakSaved(starter);
+    expect(rig.session.current().state).toBe("SPEAKING");
+    expect(rig.adapter.spoken).toEqual(["saved-selector"]);
+    // The adapter calls the caller's closure with only the abort signal.
+    const signal = new AbortController().signal;
+    await rig.adapter.synthesize?.("saved-selector", signal);
+    expect(starter.synthesize).toHaveBeenCalledWith(signal);
+    rig.adapter.finishSpeech();
+    expect(starter.onEnd).toHaveBeenCalledOnce();
+    expect(rig.session.current().state).toBe("IDLE");
+  });
+
+  it("cancels playback on a draft edit without stopping the session", () => {
+    const rig = voiceRig();
+    rig.session.speakSaved({
+      synthesize: async () => MP3,
+      onEnd: () => {},
+      onError: () => {},
+    });
+    expect(rig.session.current().state).toBe("SPEAKING");
+    rig.session.cancelSpeech();
+    expect(rig.session.current().state).toBe("IDLE");
+    expect(rig.adapter.log).toContain("stopSpeaking");
+    expect(rig.session.current().state).not.toBe("STOPPED");
+  });
+
+  it("refuses a draft read while muted instead of claiming playback", () => {
+    const rig = voiceRig();
+    rig.session.setMuted(true);
+    const onError = vi.fn();
+    rig.session.speakSaved({
+      synthesize: async () => MP3,
+      onEnd: () => {},
+      onError,
+    });
+    expect(onError).toHaveBeenCalledWith(expect.stringMatching(/muted/i));
+    expect(rig.adapter.spoken).toEqual([]);
+    expect(rig.session.current().state).toBe("MUTED");
+  });
+
+  it("reports an immediate start failure instead of a stuck speaking state", () => {
+    const adapter = fakeAdapter({
+      synthesisSupported: false,
+      synthesisReason: "This browser cannot play spoken answers.",
+    });
+    const session = createVoiceSession({
+      adapter,
+      transcribe: async () => "unused",
+      synthesize: async () => MP3,
+      onState: () => {},
+      onNotice: () => {},
+      onTranscript: () => {},
+    });
+    const onError = vi.fn();
+    session.speakSaved({
+      synthesize: async () => MP3,
+      onEnd: () => {},
+      onError,
+    });
+    expect(onError).toHaveBeenCalledWith(
+      "This browser cannot play spoken answers.",
+    );
+    expect(adapter.spoken).toEqual([]);
+    expect(session.current().state).toBe("IDLE");
+  });
+
+  it("cancels draft playback on a global stop and mute", () => {
+    for (const action of ["stop", "mute"] as const) {
+      const rig = voiceRig();
+      rig.session.speakSaved({
+        synthesize: async () => MP3,
+        onEnd: () => {},
+        onError: () => {},
+      });
+      expect(rig.session.current().state).toBe("SPEAKING");
+      if (action === "stop") rig.session.stop();
+      else rig.session.setMuted(true);
+      expect(rig.adapter.log).toContain("stopSpeaking");
+      expect(rig.session.current().state).not.toBe("SPEAKING");
+    }
+  });
+
   it("reports unavailable spoken answers without changing voice state", () => {
     const adapter = fakeAdapter({
       synthesisSupported: false,

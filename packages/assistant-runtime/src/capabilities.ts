@@ -121,6 +121,9 @@ const ROUTE_CAPABILITIES: Record<
   // A delivery request only speaks an already-saved answer; it delegates to no
   // capability and never reaches the planner.
   "assistant.delivery": null,
+  // A navigation request only points at an item an earlier turn already cited;
+  // it delegates to no capability and never reaches the planner.
+  "assistant.navigate": null,
   "assistant.clarify": null,
 };
 

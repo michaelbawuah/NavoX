@@ -190,6 +190,19 @@ export interface VoiceSession {
   speakAutomatic(turn: AssistantTurnView, token: number): void;
   /** The explicit Read aloud control. The page offers it only when unmuted. */
   speakManually(turn: AssistantTurnView): void;
+  /**
+   * Explicit read-aloud of one saved, non-turn selector (a draft version).
+   * The page binds the selector to its own synthesize closure; the server
+   * still derives the spoken text, and mute/Stop/dispose cancel it exactly
+   * like any other playback.
+   */
+  speakSaved(input: {
+    synthesize: (signal: AbortSignal) => Promise<Uint8Array<ArrayBuffer>>;
+    onEnd: () => void;
+    onError: (reason: string) => void;
+  }): void;
+  /** Cancels playback only, leaving the microphone and stop state untouched. */
+  cancelSpeech(): void;
   listen(): void;
   /** Opt-in Hands-Free clip: local silence finishes the SPEC-005 upload. */
   listenAutomatically(): void;
@@ -431,6 +444,52 @@ export function createVoiceSession(deps: VoiceSessionDeps): VoiceSession {
         adapter.stopListening();
       }
       startSpeech(turn, { type: "READ_ALOUD_STARTED" });
+    },
+
+    speakSaved({ synthesize, onEnd, onError }) {
+      if (disposed || !voiceControls(state).readAloudAvailable) {
+        onError("Spoken audio is muted. Unmute to read this aloud.");
+        return;
+      }
+      if (!adapter.synthesisSupported) {
+        onError(
+          adapter.synthesisReason ??
+            "This browser cannot play spoken answers. Read the text instead.",
+        );
+        return;
+      }
+      if (voiceControls(state).listening) {
+        endAttempt();
+        adapter.stopListening();
+      }
+      const next = reduceVoiceState(state, { type: "READ_ALOUD_STARTED" });
+      if (next.state !== "SPEAKING") {
+        onError("Spoken audio is not available right now.");
+        return;
+      }
+      publish(next);
+      adapter.speak(
+        "saved-selector",
+        {
+          onEnd: () => {
+            adapter.stopListening();
+            dispatch({ type: "SPEAKING_ENDED" });
+            onEnd();
+          },
+          onError: (reason) => {
+            adapter.stopListening();
+            dispatch({ type: "SPEAKING_ENDED" });
+            onError(reason);
+          },
+        },
+        (_selector, signal) => synthesize(signal),
+      );
+    },
+
+    cancelSpeech() {
+      if (disposed) return;
+      adapter.stopSpeaking();
+      dispatch({ type: "SPEAKING_ENDED" });
     },
 
     listen() {

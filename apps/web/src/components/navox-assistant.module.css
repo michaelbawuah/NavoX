@@ -170,9 +170,33 @@
   color: var(--muted);
 }
 
+.evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+
+.evidenceSource {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
 .citations {
   font-size: 0.75rem;
   color: var(--aqua-bright);
+}
+
+.navigationLink {
+  align-self: flex-start;
+  color: var(--aqua-bright);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
 }
 
 .sourceLink {
