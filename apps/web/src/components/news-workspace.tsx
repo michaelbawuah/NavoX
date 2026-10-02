@@ -13,9 +13,11 @@ import {
   loadNewsFeed,
   type NewsFeed,
   NewsRequestError,
+  newsPublisher,
   newsRequest,
   newsTime,
   newsTrendingCaption,
+  safeNewsUrl,
 } from "../lib/news";
 import { parseFollowedLabels } from "../lib/news-preferences";
 import { FollowedStoryUpdates } from "./followed-story-updates";
@@ -24,12 +26,12 @@ import {
   NavoXEmptyState,
   NavoXErrorState,
   NavoXNavigation,
-  NavoXPageHeader,
   NavoXSkeleton,
   NavoXSourceList,
   NavoXStatus,
 } from "./navox-ui";
 import { NewsChat } from "./news-chat";
+import { NewsStoryImage } from "./news-story-image";
 import styles from "./news-workspace.module.css";
 import { RelatedStories } from "./related-stories";
 import { StoryIntelligence } from "./story-intelligence";
@@ -68,14 +70,16 @@ function NewsFrame({ children }: { children: React.ReactNode }) {
 export function NewsStoryCard({
   story,
   busy = false,
+  featured = false,
   onSave,
 }: {
   story: NewsStory;
   busy?: boolean;
+  featured?: boolean;
   onSave: () => void;
 }) {
   return (
-    <NavoXCard>
+    <article className={styles.newsCard} data-featured={featured}>
       <div className={styles.cardTop}>
         <span>
           {categories.find(([value]) => value === story.category)?.[1]}
@@ -84,19 +88,26 @@ export function NewsStoryCard({
           {newsTime(story.published_at)}
         </time>
       </div>
-      <h2>
-        <a href={`/news/stories/${story.id}`}>{story.headline}</a>
-      </h2>
-      {story.description && (
-        <p className={styles.excerpt}>{story.description}</p>
-      )}
+      <a
+        className={styles.storyLink}
+        href={`/news/stories/${encodeURIComponent(story.id)}`}
+      >
+        <NewsStoryImage image={story.image} eager={featured} />
+        <h2>{story.headline}</h2>
+        {story.description && (
+          <p className={styles.excerpt}>{story.description}</p>
+        )}
+        <span className={styles.readStory}>
+          Explore story <span aria-hidden="true">↗</span>
+        </span>
+      </a>
       <div className={styles.cardBottom}>
         <div className={styles.sourceRow}>
-          <NavoXStatus status={story.verification_status} />
-          <span>
-            {story.sources[0]?.source_name}
+          <span className={styles.publisher}>
+            {newsPublisher(story.sources[0]?.source_name ?? "Source report")}
             {story.source_count > 1 ? ` + ${story.source_count - 1} more` : ""}
           </span>
+          <NavoXStatus status={story.verification_status} />
         </div>
         <button
           type="button"
@@ -108,8 +119,25 @@ export function NewsStoryCard({
           {story.saved ? "Saved ✓" : "Save"}
         </button>
       </div>
-    </NavoXCard>
+    </article>
   );
+}
+
+export function OriginalArticleLink({ story }: { story: NewsStory }) {
+  const source = story.sources[0];
+  const url = source && safeNewsUrl(source.canonical_url);
+  return url ? (
+    <a
+      className={styles.originalLink}
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      referrerPolicy="no-referrer"
+    >
+      Read the full article at {newsPublisher(source.source_name)}{" "}
+      <span aria-hidden="true">↗</span>
+    </a>
+  ) : null;
 }
 
 export function NewsFeedTabs({
@@ -303,10 +331,19 @@ export function NewsWorkspace() {
 
   return (
     <NewsFrame>
-      <NavoXPageHeader
-        title="Catch up on the world."
-        description="The latest headlines, with original reporting a click away."
-      />
+      <header className={styles.newsHeader}>
+        <div>
+          <p className={styles.eyebrow}>THE NEWSROOM</p>
+          <h1>Your world, in focus.</h1>
+          <p>
+            Explore the headlines. Understand the story. Go straight to the
+            source.
+          </p>
+        </div>
+        <a className={styles.askNews} href="/navox">
+          Ask NavoX <span aria-hidden="true">✦</span>
+        </a>
+      </header>
       {availability?.chat && !signedOut && <NewsChat />}
       {loading && <NavoXSkeleton />}
       {!loading && signedOut ? (
@@ -353,10 +390,11 @@ export function NewsWorkspace() {
             !error &&
             (stories.length ? (
               <div className={styles.feed}>
-                {stories.map((story) => (
+                {stories.map((story, index) => (
                   <NewsStoryCard
                     key={story.id}
                     story={story}
+                    featured={index === 0}
                     busy={busy === story.id}
                     onSave={() => void save(story)}
                   />
@@ -579,12 +617,27 @@ export function NewsStoryWorkspace({ storyId }: { storyId: string }) {
       ) : (
         story && (
           <>
-            <NavoXPageHeader
-              title={story.headline}
-              description={`${story.sources[0]?.source_name ?? "Source report"} · Published ${newsTime(story.published_at)}`}
-            />
-            <NavoXStatus status={story.verification_status} explain />
-            <p className={styles.storyDescription}>{story.description}</p>
+            <header className={styles.storyHeader}>
+              <p className={styles.eyebrow}>
+                {categories.find(([value]) => value === story.category)?.[1]} ·{" "}
+                {newsPublisher(
+                  story.sources[0]?.source_name ?? "Source report",
+                )}
+              </p>
+              <h1>{story.headline}</h1>
+              <p>
+                Published{" "}
+                <time dateTime={story.published_at}>
+                  {newsTime(story.published_at)}
+                </time>
+              </p>
+              <NavoXStatus status={story.verification_status} explain />
+            </header>
+            <NewsStoryImage image={story.image} eager />
+            {story.description && (
+              <p className={styles.storyDescription}>{story.description}</p>
+            )}
+            <OriginalArticleLink story={story} />
             <div className={styles.actions}>
               <button
                 type="button"
@@ -607,30 +660,32 @@ export function NewsStoryWorkspace({ storyId }: { storyId: string }) {
               {notice}
             </p>
             <StoryIntelligence story={story} availability={availability} />
-            <NewsChat storyId={storyId} />
+            {availability?.chat && <NewsChat storyId={storyId} />}
+            {claims.length > 0 && (
+              <details className={styles.detailSection}>
+                <summary>Reporting and source checks</summary>
+                {claims.length ? (
+                  claims.map((claim) => (
+                    <NavoXCard key={claim.id}>
+                      <p>
+                        {claim.attributed_to && (
+                          <strong>{claim.attributed_to}: </strong>
+                        )}
+                        {claim.text}
+                      </p>
+                      <NavoXStatus status={claim.status} explain />
+                    </NavoXCard>
+                  ))
+                ) : (
+                  <p>
+                    The report is available from its original source. NavoX has
+                    not yet confirmed its material claims.
+                  </p>
+                )}
+              </details>
+            )}
             <section className={styles.detailSection}>
-              <h2>What we know</h2>
-              {claims.length ? (
-                claims.map((claim) => (
-                  <NavoXCard key={claim.id}>
-                    <p>
-                      {claim.attributed_to && (
-                        <strong>{claim.attributed_to}: </strong>
-                      )}
-                      {claim.text}
-                    </p>
-                    <NavoXStatus status={claim.status} explain />
-                  </NavoXCard>
-                ))
-              ) : (
-                <p>
-                  The report is available from its original source. NavoX has
-                  not yet confirmed its material claims.
-                </p>
-              )}
-            </section>
-            <section className={styles.detailSection}>
-              <h2>Original reporting</h2>
+              <h2>Read the original reporting</h2>
               <NavoXSourceList sources={story.sources} />
             </section>
             <RelatedStories storyId={storyId} />

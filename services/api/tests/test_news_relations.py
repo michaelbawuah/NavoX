@@ -46,9 +46,10 @@ def test_absent_policy_preserves_original_source_fingerprint():
     source = definition()
     old_payload = source.model_dump(mode="json")
     old_payload.pop("evidence_policy")
-    # The legacy catalog predates these optional API credential bindings.
+    # The legacy catalog predates optional API credentials and photo hosts.
     old_payload.pop("api_connection_id")
     old_payload.pop("api_endpoint_name")
+    old_payload.pop("image_domains")
     expected = hashlib.sha256(
         json.dumps(old_payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

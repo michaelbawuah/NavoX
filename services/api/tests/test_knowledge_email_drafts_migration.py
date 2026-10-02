@@ -72,13 +72,14 @@ def render(direction: str) -> str:
     return " ".join(buffer.getvalue().split())
 
 
-def test_migration_is_the_single_head_after_the_news_clustering_revision() -> None:
+def test_migration_precedes_the_additive_news_images_head() -> None:
     module = migration_module()
     assert module.revision == REVISION
     assert module.down_revision == DOWN_REVISION
     assert len(module.revision) <= 32
     script = ScriptDirectory.from_config(Config(str(API_ROOT / "alembic.ini")))
-    assert script.get_heads() == [REVISION]
+    assert script.get_heads() == ["0035_news_article_images"]
+    assert script.get_revision(script.get_heads()[0]).down_revision == REVISION
 
 
 def test_upgrade_only_tags_the_binding_and_allows_the_null_commitment() -> None:

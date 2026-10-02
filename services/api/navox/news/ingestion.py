@@ -33,6 +33,7 @@ from navox.news.contracts import (
     stored_utc,
 )
 from navox.news.feeds import fetch_feed, parse_feed
+from navox.news.images import permitted_image
 from navox.news.registry import (
     current_rights,
     owned_source,
@@ -67,6 +68,11 @@ async def store_item(
     permitted = item.model_dump(mode="json")
     if not policy.snippet_storage_allowed:
         permitted["description"] = None
+    image = permitted_image(item.image, definition, policies=(policy,))
+    if image is None:
+        permitted.pop("image", None)
+    else:
+        permitted["image"] = image.model_dump(mode="json")
     digest = hashlib.sha256(
         json.dumps(permitted, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -89,6 +95,7 @@ async def store_item(
         return row
     values = item.model_dump()
     values["description"] = permitted["description"]
+    values["image"] = permitted.get("image")
     values["categories"] = [category.value for category in item.categories]
     if row is None:
         row = NewsItem(
@@ -208,7 +215,7 @@ async def item_view(
     source = await owned_source(
         database, item.source_id, workspace_id=item.workspace_id, user_id=item.user_id
     )
-    require_definition(source, definitions)
+    definition = require_definition(source, definitions)
     current = await current_rights(database, source)
     original = await database.get(NewsContentRights, item.rights_profile_id, populate_existing=True)
     if original is None or original.source_id != source.id:
@@ -231,6 +238,7 @@ async def item_view(
         event_started_at=stored_utc(item.event_started_at) if item.event_started_at else None,
         event_ended_at=stored_utc(item.event_ended_at) if item.event_ended_at else None,
         description=item.description if all(p.snippet_storage_allowed for p in policies) else None,
+        image=permitted_image(item.image, definition, policies=policies),
         categories=tuple(Category(value) for value in item.categories),
         language=item.language,
         region=item.region,
@@ -296,6 +304,8 @@ async def purge_unavailable(
                 # Narrowed permission removes previously stored snippets as well.
                 if view.description is None:
                     row.description = None
+                if view.image is None:
+                    row.image = None
                 original = await database.get(NewsContentRights, row.rights_profile_id)
                 source = await database.get(NewsSource, row.source_id)
                 if original is None or source is None:

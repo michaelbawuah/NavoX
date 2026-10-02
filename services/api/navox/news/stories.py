@@ -21,6 +21,7 @@ from navox.news.contracts import (
     Category,
     Contract,
     NewsError,
+    NewsImage,
     NewsItemRead,
     SourceDefinition,
     Verification,
@@ -36,6 +37,7 @@ class StoryRead(Contract):
     id: UUID
     headline: str
     description: str | None
+    image: NewsImage | None = None
     category: Category
     verification_status: Verification
     lifecycle_status: str
@@ -374,6 +376,7 @@ async def story_view(
         id=story.id,
         headline=anchor.headline,
         description=anchor.description,
+        image=anchor.image,
         category=Category(story.primary_category),
         verification_status=status,
         lifecycle_status=story.lifecycle_status,

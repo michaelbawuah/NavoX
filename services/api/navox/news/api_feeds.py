@@ -28,6 +28,7 @@ from navox.news.contracts import (
     aware_utc,
 )
 from navox.news.feeds import MAX_FEED_BYTES, MAX_FEED_ITEMS, plain_text
+from navox.news.images import feed_image
 
 
 async def approved_api_connection(
@@ -161,6 +162,14 @@ def parse_perigon(data: bytes, definition: SourceDefinition) -> tuple[list[NewsI
                     ),
                     description=plain_text(description, limit=4000)
                     if definition.rights.snippet_storage_allowed and isinstance(description, str)
+                    else None,
+                    image=feed_image(
+                        article.get("imageUrl"),
+                        article.get("imageCaption"),
+                        article.get("imageAttribution"),
+                        definition,
+                    )
+                    if definition.rights.image_display_allowed
                     else None,
                     categories=tuple(categories) or (definition.category,),
                     language=definition.language,
