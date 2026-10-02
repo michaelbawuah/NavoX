@@ -63,21 +63,22 @@ import {
   type DraftSpeechRequest,
 } from "./assistant-email-actions";
 import styles from "./navox-assistant.module.css";
+import { NavoXNavigation } from "./navox-ui";
 
 export function assistantVoiceLabel(state: AssistantVoiceState): string {
   switch (state) {
     case "LISTENING":
-      return "Recording. Press the microphone again to send it, or Stop to cancel.";
+      return "Listening… Press Talk again to send, or Stop to cancel.";
     case "TRANSCRIBING":
-      return "Transcribing your question.";
+      return "Getting your question…";
     case "THINKING":
-      return "Checking your NavoX information.";
+      return "Thinking…";
     case "SPEAKING":
-      return "Speaking the answer. Starting a new question interrupts it.";
+      return "Speaking… Start a new question to interrupt.";
     case "MUTED":
       return "Spoken answers are muted. Unmute to hear the next answer.";
     case "STOPPED":
-      return "Stopped. The microphone and any spoken answer are released.";
+      return "Stopped.";
     case "UNSUPPORTED":
       return "Microphone input is unavailable in this browser. Type your question instead.";
     default:
@@ -86,16 +87,30 @@ export function assistantVoiceLabel(state: AssistantVoiceState): string {
 }
 
 function citationLabel(citation: AssistantCitation): string {
-  const resource =
-    citation.external_resource_id ?? citation.evidence_id ?? "record";
-  return `${citation.provider} · ${citation.source_type} · ${resource}`;
+  const names: Record<string, string> = {
+    google: citation.source_type === "EMAIL" ? "Gmail" : "Google",
+    canvas: "Canvas",
+    navox: "NavoX",
+  };
+  if (citation.source_type === "NEWS_CLAIM") return "Original article";
+  if (citation.source_type === "NEWS_STORY") return "View sources";
+  const source =
+    citation.source_type === "EMAIL"
+      ? "Email"
+      : citation.source_type === "CALENDAR_EVENT"
+        ? "Calendar"
+        : "Source";
+  return `${names[citation.provider] ?? citation.provider} · ${source}`;
 }
 
 function CitationText({ citation }: { citation: AssistantCitation }) {
+  const storyId = citation.external_resource_id ?? citation.evidence_id;
   const href =
     citation.source_type === "NEWS_CLAIM"
       ? safeSourceUrl(citation.external_resource_id)
-      : null;
+      : citation.source_type === "NEWS_STORY" && storyId
+        ? `/news/stories/${encodeURIComponent(storyId)}`
+        : null;
   return href ? (
     <a
       className={styles.sourceLink}
@@ -156,6 +171,28 @@ function blockBase(block: AssistantBlock): string {
     case "CLASS_NAVIGATION":
       return `class-navigation:${block.connection_id}:${block.resource_id}`;
   }
+}
+
+function itemLabel(value: string): string {
+  const labels: Record<string, string> = {
+    NEWS_STORY: "News",
+    EMAIL: "Email",
+    SUBSCRIPTION: "Subscription",
+    commitment: "Task",
+    ATTRIBUTED: "Reported",
+    UNCONFIRMED: "Not confirmed",
+    VERIFIED: "Verified",
+    CORROBORATED: "Confirmed by multiple sources",
+    CURRENT: "Available",
+    waiting_on_external: "Waiting for a reply",
+  };
+  return (
+    labels[value] ??
+    value
+      .toLowerCase()
+      .replaceAll("_", " ")
+      .replace(/^./, (letter) => letter.toUpperCase())
+  );
 }
 
 function blockBases(blocks: AssistantBlock[]): string[] {
@@ -308,21 +345,23 @@ export function AssistantBlockView({
             )}
           </p>
           <p className={styles.itemMeta}>
-            <span>{block.item.type}</span>
+            <span>{itemLabel(block.item.type)}</span>
             <span aria-hidden="true">·</span>
-            <span>{block.item.status}</span>
-            {block.item.band && (
-              <>
-                <span aria-hidden="true">·</span>
-                <span>{block.item.band}</span>
-              </>
-            )}
+            <span>{itemLabel(block.item.status)}</span>
           </p>
           {block.item.description && (
             <p className={styles.itemBody}>{block.item.description}</p>
           )}
           {block.item.due_at && (
-            <p className={styles.itemBody}>Due {block.item.due_at}</p>
+            <p className={styles.itemBody}>
+              Due{" "}
+              {new Date(block.item.due_at).toLocaleString(undefined, {
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              })}
+            </p>
           )}
           {block.item.sources.length > 0 && (
             <ul className={styles.citations}>
@@ -342,9 +381,16 @@ export function AssistantBlockView({
     case "DETAILS":
       return (
         <ul className={styles.details}>
-          {block.lines.map((line) => (
-            <li key={line}>{line}</li>
-          ))}
+          {block.lines
+            .filter(
+              (line) =>
+                !/^(?:attention band|confidence score|ranking score|relevance score|similarity score):/i.test(
+                  line,
+                ),
+            )
+            .map((line) => (
+              <li key={line}>{line}</li>
+            ))}
         </ul>
       );
     case "EVIDENCE": {
@@ -487,7 +533,7 @@ export function AssistantTurnViewBlock({
           title="Speak the answer"
         >
           <SpeakerIcon />
-          <span className={styles.srOnly}>Speak</span>
+          <span>Read aloud</span>
         </button>
       ) : null}
       {sessionId && (
@@ -622,7 +668,7 @@ function failureMessage(error: unknown): string {
 export const GOAL_KIND_LABELS: Record<AssistantGoalKind, string> = {
   BRIEFING: "Briefing",
   MEETING_PREP: "Meeting prep",
-  COMMUNICATION_ACTION: "Communication action",
+  COMMUNICATION_ACTION: "Email",
 };
 
 export const GOAL_STATUS_LABELS: Record<AssistantGoalStatus, string> = {
@@ -636,13 +682,12 @@ export const GOAL_STATUS_LABELS: Record<AssistantGoalStatus, string> = {
 
 const GOAL_DETAIL_TEXT: Record<string, string> = {
   "goal.created": "Queued for verification.",
-  "goal.dispatch_unconfigured":
-    "Durable verification is not configured in this deployment.",
+  "goal.dispatch_unconfigured": "NavoX can’t check this right now.",
   "goal.dispatch_failed": "Verification could not start.",
   "goal.dispatched": "Verification is running.",
-  "goal.verified": "Confirmed by the owning service.",
-  "goal.turn_not_grounded": "The saved answer was not a grounded result.",
-  "goal.turn_unreadable": "The saved answer could not be re-validated.",
+  "goal.verified": "Confirmed.",
+  "goal.turn_not_grounded": "NavoX couldn’t confirm this answer.",
+  "goal.turn_unreadable": "NavoX couldn’t check this answer again.",
   "goal.action_waiting_for_approval": "Waiting for your approval.",
   "goal.action_in_flight": "The action is in progress.",
   "goal.action_executed_unverified":
@@ -1156,28 +1201,23 @@ export function NavoXAssistant() {
 
   return (
     <section className={styles.assistant} aria-label="NavoX assistant">
+      <NavoXNavigation current="Assistant" />
       <header className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>NAVOX / ASSISTANT</p>
-          <h1>Ask about your day</h1>
+          <p className={styles.eyebrow}>YOUR PERSONAL ASSISTANT</p>
+          <h1>What’s on your mind?</h1>
         </div>
         <button
           type="button"
           onClick={() => void clearConversation()}
           disabled={connecting}
         >
-          Clear conversation
+          Clear chat
         </button>
       </header>
 
-      <p className={styles.policy}>
-        Answers use your saved Today state and connected sources you can access.
-        Questions and answers expire after 30 days of session access, and
-        expired rows are purged on a bounded schedule. Clear conversation
-        removes this history right away. The microphone records after you press
-        it or explicitly enable Hands-Free. Hands-Free wake detection stays on
-        this device while this page is open; finished question clips go to the
-        NavoX speech gateway for transcription.
+      <p className={styles.intro}>
+        Your day, your questions, your next step. Type a question or tap Talk.
       </p>
 
       {notice && (
@@ -1217,20 +1257,36 @@ export function NavoXAssistant() {
 
       {connecting && <p className={styles.status}>Starting a conversation…</p>}
       {!connecting && turns.length === 0 && (
-        <p className={styles.status}>
-          Ask what you are missing today, or press the microphone to record a
-          question.
-        </p>
+        <div className={styles.welcome}>
+          <p>Try asking NavoX</p>
+          <div className={styles.suggestions}>
+            {[
+              "What am I missing today?",
+              "What class do I have next?",
+              "What's the weather today?",
+              "What's trending today?",
+            ].map((question) => (
+              <button
+                type="button"
+                key={question}
+                disabled={!sessionId}
+                onClick={() => setText(question)}
+              >
+                {question}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
       {handsFreePhase !== "OFF" && (
         <p className={styles.status} data-hands-free-state={handsFreePhase}>
           {handsFreePhase === "WAKE_LISTENING"
             ? 'Hands-Free on · waiting for "Hey NavoX".'
             : handsFreePhase === "PREPARING"
-              ? "Preparing on-device wake recognition…"
+              ? "Getting Hey NavoX ready…"
               : handsFreePhase === "PAUSED"
                 ? "Hands-Free paused while this page is hidden."
-                : "Hands-Free conversation active · microphone and speech state are shown below."}
+                : "Conversation on. Ask your next question."}
         </p>
       )}
       {status && (
@@ -1249,12 +1305,12 @@ export function NavoXAssistant() {
 
       <form className={styles.form} onSubmit={onSubmit}>
         <label className={styles.field}>
-          <span>Question</span>
+          <span className={styles.srOnly}>Question</span>
           <input
             type="text"
             value={text}
             maxLength={500}
-            placeholder="What am I missing today?"
+            placeholder="Ask NavoX…"
             onChange={(event) => setText(event.target.value)}
             disabled={connecting || !sessionId}
           />
@@ -1267,22 +1323,7 @@ export function NavoXAssistant() {
         </button>
         <button
           type="button"
-          onClick={toggleHandsFree}
-          aria-pressed={handsFreePhase !== "OFF"}
-          aria-label={
-            handsFreePhase === "OFF"
-              ? "Turn Hands-Free on"
-              : "Turn Hands-Free off"
-          }
-          disabled={
-            connecting || !sessionId || (handsFreePhase === "OFF" && busy)
-          }
-        >
-          {handsFreePhase === "OFF" ? "Hands-Free On" : "Hands-Free Off"}
-        </button>
-        <button
-          type="button"
-          className={styles.iconButton}
+          className={styles.talkButton}
           onClick={toggleMicrophone}
           aria-pressed={controls.listening}
           aria-label={microphoneLabel}
@@ -1296,44 +1337,11 @@ export function NavoXAssistant() {
           }
         >
           {controls.capturing ? <StopIcon /> : <MicIcon />}
+          <span>{controls.capturing ? "Send recording" : "Talk"}</span>
         </button>
         <button
           type="button"
-          className={styles.iconButton}
-          onClick={toggleVoiceMode}
-          aria-pressed={controls.voiceModeEnabled}
-          aria-label={
-            controls.voiceModeEnabled
-              ? "Turn Voice Mode off; answers stay on screen"
-              : "Turn Voice Mode on; spoken questions are answered aloud"
-          }
-          title={
-            controls.voiceModeEnabled
-              ? "Voice Mode on — spoken questions are answered aloud"
-              : "Voice Mode off — answers stay on screen"
-          }
-          disabled={connecting || !sessionId}
-        >
-          <VoiceModeIcon enabled={controls.voiceModeEnabled} />
-        </button>
-        <button
-          type="button"
-          className={styles.iconButton}
-          onClick={toggleMute}
-          aria-pressed={controls.muted}
-          aria-label={
-            controls.muted ? "Unmute spoken answers" : "Mute spoken answers"
-          }
-          title={
-            controls.muted ? "Unmute spoken answers" : "Mute spoken answers"
-          }
-          disabled={connecting || !sessionId}
-        >
-          {controls.muted ? <MutedIcon /> : <VolumeIcon />}
-        </button>
-        <button
-          type="button"
-          className={styles.iconButton}
+          className={styles.stopButton}
           onClick={stopEverything}
           aria-label={
             handsFreePhase === "CONVERSATION"
@@ -1349,10 +1357,95 @@ export function NavoXAssistant() {
             !controls.stopAvailable && handsFreePhase !== "CONVERSATION"
           }
         >
-          <SpeakerIcon />
-          <span className={styles.srOnly}>Stop</span>
+          <StopIcon />
+          <span>Stop</span>
         </button>
       </form>
+
+      <div className={styles.voiceTools}>
+        <button
+          className={styles.handsFreeButton}
+          type="button"
+          onClick={toggleHandsFree}
+          aria-pressed={handsFreePhase !== "OFF"}
+          aria-label={
+            handsFreePhase === "OFF"
+              ? "Turn Hands-Free on"
+              : "Turn Hands-Free off"
+          }
+          disabled={
+            connecting || !sessionId || (handsFreePhase === "OFF" && busy)
+          }
+        >
+          {handsFreePhase === "OFF" ? "Hey NavoX: Off" : "Hey NavoX: On"}
+        </button>
+
+        <details className={styles.voiceOptions}>
+          <summary>Voice options</summary>
+          <div className={styles.optionButtons}>
+            <button
+              type="button"
+              className={styles.iconButton}
+              onClick={toggleVoiceMode}
+              aria-pressed={controls.voiceModeEnabled}
+              aria-label={
+                controls.voiceModeEnabled
+                  ? "Turn Voice Mode off; answers stay on screen"
+                  : "Turn Voice Mode on; spoken questions are answered aloud"
+              }
+              title={
+                controls.voiceModeEnabled
+                  ? "Voice Mode on — spoken questions are answered aloud"
+                  : "Voice Mode off — answers stay on screen"
+              }
+              disabled={connecting || !sessionId}
+            >
+              <VoiceModeIcon enabled={controls.voiceModeEnabled} />
+              <span>
+                Spoken answers: {controls.voiceModeEnabled ? "On" : "Off"}
+              </span>
+            </button>
+            <button
+              type="button"
+              className={styles.iconButton}
+              onClick={toggleMute}
+              aria-pressed={controls.muted}
+              aria-label={
+                controls.muted ? "Unmute spoken answers" : "Mute spoken answers"
+              }
+              title={
+                controls.muted ? "Unmute spoken answers" : "Mute spoken answers"
+              }
+              disabled={connecting || !sessionId}
+            >
+              {controls.muted ? <MutedIcon /> : <VolumeIcon />}
+              <span>{controls.muted ? "Unmute answers" : "Mute answers"}</span>
+            </button>
+          </div>
+          <p>
+            Spoken questions receive spoken answers when this is on. Typed
+            questions stay on screen.
+          </p>
+        </details>
+      </div>
+      <p className={styles.permissionHint}>
+        To talk, allow microphone access when your browser asks. Turn on Hey
+        NavoX to start hands-free while this page is open.
+      </p>
+      <details className={styles.privacy}>
+        <summary>Privacy &amp; your chat</summary>
+        <p>
+          Clear chat removes this conversation. Questions and answers expire
+          after 30 days of session access and are then removed on a scheduled
+          cleanup.
+        </p>
+        <p>
+          The microphone records after you press Talk or enable Hey NavoX. Wake
+          detection stays on this device; recorded questions are sent for speech
+          recognition. Your browser may need a local speech language pack for
+          Hey NavoX.
+        </p>
+      </details>
 
       {voice.state === "UNSUPPORTED" && (
         <p className={styles.status}>

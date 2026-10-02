@@ -1438,7 +1438,7 @@ describe("SPEC-006 News lookup in a turn", () => {
     expect(context.upstream.calls.trendingNews).toEqual([COOKIE]);
     expect(context.upstream.calls.newsStory).toEqual([]);
     expect(JSON.stringify(response.turn.presentation?.blocks)).toContain(
-      "does not verify",
+      "doesn’t mean a report is confirmed",
     );
     expect(response.turn.action_refs).toEqual([]);
   });

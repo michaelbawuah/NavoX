@@ -397,7 +397,7 @@ export function newsTrends(stories: NewsStoryRecord[]): {
     blocks: [
       {
         kind: "ANSWER",
-        text: "These stories are trending by observed activity. Trending does not verify a headline; each item shows its verification status.",
+        text: "Here are a few headlines drawing attention in your news sources. Trending doesn’t mean a report is confirmed.",
       },
       ...stories.slice(0, 3).map(storyItem),
     ],

@@ -189,8 +189,9 @@ describe("assistant transcript rendering", () => {
     expect(markup).toContain("What am I missing today?");
     expect(markup).toContain("1 item needs attention now.");
     expect(markup).toContain("Send the vendor recap");
-    expect(markup).toContain("google · EMAIL · message-1");
-    expect(markup).toContain("Attention band: 0.81");
+    expect(markup).toContain("Gmail · Email");
+    expect(markup).not.toContain("message-1");
+    expect(markup).not.toContain("Attention band: 0.81");
     expect(markup).toContain('data-modality="VOICE"');
     expect(markup).not.toMatch(/similarity|relevance|confidence score/i);
   });
@@ -411,7 +412,8 @@ describe("assistant transcript rendering", () => {
     expect(markup).toContain("attributed to Example Publisher");
     expect(markup).toContain("Trending activity does not verify");
     expect(markup).toContain("ATTRIBUTED: Jane Doe announced");
-    expect(markup).toContain("NEWS_CLAIM");
+    expect(markup).toContain("Original article");
+    expect(markup).not.toContain("NEWS_CLAIM");
     expect(markup).toContain('href="https://publisher.example/jane"');
     expect(markup).toContain('rel="noopener noreferrer"');
     expect(markup).toContain('referrerPolicy="no-referrer"');
@@ -504,13 +506,13 @@ describe("click-to-speak replay control", () => {
 
 describe("voice status copy", () => {
   it("names every visible state", () => {
-    expect(assistantVoiceLabel("LISTENING")).toMatch(/recording/i);
-    expect(assistantVoiceLabel("LISTENING")).toMatch(
-      /press the microphone again/i,
+    expect(assistantVoiceLabel("LISTENING")).toMatch(/listening/i);
+    expect(assistantVoiceLabel("LISTENING")).toMatch(/press talk again/i);
+    expect(assistantVoiceLabel("TRANSCRIBING")).toMatch(
+      /getting your question/i,
     );
-    expect(assistantVoiceLabel("TRANSCRIBING")).toMatch(/transcribing/i);
-    expect(assistantVoiceLabel("THINKING")).toMatch(/navox information/i);
-    expect(assistantVoiceLabel("SPEAKING")).toMatch(/interrupts it/i);
+    expect(assistantVoiceLabel("THINKING")).toMatch(/thinking/i);
+    expect(assistantVoiceLabel("SPEAKING")).toMatch(/interrupt/i);
     expect(assistantVoiceLabel("MUTED")).toMatch(/muted/i);
     expect(assistantVoiceLabel("STOPPED")).toMatch(/stopped/i);
     expect(assistantVoiceLabel("UNSUPPORTED")).toMatch(
@@ -540,7 +542,7 @@ describe("voice controls", () => {
     // The microphone is the start/finish toggle; Stop is the separate command.
     expect(markup).toContain("The microphone records after you press");
     expect(markup).toContain('aria-label="Turn Hands-Free on"');
-    expect(markup).toContain("Hands-Free wake detection stays on this device");
+    expect(markup).toContain("Wake detection stays on this device");
     expect(markup).not.toContain("Finish recording and transcribe");
   });
 

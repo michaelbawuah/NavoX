@@ -203,7 +203,7 @@ describe("SPEC-006 News evidence", () => {
     expect(namedNewsMatches(stories, "Other")).toHaveLength(0);
     const trends = newsTrends(stories);
     expect(trends.blocks[0]).toMatchObject({
-      text: expect.stringContaining("does not verify"),
+      text: expect.stringContaining("doesn’t mean a report is confirmed"),
     });
     expect(JSON.stringify(trends.blocks)).toContain("ATTRIBUTED");
     expect(trends.decision.action_state).toBe("NONE");

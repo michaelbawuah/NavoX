@@ -25,8 +25,8 @@ export async function loadNewsFeed(
 }
 
 export const newsTrendingCaption =
-  "Trending reflects observed activity among the sources you can already read. " +
-  "It is not a measure of global popularity, importance or truth.";
+  "Stories drawing attention in your connected news sources. " +
+  "Trending does not measure worldwide popularity or importance, and does not confirm a report.";
 
 export const newsStatus: Record<NewsVerification, string> = {
   VERIFIED: "Verified",

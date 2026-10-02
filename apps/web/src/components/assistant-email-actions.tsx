@@ -258,9 +258,7 @@ export function AssistantEmailActions({
       )}
       {draft && current && (
         <>
-          <p>
-            To: {current.to[0]} · Draft version {draft.current_version}
-          </p>
+          <p>To: {current.to[0]} · Saved draft</p>
           <label htmlFor={`subject-${draft.id}`}>Subject</label>
           <input
             id={`subject-${draft.id}`}
@@ -425,7 +423,7 @@ export function AssistantEmailActions({
             </button>
           )}
           {action.status === "completed" && action.result.message_id && (
-            <p>Sent and verified. Message ID: {action.result.message_id}</p>
+            <p>Sent and confirmed by Gmail.</p>
           )}
         </div>
       )}

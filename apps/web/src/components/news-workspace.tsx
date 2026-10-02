@@ -304,8 +304,8 @@ export function NewsWorkspace() {
   return (
     <NewsFrame>
       <NavoXPageHeader
-        title="The world, in perspective."
-        description="Follow the story. See the sources. Know what’s still unclear."
+        title="Catch up on the world."
+        description="The latest headlines, with original reporting a click away."
       />
       {availability?.chat && !signedOut && <NewsChat />}
       {loading && <NavoXSkeleton />}
@@ -321,10 +321,7 @@ export function NewsWorkspace() {
         />
       ) : !loading && !availability?.feed ? (
         <NavoXEmptyState title="News is getting ready.">
-          <p>
-            Stories will appear here once news sources are available for your
-            workspace.
-          </p>
+          <p>Connect a news source in Settings to start seeing headlines.</p>
           <a href="/">Back to Today →</a>
         </NavoXEmptyState>
       ) : null}
@@ -345,8 +342,8 @@ export function NewsWorkspace() {
               {stories.every(
                 (story) => story.ranking_basis === "REVIEWED_IMPORTANCE",
               )
-                ? "Ordered by reviewed public significance, with source evidence."
-                : "Latest updates. Reviewed importance is not available for every story."}
+                ? "Top stories, selected with supporting reporting."
+                : "Latest headlines from your news sources."}
             </p>
           )}
           <p role="status" className={styles.notice}>
