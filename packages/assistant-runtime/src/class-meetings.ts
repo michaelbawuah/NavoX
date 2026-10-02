@@ -451,7 +451,7 @@ export function answerNextClass(
       blocks: [
         {
           kind: "ANSWER",
-          text: "I can't determine your next class from the current Canvas and Google Calendar meeting records.",
+          text: "I can't determine your next class from the current connected calendar meeting records.",
         },
       ],
     };

@@ -14,6 +14,7 @@ import {
   type ManagedConnection,
   matchesConnection,
   sourceStatus,
+  visibleConnectorCatalog,
 } from "./connection-management";
 
 const source: ConnectionSource = {
@@ -115,6 +116,7 @@ describe("connection lifecycle availability", () => {
     const entry = { id: "mcp", availability: "available" } as ConnectorEntry;
     expect(canOpenConnector(entry)).toBe(true);
     expect(canOpenConnector({ ...entry, id: "generic-rest-api" })).toBe(true);
+    expect(canOpenConnector({ ...entry, id: "canvas-lms" })).toBe(false);
     expect(canOpenConnector({ ...entry, id: "future-connector" })).toBe(false);
     expect(canOpenConnector({ ...entry, availability: "setup_pending" })).toBe(
       false,
@@ -133,6 +135,16 @@ describe("connection lifecycle availability", () => {
         can_reauthorize: true,
       }),
     ).toBe(true);
+  });
+
+  it("keeps deferred Canvas out of the connection browse catalog", () => {
+    const entry = {
+      id: "canvas-lms",
+      availability: "available",
+    } as ConnectorEntry;
+    expect(
+      visibleConnectorCatalog([entry, { ...entry, id: "google-workspace" }]),
+    ).toEqual([{ ...entry, id: "google-workspace" }]);
   });
 });
 
