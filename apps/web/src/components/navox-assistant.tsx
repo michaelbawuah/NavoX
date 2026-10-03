@@ -68,7 +68,7 @@ import { NavoXNavigation } from "./navox-ui";
 export function assistantVoiceLabel(state: AssistantVoiceState): string {
   switch (state) {
     case "LISTENING":
-      return "Listening… Press Talk again to send, or Stop to cancel.";
+      return "Listening… Speak naturally. Your question sends when you finish, or press Talk to send now.";
     case "TRANSCRIBING":
       return "Getting your question…";
     case "THINKING":
@@ -92,7 +92,8 @@ function citationLabel(citation: AssistantCitation): string {
     canvas: "Canvas",
     navox: "NavoX",
   };
-  if (citation.source_type === "NEWS_CLAIM") return "Original article";
+  if (["NEWS_CLAIM", "NEWS_ARTICLE"].includes(citation.source_type))
+    return "Original article";
   if (citation.source_type === "NEWS_STORY") return "View sources";
   const source =
     citation.source_type === "EMAIL"
@@ -105,12 +106,11 @@ function citationLabel(citation: AssistantCitation): string {
 
 function CitationText({ citation }: { citation: AssistantCitation }) {
   const storyId = citation.external_resource_id ?? citation.evidence_id;
-  const href =
-    citation.source_type === "NEWS_CLAIM"
-      ? safeSourceUrl(citation.external_resource_id)
-      : citation.source_type === "NEWS_STORY" && storyId
-        ? `/news/stories/${encodeURIComponent(storyId)}`
-        : null;
+  const href = ["NEWS_CLAIM", "NEWS_ARTICLE"].includes(citation.source_type)
+    ? safeSourceUrl(citation.external_resource_id)
+    : citation.source_type === "NEWS_STORY" && storyId
+      ? `/news/stories/${encodeURIComponent(storyId)}`
+      : null;
   return href ? (
     <a
       className={styles.sourceLink}
@@ -533,7 +533,7 @@ export function AssistantTurnViewBlock({
           title="Speak the answer"
         >
           <SpeakerIcon />
-          <span>Read aloud</span>
+          <span className={styles.srOnly}>Read aloud</span>
         </button>
       ) : null}
       {sessionId && (
@@ -1205,7 +1205,7 @@ export function NavoXAssistant() {
       <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}>YOUR PERSONAL ASSISTANT</p>
-          <h1>What’s on your mind?</h1>
+          <h1>{turns.length === 0 ? "What’s on your mind?" : "NavoX"}</h1>
         </div>
         <button
           type="button"
@@ -1216,9 +1216,11 @@ export function NavoXAssistant() {
         </button>
       </header>
 
-      <p className={styles.intro}>
-        Your day, your questions, your next step. Type a question or tap Talk.
-      </p>
+      {turns.length === 0 && (
+        <p className={styles.intro}>
+          Your day, your questions, your next step. Type a question or tap Talk.
+        </p>
+      )}
 
       {notice && (
         <p className={styles.error} role="alert">
@@ -1339,27 +1341,29 @@ export function NavoXAssistant() {
           {controls.capturing ? <StopIcon /> : <MicIcon />}
           <span>{controls.capturing ? "Send recording" : "Talk"}</span>
         </button>
-        <button
-          type="button"
-          className={styles.stopButton}
-          onClick={stopEverything}
-          aria-label={
-            handsFreePhase === "CONVERSATION"
-              ? "End conversation and return to wake listening"
-              : "Stop listening and speech"
-          }
-          title={
-            handsFreePhase === "CONVERSATION"
-              ? "End conversation and return to wake listening"
-              : "Stop listening and speech"
-          }
-          disabled={
-            !controls.stopAvailable && handsFreePhase !== "CONVERSATION"
-          }
-        >
-          <StopIcon />
-          <span>Stop</span>
-        </button>
+        {(controls.stopAvailable || handsFreePhase === "CONVERSATION") && (
+          <button
+            type="button"
+            className={styles.stopButton}
+            onClick={stopEverything}
+            aria-label={
+              handsFreePhase === "CONVERSATION"
+                ? "End conversation and return to wake listening"
+                : "Stop listening and speech"
+            }
+            title={
+              handsFreePhase === "CONVERSATION"
+                ? "End conversation and return to wake listening"
+                : "Stop listening and speech"
+            }
+            disabled={
+              !controls.stopAvailable && handsFreePhase !== "CONVERSATION"
+            }
+          >
+            <StopIcon />
+            <span>Stop</span>
+          </button>
+        )}
       </form>
 
       <div className={styles.voiceTools}>

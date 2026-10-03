@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { LIMITS } from "./limits";
 import {
   answerNews,
   namedNewsMatches,
@@ -63,6 +64,64 @@ const summary = {
 };
 
 describe("SPEC-006 News evidence", () => {
+  it("reports unavailable current news without asking for a named topic", () => {
+    const empty = newsTrends([]);
+    expect(empty.state).toBe("UNAVAILABLE");
+    expect(empty.decision.kind).toBe("UNAVAILABLE");
+    expect(empty.decision.action_state).toBe("NONE");
+  });
+  it("links broad headlines to the original publisher", () => {
+    const feed = newsTrends(parseNewsFeed([story], NOW));
+    expect(feed.blocks.at(-1)).toMatchObject({
+      kind: "CITATIONS",
+      citations: [{ source_type: "NEWS_ARTICLE", external_resource_id: URL }],
+    });
+    expect(
+      buildPresentationPlan({
+        modality: "TEXT",
+        decision: feed.decision,
+        blocks: feed.blocks,
+        delivery: "AUTOMATIC",
+      }),
+    ).toBeDefined();
+  });
+  it("speaks the first three attributed headlines in a voice response", () => {
+    const headlines = [
+      story.headline,
+      "City opens a new public library",
+      "New research examines ocean temperatures",
+    ];
+    const feed = newsTrends(
+      parseNewsFeed(
+        headlines.map((headline, index) => ({
+          ...story,
+          id: `${index + 1}aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+          headline,
+        })),
+        NOW,
+      ),
+    );
+    const presentation = buildPresentationPlan({
+      modality: "VOICE",
+      delivery: "AUTOMATIC",
+      decision: feed.decision,
+      blocks: feed.blocks,
+    });
+    expect(presentation.speak).toBe(true);
+    expect(presentation.speech_text).toContain("Example Publisher");
+    for (const headline of headlines)
+      expect(presentation.speech_text).toContain(headline);
+    expect(presentation.speech_text!.length).toBeLessThanOrEqual(
+      LIMITS.maxSpeechLength,
+    );
+    expect(presentation.speech_text).toContain(
+      "doesn’t mean a report is confirmed",
+    );
+    expect(feed.blocks.filter((block) => block.kind === "ITEM")).toHaveLength(
+      3,
+    );
+    expect(feed.blocks.at(-1)?.kind).toBe("CITATIONS");
+  });
   it("only normalizes exact general News requests after plan validation", () => {
     function plan(
       question: string,

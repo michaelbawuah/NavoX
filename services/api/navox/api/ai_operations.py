@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from navox.ai.configured import build_runtime
 from navox.ai.context import ContextDenied
+from navox.ai.conversation import ConversationRequest, ConversationResponse, converse
 from navox.ai.domains import Domain
 from navox.ai.factory import AIProviderNotConfigured
 from navox.ai.intent_plan import IntentPlanRequest, IntentPlanResponse, plan_intents
@@ -108,6 +109,33 @@ async def assistant_intents(
         raise HTTPException(
             403, "Intent planning is unavailable or its permissions changed"
         ) from None
+    except (AIProviderNotConfigured, GatewayUnavailable):
+        raise HTTPException(503, "No qualified AI provider is available for this request") from None
+    except ValueError:
+        raise HTTPException(409, "The conversation changed; refresh and try again") from None
+
+
+@router.post("/assistant/conversation", response_model=ConversationResponse)
+async def assistant_conversation(
+    payload: ConversationRequest,
+    response: Response,
+    account: CurrentAccountDependency,
+    settings: SettingsDependency,
+) -> ConversationResponse:
+    """An ordinary answer; qualification and provider policy remain mandatory."""
+
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        runtime = await build_runtime(settings)
+        return await converse(
+            runtime,
+            settings,
+            workspace_id=account.workspace.id,
+            user_id=account.user.id,
+            request=payload,
+        )
+    except (ContextDenied, ConnectorAccessDenied, PermissionError):
+        raise HTTPException(403, "Conversation access is unavailable or changed") from None
     except (AIProviderNotConfigured, GatewayUnavailable):
         raise HTTPException(503, "No qualified AI provider is available for this request") from None
     except ValueError:

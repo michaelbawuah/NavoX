@@ -10,9 +10,8 @@ import {
 } from "react";
 import type { TodaySource } from "../lib/source-references";
 import {
-  type TodayFilter,
-  todayFilters,
-  todaySections,
+  consumerTodaySections,
+  todayConsumerSections,
 } from "../lib/today-sections";
 import { ApprovalPanel } from "./approval-panel";
 import { CommunicationDrafts } from "./communication-drafts";
@@ -23,7 +22,7 @@ import {
   IntelligenceFeedback,
   WorkspaceContext,
 } from "./intelligence-controls";
-import { NavoXAskBox, NavoXNavigation } from "./navox-ui";
+import { NavoXNavigation } from "./navox-ui";
 import { OperationalAssistance } from "./operational-assistance";
 import { PagedList } from "./paged-list";
 import { ProactivePanel } from "./proactive-panel";
@@ -80,14 +79,6 @@ interface TodayPayload {
   renewals: TodayItem[];
   waiting_on: TodayItem[];
   completed_recently: TodayItem[];
-}
-
-interface QueryPayload {
-  intent: string;
-  answer: string;
-  items: TodayItem[];
-  supported_queries: string[];
-  details: string[];
 }
 
 interface PlanAction {
@@ -178,58 +169,6 @@ function dueLabel(value: string | null, timezone: string): string {
   }).format(new Date(value));
 }
 
-function priorityLabel(priority: number): string {
-  const labels: Record<number, string> = {
-    1: "Low",
-    2: "Moderate",
-    3: "Standard",
-    4: "Important",
-    5: "Critical",
-  };
-  return labels[priority] ?? "Standard";
-}
-
-function itemUrgency(
-  item: TodayItem,
-): "urgent" | "upcoming" | "completed" | "neutral" {
-  if (item.status === "completed") {
-    return "completed";
-  }
-  if (item.band === "NOW" || item.band === "TODAY_HIGH") {
-    return "urgent";
-  }
-  if (item.due_at === null) {
-    return "neutral";
-  }
-  const hours =
-    (new Date(item.due_at).getTime() - Date.now()) / (60 * 60 * 1000);
-  return hours <= 48 ? "urgent" : "upcoming";
-}
-
-function urgencyLabel(item: TodayItem): string {
-  const urgency = itemUrgency(item);
-  if (urgency === "urgent") return "Urgent";
-  if (urgency === "completed") return "Completed";
-  if (urgency === "upcoming") return "Upcoming";
-  return priorityLabel(item.priority);
-}
-
-function queryHeading(intent: string): string {
-  const headings: Record<string, string> = {
-    today: "Your day at a glance",
-    attention: "Needs your attention",
-    this_week: "Coming up this week",
-    waiting: "Waiting on",
-    renewals: "Money and renewals",
-    promises: "Promises you made",
-    forgetting: "Worth a second look",
-    meeting_prep: "Next meeting prep",
-    handleable: "NavoX can handle",
-    unsupported: "Try another question",
-  };
-  return headings[intent] ?? "NavoX briefing";
-}
-
 function greeting(timezone: string): string {
   const hour = Number(
     new Intl.DateTimeFormat("en-US", {
@@ -247,19 +186,6 @@ function greeting(timezone: string): string {
   return "Good evening";
 }
 
-function sectionEmpty(label: string): string {
-  if (label === "Needs Attention") {
-    return "Nothing is asking for your attention right now.";
-  }
-  if (label === "Coming Up") {
-    return "No upcoming commitments are saved yet.";
-  }
-  if (label === "Money / Renewals") {
-    return "No active renewals are saved.";
-  }
-  return "Nothing is currently waiting.";
-}
-
 export function TodayWorkspace({
   account,
   connections,
@@ -267,7 +193,6 @@ export function TodayWorkspace({
   onConnectionsChanged,
   onSignOut,
 }: TodayWorkspaceProps) {
-  const [selectedFilter, setFilter] = useState<TodayFilter>("Needs Attention");
   const [showSetAside, setShowSetAside] = useState(false);
   const [timezone, setTimezone] = useState(account.timezone ?? "UTC");
   const [today, setToday] = useState<TodayPayload | null>(null);
@@ -282,10 +207,6 @@ export function TodayWorkspace({
   const [priority, setPriority] = useState("3");
   const [dueAt, setDueAt] = useState("");
   const [creating, setCreating] = useState(false);
-
-  const [query, setQuery] = useState("What do I need to know today?");
-  const [queryResult, setQueryResult] = useState<QueryPayload | null>(null);
-  const [querying, setQuerying] = useState(false);
 
   const [agentPaused, setAgentPaused] = useState(false);
   const [togglingAgent, setTogglingAgent] = useState(false);
@@ -312,7 +233,7 @@ export function TodayWorkspace({
       if (requestNumber === todayRequest.current) setToday(payload);
     } catch {
       if (requestNumber === todayRequest.current)
-        setWorkspaceError("NavoX could not reach the workspace service.");
+        setWorkspaceError("Your day could not be refreshed. Please try again.");
     } finally {
       if (requestNumber === todayRequest.current) setLoadingToday(false);
     }
@@ -360,6 +281,16 @@ export function TodayWorkspace({
 
   useEffect(() => {
     void refreshToday();
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void refreshToday();
+    };
+    document.addEventListener("visibilitychange", refreshVisible);
+    const timer = window.setInterval(refreshVisible, 60_000);
+    return () => {
+      document.removeEventListener("visibilitychange", refreshVisible);
+      window.clearInterval(timer);
+      todayRequest.current += 1;
+    };
   }, [refreshToday]);
 
   useEffect(() => {
@@ -377,7 +308,11 @@ export function TodayWorkspace({
     return () => window.clearTimeout(timer);
   }, [activePlan, loadPlan]);
 
-  const sections = useMemo(() => todaySections(today), [today]);
+  const sections = useMemo(
+    () =>
+      consumerTodaySections(today, today ? Date.parse(today.generated_at) : 0),
+    [today],
+  );
 
   const approvalCommitments = useMemo(() => {
     const combined = [
@@ -532,30 +467,9 @@ export function TodayWorkspace({
     }
   }
 
-  async function askNavox(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setQuerying(true);
-    setWorkspaceError("");
-    try {
-      const response = await fetch(`${apiBaseUrl}/today/query`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, timezone }),
-      });
-      if (!response.ok) {
-        setWorkspaceError(await readApiError(response));
-        return;
-      }
-      setQueryResult((await response.json()) as QueryPayload);
-    } catch {
-      setWorkspaceError("NavoX could not answer that query.");
-    } finally {
-      setQuerying(false);
-    }
-  }
-
   function renderActions(item: TodayItem) {
+    if (["completed", "cancelled", "dismissed"].includes(item.status))
+      return null;
     if (item.status === "candidate") {
       return (
         <div className={styles.itemActions}>
@@ -648,14 +562,21 @@ export function TodayWorkspace({
         <div className={styles.sectionHeading}>
           <div>
             <p>{label}</p>
-            <span className={styles.sectionCount}>
-              {items.length.toString().padStart(2, "0")}
-            </span>
           </div>
           <i aria-hidden="true" />
         </div>
         {items.length === 0 ? (
-          <p className={styles.emptyState}>{sectionEmpty(label)}</p>
+          <p className={styles.emptyState}>
+            {loadingToday
+              ? "Checking your day…"
+              : workspaceError
+                ? "Your day could not be refreshed. Please try again."
+                : label === "Needs your attention"
+                  ? "Nothing needs attention in your saved items right now."
+                  : label === "Coming up"
+                    ? "No upcoming events or tasks are saved yet."
+                    : "No new updates in your saved items."}
+          </p>
         ) : (
           <PagedList
             key={label}
@@ -663,23 +584,25 @@ export function TodayWorkspace({
             items={items.map((item) => (
               <details className={styles.item} key={item.id}>
                 <summary className={styles.itemSummary}>
-                  <span className={styles.itemTopline}>
-                    <span>{item.type.replaceAll("_", " ")}</span>
-                    {!setAside && (
-                      <span data-urgency={itemUrgency(item)}>
-                        {urgencyLabel(item)}
-                      </span>
-                    )}
-                  </span>
                   <h3>{item.title}</h3>
                   <span className={styles.itemMeta}>
                     {setAside
                       ? "Review when you have a moment"
                       : item.due_at
                         ? dueLabel(item.due_at, timezone)
-                        : "No due date"}
+                        : item.status === "completed"
+                          ? "Completed"
+                          : ""}
                   </span>
-                  <span className={styles.expandHint}>Details & actions</span>
+                  <span className={styles.expandHint}>
+                    {item.type === "renewal"
+                      ? "Review subscription"
+                      : item.sources.some(
+                            (source) => source.source_type === "EMAIL",
+                          )
+                        ? "Review reply"
+                        : "View details"}
+                  </span>
                 </summary>
                 <div className={styles.itemDetail}>
                   {item.description && <p>{item.description}</p>}
@@ -758,31 +681,16 @@ export function TodayWorkspace({
 
       <section className={styles.hero}>
         <div className={styles.heroIntro}>
-          <p className={styles.kicker}>Your day, in focus</p>
           <h1>
             {greeting(timezone)}, {firstName}.
-            <span className={styles.heroAccent}>
-              Here&apos;s what matters now.
-            </span>
           </h1>
-          <p className={styles.heroCopy}>
-            See what needs your attention, catch up on the news, or ask NavoX
-            for a hand.
-          </p>
-          <a className={styles.askCta} href="/navox">
-            Ask NavoX <span aria-hidden="true">↗</span>
-          </a>
-          <div className={styles.posture}>
-            <span className={styles.liveDot} aria-hidden="true" />
-            <div>
-              <small>Your day</small>
-              <strong>
-                {loadingToday
-                  ? "Updating…"
-                  : `${String(today?.total ?? 0)} things to keep track of`}
-              </strong>
-            </div>
-          </div>
+          <p className={styles.heroCopy}>Here&apos;s what matters today.</p>
+          {connections.length === 0 && (
+            <p className={styles.heroCopy}>
+              Connect your email and calendar to include them in your day.{" "}
+              <a href="#settings">Set up connections</a>
+            </p>
+          )}
         </div>
         <WorkspaceContext timezone={timezone} onTimezoneChange={setTimezone} />
       </section>
@@ -799,26 +707,12 @@ export function TodayWorkspace({
       <div className={styles.layout}>
         <div className={styles.focusLayout}>
           <div className={styles.focusColumn}>
-            <div className={styles.focusHeading}>
-              <h2>Your focus</h2>
-              <p>Personal actions, replies and important alerts.</p>
-            </div>
-            <nav
-              className={styles.focusFilters}
-              aria-label="Filter commitments"
-            >
-              {todayFilters.map((label) => (
-                <button
-                  type="button"
-                  key={label}
-                  aria-pressed={selectedFilter === label}
-                  onClick={() => setFilter(label)}
-                >
-                  {label} <span>{sections[label].length}</span>
-                </button>
-              ))}
-            </nav>
-            {renderSection(selectedFilter, sections[selectedFilter])}
+            {todayConsumerSections.map((label) => (
+              <div key={label}>{renderSection(label, sections[label])}</div>
+            ))}
+            <a className={styles.askCta} href="/navox">
+              ✦ Ask NavoX about my day… <span aria-hidden="true">🎙</span>
+            </a>
             {(today?.set_aside?.length ?? 0) > 0 && (
               <div className={styles.setAside}>
                 <button
@@ -859,83 +753,6 @@ export function TodayWorkspace({
             </details>
           </div>
           <aside className={styles.toolsColumn} aria-label="Workspace tools">
-            <section className={styles.controlCard}>
-              <div className={styles.controlHeading}>
-                <p>Quick overview</p>
-                <a className={styles.assistantLink} href="/navox">
-                  Talk with NavoX →
-                </a>
-              </div>
-              <h2>What do you need to know?</h2>
-              <div id="ask-navox">
-                <NavoXAskBox
-                  id="navox-query"
-                  label="Ask NavoX about your day"
-                  value={query}
-                  placeholder="What needs my attention today?"
-                  busy={querying}
-                  busyLabel="Checking…"
-                  maxLength={500}
-                  onChange={setQuery}
-                  onSubmit={askNavox}
-                />
-              </div>
-              {queryResult && (
-                <div className={styles.queryAnswer} aria-live="polite">
-                  <div className={styles.queryAnswerHeader}>
-                    <div>
-                      <span>NavoX briefing</span>
-                      <strong>{queryHeading(queryResult.intent)}</strong>
-                    </div>
-                    <b>
-                      {queryResult.items.length > 0
-                        ? `${queryResult.items.length} item${queryResult.items.length === 1 ? "" : "s"}`
-                        : "Clear"}
-                    </b>
-                  </div>
-                  <p className={styles.querySummary}>{queryResult.answer}</p>
-                  {queryResult.items.length > 0 && (
-                    <div className={styles.queryFocusList}>
-                      {queryResult.items.slice(0, 5).map((item) => (
-                        <article
-                          className={styles.queryFocusItem}
-                          key={item.id}
-                        >
-                          <div>
-                            <strong>{item.title}</strong>
-                            <span className={styles.queryDue}>
-                              {item.due_at
-                                ? dueLabel(item.due_at, timezone)
-                                : "No due date"}
-                            </span>
-                          </div>
-                          <span
-                            className={styles.queryUrgency}
-                            data-urgency={itemUrgency(item)}
-                          >
-                            {urgencyLabel(item)}
-                          </span>
-                        </article>
-                      ))}
-                    </div>
-                  )}
-                  {queryResult.details.length > 0 && (
-                    <div className={styles.queryDetails}>
-                      {queryResult.details.slice(0, 5).map((detail) => (
-                        <p key={detail}>{detail}</p>
-                      ))}
-                    </div>
-                  )}
-                  {queryResult.intent === "unsupported" && (
-                    <small>
-                      Try today, attention, this week, waiting, renewals,
-                      promises, forgetting, meeting prep, or what NavoX can
-                      handle.
-                    </small>
-                  )}
-                </div>
-              )}
-            </section>
             <details className={styles.toolDisclosure}>
               <summary>Add a task or event</summary>
               <section className={styles.controlCard}>

@@ -266,7 +266,7 @@ export function SubscriptionsDashboard() {
     setNotice(
       editor.item
         ? "Correction saved with its provenance."
-        : "Subscription added to your registry.",
+        : "Subscription added.",
     );
     await load();
   }
@@ -433,7 +433,7 @@ export function SubscriptionsDashboard() {
     <div className={styles.dashboard}>
       <header className={styles.hero}>
         <div>
-          <p className={styles.eyebrow}>Recurring obligations</p>
+          <p className={styles.eyebrow}>Your subscriptions</p>
           <h1>
             Subscriptions.
             <br />
@@ -593,7 +593,7 @@ export function SubscriptionsDashboard() {
         )}
         {attention.length > 4 && (
           <p className={styles.muted}>
-            {attention.length - 4} more to review in your registry below.
+            {attention.length - 4} more subscriptions to review below.
           </p>
         )}
       </section>
@@ -603,7 +603,7 @@ export function SubscriptionsDashboard() {
       >
         <div className={styles.sectionHeading}>
           <div>
-            <p className={styles.eyebrow}>Evidence-backed registry</p>
+            <p className={styles.eyebrow}>Your subscriptions</p>
             <h2 id="subscription-registry-heading">
               Known recurring subscriptions
             </h2>
@@ -643,7 +643,7 @@ export function SubscriptionsDashboard() {
         </div>
         {loading && items.length === 0 ? (
           <div className={styles.empty} role="status">
-            Loading your registry…
+            Loading your subscriptions…
           </div>
         ) : visible.length === 0 ? (
           <div className={styles.empty}>

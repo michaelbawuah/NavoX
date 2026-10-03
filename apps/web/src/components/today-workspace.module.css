@@ -50,7 +50,7 @@
 .layout,
 .statusBanner,
 .errorBanner {
-  width: min(100%, 88rem);
+  width: min(100%, 64rem);
   margin-inline: auto;
 }
 
@@ -150,7 +150,7 @@
 .hero h1 {
   max-width: 26ch;
   margin: 0;
-  font-size: clamp(2rem, 3vw, 3.1rem);
+  font-size: clamp(1.7rem, 3vw, 2.2rem);
   font-weight: 760;
   line-height: 1.1;
   letter-spacing: -0.045em;
@@ -235,7 +235,7 @@
 
 .focusLayout {
   display: grid;
-  grid-template-columns: minmax(0, 1.8fr) minmax(19rem, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.25rem;
   align-items: start;
 }

@@ -18,6 +18,23 @@ function json(payload: unknown, status = 200): Response {
 }
 
 describe("NavoX API gateway", () => {
+  it("uses the scoped upcoming and regional endpoints without a named selector", async () => {
+    const fetchImpl = vi.fn(async () => json([])) as unknown as FetchLike;
+    const upstream = createNavoxUpstream({ baseUrl: base, fetchImpl });
+    await upstream.querySubscriptions(cookie, null);
+    await upstream.getTrendingNews(cookie, "world");
+    await upstream.getTrendingNews(cookie, "us");
+    const calls = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls;
+    expect(JSON.parse(calls[0][1].body)).toEqual({
+      intent: "UPCOMING",
+      days: 30,
+    });
+    expect(calls.slice(1).map((call) => call[0])).toEqual([
+      `${base}/news/categories/world`,
+      `${base}/news/categories/us`,
+    ]);
+    expect(calls.every((call) => call[1].headers.cookie === cookie)).toBe(true);
+  });
   it("derives the account from the forwarded session cookie", async () => {
     const fetchImpl = vi.fn(async () => json(account)) as unknown as FetchLike;
     const upstream = createNavoxUpstream({ baseUrl: `${base}/`, fetchImpl });

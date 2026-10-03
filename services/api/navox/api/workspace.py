@@ -55,8 +55,15 @@ async def display_preferences(
 @router.get("/preferences")
 async def get_preferences(
     database: DatabaseSession, current_account: CurrentAccountDependency
-) -> DisplayPreferences:
-    return await display_preferences(database, current_account)
+) -> dict[str, object]:
+    prefs = await display_preferences(database, current_account)
+    preference = await database.get(
+        WorkspaceDisplayPreference, (current_account.workspace.id, current_account.user.id)
+    )
+    return {
+        **prefs.model_dump(),
+        "timezone_selected": preference is not None or current_account.user.timezone != "UTC",
+    }
 
 
 @router.post("/preferences")

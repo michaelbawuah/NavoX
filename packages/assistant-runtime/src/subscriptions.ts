@@ -77,11 +77,12 @@ export function subscriptionSelector(intent: PlannedIntent): string | null {
 
 export function parseSubscriptionSearch(
   payload: unknown,
-  selector: string,
+  selector: string | null,
+  now: Date = new Date(),
 ): SubscriptionRecord[] {
   if (
     !isRecord(payload) ||
-    payload.intent !== "SEARCH" ||
+    payload.intent !== (selector === null ? "UPCOMING" : "SEARCH") ||
     !Array.isArray(payload.subscriptions) ||
     payload.subscriptions.length > 50
   )
@@ -94,12 +95,13 @@ export function parseSubscriptionSearch(
     const name = bounded(entry.name, 256);
     const plan = optionalText(entry.plan_name, 256);
     if (
+      selector !== null &&
       !`${name} ${plan ?? ""}`
         .toLocaleLowerCase("en-US")
         .includes(selector.toLocaleLowerCase("en-US"))
     )
       unreadable();
-    return {
+    const row = {
       id: entry.id,
       revision: boundedRevision(entry.revision),
       name,
@@ -109,7 +111,80 @@ export function parseSubscriptionSearch(
       last_verified_at: optionalDate(entry.last_verified_at),
       updated_at: optionalDate(entry.updated_at) ?? unreadable(),
     };
+    if (
+      selector === null &&
+      (![
+        "ACTIVE",
+        "TRIAL",
+        "CANCEL_PENDING",
+        "CANCELLATION_REQUESTED",
+      ].includes(row.status) ||
+        row.next_renewal_at === null ||
+        Date.parse(row.next_renewal_at) < now.getTime() ||
+        Date.parse(row.next_renewal_at) > now.getTime() + 30 * 86_400_000)
+    )
+      unreadable();
+    return row;
   });
+}
+
+export function answerUpcomingSubscriptions(rows: SubscriptionRecord[]): {
+  state: AssistantResponseState;
+  decision: CapabilityDecision;
+  blocks: AssistantBlock[];
+} {
+  const sorted = [...rows].sort(
+    (a, b) =>
+      Date.parse(a.next_renewal_at ?? "") - Date.parse(b.next_renewal_at ?? ""),
+  );
+  return {
+    state: "READY",
+    decision: decision("READY", "subscription.upcoming"),
+    blocks: [
+      {
+        kind: "ANSWER",
+        text: rows.length
+          ? `You have ${rows.length} saved subscription${rows.length === 1 ? "" : "s"} renewing in the next 30 days.${rows.length > 10 ? " Here are the next 10." : ""}`
+          : "I haven’t found any renewals in the next 30 days among the subscriptions you’ve added or NavoX has found. You can add missing subscriptions on the Subscriptions page.",
+      },
+      ...(sorted.length
+        ? [
+            {
+              kind: "DETAILS" as const,
+              lines: sorted.slice(0, 3).map((row) => {
+                const name =
+                  row.name.length > 64 ? `${row.name.slice(0, 63)}…` : row.name;
+                return `${name}: recorded renewal ${row.next_renewal_at}.`;
+              }),
+            },
+          ]
+        : []),
+      ...sorted.slice(0, 10).map(
+        (row): AssistantBlock => ({
+          kind: "ITEM",
+          item: {
+            id: row.id,
+            type: "SUBSCRIPTION",
+            title: row.name,
+            description: row.plan_name,
+            status: row.status,
+            due_at: row.next_renewal_at,
+            band: "SUBSCRIPTION",
+            sources: [
+              {
+                provider: "navox",
+                source_type: "SUBSCRIPTION",
+                external_resource_id: null,
+                evidence_id: row.id,
+                connection_id: null,
+                observed_at: row.updated_at,
+              },
+            ],
+          },
+        }),
+      ),
+    ],
+  };
 }
 
 export function parseSubscriptionCancellation(

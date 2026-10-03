@@ -1,4 +1,5 @@
 import type { AssistantMeetingBriefing } from "@navox/contracts";
+import type { ConversationReference } from "./conversation";
 import { AssistantError, isAssistantError, toAssistantError } from "./errors";
 import { LIMITS } from "./limits";
 import { parseMeetingPrep } from "./meeting";
@@ -38,6 +39,15 @@ export interface NavoxUpstream {
       sessionId: string | null;
     },
   ): Promise<unknown>;
+  /** Text-only model response. The runtime validates its session and authority. */
+  answerConversation(
+    cookie: string,
+    input: {
+      utterance: string;
+      recentTurns: readonly ConversationReference[];
+      sessionId: string;
+    },
+  ): Promise<unknown>;
   /**
    * Raw read-only SPEC-007 connected search. Validated by the runtime before
    * any result becomes a citation or an item.
@@ -61,9 +71,9 @@ export interface NavoxUpstream {
     cookie: string,
     input: { connectionId: string; resourceId: string },
   ): Promise<unknown>;
-  querySubscriptions(cookie: string, selector: string): Promise<unknown>;
+  querySubscriptions(cookie: string, selector: string | null): Promise<unknown>;
   getSubscriptionCancellation(cookie: string, id: string): Promise<unknown>;
-  getTrendingNews(cookie: string): Promise<unknown>;
+  getTrendingNews(cookie: string, region?: "world" | "us"): Promise<unknown>;
   getNewsStory(cookie: string, id: string): Promise<unknown>;
   getNewsSummary(cookie: string, id: string): Promise<unknown>;
   getWeather(cookie: string): Promise<unknown>;
@@ -382,6 +392,36 @@ export function createNavoxUpstream(
       }
     },
 
+    async answerConversation(cookie, input) {
+      const path = "/ai/assistant/conversation";
+      const response = await send(path, {
+        method: "POST",
+        cookie,
+        body: {
+          utterance: input.utterance,
+          recent_turns: [...input.recentTurns],
+          session_id: input.sessionId,
+        },
+      });
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new AssistantError(
+            "unsupported",
+            "Conversation answers are not enabled in this deployment.",
+          );
+        }
+        throw statusError(response.status, path);
+      }
+      try {
+        return await response.json();
+      } catch {
+        throw new AssistantError(
+          "unavailable",
+          "The assistant did not return a readable conversation answer.",
+        );
+      }
+    },
+
     async searchEmail(
       cookie: string,
       input: { query: string; limit?: number },
@@ -443,7 +483,10 @@ export function createNavoxUpstream(
       const response = await send(path, {
         method: "POST",
         cookie,
-        body: { intent: "SEARCH", text: selector },
+        body:
+          selector === null
+            ? { intent: "UPCOMING", days: 30 }
+            : { intent: "SEARCH", text: selector },
       });
       if (!response.ok) throw statusError(response.status, path);
       return response.json().catch(() => {
@@ -466,8 +509,8 @@ export function createNavoxUpstream(
       });
     },
 
-    async getTrendingNews(cookie): Promise<unknown> {
-      const path = "/news/trending";
+    async getTrendingNews(cookie, region): Promise<unknown> {
+      const path = region ? `/news/categories/${region}` : "/news/trending";
       const response = await send(path, { method: "GET", cookie });
       if (response.status === 503) {
         const payload: unknown = await response.json().catch(() => null);

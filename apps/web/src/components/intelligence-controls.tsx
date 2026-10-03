@@ -769,12 +769,22 @@ export function WorkspaceContext({
   }, []);
   useEffect(() => {
     let active = true;
-    void request<Preferences>("/workspace/preferences")
+    void request<Preferences & { timezone_selected?: boolean }>(
+      "/workspace/preferences",
+    )
       .then((value) => {
         if (!active) return;
-        setPreferences(value);
-        setDraft(value);
-        onTimezoneChange(value.timezone);
+        const { timezone_selected, ...saved } = value;
+        const display = {
+          ...saved,
+          timezone:
+            timezone_selected === false
+              ? Intl.DateTimeFormat().resolvedOptions().timeZone
+              : saved.timezone,
+        };
+        setPreferences(display);
+        setDraft(display);
+        onTimezoneChange(display.timezone);
       })
       .catch(() => {
         if (active)

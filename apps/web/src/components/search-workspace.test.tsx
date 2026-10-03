@@ -79,8 +79,14 @@ describe("search result card", () => {
 describe("search workspace shell", () => {
   it("renders the usable first screen without implementation jargon", () => {
     const markup = renderToStaticMarkup(createElement(SearchWorkspace));
-    expect(markup).toContain("Search your connected world");
+    expect(markup).toContain("Find what you need");
     expect(markup).toContain("What are you looking for?");
+    expect(markup).toMatch(
+      /<details[^>]*><summary>Filters &amp; options · All time<\/summary>/,
+    );
+    expect(markup).toMatch(/value="AUTO"/);
+    expect(markup).toMatch(/<input[^>]*id="search-from"[^>]*value=""/);
+    expect(markup).toMatch(/<input[^>]*id="search-to"[^>]*value=""/);
     expect(markup).toContain("Any type");
     expect(markup).toContain("Recent searches");
     expect(markup).toContain("Hidden from search");
