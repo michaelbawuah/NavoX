@@ -161,6 +161,7 @@ interface TodayWorkspaceProps {
   view?: TodayWorkspaceView;
   account: Account;
   connections: GoogleConnection[];
+  connectionsUnavailable?: boolean;
   message: string;
   onConnectionsChanged: () => Promise<void>;
   onSignOut: () => Promise<void>;
@@ -218,10 +219,13 @@ export function TodayWorkspace({
   view = "today",
   account,
   connections,
+  connectionsUnavailable = false,
   message,
   onConnectionsChanged,
   onSignOut,
 }: TodayWorkspaceProps) {
+  const needsConnectionSetup =
+    connections.length === 0 && !connectionsUnavailable;
   const [showSetAside, setShowSetAside] = useState(false);
   const [timezone, setTimezone] = useState(account.timezone ?? "UTC");
   const [today, setToday] = useState<TodayPayload | null>(null);
@@ -679,10 +683,8 @@ export function TodayWorkspace({
                   : emptyCopy}
             </p>
             {!loadingToday && !workspaceError && (
-              <Link
-                href={connections.length === 0 ? "/connections" : "/planner"}
-              >
-                {connections.length === 0 ? "Connect your apps" : "Add a task"}
+              <Link href={needsConnectionSetup ? "/connections" : "/planner"}>
+                {needsConnectionSetup ? "Connect your apps" : "Add a task"}
               </Link>
             )}
           </div>
@@ -991,7 +993,7 @@ export function TodayWorkspace({
         {view === "today" && (
           <div className={styles.focusLayout}>
             <div className={styles.focusColumn}>
-              {connections.length === 0 && (
+              {needsConnectionSetup && (
                 <section
                   className={styles.setupCard}
                   aria-labelledby="setup-heading"

@@ -260,7 +260,6 @@
 }
 @media (max-width: 1050px) {
   .sidebar {
-    visibility: hidden;
     width: 13.5rem;
   }
   .canvas {
@@ -275,6 +274,7 @@
 }
 @media (max-width: 760px) {
   .sidebar {
+    visibility: hidden;
     width: min(19rem, 85vw);
     transform: translateX(-100%);
     transition: transform 160ms ease;

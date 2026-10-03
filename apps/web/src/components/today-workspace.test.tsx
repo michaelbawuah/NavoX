@@ -33,6 +33,21 @@ function renderView(view: TodayWorkspaceView = "today") {
 }
 
 describe("workspace destinations", () => {
+  it("does not advertise an empty connection list when its state is unavailable", () => {
+    const markup = renderToStaticMarkup(
+      createElement(TodayWorkspace, {
+        account,
+        connections: [],
+        connectionsUnavailable: true,
+        message: "Connected apps could not be loaded.",
+        onConnectionsChanged: vi.fn(async () => {}),
+        onSignOut: vi.fn(async () => {}),
+      }),
+    );
+    expect(markup).toContain("Connected apps could not be loaded");
+    expect(markup).not.toContain("Connect your apps");
+    expect(markup).toContain("Upcoming agenda");
+  });
   it("keeps the daily agenda visible and treats loading as unconfirmed data", () => {
     const markup = renderView();
     expect(markup).toContain("Upcoming agenda");

@@ -1,21 +1,16 @@
 "use client";
 
 import { type FormEvent, useCallback, useEffect, useState } from "react";
-import { type Account, authenticate } from "../lib/account-access";
+import {
+  type Account,
+  authenticate,
+  type GoogleConnection,
+  restoreAccountAccess,
+} from "../lib/account-access";
 import { NavoXCinematic } from "./navox-cinematic";
 import { TodayWorkspace, type TodayWorkspaceView } from "./today-workspace";
 
 type AuthMode = "register" | "login";
-
-interface GoogleConnection {
-  id: string;
-  provider: "google";
-  external_email: string | null;
-  status: string;
-  granted_scopes: string[];
-  last_checked_at: string | null;
-  last_error: string | null;
-}
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
@@ -32,6 +27,7 @@ export function AccountWorkspace({
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [connections, setConnections] = useState<GoogleConnection[]>([]);
+  const [connectionsUnavailable, setConnectionsUnavailable] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [sessionRestored, setSessionRestored] = useState(false);
 
@@ -67,25 +63,12 @@ export function AccountWorkspace({
 
     async function restoreSession() {
       try {
-        const response = await fetch(`${apiBaseUrl}/auth/me`, {
-          credentials: "include",
-        });
-        if (response.ok) {
-          const restoredAccount = (await response.json()) as Account;
-          const connectionResponse = await fetch(
-            `${apiBaseUrl}/connections/google`,
-            { credentials: "include" },
-          );
-          if (connectionResponse.ok) {
-            setConnections(
-              (await connectionResponse.json()) as GoogleConnection[],
-            );
-          } else {
-            setMessage(
-              "Connected apps could not be loaded. Open Connections to retry.",
-            );
-          }
-          setAccount(restoredAccount);
+        const restored = await restoreAccountAccess(apiBaseUrl);
+        if (restored.account) {
+          setConnections(restored.connections);
+          setConnectionsUnavailable(Boolean(restored.connectionsError));
+          if (restored.connectionsError) setMessage(restored.connectionsError);
+          setAccount(restored.account);
         }
       } catch {
         // The public landing page remains usable when the API is offline.
@@ -109,6 +92,7 @@ export function AccountWorkspace({
         : { email, password };
     try {
       setAccount(await authenticate(apiBaseUrl, mode, payload));
+      setConnectionsUnavailable(false);
       setPassword("");
     } catch (error) {
       setMessage(
@@ -130,9 +114,12 @@ export function AccountWorkspace({
       if (!response.ok)
         throw new Error("Connection controls could not refresh.");
       setConnections((await response.json()) as GoogleConnection[]);
+      setConnectionsUnavailable(false);
+      setMessage("");
     } catch (error) {
       // Do not leave older approval/read controls advertising a stale active account.
       setConnections([]);
+      setConnectionsUnavailable(true);
       throw error;
     }
   }, []);
@@ -168,6 +155,7 @@ export function AccountWorkspace({
         view={view}
         account={account}
         connections={connections}
+        connectionsUnavailable={connectionsUnavailable}
         message={message}
         onConnectionsChanged={refreshConnections}
         onSignOut={signOut}
