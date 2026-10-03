@@ -523,6 +523,12 @@ describe("voice status copy", () => {
 });
 
 describe("voice controls", () => {
+  it("explains the question limit without letting the browser cut off pasted text", () => {
+    const markup = renderToStaticMarkup(createElement(NavoXAssistant));
+    expect(markup).toContain("Questions can be up to 500 characters.");
+    expect(markup).toContain('aria-describedby="navox-question-limit"');
+    expect(markup).not.toMatch(/maxLength|maxlength/);
+  });
   it("renders the microphone and mute controls, with Stop hidden while idle", () => {
     const markup = renderToStaticMarkup(createElement(NavoXAssistant));
     expect(markup).toContain(

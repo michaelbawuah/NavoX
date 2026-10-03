@@ -10,7 +10,7 @@ from navox.ai.domains import Domain
 from navox.ai.factory import AIProviderNotConfigured
 from navox.ai.intent_plan import IntentPlanRequest, IntentPlanResponse, plan_intents
 from navox.ai.operational_service import OperationalRequest, OperationalResponse, advise
-from navox.ai.runtime import GatewayUnavailable
+from navox.ai.runtime import GatewayOutputLimit, GatewayUnavailable
 from navox.ai.sessions import create_session
 from navox.ai.speech_adapters import configured_speech_adapters
 from navox.ai.speech_service import (
@@ -136,6 +136,15 @@ async def assistant_conversation(
         )
     except (ContextDenied, ConnectorAccessDenied, PermissionError):
         raise HTTPException(403, "Conversation access is unavailable or changed") from None
+    except GatewayOutputLimit:
+        raise HTTPException(
+            422,
+            {
+                "code": "conversation_output_limit",
+                "message": "The answer reached its length limit. Please ask for a shorter answer.",
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from None
     except (AIProviderNotConfigured, GatewayUnavailable):
         raise HTTPException(503, "No qualified AI provider is available for this request") from None
     except ValueError:

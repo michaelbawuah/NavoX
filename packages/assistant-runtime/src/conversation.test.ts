@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  CONVERSATION_OUTPUT_LIMIT,
+  CONVERSATION_OUTPUT_LIMIT_MESSAGE,
   conversationReferences,
   parseConversationAnswer,
 } from "./conversation";
@@ -222,19 +224,68 @@ describe("ordinary conversation in the saved assistant", () => {
     expect(upstream.calls.today).toEqual([]);
   });
 
-  it("does not consume a named clarification or an unresolved prior-turn reference", async () => {
-    for (const slots of [
-      { entity: { kind: "PERSON", value: "Sarah", confidence: 1 } },
-      { reference: { kind: "RECENT_TURN", ordinal: 1, turn_id: null } },
-    ]) {
+  it.each([
+    {
+      question: "Could you explain photosynthesis in plain language?",
+      entity: { kind: "TOPIC", value: "photosynthesis", confidence: 1 },
+      answer: "Plants use sunlight to turn water and carbon dioxide into food.",
+    },
+    {
+      question:
+        "Rephrase this note more warmly: Jordan, please finish the draft.",
+      entity: { kind: "PERSON", value: "Jordan", confidence: 1 },
+      answer:
+        "Jordan, could you please finish the draft when you have a chance?",
+    },
+  ])(
+    "answers ordinary text about a named subject: $question",
+    async ({ question, entity, answer }) => {
       const { submit, upstream } = await setup();
       upstream.plan = intentEnvelope({
         version: 1,
-        intents: [{ ...CLARIFY_PLAN.intents[0], ...slots }],
+        intents: [{ ...CLARIFY_PLAN.intents[0], entity }],
       });
-      await submit("What should Sarah do next?");
-      expect(upstream.calls.conversation).toEqual([]);
-    }
+      upstream.conversation = envelope(answer);
+      const result = await submit(question);
+      expect(result.turn.state).toBe("READY");
+      expect(result.turn.presentation?.blocks).toEqual([
+        { kind: "ANSWER", text: answer },
+      ]);
+      expect(result.turn.decision).toMatchObject({
+        kind: "PRESENT",
+        capability_id: null,
+        target: null,
+        requires_approval: false,
+        action_state: "NONE",
+        action_id: null,
+      });
+      expect(upstream.calls.conversation).toEqual([
+        {
+          cookie: COOKIE,
+          utterance: question,
+          sessionId: NAVOX_SESSION_ID,
+          recentTurns: [],
+        },
+      ]);
+      expect(upstream.calls.email).toEqual([]);
+      expect(upstream.calls.actions).toEqual([]);
+      expect(result.turn.action_refs).toEqual([]);
+    },
+  );
+
+  it("does not consume an unresolved prior-turn reference", async () => {
+    const { submit, upstream } = await setup();
+    upstream.plan = intentEnvelope({
+      version: 1,
+      intents: [
+        {
+          ...CLARIFY_PLAN.intents[0],
+          reference: { kind: "RECENT_TURN", ordinal: 1, turn_id: null },
+        },
+      ],
+    });
+    await submit("Make that explanation simpler");
+    expect(upstream.calls.conversation).toEqual([]);
   });
 
   it("uses a bound follow-up only when its source is a verified conversation answer", async () => {
@@ -412,6 +463,65 @@ describe("ordinary conversation in the saved assistant", () => {
 });
 
 describe("conversation API transport", () => {
+  it("surfaces a verified output limit without accepting private upstream text", async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            detail: {
+              code: CONVERSATION_OUTPUT_LIMIT,
+              message: "private-upstream-output",
+            },
+          }),
+          { status: 422 },
+        ),
+    ) as unknown as FetchLike;
+    const upstream = createNavoxUpstream({
+      baseUrl: "https://navox.example/api/v1",
+      fetchImpl,
+    });
+    await expect(
+      upstream.answerConversation(COOKIE, {
+        sessionId: NAVOX_SESSION_ID,
+        utterance: "Explain it",
+        recentTurns: [],
+      }),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      reason: CONVERSATION_OUTPUT_LIMIT,
+      message: CONVERSATION_OUTPUT_LIMIT_MESSAGE,
+      retryable: false,
+    });
+  });
+
+  it("shows the answer limit as a limit, with no partial answer or clarification", async () => {
+    const { submit, upstream } = await setup();
+    upstream.conversationError = new AssistantError(
+      "invalid_request",
+      "private-upstream-output",
+      {
+        reason: CONVERSATION_OUTPUT_LIMIT,
+      },
+    );
+    const result = await submit();
+    expect(result.turn.state).toBe("UNAVAILABLE");
+    expect(result.turn.presentation?.blocks).toEqual([
+      {
+        kind: "NOTICE",
+        state: "UNAVAILABLE",
+        text: CONVERSATION_OUTPUT_LIMIT_MESSAGE,
+      },
+    ]);
+    expect(result.turn.action_refs).toEqual([]);
+    expect(upstream.calls.conversation).toHaveLength(1);
+  });
+
+  it("rejects an overlong answer explicitly instead of truncating it", () => {
+    expect(() =>
+      parseConversationAnswer(envelope("x".repeat(3001)), NAVOX_SESSION_ID),
+    ).toThrow(CONVERSATION_OUTPUT_LIMIT_MESSAGE);
+  });
+
   it("uses the existing authenticated session and exact bounded-context contract", async () => {
     const fetchImpl = vi.fn(
       async () => new Response(JSON.stringify(envelope())),

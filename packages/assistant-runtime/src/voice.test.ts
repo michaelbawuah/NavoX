@@ -6,6 +6,7 @@ import {
   createInactiveWakeWordAdapter,
   draftSpeechFor,
   initialVoiceState,
+  questionLimitNotice,
   reduceVoiceState,
   spokenTextForTurn,
   voiceModeAllowsSpeech,
@@ -45,6 +46,21 @@ function apply(
 }
 
 describe("click-to-talk voice state", () => {
+  it("accepts a complete question at the bound and rejects an oversized transcript", () => {
+    const listening = apply(initialVoiceState(), { type: "REQUEST_LISTENING" });
+    const maximum = "x".repeat(500);
+    const accepted = apply(listening, { type: "TRANSCRIPT", text: maximum });
+    expect(accepted.transcript).toBe(maximum);
+    expect(accepted.state).toBe("TRANSCRIBING");
+    const rejected = apply(listening, {
+      type: "TRANSCRIPT",
+      text: `${maximum}y`,
+    });
+    expect(rejected.transcript).toBeNull();
+    expect(rejected.state).toBe("IDLE");
+    expect(rejected.error).toBe(questionLimitNotice(`${maximum}y`));
+    expect(rejected.error).toContain("500 characters");
+  });
   it("resumes a stopped session only on a new local wake event", () => {
     const stopped = reduceVoiceState(initialVoiceState(), { type: "STOP" });
     expect(reduceVoiceState(stopped, { type: "SUBMITTED" }).state).toBe(

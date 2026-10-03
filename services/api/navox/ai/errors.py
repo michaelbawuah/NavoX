@@ -12,6 +12,7 @@ AI_PROVIDER_DIAGNOSTIC_CODES = frozenset(
         "timeout",
         "transport_error",
         "incomplete_response",
+        "output_limit",
         "invalid_response",
         "provider_error",
     }

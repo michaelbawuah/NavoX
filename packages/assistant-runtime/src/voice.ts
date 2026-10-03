@@ -59,6 +59,13 @@ export type VoiceEvent =
 
 const UNSUPPORTED_REASON = "This browser cannot capture microphone input.";
 
+/** Reject a whole question instead of submitting an altered prefix. */
+export function questionLimitNotice(text: string): string | null {
+  return text.trim().length > LIMITS.maxQuestionLength
+    ? `That question is longer than ${LIMITS.maxQuestionLength} characters. Shorten it before sending.`
+    : null;
+}
+
 /** A stop is terminal for whatever the operator was hearing or saying. */
 function isSettled(state: VoiceSessionState): boolean {
   return state.state === "STOPPED" || state.state === "UNSUPPORTED";
@@ -151,7 +158,15 @@ export function reduceVoiceState(
       // A transcript that arrives after Stop or an unsupported fallback is
       // stale input and must never open a new turn.
       if (isSettled(state)) return state;
-      const text = clampText(event.text.trim(), LIMITS.maxQuestionLength);
+      const text = event.text.trim();
+      const limitNotice = questionLimitNotice(text);
+      if (limitNotice)
+        return {
+          ...state,
+          state: restingState(state),
+          transcript: null,
+          error: limitNotice,
+        };
       if (!text) return { ...state, state: "IDLE", transcript: null };
       return { ...state, state: "TRANSCRIBING", transcript: text, error: null };
     }

@@ -2,6 +2,7 @@
 
 import {
   initialVoiceState,
+  questionLimitNotice,
   type VoiceSessionState,
 } from "@navox/assistant-runtime/voice";
 import type {
@@ -943,6 +944,12 @@ export function NavoXAssistant() {
     ) => {
       const trimmed = question.trim();
       if (!sessionId || !trimmed || busy) return;
+      const limitNotice = questionLimitNotice(trimmed);
+      if (limitNotice) {
+        setNotice(limitNotice);
+        if (modality === "VOICE") voiceSession().turnFailed(limitNotice);
+        return;
+      }
       setNotice(null);
       if (modality === "VOICE") {
         // Open the turn before the request so its answer carries this token.
@@ -1198,6 +1205,7 @@ export function NavoXAssistant() {
   );
 
   const status = assistantVoiceLabel(voice.state);
+  const questionLimit = questionLimitNotice(text);
 
   return (
     <section className={styles.assistant} aria-label="NavoX assistant">
@@ -1311,7 +1319,8 @@ export function NavoXAssistant() {
           <input
             type="text"
             value={text}
-            maxLength={500}
+            aria-describedby="navox-question-limit"
+            aria-invalid={questionLimit ? true : undefined}
             placeholder="Ask NavoX…"
             onChange={(event) => setText(event.target.value)}
             disabled={connecting || !sessionId}
@@ -1319,7 +1328,13 @@ export function NavoXAssistant() {
         </label>
         <button
           type="submit"
-          disabled={connecting || !sessionId || busy || !text.trim()}
+          disabled={
+            connecting ||
+            !sessionId ||
+            busy ||
+            !text.trim() ||
+            Boolean(questionLimit)
+          }
         >
           {busy ? "Checking…" : "Send"}
         </button>
@@ -1365,6 +1380,13 @@ export function NavoXAssistant() {
           </button>
         )}
       </form>
+      <p
+        id="navox-question-limit"
+        className={questionLimit ? styles.error : styles.status}
+        role={questionLimit ? "alert" : undefined}
+      >
+        {questionLimit ?? "Questions can be up to 500 characters."}
+      </p>
 
       <div className={styles.voiceTools}>
         <button

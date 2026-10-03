@@ -30,6 +30,7 @@ class ErrorCode(StrEnum):
     UNAVAILABLE = "unavailable"
     INVALID_REQUEST = "invalid_request"
     INVALID_RESPONSE = "invalid_response"
+    OUTPUT_LIMIT = "output_limit"
     REFUSAL = "refusal"
     UNKNOWN = "unknown"
 

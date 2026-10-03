@@ -8,6 +8,10 @@ export const CONVERSATION_LIMITS = {
   maxAnswerLength: 3000,
 } as const;
 
+export const CONVERSATION_OUTPUT_LIMIT = "conversation_output_limit";
+export const CONVERSATION_OUTPUT_LIMIT_MESSAGE =
+  "The answer reached its length limit. Please ask for a shorter answer.";
+
 export interface ConversationReference {
   task_id: string;
   question: string;
@@ -57,6 +61,18 @@ export function parseConversationAnswer(
   sessionId: string,
 ): ConversationAnswer {
   if (!isRecord(payload)) invalid();
+  if (
+    typeof payload.answer === "string" &&
+    payload.answer.length > CONVERSATION_LIMITS.maxAnswerLength
+  ) {
+    throw new AssistantError(
+      "invalid_request",
+      CONVERSATION_OUTPUT_LIMIT_MESSAGE,
+      {
+        reason: CONVERSATION_OUTPUT_LIMIT,
+      },
+    );
+  }
   if (
     Object.keys(payload).length !== ENVELOPE_FIELDS.length ||
     Object.keys(payload).some(

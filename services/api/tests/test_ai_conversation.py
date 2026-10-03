@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 from sqlalchemy import select
 from test_ai_evaluation import model_for
 from test_ai_intent_plan import intent_env as intent_env
@@ -21,8 +21,18 @@ from navox.ai.conversation import (
     ConversationAnswer,
     ConversationRequest,
 )
-from navox.ai.foundation.contracts import Profile, Provider, ProviderGrant, Sensitivity, TaskType
+from navox.ai.foundation.adapter import ErrorCode
+from navox.ai.foundation.contracts import (
+    FinishReason,
+    Profile,
+    Provider,
+    ProviderGrant,
+    Sensitivity,
+    TaskType,
+    Usage,
+)
 from navox.ai.foundation.persistence import RegistryStore, canonical, digest, model_key
+from navox.ai.providers import AdapterFailure, OpenAIAdapter
 from navox.ai.routing import EvaluationEvidence, PolicyRules, RoutingTaskScope
 from navox.ai.runtime import GatewayRuntime
 from navox.ai.store import GatewayStore
@@ -346,3 +356,65 @@ async def test_session_revoked_during_answer_is_rechecked_before_return(intent_e
     assert response.status_code == 503 and len(adapter.calls) == 1
     async with env.factory() as database:
         assert await database.scalar(select(AssistantTurn)) is None
+
+
+@pytest.mark.parametrize(
+    "reason,expected",
+    [("max_output_tokens", ErrorCode.OUTPUT_LIMIT), ("content_filter", ErrorCode.INVALID_RESPONSE)],
+)
+def test_openai_incomplete_output_has_only_a_fixed_limit_classification(reason, expected):
+    adapter = OpenAIAdapter(api_key=SecretStr("offline-fixture"), models=())
+    with pytest.raises(AdapterFailure) as caught:
+        adapter.normalize_response(
+            {
+                "status": "incomplete",
+                "incomplete_details": {"reason": reason, "private": "private-output-text"},
+                "output": [{"private": "private-output-text"}],
+            }
+        )
+    assert caught.value.detail.code == expected
+    assert "private-output-text" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", ["characters", "usage", "finish", "incomplete"])
+async def test_output_limit_is_explicit_without_truncation_retry_or_saved_answer(intent_env, limit):
+    env = intent_env
+    adapter = await install_conversation_runtime(
+        env, output=json.dumps({"answer": "x" * 3001}) if limit == "characters" else None
+    )
+    execute = adapter.execute
+
+    async def limited(request):
+        result = await execute(request)
+        if limit == "incomplete":
+            raise AdapterFailure(ErrorCode.OUTPUT_LIMIT)
+        if limit == "usage":
+            return result.model_copy(update={"usage": Usage(input_tokens=10, output_tokens=1001)})
+        if limit == "finish":
+            return result.model_copy(update={"finish_reason": FinishReason.LENGTH})
+        return result
+
+    adapter.execute = limited
+    session_id = await new_conversation(env)
+    response = await env.client.post(
+        "/api/v1/ai/assistant/conversation",
+        json={"session_id": session_id, "utterance": "Explain a concept."},
+    )
+    assert response.status_code == 422, response.text
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "detail": {
+            "code": "conversation_output_limit",
+            "message": "The answer reached its length limit. Please ask for a shorter answer.",
+        }
+    }
+    assert len(adapter.calls) == 1
+    async with env.factory() as database:
+        assert await database.scalar(select(AssistantTurn)) is None
+        run = await database.scalar(select(AITaskRun))
+        assert run.status == "FAILED" and run.error_code == "output_limit"
+        assert "answer" not in run.usage
+        if limit == "usage":
+            assert run.usage["output_tokens"] == 1001
+            assert run.estimated_cost == Decimal("0.0002012")

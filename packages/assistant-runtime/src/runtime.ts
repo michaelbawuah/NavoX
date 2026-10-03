@@ -30,6 +30,8 @@ import {
 } from "./capabilities";
 import { answerNextClass, parseClassSourceSnapshot } from "./class-meetings";
 import {
+  CONVERSATION_OUTPUT_LIMIT,
+  CONVERSATION_OUTPUT_LIMIT_MESSAGE,
   conversationReferences,
   parseConversationAnswer,
 } from "./conversation";
@@ -739,6 +741,12 @@ export function createAssistantRuntime(
     const failure = isAssistantError(error) ? error : toAssistantError(error);
     const result = planFailure(failure);
     if (failure.reason === "conversation_scope_changed") return result;
+    if (failure.reason === CONVERSATION_OUTPUT_LIMIT) {
+      return {
+        ...result,
+        blocks: noticeBlocks(result.state, CONVERSATION_OUTPUT_LIMIT_MESSAGE),
+      };
+    }
     return {
       ...result,
       blocks: noticeBlocks(
@@ -1308,11 +1316,13 @@ export function createAssistantRuntime(
         conversationReferences(input.turns, input.record.id).some(
           (reference) => reference.task_id === verifiedReference.task_id,
         ));
+    // Named subjects copied from the question are still ordinary text, not
+    // connected context or capability authority. Only the owning read route
+    // can retrieve live facts, and connected follow-ups stay excluded above.
     if (
       plan.intents.length === 1 &&
       one.kind === "assistant.clarify" &&
       one.question === input.request.text &&
-      one.entity.kind === "NONE" &&
       conversationReferenceAllowed &&
       one.capability_id === null
     ) {

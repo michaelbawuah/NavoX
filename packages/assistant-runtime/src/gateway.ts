@@ -1,5 +1,9 @@
 import type { AssistantMeetingBriefing } from "@navox/contracts";
-import type { ConversationReference } from "./conversation";
+import {
+  CONVERSATION_OUTPUT_LIMIT,
+  CONVERSATION_OUTPUT_LIMIT_MESSAGE,
+  type ConversationReference,
+} from "./conversation";
 import { AssistantError, isAssistantError, toAssistantError } from "./errors";
 import { LIMITS } from "./limits";
 import { parseMeetingPrep } from "./meeting";
@@ -404,6 +408,25 @@ export function createNavoxUpstream(
         },
       });
       if (!response.ok) {
+        if (response.status === 422) {
+          let failure: unknown;
+          try {
+            failure = await response.json();
+          } catch {
+            // An unreadable error does not become a trusted limit classification.
+          }
+          if (
+            isRecord(failure) &&
+            isRecord(failure.detail) &&
+            failure.detail.code === CONVERSATION_OUTPUT_LIMIT
+          ) {
+            throw new AssistantError(
+              "invalid_request",
+              CONVERSATION_OUTPUT_LIMIT_MESSAGE,
+              { reason: CONVERSATION_OUTPUT_LIMIT },
+            );
+          }
+        }
         if (response.status === 404) {
           throw new AssistantError(
             "unsupported",
