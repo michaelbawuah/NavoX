@@ -145,6 +145,17 @@ export function SubscriptionsDashboard() {
       }),
     [items],
   );
+  const upcoming = useMemo(
+    () =>
+      items
+        .filter((item) => subscriptionInFilter(item, "Upcoming"))
+        .sort(
+          (left, right) =>
+            Date.parse(left.trial_ends_at ?? left.next_renewal_at ?? "") -
+            Date.parse(right.trial_ends_at ?? right.next_renewal_at ?? ""),
+        ),
+    [items],
+  );
   const pageCount = Math.max(1, Math.ceil(displayed.length / pageSize));
   const currentPage = Math.min(page, pageCount);
   const visible = displayed.slice(
@@ -433,15 +444,9 @@ export function SubscriptionsDashboard() {
     <div className={styles.dashboard}>
       <header className={styles.hero}>
         <div>
-          <p className={styles.eyebrow}>Your subscriptions</p>
-          <h1>
-            Subscriptions.
-            <br />
-            <span>Know what comes next.</span>
-          </h1>
+          <h1>Subscriptions</h1>
           <p className={styles.heroCopy}>
-            A clear record of recurring costs, upcoming renewals and the
-            decisions that stay yours.
+            See your recurring costs and what renews next.
           </p>
         </div>
         <button
@@ -474,96 +479,155 @@ export function SubscriptionsDashboard() {
           {notice}
         </p>
       )}
-      <SubscriptionsAsk
-        key={queryVersion}
-        apiBase={apiBase}
-        onOpen={(item) => void openDetails(item)}
-      />
-      <section
-        className={styles.costPanel}
-        aria-labelledby="known-cost-heading"
-      >
-        <div className={styles.sectionHeading}>
-          <div>
-            <p className={styles.eyebrow}>Your recurring picture</p>
-            <h2 id="known-cost-heading">Known recurring cost</h2>
+      <div className={styles.overview}>
+        <section
+          className={styles.costPanel}
+          aria-labelledby="known-cost-heading"
+        >
+          <div className={styles.sectionHeading}>
+            <div>
+              <h2 id="known-cost-heading">Known recurring cost</h2>
+            </div>
+            <span className={styles.coverage}>Coverage incomplete</span>
           </div>
-          <span className={styles.coverage}>Coverage incomplete</span>
-        </div>
-        {loading && !summary ? (
-          <p role="status" className={styles.muted}>
-            Loading known costs…
-          </p>
-        ) : summary && summary.currency_totals.length > 0 ? (
-          <div className={styles.currencies}>
-            {summary.currency_totals.map((total) => (
-              <article key={total.currency}>
-                <span className={styles.currencyCode}>{total.currency}</span>
-                <p className={styles.total}>
-                  ~{subscriptionMoney(total.monthly_equivalent, total.currency)}
-                  <small>/ month equivalent</small>
-                </p>
-                <p className={styles.yearly}>
-                  ~{subscriptionMoney(total.yearly_equivalent, total.currency)}{" "}
-                  / year equivalent
-                </p>
-                <small>
-                  {total.obligation_count} known recurring subscription
-                  {total.obligation_count === 1 ? "" : "s"}
-                </small>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <p className={styles.muted}>
-            {summary
-              ? "Add a known price to see your recurring cost equivalents."
-              : "Your recurring totals are unavailable."}
-          </p>
-        )}
-        <div className={styles.costFootnote}>
-          <p>
-            Based on known recurring subscriptions. Actual billing intervals
-            stay unchanged; currencies are kept separate.
-          </p>
-          <span>{summary?.unknown_cost_count ?? "—"} with unknown cost</span>
-        </div>
-        {prevented && (
-          <div className={styles.costFootnote}>
-            <p>
-              <strong>
-                {prevented.count} unwanted renewal
-                {prevented.count === 1 ? "" : "s"} prevented.
-              </strong>{" "}
-              {prevented.explanation}
+          {loading && !summary ? (
+            <p role="status" className={styles.muted}>
+              Loading known costs…
             </p>
-            <span>
-              {prevented.currency_totals
-                .map((total) =>
-                  subscriptionMoney(total.renewal_amount, total.currency),
-                )
-                .join(" · ") || "No verified renewal amount yet"}
-            </span>
+          ) : summary && summary.currency_totals.length > 0 ? (
+            <div className={styles.currencies}>
+              {summary.currency_totals.map((total) => (
+                <article key={total.currency}>
+                  <span className={styles.currencyCode}>{total.currency}</span>
+                  <p className={styles.total}>
+                    ~
+                    {subscriptionMoney(
+                      total.monthly_equivalent,
+                      total.currency,
+                    )}
+                    <small>/ month equivalent</small>
+                  </p>
+                  <p className={styles.yearly}>
+                    ~
+                    {subscriptionMoney(total.yearly_equivalent, total.currency)}{" "}
+                    / year equivalent
+                  </p>
+                  <small>
+                    {total.obligation_count} known recurring subscription
+                    {total.obligation_count === 1 ? "" : "s"}
+                  </small>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className={styles.muted}>
+              {summary
+                ? "Add a known price to see your recurring cost equivalents."
+                : "Your recurring totals are unavailable."}
+            </p>
+          )}
+          <p className={styles.muted}>
+            {summary?.unknown_cost_count ?? "—"} with unknown cost · Currencies
+            stay separate.
+          </p>
+          <details className={styles.calculationDetails}>
+            <summary>How costs are calculated</summary>
+            <p>
+              Based on known recurring subscriptions. Actual billing intervals
+              stay unchanged; currencies are kept separate.
+            </p>
+          </details>
+          {prevented && (
+            <div className={styles.costFootnote}>
+              <p>
+                <strong>
+                  {prevented.count} unwanted renewal
+                  {prevented.count === 1 ? "" : "s"} prevented.
+                </strong>{" "}
+                {prevented.explanation}
+              </p>
+              <span>
+                {prevented.currency_totals
+                  .map((total) =>
+                    subscriptionMoney(total.renewal_amount, total.currency),
+                  )
+                  .join(" · ") || "No verified renewal amount yet"}
+              </span>
+            </div>
+          )}
+        </section>
+        <section
+          className={styles.renewalsPanel}
+          aria-labelledby="subscription-renewals-heading"
+        >
+          <div className={styles.sectionHeading}>
+            <h2 id="subscription-renewals-heading">Renewals &amp; trials</h2>
+            <span className={styles.muted}>Due &amp; next 30 days</span>
           </div>
-        )}
-      </section>
+          {loading && items.length === 0 ? (
+            <p className={styles.muted} role="status">
+              Loading renewal dates…
+            </p>
+          ) : upcoming.length ? (
+            <ul className={styles.renewalsList}>
+              {upcoming.slice(0, 3).map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    className={styles.renewalButton}
+                    onClick={() => void openDetails(item)}
+                  >
+                    <span>
+                      <strong>{item.name}</strong>
+                      <span>
+                        {item.trial_ends_at ? "Trial end" : "Renewal"}{" "}
+                        {subscriptionDate(
+                          item.trial_ends_at ?? item.next_renewal_at,
+                        )}
+                      </span>
+                    </span>
+                    <span>
+                      {subscriptionMoney(
+                        item.billing_amount,
+                        item.billing_currency,
+                      )}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className={styles.muted}>
+              No known renewal or trial dates in this window.
+            </p>
+          )}
+          <button
+            className={styles.viewRenewals}
+            type="button"
+            onClick={() => {
+              setFilter("Upcoming");
+              setPage(1);
+              document
+                .getElementById("subscription-registry-heading")
+                ?.scrollIntoView({ block: "start" });
+            }}
+          >
+            View all upcoming →
+          </button>
+        </section>
+      </div>
       <section
         className={styles.attentionPanel}
         aria-labelledby="subscription-attention-heading"
       >
         <div className={styles.sectionHeading}>
           <div>
-            <p className={styles.eyebrow}>Decide with context</p>
             <h2 id="subscription-attention-heading">
               Needs attention <span>{attention.length}</span>
             </h2>
           </div>
           <a href="/">Open Today ↗</a>
         </div>
-        <p className={styles.muted}>
-          Trials, renewals, price changes and cancellation issues appear here
-          and in your daily attention.
-        </p>
         {attention.length > 0 ? (
           <div className={styles.attentionGrid}>
             {attention.slice(0, 4).map(({ item, reasons }) => (
@@ -603,9 +667,14 @@ export function SubscriptionsDashboard() {
       >
         <div className={styles.sectionHeading}>
           <div>
-            <p className={styles.eyebrow}>Your subscriptions</p>
             <h2 id="subscription-registry-heading">
-              Known recurring subscriptions
+              Your subscriptions{" "}
+              <span>
+                {
+                  items.filter((item) => subscriptionInFilter(item, "All"))
+                    .length
+                }
+              </span>
             </h2>
           </div>
           <button type="button" disabled={loading} onClick={() => void load()}>
@@ -735,52 +804,59 @@ export function SubscriptionsDashboard() {
                     >
                       Review
                     </button>
-                    {candidate ? (
-                      <>
-                        <button
-                          type="button"
-                          disabled={pending}
-                          onClick={() => void review(item, "CONFIRM")}
-                        >
-                          This is mine
-                        </button>
-                        <button
-                          type="button"
-                          disabled={pending}
-                          onClick={() => void review(item, "NOT_MINE")}
-                        >
-                          Not my subscription
-                        </button>
-                      </>
-                    ) : !ended ? (
-                      <>
-                        <button
-                          type="button"
-                          disabled={pending || cancellationPending}
-                          onClick={() => void review(item, "KEEP")}
-                        >
-                          Keep
-                        </button>
-                        <button
-                          type="button"
-                          disabled={pending}
-                          onClick={() => void startCancellation(item)}
-                        >
-                          {pendingId === item.id
-                            ? "Working…"
-                            : cancellationPending
-                              ? "Check cancellation"
-                              : "Cancel subscription"}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={pending}
-                          onClick={() => void review(item, "SNOOZE")}
-                        >
-                          Review in 7 days
-                        </button>
-                      </>
-                    ) : null}
+                    {!ended && (
+                      <details className={styles.moreActions}>
+                        <summary>More actions</summary>
+                        <div className={styles.rowMenu}>
+                          {candidate ? (
+                            <>
+                              <button
+                                type="button"
+                                disabled={pending}
+                                onClick={() => void review(item, "CONFIRM")}
+                              >
+                                This is mine
+                              </button>
+                              <button
+                                type="button"
+                                disabled={pending}
+                                onClick={() => void review(item, "NOT_MINE")}
+                              >
+                                Not my subscription
+                              </button>
+                            </>
+                          ) : !ended ? (
+                            <>
+                              <button
+                                type="button"
+                                disabled={pending || cancellationPending}
+                                onClick={() => void review(item, "KEEP")}
+                              >
+                                Keep
+                              </button>
+                              <button
+                                type="button"
+                                disabled={pending}
+                                onClick={() => void startCancellation(item)}
+                              >
+                                {pendingId === item.id
+                                  ? "Working…"
+                                  : cancellationPending
+                                    ? "Check cancellation"
+                                    : "Cancel subscription"}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={pending}
+                                onClick={() => void review(item, "SNOOZE")}
+                              >
+                                Review in 7 days
+                              </button>
+                            </>
+                          ) : null}
+                        </div>
+                      </details>
+                    )}
                   </div>
                 </li>
               );
@@ -809,6 +885,11 @@ export function SubscriptionsDashboard() {
           </nav>
         )}
       </section>
+      <SubscriptionsAsk
+        key={queryVersion}
+        apiBase={apiBase}
+        onOpen={(item) => void openDetails(item)}
+      />
       <footer className={styles.footer}>
         <span>Evidence first. Decisions yours.</span>
         <p>

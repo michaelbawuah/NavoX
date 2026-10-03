@@ -58,6 +58,59 @@ const turn: AssistantTurnView = {
 };
 
 describe("assistant transcript rendering", () => {
+  it("keeps the selected email workspace beside its response without duplicate actions", () => {
+    const emailTurn: AssistantTurnView = {
+      ...turn,
+      decision: {
+        kind: "PRESENT",
+        capability_id: "email.search",
+        target: "knowledge.search",
+        reason: "email.search.found_one",
+        requires_approval: false,
+        action_state: "NONE",
+        action_id: null,
+        response_state: "READY",
+      },
+      presentation: {
+        presentation: "TEXT",
+        speak: false,
+        speech_text: null,
+        delivery: "AUTOMATIC",
+        blocks: [
+          { kind: "ANSWER", text: "I found the message." },
+          {
+            kind: "ITEM",
+            item: {
+              id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+              type: "EMAIL",
+              title: "Project update",
+              description: null,
+              status: "CURRENT",
+              due_at: null,
+              band: "CONNECTED",
+              sources: [],
+            },
+          },
+        ],
+      },
+    };
+    const markup = renderToStaticMarkup(
+      createElement(AssistantTurnViewBlock, {
+        turn: emailTurn,
+        sessionId: "66666666-6666-4666-8666-666666666666",
+      }),
+    );
+    expect(markup).toContain('aria-label="Email workspace"');
+    expect(markup).toContain("I found the message.");
+    expect(markup.match(/aria-label="Email reply action"/g)).toHaveLength(1);
+    expect(markup).not.toContain("Approve and send");
+
+    const missingSession = renderToStaticMarkup(
+      createElement(AssistantTurnViewBlock, { turn: emailTurn }),
+    );
+    expect(missingSession).not.toContain('aria-label="Email workspace"');
+  });
+
   it("renders class navigation through the same-origin authorization route", () => {
     const markup = renderToStaticMarkup(
       createElement(AssistantBlockView, {
@@ -523,6 +576,16 @@ describe("voice status copy", () => {
 });
 
 describe("voice controls", () => {
+  it("uses one composer in the shared workspace with voice settings collapsed", () => {
+    const markup = renderToStaticMarkup(createElement(NavoXAssistant));
+    expect(markup).toContain("What can I help you with?");
+    expect(markup.match(/aria-label="Ask NavoX"/g)).toHaveLength(1);
+    expect(markup).toContain('href="/inbox"');
+    expect(markup).toContain('href="/planner"');
+    expect(markup).toMatch(/<details[^>]*><summary>Voice options<\/summary>/);
+    expect(markup).not.toMatch(/<details[^>]*open[^>]*>/);
+  });
+
   it("explains the question limit without letting the browser cut off pasted text", () => {
     const markup = renderToStaticMarkup(createElement(NavoXAssistant));
     expect(markup).toContain("Questions can be up to 500 characters.");

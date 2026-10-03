@@ -676,14 +676,14 @@ export function WorkspaceReadout({
           : "Your day at a glance"}
       </p>
       <div className={styles.timeReadout}>
-        <span className={styles.clockLabel}>Your local time</span>
+        <span className={styles.clockLabel}>Workspace time</span>
         <time dateTime={now?.toISOString()}>
           {now
             ? new Intl.DateTimeFormat("en-US", {
                 ...clockOptions,
                 second: "2-digit",
               }).format(now)
-            : "Loading local time…"}
+            : "Loading time…"}
         </time>
         <span className={styles.timezone}>
           {timezoneAbbreviation(timezone, now)} ·{" "}
