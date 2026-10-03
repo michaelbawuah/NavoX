@@ -9,6 +9,47 @@ export interface Account {
   };
 }
 
+export interface GoogleConnection {
+  id: string;
+  provider: "google";
+  external_email: string | null;
+  status: string;
+  granted_scopes: string[];
+  last_checked_at: string | null;
+  last_error: string | null;
+}
+
+export async function restoreAccountAccess(apiBaseUrl: string): Promise<{
+  account: Account | null;
+  connections: GoogleConnection[];
+  connectionsError: string;
+}> {
+  const response = await fetch(`${apiBaseUrl}/auth/me`, {
+    credentials: "include",
+  });
+  if (!response.ok)
+    return { account: null, connections: [], connectionsError: "" };
+  const account = (await response.json()) as Account;
+  try {
+    const connectionResponse = await fetch(`${apiBaseUrl}/connections/google`, {
+      credentials: "include",
+    });
+    if (!connectionResponse.ok) throw new Error("Connections unavailable");
+    return {
+      account,
+      connections: (await connectionResponse.json()) as GoogleConnection[],
+      connectionsError: "",
+    };
+  } catch {
+    return {
+      account,
+      connections: [],
+      connectionsError:
+        "Connected apps could not be loaded. Open Connections to retry.",
+    };
+  }
+}
+
 export async function authenticate(
   apiBaseUrl: string,
   mode: "register" | "login",

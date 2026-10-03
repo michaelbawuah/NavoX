@@ -25,7 +25,6 @@ import {
   NavoXCard,
   NavoXEmptyState,
   NavoXErrorState,
-  NavoXNavigation,
   NavoXSkeleton,
   NavoXSourceList,
   NavoXStatus,
@@ -35,6 +34,7 @@ import { NewsStoryImage } from "./news-story-image";
 import styles from "./news-workspace.module.css";
 import { RelatedStories } from "./related-stories";
 import { StoryIntelligence } from "./story-intelligence";
+import { WorkspaceShell } from "./workspace-shell";
 
 const categories: [NewsCategory, string][] = [
   ["world", "World"],
@@ -47,23 +47,11 @@ type Feed = NewsFeed;
 
 function NewsFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div className={styles.workspace}>
-      <a className={styles.skipLink} href="#news-main">
-        Skip to news
-      </a>
-      <header className={styles.topbar}>
-        <a href="/" className={styles.brand} aria-label="NavoX home">
-          NavoX<span aria-hidden="true">✦</span>
-        </a>
-        <NavoXNavigation current="News" />
-      </header>
-      <main id="news-main" className={styles.main}>
-        {children}
-      </main>
-      <footer className={styles.footer}>
-        NavoX · A clearer view of what’s happening.
-      </footer>
-    </div>
+    <WorkspaceShell current="News">
+      <section className={styles.workspace} aria-label="News workspace">
+        <div className={styles.main}>{children}</div>
+      </section>
+    </WorkspaceShell>
   );
 }
 
@@ -333,18 +321,15 @@ export function NewsWorkspace() {
     <NewsFrame>
       <header className={styles.newsHeader}>
         <div>
-          <p className={styles.eyebrow}>THE NEWSROOM</p>
-          <h1>Your world, in focus.</h1>
-          <p>
-            Explore the headlines. Understand the story. Go straight to the
-            source.
-          </p>
+          <h1>News</h1>
+          <p>Stories from your sources, with the context to understand them.</p>
         </div>
-        <a className={styles.askNews} href="/navox">
-          Ask NavoX <span aria-hidden="true">✦</span>
-        </a>
+        {availability?.feed && !signedOut && (
+          <a className={styles.settingsLink} href="#news-sources">
+            Manage sources
+          </a>
+        )}
       </header>
-      {availability?.chat && !signedOut && <NewsChat />}
       {loading && <NavoXSkeleton />}
       {!loading && signedOut ? (
         <NavoXEmptyState title="Your news starts here.">
@@ -362,7 +347,12 @@ export function NewsWorkspace() {
             Current headlines aren’t available right now. Please try again
             later.
           </p>
-          <a href="/">Back to Today →</a>
+          <button
+            type="button"
+            onClick={() => setSelection((value) => ({ ...value }))}
+          >
+            Try again
+          </button>
         </NavoXEmptyState>
       ) : null}
       {availability?.feed && !signedOut && !error && (
@@ -414,8 +404,20 @@ export function NewsWorkspace() {
                 <p>
                   {feed === "saved"
                     ? "Save any story and you’ll find it here."
-                    : "No current reports are available in this category. Please try again later."}
+                    : sources.some((source) => source.status === "active")
+                      ? "Your sources have no current stories in this view. Try another category or refresh a source."
+                      : "Choose a news source to start your feed."}
                 </p>
+                {feed === "saved" ? (
+                  <button
+                    type="button"
+                    onClick={() => setSelection({ feed: "top" })}
+                  >
+                    Browse latest stories
+                  </button>
+                ) : (
+                  <a href="#news-sources">Choose news sources →</a>
+                )}
               </NavoXEmptyState>
             ))}
           <section className={styles.settings} aria-label="Your news settings">
@@ -476,7 +478,7 @@ export function NewsWorkspace() {
                 </form>
               )}
             </details>
-            <details>
+            <details id="news-sources" open={!loading && stories.length === 0}>
               <summary>Your sources</summary>
               <p>Add sources to start receiving their reports.</p>
               {sources.length === 0 && <p>No sources are available yet.</p>}
@@ -524,6 +526,11 @@ export function NewsWorkspace() {
             </details>
           </section>
         </>
+      )}
+      {availability?.chat && !signedOut && (
+        <div className={styles.newsQuestions}>
+          <NewsChat />
+        </div>
       )}
     </NewsFrame>
   );

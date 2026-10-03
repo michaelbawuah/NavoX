@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   type FormEvent,
   useCallback,
@@ -9,10 +10,8 @@ import {
   useState,
 } from "react";
 import type { TodaySource } from "../lib/source-references";
-import {
-  consumerTodaySections,
-  todayConsumerSections,
-} from "../lib/today-sections";
+import { consumerTodaySections } from "../lib/today-sections";
+import { AISettings } from "./ai-settings";
 import { ApprovalPanel } from "./approval-panel";
 import { CommunicationDrafts } from "./communication-drafts";
 import { ConnectionsPanel } from "./connections-panel";
@@ -22,12 +21,12 @@ import {
   IntelligenceFeedback,
   WorkspaceContext,
 } from "./intelligence-controls";
-import { NavoXNavigation } from "./navox-ui";
 import { OperationalAssistance } from "./operational-assistance";
 import { PagedList } from "./paged-list";
 import { ProactivePanel } from "./proactive-panel";
 import { SourceReferences } from "./source-references";
 import styles from "./today-workspace.module.css";
+import { WorkspaceShell } from "./workspace-shell";
 
 interface Account {
   id: string;
@@ -67,6 +66,27 @@ interface TodayItem {
   factors?: Record<string, number>;
   suggested_capability?: string | null;
   sources: TodaySource[];
+}
+
+/** Today keeps raw connector resource types; Gmail is not a knowledge EMAIL row. */
+export function workspaceItemGroups<
+  T extends Pick<TodayItem, "type" | "sources">,
+>(items: T[]): { inbox: T[]; planner: T[] } {
+  const isEmail = (item: T) =>
+    item.sources.some(
+      (source) =>
+        (source.provider === "google" &&
+          source.source_type === "gmail_message") ||
+        ["EMAIL", "EMAIL_THREAD"].includes(source.source_type),
+    );
+  return {
+    inbox: items.filter(isEmail),
+    planner: items.filter(
+      (item) =>
+        item.type !== "renewal" &&
+        (!isEmail(item) || ["meeting", "deadline"].includes(item.type)),
+    ),
+  };
 }
 
 interface TodayPayload {
@@ -130,9 +150,18 @@ interface PlanDetail extends PlanSummary {
   } | null;
 }
 
+export type TodayWorkspaceView =
+  | "today"
+  | "inbox"
+  | "planner"
+  | "connections"
+  | "settings";
+
 interface TodayWorkspaceProps {
+  view?: TodayWorkspaceView;
   account: Account;
   connections: GoogleConnection[];
+  connectionsUnavailable?: boolean;
   message: string;
   onConnectionsChanged: () => Promise<void>;
   onSignOut: () => Promise<void>;
@@ -159,7 +188,7 @@ function isTerminalPlan(status: string): boolean {
 }
 
 function dueLabel(value: string | null, timezone: string): string {
-  if (value === null) {
+  if (value === null || !Number.isFinite(Date.parse(value))) {
     return "No due date";
   }
   return new Intl.DateTimeFormat(undefined, {
@@ -187,12 +216,16 @@ function greeting(timezone: string): string {
 }
 
 export function TodayWorkspace({
+  view = "today",
   account,
   connections,
+  connectionsUnavailable = false,
   message,
   onConnectionsChanged,
   onSignOut,
 }: TodayWorkspaceProps) {
+  const needsConnectionSetup =
+    connections.length === 0 && !connectionsUnavailable;
   const [showSetAside, setShowSetAside] = useState(false);
   const [timezone, setTimezone] = useState(account.timezone ?? "UTC");
   const [today, setToday] = useState<TodayPayload | null>(null);
@@ -297,6 +330,17 @@ export function TodayWorkspace({
     void refreshPlans();
     void refreshAgentState();
   }, [refreshAgentState, refreshPlans]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(window.location.hash.slice(1));
+      if (!target) return;
+      target.tabIndex = -1;
+      target.scrollIntoView();
+      target.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
 
   useEffect(() => {
     if (activePlan === null || isTerminalPlan(activePlan.status)) {
@@ -556,99 +600,159 @@ export function TodayWorkspace({
     );
   }
 
-  function renderSection(label: string, items: TodayItem[], setAside = false) {
+  const allItems = useMemo(() => {
+    const seen = new Set<string>();
+    return [
+      ...sections["Needs your attention"],
+      ...sections["Coming up"],
+      ...sections.Updates,
+    ].filter((item) => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
+  }, [sections]);
+  const { inbox: inboxItems, planner: plannerItems } =
+    workspaceItemGroups(allItems);
+  const agenda = plannerItems
+    .filter(
+      (item) =>
+        item.due_at !== null &&
+        Number.isFinite(Date.parse(item.due_at)) &&
+        !["completed", "cancelled", "dismissed"].includes(item.status),
+    )
+    .sort((a, b) => Date.parse(a.due_at ?? "") - Date.parse(b.due_at ?? ""));
+  const renewals = allItems.filter(
+    (item) =>
+      item.type === "renewal" &&
+      !["completed", "cancelled", "dismissed"].includes(item.status),
+  );
+  const page = {
+    today: {
+      current: "Today" as const,
+      title: `${greeting(timezone)}, ${firstName}.`,
+      copy: "Your priorities and plans, in one place.",
+    },
+    inbox: {
+      current: "Inbox" as const,
+      title: "Inbox",
+      copy: "Review what needs a reply. Prepare a draft, then approve the final message.",
+    },
+    planner: {
+      current: "Planner" as const,
+      title: "Planner",
+      copy: "Keep your tasks, meetings, and deadlines together.",
+    },
+    connections: {
+      current: "Connections" as const,
+      title: "Connected apps",
+      copy: "Choose which accounts NavoX can use and manage their access.",
+    },
+    settings: {
+      current: "Settings" as const,
+      title: "Settings",
+      copy: "Make NavoX work the way you do.",
+    },
+  }[view];
+
+  function renderSection(
+    label: string,
+    items: TodayItem[],
+    emptyCopy: string,
+    setAside = false,
+  ) {
     return (
-      <section className={styles.sectionCard} aria-label={label}>
+      <section
+        className={styles.sectionCard}
+        aria-label={label}
+        aria-busy={loadingToday}
+      >
         <div className={styles.sectionHeading}>
-          <div>
-            <p>{label}</p>
-          </div>
-          <i aria-hidden="true" />
+          <h2>{label}</h2>
+          {!loadingToday && (
+            <span className={styles.sectionCount}>{items.length}</span>
+          )}
         </div>
         {items.length === 0 ? (
-          <p className={styles.emptyState}>
-            {loadingToday
-              ? "Checking your day…"
-              : workspaceError
-                ? "Your day could not be refreshed. Please try again."
-                : label === "Needs your attention"
-                  ? "Nothing needs attention in your saved items right now."
-                  : label === "Coming up"
-                    ? "No upcoming events or tasks are saved yet."
-                    : "No new updates in your saved items."}
-          </p>
+          <div className={styles.emptyState}>
+            <p>
+              {loadingToday
+                ? "Loading your saved items…"
+                : workspaceError
+                  ? "Your saved items could not be refreshed. Try again using Refresh."
+                  : emptyCopy}
+            </p>
+            {!loadingToday && !workspaceError && (
+              <Link href={needsConnectionSetup ? "/connections" : "/planner"}>
+                {needsConnectionSetup ? "Connect your apps" : "Add a task"}
+              </Link>
+            )}
+          </div>
         ) : (
           <PagedList
             key={label}
             label={label}
             items={items.map((item) => (
-              <details className={styles.item} key={item.id}>
-                <summary className={styles.itemSummary}>
-                  <h3>{item.title}</h3>
-                  <span className={styles.itemMeta}>
-                    {setAside
-                      ? "Review when you have a moment"
-                      : item.due_at
-                        ? dueLabel(item.due_at, timezone)
-                        : item.status === "completed"
-                          ? "Completed"
-                          : ""}
+              <article className={styles.item} key={item.id}>
+                <div className={styles.itemTopline}>
+                  <span>{item.type.replaceAll("_", " ")}</span>
+                  <span>
+                    {item.status === "candidate"
+                      ? "Suggested"
+                      : item.status.replaceAll("_", " ")}
                   </span>
-                  <span className={styles.expandHint}>
-                    {item.type === "renewal"
-                      ? "Review subscription"
-                      : item.sources.some(
-                            (source) => source.source_type === "EMAIL",
-                          )
-                        ? "Review reply"
-                        : "View details"}
-                  </span>
-                </summary>
-                <div className={styles.itemDetail}>
-                  {item.description && <p>{item.description}</p>}
-                  <details className={styles.evidence}>
-                    <summary>Why this is here</summary>
-                    <p>
-                      {item.created_by === "user"
-                        ? "You added this."
-                        : item.status === "candidate"
-                          ? "Suggested from your connected apps. Confirm it if it belongs on your list."
-                          : "From your connected apps."}
-                    </p>
-                    <SourceReferences
-                      sources={item.sources}
-                      paused={agentPaused}
-                      formatDate={(value) => dueLabel(value, timezone)}
-                    />
-                  </details>
-                  {setAside ? (
-                    <div className={styles.itemActions}>
-                      <button
-                        type="button"
-                        disabled={mutatingId === item.id}
-                        onClick={() => void mutateCommitment(item.id, "keep")}
-                      >
-                        Keep in Today
-                      </button>
-                      <button
-                        type="button"
-                        disabled={mutatingId === item.id}
-                        onClick={() =>
-                          void mutateCommitment(item.id, "dismiss")
-                        }
-                      >
-                        Not a task
-                      </button>
-                    </div>
-                  ) : (
-                    renderActions(item)
-                  )}
+                </div>
+                <h3>{item.title}</h3>
+                <span className={styles.itemMeta}>
+                  {setAside
+                    ? "Review when you have a moment"
+                    : item.due_at
+                      ? dueLabel(item.due_at, timezone)
+                      : item.status === "completed"
+                        ? "Completed"
+                        : "No due date"}
+                </span>
+                {item.description && <p>{item.description}</p>}
+                {setAside ? (
+                  <div className={styles.itemActions}>
+                    <button
+                      type="button"
+                      disabled={mutatingId === item.id}
+                      onClick={() => void mutateCommitment(item.id, "keep")}
+                    >
+                      Keep in Today
+                    </button>
+                    <button
+                      type="button"
+                      disabled={mutatingId === item.id}
+                      onClick={() => void mutateCommitment(item.id, "dismiss")}
+                    >
+                      Not a task
+                    </button>
+                  </div>
+                ) : (
+                  renderActions(item)
+                )}
+                <details className={styles.evidence}>
+                  <summary>Source and feedback</summary>
+                  <p>
+                    {item.created_by === "user"
+                      ? "You added this."
+                      : item.status === "candidate"
+                        ? "Suggested from your connected apps. Confirm it if it belongs on your list."
+                        : "From your connected apps."}
+                  </p>
+                  <SourceReferences
+                    sources={item.sources}
+                    paused={agentPaused}
+                    formatDate={(value) => dueLabel(value, timezone)}
+                  />
                   <IntelligenceFeedback
                     commitmentId={item.id}
                     onRefresh={refreshToday}
                   />
-                </div>
-              </details>
+                </details>
+              </article>
             ))}
           />
         )}
@@ -656,63 +760,406 @@ export function TodayWorkspace({
     );
   }
 
-  return (
-    <main className={styles.workspace}>
-      <div className={styles.glowOne} />
-      <div className={styles.glowTwo} />
+  function renderCapture() {
+    return (
+      <section className={styles.controlCard} aria-labelledby="capture-heading">
+        <h2 id="capture-heading">Add a task</h2>
+        <p className={styles.mutedCopy}>
+          Save a task, meeting, or deadline to your planner.
+        </p>
+        <form className={styles.captureForm} onSubmit={createCommitment}>
+          <label>
+            What needs to happen?
+            <input
+              maxLength={256}
+              minLength={3}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="e.g. Submit ECE lab"
+              required
+              value={title}
+            />
+          </label>
+          <div className={styles.formRow}>
+            <label>
+              Type
+              <select
+                onChange={(event) => setCommitmentType(event.target.value)}
+                value={commitmentType}
+              >
+                <option value="task">Task</option>
+                <option value="deadline">Deadline</option>
+                <option value="meeting">Meeting</option>
+                <option value="follow_up">Follow-up</option>
+                <option value="promise">Promise</option>
+                <option value="renewal">Renewal</option>
+              </select>
+            </label>
+            <label>
+              Priority
+              <select
+                onChange={(event) => setPriority(event.target.value)}
+                value={priority}
+              >
+                <option value="1">Low</option>
+                <option value="2">Moderate</option>
+                <option value="3">Standard</option>
+                <option value="4">Important</option>
+                <option value="5">Critical</option>
+              </select>
+            </label>
+          </div>
+          <label>
+            Due · this device&apos;s local time
+            <input
+              onChange={(event) => setDueAt(event.target.value)}
+              type="datetime-local"
+              value={dueAt}
+            />
+          </label>
+          <button disabled={creating} type="submit">
+            {creating ? "Saving…" : "Add task"}
+          </button>
+        </form>
+      </section>
+    );
+  }
 
-      <header className={styles.topbar}>
-        <a className={styles.brand} href="/" aria-label="NavoX home">
-          <span aria-hidden="true" className={styles.brandMark}>
-            <i />
-            <i />
-            <i />
-          </span>
-          NavoX
-        </a>
-        <NavoXNavigation current="Today" />
-        <div className={styles.topbarMeta}>
-          <a href="#settings">Settings</a>
-          <button onClick={() => void onSignOut()} type="button">
-            Sign out
+  function renderActivity() {
+    return (
+      <section className={`${styles.controlCard} ${styles.agentCard}`}>
+        <div className={styles.controlHeading}>
+          <h2>NavoX activity</h2>
+          <span className={styles.controlMeta}>You’re in control</span>
+        </div>
+        <div className={styles.agentStateRow}>
+          <div>
+            <span
+              className={
+                agentPaused ? styles.agentPausedDot : styles.agentLiveDot
+              }
+            />
+            <strong>{agentPaused ? "Paused" : "Ready"}</strong>
+          </div>
+          <button
+            disabled={togglingAgent}
+            onClick={() => void toggleAgent()}
+            type="button"
+          >
+            {togglingAgent
+              ? "Updating…"
+              : agentPaused
+                ? "Resume assistance"
+                : "Pause assistance"}
           </button>
         </div>
-      </header>
-
-      <section className={styles.hero}>
-        <div className={styles.heroIntro}>
-          <h1>
-            {greeting(timezone)}, {firstName}.
-          </h1>
-          <p className={styles.heroCopy}>Here&apos;s what matters today.</p>
-          {connections.length === 0 && (
-            <p className={styles.heroCopy}>
-              Connect your email and calendar to include them in your day.{" "}
-              <a href="#settings">Set up connections</a>
-            </p>
-          )}
-        </div>
-        <WorkspaceContext timezone={timezone} onTimezoneChange={setTimezone} />
-      </section>
-
-      {(workspaceError || workspaceMessage || message) && (
-        <div
-          className={workspaceError ? styles.errorBanner : styles.statusBanner}
-          role={workspaceError ? "alert" : "status"}
-        >
-          {workspaceError || workspaceMessage || message}
-        </div>
-      )}
-
-      <div className={styles.layout}>
-        <div className={styles.focusLayout}>
-          <div className={styles.focusColumn}>
-            {todayConsumerSections.map((label) => (
-              <div key={label}>{renderSection(label, sections[label])}</div>
+        <p className={styles.mutedCopy}>
+          NavoX can help prepare your next step. Review and approve the exact
+          message before any email is sent.
+        </p>
+        {activePlan ? (
+          <div className={styles.planPanel} aria-live="polite">
+            <div className={styles.planHeader}>
+              <div>
+                <small>Selected activity</small>
+                <h3>{activePlan.goal}</h3>
+              </div>
+              <span data-status={activePlan.status}>
+                {activePlan.status.replaceAll("_", " ")}
+              </span>
+            </div>
+            <ol className={styles.planSteps}>
+              {activePlan.steps.map((step) => (
+                <li key={step.id}>
+                  <div className={styles.stepNumber}>
+                    {step.sequence_number}
+                  </div>
+                  <div className={styles.stepBody}>
+                    <strong>{step.description}</strong>
+                    <small>{step.status.replaceAll("_", " ")}</small>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            {activePlan.error_code && (
+              <p className={styles.planError}>
+                NavoX couldn’t finish this. Review the activity or try again.
+              </p>
+            )}
+            <Link className={styles.textLink} href="/inbox#approvals">
+              Review email approvals
+            </Link>
+          </div>
+        ) : recentPlans.length > 0 ? (
+          <div className={styles.recentPlans}>
+            <small>Recent activity</small>
+            {recentPlans.map((plan) => (
+              <button
+                key={plan.id}
+                onClick={() => void loadPlan(plan.id)}
+                type="button"
+              >
+                <span>{plan.goal}</span>
+                <b>{plan.status.replaceAll("_", " ")}</b>
+              </button>
             ))}
-            <a className={styles.askCta} href="/navox">
-              ✦ Ask NavoX about my day… <span aria-hidden="true">🎙</span>
-            </a>
+          </div>
+        ) : (
+          <p className={styles.emptyAgent}>
+            Choose <strong>Handle this</strong> on a confirmed task to ask NavoX
+            for help.
+          </p>
+        )}
+      </section>
+    );
+  }
+
+  function renderAgenda() {
+    return (
+      <section
+        className={styles.sectionCard}
+        aria-labelledby="agenda-heading"
+        aria-busy={loadingToday}
+      >
+        <div className={styles.sectionHeading}>
+          <h2 id="agenda-heading">Upcoming agenda</h2>
+          <Link href="/planner">View planner</Link>
+        </div>
+        {agenda.length > 0 ? (
+          <ol className={styles.agendaList}>
+            {agenda.slice(0, 5).map((item) => (
+              <li key={item.id}>
+                <time dateTime={item.due_at ?? undefined}>
+                  {dueLabel(item.due_at, timezone)}
+                </time>
+                <strong>{item.title}</strong>
+                <span>{item.type.replaceAll("_", " ")}</span>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <div className={styles.emptyState}>
+            <p>
+              {loadingToday
+                ? "Loading your agenda…"
+                : workspaceError
+                  ? "Your agenda could not be refreshed."
+                  : "No upcoming meetings or deadlines are saved yet."}
+            </p>
+            {!loadingToday && !workspaceError && (
+              <Link href="/planner">Plan your next step</Link>
+            )}
+          </div>
+        )}
+      </section>
+    );
+  }
+
+  return (
+    <WorkspaceShell
+      current={page.current}
+      accountName={account.display_name ?? account.email}
+      onSignOut={onSignOut}
+    >
+      <div className={styles.workspace}>
+        <header className={styles.pageHeader}>
+          <div>
+            <p className={styles.kicker}>{page.current}</p>
+            <h1>{page.title}</h1>
+            <p className={styles.heroCopy}>{page.copy}</p>
+          </div>
+          {["today", "inbox", "planner"].includes(view) && (
+            <button
+              className={styles.secondaryAction}
+              disabled={loadingToday}
+              onClick={() => void refreshToday()}
+              type="button"
+            >
+              {loadingToday ? "Refreshing…" : "Refresh"}
+            </button>
+          )}
+        </header>
+
+        {(workspaceError || workspaceMessage || message) && (
+          <div
+            className={
+              workspaceError ? styles.errorBanner : styles.statusBanner
+            }
+            role={workspaceError ? "alert" : "status"}
+          >
+            {workspaceError || workspaceMessage || message}
+          </div>
+        )}
+
+        {view === "today" && (
+          <div className={styles.focusLayout}>
+            <div className={styles.focusColumn}>
+              {needsConnectionSetup && (
+                <section
+                  className={styles.setupCard}
+                  aria-labelledby="setup-heading"
+                >
+                  <span className={styles.setupIcon} aria-hidden="true">
+                    ↗
+                  </span>
+                  <div>
+                    <h2 id="setup-heading">Make your day easier</h2>
+                    <p>
+                      Connect your email and calendar to see requests and
+                      deadlines here. You can also start with a task.
+                    </p>
+                    <div className={styles.setupActions}>
+                      <Link className={styles.primaryLink} href="/connections">
+                        Connect your apps
+                      </Link>
+                      <Link className={styles.textLink} href="/planner">
+                        Add a task
+                      </Link>
+                    </div>
+                  </div>
+                </section>
+              )}
+              {renderSection(
+                "Needs your attention",
+                sections["Needs your attention"],
+                "You’re caught up on your saved items. New requests will appear here as your apps sync.",
+              )}
+              <section
+                className={styles.quickLinks}
+                aria-label="Continue your day"
+              >
+                <Link href="/inbox#approvals">
+                  <strong>Review email</strong>
+                  <span>
+                    Drafts, replies, and approvals{" "}
+                    <span aria-hidden="true">→</span>
+                  </span>
+                </Link>
+                <Link href="/navox">
+                  <strong>Ask NavoX</strong>
+                  <span>
+                    Talk through your next step{" "}
+                    <span aria-hidden="true">→</span>
+                  </span>
+                </Link>
+              </section>
+              {sections.Updates.length > 0 && (
+                <details className={styles.toolDisclosure}>
+                  <summary>
+                    Recent updates <span>{sections.Updates.length}</span>
+                  </summary>
+                  {renderSection(
+                    "Updates",
+                    sections.Updates,
+                    "No recent updates.",
+                  )}
+                </details>
+              )}
+              <details
+                className={styles.toolDisclosure}
+                open={activePlan !== null}
+              >
+                <summary>Activity</summary>
+                {renderActivity()}
+              </details>
+            </div>
+            <aside
+              className={styles.toolsColumn}
+              aria-label="Your day at a glance"
+            >
+              <WorkspaceContext
+                timezone={timezone}
+                onTimezoneChange={setTimezone}
+              />
+              {renderAgenda()}
+              <section
+                className={styles.sectionCard}
+                aria-labelledby="renewals-heading"
+                aria-busy={loadingToday}
+              >
+                <div className={styles.sectionHeading}>
+                  <h2 id="renewals-heading">Upcoming renewals</h2>
+                  <Link href="/subscriptions">View all</Link>
+                </div>
+                {renewals.length > 0 ? (
+                  <ul className={styles.renewalList}>
+                    {renewals.slice(0, 3).map((item) => (
+                      <li key={item.id}>
+                        <strong>{item.title}</strong>
+                        <span>{dueLabel(item.due_at, timezone)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className={styles.emptyState}>
+                    {loadingToday
+                      ? "Loading renewals…"
+                      : workspaceError
+                        ? "Renewals could not be refreshed."
+                        : "No upcoming renewals in your saved items."}
+                  </p>
+                )}
+              </section>
+            </aside>
+          </div>
+        )}
+
+        {view === "inbox" && (
+          <div className={styles.layout}>
+            <nav className={styles.viewTabs} aria-label="Inbox sections">
+              <a href="#needs-reply">Needs reply</a>
+              <a href="#drafts">Drafts</a>
+              <a href="#approvals">Approvals</a>
+              <a href="#follow-ups">Follow-ups</a>
+            </nav>
+            <div id="needs-reply">
+              {renderSection(
+                "Needs reply",
+                inboxItems.filter(
+                  (item) =>
+                    ![
+                      "completed",
+                      "cancelled",
+                      "dismissed",
+                      "waiting",
+                      "waiting_on_external",
+                    ].includes(item.status),
+                ),
+                "No saved email requests need a reply. Connect and sync Gmail to bring them here.",
+              )}
+            </div>
+            <section
+              id="drafts"
+              className={styles.panelSlot}
+              aria-label="Email drafts"
+            >
+              <CommunicationDrafts
+                commitments={approvalCommitments}
+                connections={connections}
+                paused={agentPaused}
+                onStateChanged={refreshToday}
+              />
+            </section>
+            <section
+              id="approvals"
+              className={styles.panelSlot}
+              aria-label="Exact message approvals"
+            >
+              <ApprovalPanel
+                agentPaused={agentPaused}
+                commitments={approvalCommitments}
+                connections={connections}
+                onStateChanged={refreshToday}
+              />
+            </section>
+            <div id="follow-ups">
+              {renderSection(
+                "Follow-ups",
+                inboxItems.filter((item) =>
+                  ["waiting", "waiting_on_external"].includes(item.status),
+                ),
+                "No email follow-ups are waiting right now.",
+              )}
+            </div>
             {(today?.set_aside?.length ?? 0) > 0 && (
               <div className={styles.setAside}>
                 <button
@@ -721,22 +1168,47 @@ export function TodayWorkspace({
                   aria-controls="set-aside-items"
                   onClick={() => setShowSetAside(!showSetAside)}
                 >
-                  Email suggestions set aside{" "}
-                  <span>{today?.set_aside?.length}</span>
+                  Suggestions set aside <span>{today?.set_aside?.length}</span>
                 </button>
                 <p>
-                  Older or unverified suggestions are kept out of your daily
-                  list. You only need to look here if something is missing.
+                  Older or unverified suggestions stay here until you decide to
+                  keep them.
                 </p>
                 {showSetAside && (
                   <div id="set-aside-items">
-                    {renderSection("Set aside", today?.set_aside ?? [], true)}
+                    {renderSection(
+                      "Set aside",
+                      today?.set_aside ?? [],
+                      "No suggestions set aside.",
+                      true,
+                    )}
                   </div>
                 )}
               </div>
             )}
-            <details className={styles.toolDisclosure}>
-              <summary>Deadlines & briefing</summary>
+            <details
+              className={styles.toolDisclosure}
+              open={activePlan !== null}
+            >
+              <summary>Activity</summary>
+              {renderActivity()}
+            </details>
+          </div>
+        )}
+
+        {view === "planner" && (
+          <div className={styles.focusLayout}>
+            <div className={styles.focusColumn}>
+              {renderSection(
+                "Tasks & events",
+                plannerItems.filter(
+                  (item) =>
+                    !["completed", "cancelled", "dismissed"].includes(
+                      item.status,
+                    ),
+                ),
+                "Your planner is ready. Add your first task or connect Calendar and Canvas for meetings and deadlines.",
+              )}
               <ProactivePanel
                 agentPaused={agentPaused}
                 completedDeadlines={(today?.completed_recently ?? []).filter(
@@ -750,211 +1222,87 @@ export function TodayWorkspace({
                 onHandleCommitment={handleCommitmentById}
                 timezone={timezone}
               />
-            </details>
-          </div>
-          <aside className={styles.toolsColumn} aria-label="Workspace tools">
-            <details className={styles.toolDisclosure}>
-              <summary>Add a task or event</summary>
-              <section className={styles.controlCard}>
-                <div className={styles.controlHeading}>
-                  <p>Capture</p>
-                </div>
-                <h2>Add to your day</h2>
-                <form
-                  className={styles.captureForm}
-                  onSubmit={createCommitment}
-                >
-                  <label>
-                    What needs to happen?
-                    <input
-                      maxLength={256}
-                      minLength={3}
-                      onChange={(event) => setTitle(event.target.value)}
-                      placeholder="e.g. Submit ECE lab"
-                      required
-                      value={title}
-                    />
-                  </label>
-                  <div className={styles.formRow}>
-                    <label>
-                      Type
-                      <select
-                        onChange={(event) =>
-                          setCommitmentType(event.target.value)
-                        }
-                        value={commitmentType}
-                      >
-                        <option value="task">Task</option>
-                        <option value="deadline">Deadline</option>
-                        <option value="meeting">Meeting</option>
-                        <option value="follow_up">Follow-up</option>
-                        <option value="promise">Promise</option>
-                        <option value="renewal">Renewal</option>
-                      </select>
-                    </label>
-                    <label>
-                      Priority
-                      <select
-                        onChange={(event) => setPriority(event.target.value)}
-                        value={priority}
-                      >
-                        <option value="1">1 · Low</option>
-                        <option value="2">2 · Moderate</option>
-                        <option value="3">3 · Standard</option>
-                        <option value="4">4 · Important</option>
-                        <option value="5">5 · Critical</option>
-                      </select>
-                    </label>
-                  </div>
-                  <label>
-                    Due · this device&apos;s local time
-                    <input
-                      onChange={(event) => setDueAt(event.target.value)}
-                      type="datetime-local"
-                      value={dueAt}
-                    />
-                  </label>
-                  <button disabled={creating} type="submit">
-                    {creating ? "Saving…" : "Add to NavoX"}
-                  </button>
-                </form>
-              </section>
-            </details>
-            <details className={styles.toolDisclosure}>
-              <summary>Activity</summary>
-              <section className={`${styles.controlCard} ${styles.agentCard}`}>
-                <div className={styles.controlHeading}>
-                  <p>NavoX activity</p>
-                  <span className={styles.controlMeta}>You’re in control</span>
-                </div>
-                <div className={styles.agentStateRow}>
-                  <div>
-                    <span
-                      className={
-                        agentPaused
-                          ? styles.agentPausedDot
-                          : styles.agentLiveDot
-                      }
-                    />
-                    <strong>{agentPaused ? "Paused" : "Ready"}</strong>
-                  </div>
-                  <button
-                    disabled={togglingAgent}
-                    onClick={() => void toggleAgent()}
-                    type="button"
-                  >
-                    {togglingAgent
-                      ? "Updating…"
-                      : agentPaused
-                        ? "Resume assistance"
-                        : "Pause assistance"}
-                  </button>
-                </div>
-                <p className={styles.mutedCopy}>
-                  NavoX can help prepare your next step. Review and approve the
-                  exact message before any email is sent.
-                </p>
-
-                {activePlan ? (
-                  <div className={styles.planPanel} aria-live="polite">
-                    <div className={styles.planHeader}>
-                      <div>
-                        <small>In progress</small>
-                        <h3>{activePlan.goal}</h3>
-                      </div>
-                      <span data-status={activePlan.status}>
-                        {activePlan.status.replaceAll("_", " ")}
-                      </span>
-                    </div>
-                    <ol className={styles.planSteps}>
-                      {activePlan.steps.map((step) => (
-                        <li key={step.id}>
-                          <div className={styles.stepNumber}>
-                            {String(step.sequence_number).padStart(2, "0")}
-                          </div>
-                          <div className={styles.stepBody}>
-                            <div className={styles.stepTopline}>
-                              <strong>{step.description}</strong>
-                            </div>
-                            <small>{step.status.replaceAll("_", " ")}</small>
-                          </div>
-                        </li>
-                      ))}
-                    </ol>
-                    {activePlan.error_code && (
-                      <p className={styles.planError}>
-                        NavoX couldn’t finish this. Review the activity or try
-                        again.
-                      </p>
-                    )}
-                  </div>
-                ) : recentPlans.length > 0 ? (
-                  <div className={styles.recentPlans}>
-                    <small>Recent activity</small>
-                    {recentPlans.map((plan) => (
-                      <button
-                        key={plan.id}
-                        onClick={() => void loadPlan(plan.id)}
-                        type="button"
-                      >
-                        <span>{plan.goal}</span>
-                        <b>{plan.status.replaceAll("_", " ")}</b>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className={styles.emptyAgent}>
-                    Choose <strong>Handle this</strong> on a confirmed task to
-                    ask NavoX for help.
-                  </p>
+              <OperationalAssistance items={allItems} paused={agentPaused} />
+              <details className={styles.toolDisclosure}>
+                <summary>Completed & recent updates</summary>
+                {renderSection(
+                  "Planner updates",
+                  plannerItems.filter((item) =>
+                    ["completed", "cancelled", "dismissed"].includes(
+                      item.status,
+                    ),
+                  ),
+                  "No completed tasks yet.",
                 )}
-              </section>
-            </details>
-            <details className={styles.toolDisclosure}>
-              <summary>Explore your tasks</summary>
-              <OperationalAssistance
-                items={[
-                  ...(today?.needs_attention ?? []),
-                  ...(today?.coming_up ?? []),
-                  ...(today?.waiting_on ?? []),
-                  ...(today?.renewals ?? []),
-                ]}
-                paused={agentPaused}
-              />
-            </details>
-            <details className={styles.toolDisclosure}>
-              <summary>Email actions</summary>
-              <CommunicationDrafts
-                commitments={approvalCommitments}
-                connections={connections}
-                paused={agentPaused}
-                onStateChanged={refreshToday}
-              />
-              <ApprovalPanel
-                agentPaused={agentPaused}
-                commitments={approvalCommitments}
-                connections={connections}
-                onStateChanged={refreshToday}
-              />
-            </details>
-          </aside>
-        </div>
-        <details id="settings" className={styles.toolDisclosure}>
-          <summary>Settings &amp; connected apps</summary>
-          <ConnectionsPanel
-            agentPaused={agentPaused}
-            onConnectionsChanged={onConnectionsChanged}
-          />
-          <details className={styles.toolDisclosure}>
-            <summary>Refresh email &amp; calendar</summary>
+              </details>
+              <details
+                className={styles.toolDisclosure}
+                open={activePlan !== null}
+              >
+                <summary>Activity</summary>
+                {renderActivity()}
+              </details>
+            </div>
+            <aside className={styles.toolsColumn} aria-label="Plan your day">
+              {renderCapture()}
+              {renderAgenda()}
+              <div className={styles.connectionHint}>
+                <p>Bring meetings and assignments into your planner.</p>
+                <Link href="/connections">Manage Calendar &amp; Canvas</Link>
+              </div>
+            </aside>
+          </div>
+        )}
+
+        {view === "connections" && (
+          <div className={styles.layout}>
+            <ConnectionsPanel
+              agentPaused={agentPaused}
+              onConnectionsChanged={onConnectionsChanged}
+            />
             <IntelligenceControls
               connections={connections}
               paused={agentPaused}
               onRefresh={refreshToday}
             />
-          </details>
-        </details>
+          </div>
+        )}
+
+        {view === "settings" && (
+          <div className={styles.settingsGrid}>
+            <div className={styles.focusColumn}>
+              <section className={styles.controlCard}>
+                <h2>Account</h2>
+                <dl className={styles.accountDetails}>
+                  <div>
+                    <dt>Name</dt>
+                    <dd>{account.display_name ?? "Not set"}</dd>
+                  </div>
+                  <div>
+                    <dt>Email</dt>
+                    <dd>{account.email}</dd>
+                  </div>
+                  <div>
+                    <dt>Workspace</dt>
+                    <dd>{account.workspace.name}</dd>
+                  </div>
+                </dl>
+                <Link className={styles.textLink} href="/connections">
+                  Manage connected apps
+                </Link>
+              </section>
+              <AISettings />
+            </div>
+            <div className={styles.focusColumn}>
+              <WorkspaceContext
+                timezone={timezone}
+                onTimezoneChange={setTimezone}
+              />
+              {renderActivity()}
+            </div>
+          </div>
+        )}
       </div>
-    </main>
+    </WorkspaceShell>
   );
 }

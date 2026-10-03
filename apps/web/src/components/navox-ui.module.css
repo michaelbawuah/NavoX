@@ -6,24 +6,24 @@
 .navigation a {
   padding: 0.75rem 1rem;
   border-radius: 100px;
-  color: #b6c8c3;
+  color: #a6b3c2;
   text-decoration: none;
   font-size: 0.9rem;
 }
 .navigation a[aria-current="page"] {
-  background: #173f38;
+  background: #1a3532;
   color: #eafff7;
 }
 .navigation a:hover {
   color: #fff;
-  background: #17332e;
+  background: #192430;
 }
 .pageHeader {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: 2rem;
-  margin: 3rem 0 2rem;
+  margin: 0 0 1.5rem;
   overflow-wrap: anywhere;
 }
 .pageHeader > * {
@@ -31,21 +31,21 @@
   max-width: 100%;
 }
 .pageHeader h1 {
-  font-size: clamp(2.4rem, 5vw, 4.25rem);
+  font-size: clamp(1.7rem, 3vw, 2.15rem);
   font-weight: 500;
   letter-spacing: -0.055em;
   margin: 0.65rem 0;
   line-height: 1.1;
 }
 .pageHeader p {
-  color: #afc4bd;
+  color: #a9b7c7;
   line-height: 1.6;
   max-width: 40rem;
 }
 .pageHeader .eyebrow {
   color: #8dddd0;
   letter-spacing: 0.18em;
-  font-size: 0.7rem;
+  font-size: 0.875rem;
 }
 .askBox {
   display: grid;
@@ -57,21 +57,21 @@
   width: 100%;
   min-width: 0;
   min-height: 2.75rem;
-  background: #0c1b19;
+  background: #0c1118;
   color: #effaf6;
-  border: 1px solid #35564d;
+  border: 1px solid #344659;
   border-radius: 0.65rem;
   padding: 0.75rem 0.9rem;
   font: inherit;
 }
 .askBox input::placeholder {
-  color: #7e9990;
+  color: #8f9eae;
 }
 .askBox button {
   min-height: 2.75rem;
-  background: #a2f2da;
+  background: #72e3c7;
   color: #0b2727;
-  border: 1px solid #a2f2da;
+  border: 1px solid #72e3c7;
   border-radius: 0.65rem;
   padding: 0.7rem 1rem;
   font: inherit;
@@ -84,15 +84,15 @@
 }
 .askHint {
   grid-column: 1 / -1;
-  color: #8ea79f;
-  font-size: 0.75rem;
+  color: #a3b2c3;
+  font-size: 0.875rem;
   line-height: 1.5;
   margin: 0;
 }
 .card {
   padding: clamp(1.2rem, 3vw, 2rem);
-  background: #10211f;
-  border: 1px solid #2b423b;
+  background: #111923;
+  border: 1px solid #293746;
   border-radius: 1.1rem;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -112,7 +112,7 @@
   text-underline-offset: 0.2em;
 }
 .card p {
-  color: #becfc8;
+  color: #b8c4d1;
   line-height: 1.75;
 }
 .statusBlock {
@@ -127,7 +127,7 @@
   border: 1px solid #58644c;
   border-radius: 0.4rem;
   color: #e5deb9;
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   line-height: 1.5;
 }
 .status[data-state="VERIFIED"],
@@ -155,7 +155,7 @@
   display: grid;
   gap: 0.6rem;
   padding: 1rem 0;
-  border-bottom: 1px solid #2b423b;
+  border-bottom: 1px solid #293746;
 }
 .sources a {
   color: #b0ead2;
@@ -165,9 +165,9 @@
   color: #b2c3bb;
 }
 .empty {
-  padding: 3rem 1rem;
+  padding: 2rem 1.5rem;
   text-align: center;
-  border: 1px dashed #3a554a;
+  border: 1px dashed #344659;
   border-radius: 1rem;
 }
 .empty h2 {
@@ -175,7 +175,7 @@
   font-weight: 500;
 }
 .empty p {
-  color: #b5c8be;
+  color: #a9b7c7;
   line-height: 1.7;
   max-width: 40rem;
   margin: 1rem auto;
@@ -200,7 +200,7 @@
 }
 .skeleton {
   padding: 2rem 0;
-  color: #b5c8be;
+  color: #a9b7c7;
 }
 .skeleton span {
   display: block;

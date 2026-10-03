@@ -64,7 +64,7 @@ import {
   type DraftSpeechRequest,
 } from "./assistant-email-actions";
 import styles from "./navox-assistant.module.css";
-import { NavoXNavigation } from "./navox-ui";
+import { WorkspaceShell } from "./workspace-shell";
 
 export function assistantVoiceLabel(state: AssistantVoiceState): string {
   switch (state) {
@@ -491,61 +491,82 @@ export function AssistantTurnViewBlock({
   const blocks = turn.presentation?.blocks ?? [];
   const keys = uniqueKeys(blockBases(blocks));
   const speakable = canSpeakTurn(turn);
+  const hasEmailWorkspace =
+    sessionId &&
+    turn.state === "READY" &&
+    turn.decision?.capability_id === "email.search" &&
+    turn.decision.reason === "email.search.found_one" &&
+    blocks.filter(
+      (block) => block.kind === "ITEM" && block.item.type === "EMAIL",
+    ).length === 1;
   return (
     <li
       className={styles.turn}
       data-modality={turn.modality}
       data-state={turn.state}
+      data-has-work={Boolean(hasEmailWorkspace)}
     >
       <p className={styles.question}>{turn.question}</p>
-      {turn.presentation ? (
-        <div className={styles.blocks}>
-          {blocks.map((block, index) => (
-            <Fragment key={keys[index] ?? "block"}>
-              <AssistantBlockView
-                block={block}
-                sessionId={sessionId}
-                turnId={turn.id}
-              />
-              {onSelectEmail &&
-                turn.state === "CLARIFY" &&
-                turn.decision?.reason === "email.search.ambiguous" &&
-                block.kind === "ITEM" &&
-                block.item.type === "EMAIL" && (
-                  <button
-                    type="button"
-                    className={styles.selectEmail}
-                    aria-label={`Select email: ${block.item.title} (${block.item.id})`}
-                    onClick={() => onSelectEmail(turn, block.item.id)}
-                  >
-                    Select this email
-                  </button>
-                )}
-            </Fragment>
-          ))}
+      <div
+        className={styles.turnBody}
+        data-has-work={Boolean(hasEmailWorkspace)}
+      >
+        <div className={styles.response}>
+          <p className={styles.responseLabel}>NavoX</p>
+          {turn.presentation ? (
+            <div className={styles.blocks}>
+              {blocks.map((block, index) => (
+                <Fragment key={keys[index] ?? "block"}>
+                  <AssistantBlockView
+                    block={block}
+                    sessionId={sessionId}
+                    turnId={turn.id}
+                  />
+                  {onSelectEmail &&
+                    turn.state === "CLARIFY" &&
+                    turn.decision?.reason === "email.search.ambiguous" &&
+                    block.kind === "ITEM" &&
+                    block.item.type === "EMAIL" && (
+                      <button
+                        type="button"
+                        className={styles.selectEmail}
+                        aria-label={`Select email: ${block.item.title} (${block.item.id})`}
+                        onClick={() => onSelectEmail(turn, block.item.id)}
+                      >
+                        Select this email
+                      </button>
+                    )}
+                </Fragment>
+              ))}
+            </div>
+          ) : null}
+          {onSpeak && speakable ? (
+            <button
+              type="button"
+              className={styles.speakButton}
+              onClick={() => onSpeak(turn)}
+              aria-label={`Speak the answer to "${turn.question}"`}
+              title="Speak the answer"
+            >
+              <SpeakerIcon />
+              <span>Read aloud</span>
+            </button>
+          ) : null}
         </div>
-      ) : null}
-      {onSpeak && speakable ? (
-        <button
-          type="button"
-          className={styles.speakButton}
-          onClick={() => onSpeak(turn)}
-          aria-label={`Speak the answer to "${turn.question}"`}
-          title="Speak the answer"
-        >
-          <SpeakerIcon />
-          <span className={styles.srOnly}>Read aloud</span>
-        </button>
-      ) : null}
-      {sessionId && (
-        <AssistantEmailActions
-          sessionId={sessionId}
-          turn={turn}
-          speakDraft={onSpeakDraft}
-          stopDraftSpeech={onStopDraftSpeech}
-          speakingKey={draftSpeakingKey}
-        />
-      )}
+        {hasEmailWorkspace && sessionId && (
+          <aside className={styles.workPane} aria-label="Email workspace">
+            <p className={styles.workTitle}>Email workspace</p>
+            <p className={styles.workIntro}>Review and edit your reply here.</p>
+            <AssistantEmailActions
+              sessionId={sessionId}
+              turn={turn}
+              speakDraft={onSpeakDraft}
+              stopDraftSpeech={onStopDraftSpeech}
+              speakingKey={draftSpeakingKey}
+            />
+          </aside>
+        )}
+      </div>
     </li>
   );
 }
@@ -1208,276 +1229,351 @@ export function NavoXAssistant() {
   const questionLimit = questionLimitNotice(text);
 
   return (
-    <section className={styles.assistant} aria-label="NavoX assistant">
-      <NavoXNavigation current="Assistant" />
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>YOUR PERSONAL ASSISTANT</p>
-          <h1>{turns.length === 0 ? "What’s on your mind?" : "NavoX"}</h1>
-        </div>
-        <button
-          type="button"
-          onClick={() => void clearConversation()}
-          disabled={connecting}
-        >
-          Clear chat
-        </button>
-      </header>
-
-      {turns.length === 0 && (
-        <p className={styles.intro}>
-          Your day, your questions, your next step. Type a question or tap Talk.
-        </p>
-      )}
-
-      {notice && (
-        <p className={styles.error} role="alert">
-          {notice}
-        </p>
-      )}
-
-      <ol className={styles.transcript} aria-live="polite">
-        {turns.map((turn) => (
-          <AssistantTurnViewBlock
-            key={turn.id}
-            turn={turn}
-            sessionId={sessionId ?? undefined}
-            onSpeak={
-              controls.readAloudAvailable
-                ? (target) => speak(target)
-                : undefined
-            }
-            onSelectEmail={(source, resourceId) => {
-              void sendTurn("TEXT", "Select an email", [source.id, resourceId]);
-            }}
-            onSpeakDraft={controls.readAloudAvailable ? speakDraft : undefined}
-            onStopDraftSpeech={stopDraftSpeech}
-            draftSpeakingKey={speakingDraftKey}
-          />
-        ))}
-      </ol>
-
-      <AssistantGoalList
-        goals={goals}
-        busy={busy}
-        onRetry={(goalId) => {
-          void retryGoal(goalId);
-        }}
-      />
-
-      {connecting && <p className={styles.status}>Starting a conversation…</p>}
-      {!connecting && turns.length === 0 && (
-        <div className={styles.welcome}>
-          <p>Try asking NavoX</p>
-          <div className={styles.suggestions}>
-            {[
-              "What am I missing today?",
-              "What class do I have next?",
-              "What's the weather today?",
-              "What's trending today?",
-            ].map((question) => (
-              <button
-                type="button"
-                key={question}
-                disabled={!sessionId}
-                onClick={() => setText(question)}
-              >
-                {question}
-              </button>
-            ))}
+    <WorkspaceShell current="Assistant">
+      <section
+        className={styles.assistant}
+        aria-label="NavoX assistant"
+        data-has-conversation={turns.length > 0}
+      >
+        <header className={styles.header}>
+          <div>
+            <h1>Assistant</h1>
+            <p className={styles.headerDescription}>
+              Your day, your questions, your next step.
+            </p>
           </div>
-        </div>
-      )}
-      {handsFreePhase !== "OFF" && (
-        <p className={styles.status} data-hands-free-state={handsFreePhase}>
-          {handsFreePhase === "WAKE_LISTENING"
-            ? 'Hands-Free on · waiting for "Hey NavoX".'
-            : handsFreePhase === "PREPARING"
-              ? "Getting Hey NavoX ready…"
-              : handsFreePhase === "PAUSED"
-                ? "Hands-Free paused while this page is hidden."
-                : "Conversation on. Ask your next question."}
-        </p>
-      )}
-      {status && (
-        <p className={styles.status} data-voice-state={voice.state}>
-          {handsFreePhase === "CONVERSATION" && voice.state === "LISTENING"
-            ? "Listening for your next question. Speak naturally, or press Stop."
-            : status}
-        </p>
-      )}
-      {!controls.voiceModeEnabled && (
-        <p className={styles.status} data-voice-mode="off">
-          Voice Mode is off. Answers are shown on screen; press Read aloud on
-          one to hear it.
-        </p>
-      )}
-
-      <form className={styles.form} onSubmit={onSubmit}>
-        <label className={styles.field}>
-          <span className={styles.srOnly}>Question</span>
-          <input
-            type="text"
-            value={text}
-            aria-describedby="navox-question-limit"
-            aria-invalid={questionLimit ? true : undefined}
-            placeholder="Ask NavoX…"
-            onChange={(event) => setText(event.target.value)}
-            disabled={connecting || !sessionId}
-          />
-        </label>
-        <button
-          type="submit"
-          disabled={
-            connecting ||
-            !sessionId ||
-            busy ||
-            !text.trim() ||
-            Boolean(questionLimit)
-          }
-        >
-          {busy ? "Checking…" : "Send"}
-        </button>
-        <button
-          type="button"
-          className={styles.talkButton}
-          onClick={toggleMicrophone}
-          aria-pressed={controls.listening}
-          aria-label={microphoneLabel}
-          title={microphoneLabel}
-          disabled={
-            connecting ||
-            !sessionId ||
-            busy ||
-            controls.microphoneDisabled ||
-            controls.transcribing
-          }
-        >
-          {controls.capturing ? <StopIcon /> : <MicIcon />}
-          <span>{controls.capturing ? "Send recording" : "Talk"}</span>
-        </button>
-        {(controls.stopAvailable || handsFreePhase === "CONVERSATION") && (
           <button
             type="button"
-            className={styles.stopButton}
-            onClick={stopEverything}
-            aria-label={
-              handsFreePhase === "CONVERSATION"
-                ? "End conversation and return to wake listening"
-                : "Stop listening and speech"
-            }
-            title={
-              handsFreePhase === "CONVERSATION"
-                ? "End conversation and return to wake listening"
-                : "Stop listening and speech"
-            }
-            disabled={
-              !controls.stopAvailable && handsFreePhase !== "CONVERSATION"
-            }
+            onClick={() => void clearConversation()}
+            disabled={connecting}
           >
-            <StopIcon />
-            <span>Stop</span>
+            Clear chat
           </button>
-        )}
-      </form>
-      <p
-        id="navox-question-limit"
-        className={questionLimit ? styles.error : styles.status}
-        role={questionLimit ? "alert" : undefined}
-      >
-        {questionLimit ?? "Questions can be up to 500 characters."}
-      </p>
+        </header>
 
-      <div className={styles.voiceTools}>
-        <button
-          className={styles.handsFreeButton}
-          type="button"
-          onClick={toggleHandsFree}
-          aria-pressed={handsFreePhase !== "OFF"}
-          aria-label={
-            handsFreePhase === "OFF"
-              ? "Turn Hands-Free on"
-              : "Turn Hands-Free off"
-          }
-          disabled={
-            connecting || !sessionId || (handsFreePhase === "OFF" && busy)
-          }
-        >
-          {handsFreePhase === "OFF" ? "Hey NavoX: Off" : "Hey NavoX: On"}
-        </button>
-
-        <details className={styles.voiceOptions}>
-          <summary>Voice options</summary>
-          <div className={styles.optionButtons}>
-            <button
-              type="button"
-              className={styles.iconButton}
-              onClick={toggleVoiceMode}
-              aria-pressed={controls.voiceModeEnabled}
-              aria-label={
-                controls.voiceModeEnabled
-                  ? "Turn Voice Mode off; answers stay on screen"
-                  : "Turn Voice Mode on; spoken questions are answered aloud"
-              }
-              title={
-                controls.voiceModeEnabled
-                  ? "Voice Mode on — spoken questions are answered aloud"
-                  : "Voice Mode off — answers stay on screen"
-              }
-              disabled={connecting || !sessionId}
-            >
-              <VoiceModeIcon enabled={controls.voiceModeEnabled} />
-              <span>
-                Spoken answers: {controls.voiceModeEnabled ? "On" : "Off"}
+        <div className={styles.conversationArea}>
+          {turns.length === 0 && (
+            <div className={styles.welcome}>
+              <span className={styles.welcomeMark} aria-hidden="true">
+                ✳
               </span>
-            </button>
-            <button
-              type="button"
-              className={styles.iconButton}
-              onClick={toggleMute}
-              aria-pressed={controls.muted}
-              aria-label={
-                controls.muted ? "Unmute spoken answers" : "Mute spoken answers"
-              }
-              title={
-                controls.muted ? "Unmute spoken answers" : "Mute spoken answers"
-              }
-              disabled={connecting || !sessionId}
-            >
-              {controls.muted ? <MutedIcon /> : <VolumeIcon />}
-              <span>{controls.muted ? "Unmute answers" : "Mute answers"}</span>
-            </button>
-          </div>
-          <p>
-            Spoken questions receive spoken answers when this is on. Typed
-            questions stay on screen.
-          </p>
-        </details>
-      </div>
-      <p className={styles.permissionHint}>
-        To talk, allow microphone access when your browser asks. Turn on Hey
-        NavoX to start hands-free while this page is open.
-      </p>
-      <details className={styles.privacy}>
-        <summary>Privacy &amp; your chat</summary>
-        <p>
-          Clear chat removes this conversation. Questions and answers expire
-          after 30 days of session access and are then removed on a scheduled
-          cleanup.
-        </p>
-        <p>
-          The microphone records after you press Talk or enable Hey NavoX. Wake
-          detection stays on this device; recorded questions are sent for speech
-          recognition. Your browser may need a local speech language pack for
-          Hey NavoX.
-        </p>
-      </details>
+              <h2>What can I help you with?</h2>
+              <p className={styles.intro}>
+                Make sense of your day. Find a message. Take the next step.
+              </p>
+            </div>
+          )}
 
-      {voice.state === "UNSUPPORTED" && (
-        <p className={styles.status}>
-          Typed input is fully available; the microphone is not.
-        </p>
-      )}
-    </section>
+          {notice && (
+            <p className={styles.error} role="alert">
+              {notice}
+            </p>
+          )}
+
+          <ol className={styles.transcript} aria-live="polite">
+            {turns.map((turn) => (
+              <AssistantTurnViewBlock
+                key={turn.id}
+                turn={turn}
+                sessionId={sessionId ?? undefined}
+                onSpeak={
+                  controls.readAloudAvailable
+                    ? (target) => speak(target)
+                    : undefined
+                }
+                onSelectEmail={(source, resourceId) => {
+                  void sendTurn("TEXT", "Select an email", [
+                    source.id,
+                    resourceId,
+                  ]);
+                }}
+                onSpeakDraft={
+                  controls.readAloudAvailable ? speakDraft : undefined
+                }
+                onStopDraftSpeech={stopDraftSpeech}
+                draftSpeakingKey={speakingDraftKey}
+              />
+            ))}
+          </ol>
+
+          <AssistantGoalList
+            goals={goals}
+            busy={busy}
+            onRetry={(goalId) => {
+              void retryGoal(goalId);
+            }}
+          />
+
+          {connecting && (
+            <p className={styles.status}>Starting a conversation…</p>
+          )}
+          <div className={styles.composerArea}>
+            {handsFreePhase !== "OFF" && (
+              <p
+                className={styles.status}
+                data-hands-free-state={handsFreePhase}
+              >
+                {handsFreePhase === "WAKE_LISTENING"
+                  ? 'Hands-Free on · waiting for "Hey NavoX".'
+                  : handsFreePhase === "PREPARING"
+                    ? "Getting Hey NavoX ready…"
+                    : handsFreePhase === "PAUSED"
+                      ? "Hands-Free paused while this page is hidden."
+                      : "Conversation on. Ask your next question."}
+              </p>
+            )}
+            {status && (
+              <p className={styles.status} data-voice-state={voice.state}>
+                {handsFreePhase === "CONVERSATION" &&
+                voice.state === "LISTENING"
+                  ? "Listening for your next question. Speak naturally, or press Stop."
+                  : status}
+              </p>
+            )}
+            {!controls.voiceModeEnabled && (
+              <p className={styles.status} data-voice-mode="off">
+                Voice Mode is off. Answers are shown on screen; press Read aloud
+                on one to hear it.
+              </p>
+            )}
+
+            <form
+              className={styles.form}
+              onSubmit={onSubmit}
+              aria-label="Ask NavoX"
+            >
+              <label className={styles.field}>
+                <span className={styles.srOnly}>Question</span>
+                <input
+                  type="text"
+                  value={text}
+                  aria-describedby="navox-question-limit"
+                  aria-invalid={questionLimit ? true : undefined}
+                  placeholder="Ask about your day, or tell NavoX what to do…"
+                  onChange={(event) => setText(event.target.value)}
+                  disabled={connecting || !sessionId}
+                />
+              </label>
+              <div className={styles.composerActions}>
+                <div className={styles.recordingControls}>
+                  <button
+                    type="button"
+                    className={styles.talkButton}
+                    onClick={toggleMicrophone}
+                    aria-pressed={controls.listening}
+                    aria-label={microphoneLabel}
+                    title={microphoneLabel}
+                    disabled={
+                      connecting ||
+                      !sessionId ||
+                      busy ||
+                      controls.microphoneDisabled ||
+                      controls.transcribing
+                    }
+                  >
+                    {controls.capturing ? <StopIcon /> : <MicIcon />}
+                    <span>
+                      {controls.capturing ? "Send recording" : "Talk"}
+                    </span>
+                  </button>
+                  {(controls.stopAvailable ||
+                    handsFreePhase === "CONVERSATION") && (
+                    <button
+                      type="button"
+                      className={styles.stopButton}
+                      onClick={stopEverything}
+                      aria-label={
+                        handsFreePhase === "CONVERSATION"
+                          ? "End conversation and return to wake listening"
+                          : "Stop listening and speech"
+                      }
+                      title={
+                        handsFreePhase === "CONVERSATION"
+                          ? "End conversation and return to wake listening"
+                          : "Stop listening and speech"
+                      }
+                      disabled={
+                        !controls.stopAvailable &&
+                        handsFreePhase !== "CONVERSATION"
+                      }
+                    >
+                      <StopIcon />
+                      <span>Stop</span>
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="submit"
+                  className={styles.sendButton}
+                  disabled={
+                    connecting ||
+                    !sessionId ||
+                    busy ||
+                    !text.trim() ||
+                    Boolean(questionLimit)
+                  }
+                >
+                  {busy ? "Checking…" : "Send"}
+                  <span aria-hidden="true">↑</span>
+                </button>
+              </div>
+            </form>
+            <p
+              id="navox-question-limit"
+              className={questionLimit ? styles.error : styles.limitHint}
+              role={questionLimit ? "alert" : undefined}
+            >
+              {questionLimit ?? "Questions can be up to 500 characters."}
+            </p>
+
+            <div className={styles.composerPreferences}>
+              <div className={styles.voiceTools}>
+                <button
+                  className={styles.handsFreeButton}
+                  type="button"
+                  onClick={toggleHandsFree}
+                  aria-pressed={handsFreePhase !== "OFF"}
+                  aria-label={
+                    handsFreePhase === "OFF"
+                      ? "Turn Hands-Free on"
+                      : "Turn Hands-Free off"
+                  }
+                  disabled={
+                    connecting ||
+                    !sessionId ||
+                    (handsFreePhase === "OFF" && busy)
+                  }
+                >
+                  {handsFreePhase === "OFF"
+                    ? "Hey NavoX: Off"
+                    : "Hey NavoX: On"}
+                </button>
+
+                <details className={styles.voiceOptions}>
+                  <summary>Voice options</summary>
+                  <div className={styles.optionButtons}>
+                    <button
+                      type="button"
+                      className={styles.iconButton}
+                      onClick={toggleVoiceMode}
+                      aria-pressed={controls.voiceModeEnabled}
+                      aria-label={
+                        controls.voiceModeEnabled
+                          ? "Turn Voice Mode off; answers stay on screen"
+                          : "Turn Voice Mode on; spoken questions are answered aloud"
+                      }
+                      title={
+                        controls.voiceModeEnabled
+                          ? "Voice Mode on — spoken questions are answered aloud"
+                          : "Voice Mode off — answers stay on screen"
+                      }
+                      disabled={connecting || !sessionId}
+                    >
+                      <VoiceModeIcon enabled={controls.voiceModeEnabled} />
+                      <span>
+                        Spoken answers:{" "}
+                        {controls.voiceModeEnabled ? "On" : "Off"}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.iconButton}
+                      onClick={toggleMute}
+                      aria-pressed={controls.muted}
+                      aria-label={
+                        controls.muted
+                          ? "Unmute spoken answers"
+                          : "Mute spoken answers"
+                      }
+                      title={
+                        controls.muted
+                          ? "Unmute spoken answers"
+                          : "Mute spoken answers"
+                      }
+                      disabled={connecting || !sessionId}
+                    >
+                      {controls.muted ? <MutedIcon /> : <VolumeIcon />}
+                      <span>
+                        {controls.muted ? "Unmute answers" : "Mute answers"}
+                      </span>
+                    </button>
+                  </div>
+                  <p>
+                    Spoken questions receive spoken answers when this is on.
+                    Typed questions stay on screen.
+                  </p>
+                  <p className={styles.permissionHint}>
+                    To talk, allow microphone access when your browser asks.
+                    Turn on Hey NavoX to start hands-free while this page is
+                    open.
+                  </p>
+                </details>
+              </div>
+              <details className={styles.privacy}>
+                <summary>Privacy &amp; your chat</summary>
+                <p>
+                  Clear chat removes this conversation. Questions and answers
+                  expire after 30 days of session access and are then removed on
+                  a scheduled cleanup.
+                </p>
+                <p>
+                  The microphone records after you press Talk or enable Hey
+                  NavoX. Wake detection stays on this device; recorded questions
+                  are sent for speech recognition. Your browser may need a local
+                  speech language pack for Hey NavoX.
+                </p>
+              </details>
+            </div>
+          </div>
+
+          {!connecting && turns.length === 0 && (
+            <div className={styles.suggestionArea}>
+              <p className={styles.suggestionLabel}>Start with a question</p>
+              <div className={styles.suggestions}>
+                {[
+                  {
+                    label: "Plan my day",
+                    question: "What am I missing today?",
+                    icon: "◷",
+                  },
+                  {
+                    label: "My next class",
+                    question: "What class do I have next?",
+                    icon: "▤",
+                  },
+                  {
+                    label: "Today's weather",
+                    question: "What's the weather today?",
+                    icon: "☀",
+                  },
+                  {
+                    label: "Catch up on news",
+                    question: "What's trending today?",
+                    icon: "◎",
+                  },
+                ].map(({ label, question, icon }) => (
+                  <button
+                    type="button"
+                    key={question}
+                    disabled={!sessionId}
+                    onClick={() => setText(question)}
+                    aria-label={question}
+                  >
+                    <span aria-hidden="true">{icon}</span>
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {voice.state === "UNSUPPORTED" && (
+            <p className={styles.status}>
+              Typed input is fully available; the microphone is not.
+            </p>
+          )}
+        </div>
+      </section>
+    </WorkspaceShell>
   );
 }

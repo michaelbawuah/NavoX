@@ -110,7 +110,7 @@ describe("connected understanding controls", () => {
         onTimezoneChange: vi.fn(),
       }),
     );
-    expect(markup).toContain("Loading local time");
+    expect(markup).toContain("Loading time");
     expect(markup).not.toContain("Weather unavailable");
     expect(markup).not.toContain("°");
   });
