@@ -1,0 +1,73 @@
+# Public VPS overlay. Always load after docker-compose.yml.
+# Only the host HTTPS proxy can reach the two loopback HTTP listeners.
+x-python-database-url: &python-db postgresql+asyncpg://navox:${NAVOX_DATABASE_PASSWORD:?Set a unique URL-safe database password}@postgres:5432/navox
+x-node-database-url: &node-db postgres://navox:${NAVOX_DATABASE_PASSWORD:?Set a unique URL-safe database password}@postgres:5432/navox
+x-production-api-environment: &api-environment
+  DATABASE_URL: *python-db
+  APP_ENVIRONMENT: production
+  WEB_ORIGIN: ${NAVOX_PUBLIC_ORIGIN:?Set the public HTTPS origin}
+  GOOGLE_OAUTH_REDIRECT_URI: ${NAVOX_PUBLIC_ORIGIN}/api/v1/connections/google/callback
+  CANVAS_OAUTH_REDIRECT_URI: ${NAVOX_PUBLIC_ORIGIN}/api/v1/connectors/canvas-lms/callback
+
+services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${TEMPORAL_DATABASE_PASSWORD:?Set a unique Temporal database password}
+      NAVOX_DATABASE_PASSWORD: ${NAVOX_DATABASE_PASSWORD:?Set a unique URL-safe database password}
+    ports: !reset []
+    volumes: !override
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init-production.sh:/docker-entrypoint-initdb.d/10-create-navox.sh:ro
+    restart: unless-stopped
+
+  temporal:
+    environment:
+      POSTGRES_PWD: ${TEMPORAL_DATABASE_PASSWORD:?Set a unique Temporal database password}
+    ports: !reset []
+    restart: unless-stopped
+
+  temporal-ui:
+    profiles: [operations]
+    ports: !override
+      - "127.0.0.1:8080:8080"
+
+  migrate:
+    environment: *api-environment
+
+  api:
+    environment: *api-environment
+    ports: !override
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready', timeout=5)"]
+      interval: 10s
+      timeout: 8s
+      retries: 20
+      start_period: 45s
+    restart: unless-stopped
+
+  worker:
+    environment: *api-environment
+
+  assistant-migrate:
+    environment:
+      NAVOX_ASSISTANT_DATABASE_URL: *node-db
+
+  web:
+    build:
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NAVOX_PUBLIC_API_BASE_URL:?Set the public HTTPS API URL}
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NAVOX_PUBLIC_API_BASE_URL:?Set the public HTTPS API URL}
+      NAVOX_ASSISTANT_DATABASE_URL: *node-db
+      NAVOX_ASSISTANT_ORIGIN: ${NAVOX_PUBLIC_ORIGIN:?Set the public HTTPS origin}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports: !override
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
+  assistant-goals-worker:
+    environment:
+      NAVOX_ASSISTANT_DATABASE_URL: *node-db

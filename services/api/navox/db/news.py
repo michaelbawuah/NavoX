@@ -112,6 +112,7 @@ class NewsItem(Base):
     event_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     event_ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     description: Mapped[str | None] = mapped_column(Text)
+    image: Mapped[dict[str, str] | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     categories: Mapped[list[str]] = mapped_column(JSON)
     language: Mapped[str] = mapped_column(String(32))
     region: Mapped[str] = mapped_column(String(64))

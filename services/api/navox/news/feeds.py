@@ -18,6 +18,7 @@ from navox.news.contracts import (
     SourceDefinition,
     aware_utc,
 )
+from navox.news.images import feed_image
 
 MAX_FEED_BYTES = 1_048_576
 MAX_FEED_ITEMS = 100
@@ -108,6 +109,8 @@ def parse_feed(data: bytes, definition: SourceDefinition) -> tuple[list[NewsItem
                     )
                     or None
                 )
+            media = "{http://search.yahoo.com/mrss/}"
+            image = node.find(media + "content")
             result.append(
                 NewsItemInput(
                     external_id=_value(node, atom + "id" if is_atom else "guid") or link,
@@ -121,6 +124,19 @@ def parse_feed(data: bytes, definition: SourceDefinition) -> tuple[list[NewsItem
                     published_at=_time(published),
                     updated_at=_time(updated) if updated else None,
                     description=description,
+                    image=feed_image(
+                        image.attrib.get("url") if image is not None else None,
+                        _value(node, media + "description"),
+                        _value(node, media + "credit"),
+                        definition,
+                    )
+                    if definition.rights.image_display_allowed
+                    and image is not None
+                    and (
+                        image.attrib.get("medium") == "image"
+                        or image.attrib.get("type", "").startswith("image/")
+                    )
+                    else None,
                     categories=(definition.category,),
                     language=definition.language,
                     region=definition.region,

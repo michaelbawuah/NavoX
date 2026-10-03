@@ -17,17 +17,23 @@ from navox.api.actions import (
 from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
 from navox.approvals.schemas import ApprovalDecisionRequest
 from navox.approvals.service import ApprovalService, ApprovalServiceError
-from navox.communication.generation import generate_content
+from navox.communication.generation import (
+    generate_content,
+    generate_knowledge_email_content,
+)
 from navox.communication.schemas import (
     DraftContent,
     GenerateDraft,
+    GenerateKnowledgeEmailDraft,
     PrepareDraft,
     RegenerateDraft,
     ReviseDraft,
 )
 from navox.communication.service import (
+    KNOWLEDGE_EMAIL_BINDING,
     content_of,
     create_draft,
+    create_knowledge_email_draft,
     current_version,
     owned_draft,
     prepare_draft,
@@ -53,8 +59,10 @@ async def detail(
     ).all()
     return {
         "id": str(draft.id),
-        "commitment_id": str(draft.commitment_id),
+        "commitment_id": str(draft.commitment_id) if draft.commitment_id else None,
+        "binding_kind": draft.binding_kind or "COMMITMENT",
         "source_id": draft.source_reference,
+        "source_external_id": draft.source_external_id,
         "current_version": draft.current_version,
         "status": draft.status,
         "action_id": str(draft.action_id) if draft.action_id else None,
@@ -100,6 +108,49 @@ async def generate(
             commitment_id=payload.commitment_id,
             source_connection_id=source_connection_id,
             source_reference=str(payload.source_id),
+            content=content,
+            generated=result,
+        )
+        return await detail(database, draft)
+    except ApprovalServiceError as error:
+        raise approval_error(error) from None
+    except (
+        AIProviderNotConfigured,
+        GatewayUnavailable,
+        GoogleSourceError,
+        GoogleAccessTokenError,
+        TimeoutError,
+    ):
+        raise HTTPException(
+            503, "No eligible AI provider is available; you can still write the email yourself"
+        ) from None
+
+
+@router.post("/from-knowledge-email", status_code=201)
+async def generate_from_knowledge_email(
+    payload: GenerateKnowledgeEmailDraft,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict[str, object]:
+    """Draft a reply from one authorized SPEC-007 email selector."""
+    if account.user.agent_paused:
+        raise HTTPException(409, "NavoX is paused")
+    try:
+        content, result, binding = await generate_knowledge_email_content(
+            database,
+            await build_runtime(settings),
+            settings=settings,
+            workspace_id=account.workspace.id,
+            user_id=account.user.id,
+            source_id=payload.source_id,
+            instructions=payload.instructions,
+        )
+        draft = await create_knowledge_email_draft(
+            database,
+            workspace_id=account.workspace.id,
+            user_id=account.user.id,
+            binding=binding,
             content=content,
             generated=result,
         )
@@ -219,18 +270,32 @@ async def regenerate(
         if draft.current_version != payload.expected_version:
             raise HTTPException(409, "Draft changed; reload before generating another version")
         previous = await current_version(database, draft)
-        content, result, _ = await generate_content(
-            database,
-            await build_runtime(settings),
-            settings=settings,
-            workspace_id=account.workspace.id,
-            user_id=account.user.id,
-            commitment_id=draft.commitment_id,
-            source_id=UUID(draft.source_reference or ""),
-            previous=content_of(previous),
-            recipient=previous.to[0],
-            instructions=payload.instructions,
-        )
+        if (draft.binding_kind or "COMMITMENT") == KNOWLEDGE_EMAIL_BINDING:
+            content, result, _ = await generate_knowledge_email_content(
+                database,
+                await build_runtime(settings),
+                settings=settings,
+                workspace_id=account.workspace.id,
+                user_id=account.user.id,
+                source_id=UUID(draft.source_reference or ""),
+                previous=content_of(previous),
+                instructions=payload.instructions,
+            )
+        else:
+            if draft.commitment_id is None:
+                raise HTTPException(409, "Draft is missing its commitment binding")
+            content, result, _ = await generate_content(
+                database,
+                await build_runtime(settings),
+                settings=settings,
+                workspace_id=account.workspace.id,
+                user_id=account.user.id,
+                commitment_id=draft.commitment_id,
+                source_id=UUID(draft.source_reference or ""),
+                previous=content_of(previous),
+                recipient=previous.to[0],
+                instructions=payload.instructions,
+            )
         await save_version(
             database, draft, content, expected_version=payload.expected_version, generated=result
         )

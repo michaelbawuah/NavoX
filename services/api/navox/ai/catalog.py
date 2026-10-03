@@ -40,6 +40,8 @@ def catalog_template() -> RegistrySnapshot:
                     else frozenset()
                 ),
             )
-            for profile in Profile
+            # Only profiles with a declared task binding are published; vocabulary
+            # added for audio qualification stays absent until an operator opts in.
+            for profile in tasks
         ),
     )

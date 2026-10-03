@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     canvas_oauth_client_id: str = ""
     canvas_oauth_client_secret: SecretStr | None = None
     canvas_oauth_redirect_uri: str = "http://localhost:8000/api/v1/connectors/canvas-lms/callback"
+    # Reviewed school OAuth deployments; never supplied by a student request.
+    canvas_oauth_deployments: list[dict[str, JsonValue]] = Field(
+        default_factory=list, max_length=50, repr=False
+    )
     google_oauth_client_id: str = ""
     google_oauth_client_secret: SecretStr | None = None
     google_oauth_redirect_uri: str = "http://localhost:8000/api/v1/connections/google/callback"

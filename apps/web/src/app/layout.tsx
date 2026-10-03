@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "NavoX — Your day. In perspective.",
   description:
-    "Bring your messages, meetings, and commitments into focus with NavoX, your personal operations workspace.",
+    "Your personal assistant for a clearer day. Keep up with tasks, classes, messages and news.",
 };
 
 export default function RootLayout({

@@ -128,10 +128,10 @@ describe("News feed selection", () => {
     );
     expect(trending).toContain("Trending");
     expect(trending).toContain(
-      "observed activity among the sources you can already read",
+      "Stories drawing attention in your connected news sources",
     );
     expect(trending).toContain(
-      "not a measure of global popularity, importance or truth",
+      "does not measure worldwide popularity or importance, and does not confirm a report",
     );
     expect(trending).toContain('aria-pressed="true"');
   });

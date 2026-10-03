@@ -36,6 +36,37 @@ export function canvasOrigin(value: unknown): string {
     throw new Error("Canvas setup is unavailable.");
   return url.origin;
 }
+export interface CanvasInstitution {
+  id: string;
+  name: string;
+  origin: string;
+}
+export function canvasInstitutions(value: unknown): CanvasInstitution[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 50)
+    throw new Error("Canvas setup is unavailable.");
+  const ids = new Set<string>();
+  const origins = new Set<string>();
+  return value.map((entry: unknown) => {
+    if (!entry || typeof entry !== "object")
+      throw new Error("Canvas setup is unavailable.");
+    const item = entry as Record<string, unknown>;
+    if (
+      Object.keys(item).sort().join(",") !== "id,name,origin" ||
+      typeof item.id !== "string" ||
+      !/^[a-z0-9-]{1,64}$/.test(item.id) ||
+      typeof item.name !== "string" ||
+      !item.name.trim() ||
+      item.name.length > 100
+    )
+      throw new Error("Canvas setup is unavailable.");
+    const origin = canvasOrigin(item.origin);
+    if (ids.has(item.id) || origins.has(origin))
+      throw new Error("Canvas setup is unavailable.");
+    ids.add(item.id);
+    origins.add(origin);
+    return { id: item.id, name: item.name, origin };
+  });
+}
 export function canvasAuthorizationUrl(value: unknown, origin: string): string {
   if (typeof value !== "string")
     throw new Error("Canvas authorization was not returned.");

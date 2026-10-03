@@ -4,8 +4,9 @@ import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from uuid import uuid4
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from navox.ai.foundation.adapter import ErrorCode, ProviderError
@@ -194,6 +195,87 @@ class GatewayStore:
                     return False
             await db.commit()
             return True
+
+    async def _admit_audio_attempt(
+        self, task: AITask, *, limit: int, window: timedelta
+    ) -> AITaskRun | None:
+        """Reserve one bounded audio attempt under the caller's user row lock.
+
+        Returns the committed ``STARTED`` trace row when the caller may attempt a
+        provider call, or ``None`` when the rolling-window budget is already
+        spent. The user row is locked so the count and the insert serialize per
+        user, and the row is committed before the provider call, so a failed or
+        discarded attempt still consumes its slot. Audio, transcript and speech
+        text never reach this row.
+        """
+
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            raise ValueError("Audio attempt limit must be a positive integer")
+        moment = datetime.now(UTC)
+        async with self.factory() as db:
+            user = await db.scalar(
+                select(User)
+                .where(User.id == task.user_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            # Re-check scope and pause under the same lock that admits the paid
+            # attempt, so a revocation between authorize and admission cannot
+            # still reserve a provider slot.
+            member = await db.get(
+                WorkspaceMembership,
+                (task.workspace_id, task.user_id),
+                populate_existing=True,
+            )
+            if user is None or user.agent_paused or member is None:
+                raise PermissionError("AI task access denied")
+            used = int(
+                await db.scalar(
+                    select(func.count())
+                    .select_from(AITaskRun)
+                    .where(
+                        AITaskRun.user_id == task.user_id,
+                        AITaskRun.task_type == task.task_type.value,
+                        AITaskRun.created_at >= moment - window,
+                    )
+                )
+                or 0
+            )
+            if used >= limit:
+                return None
+            run = AITaskRun(
+                id=uuid4(),
+                task_id=task.id,
+                workspace_id=task.workspace_id,
+                user_id=task.user_id,
+                trace_id=task.trace_id,
+                task_type=task.task_type.value,
+                profile=task.profile.value,
+                prompt=f"{task.prompt.name}@{task.prompt.version}",
+                schema=f"{task.output_schema.name}@{task.output_schema.version}",
+                status="STARTED",
+                usage={},
+                fallback_count=0,
+                shadow=False,
+                created_at=moment,
+            )
+            db.add(run)
+            await db.commit()
+        return run
+
+    async def admit_transcription(
+        self, task: AITask, *, limit: int, window: timedelta
+    ) -> AITaskRun | None:
+        """Reserve one transcription attempt; see ``_admit_audio_attempt``."""
+
+        return await self._admit_audio_attempt(task, limit=limit, window=window)
+
+    async def admit_synthesis(
+        self, task: AITask, *, limit: int, window: timedelta
+    ) -> AITaskRun | None:
+        """Reserve one speech-synthesis attempt; see ``_admit_audio_attempt``."""
+
+        return await self._admit_audio_attempt(task, limit=limit, window=window)
 
     async def health(self, model_id: str, error: ProviderError | None) -> None:
         async with self.factory() as db:

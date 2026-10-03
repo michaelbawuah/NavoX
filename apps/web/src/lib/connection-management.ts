@@ -77,11 +77,17 @@ export function catalogAvailability(
 
 const connectableIds = new Set([
   "google-workspace",
-  "canvas-lms",
   "generic-import",
   "generic-rest-api",
   "mcp",
 ]);
+
+/** Canvas onboarding is deferred from the current personal-assistant release. */
+export function visibleConnectorCatalog(
+  entries: ConnectorEntry[],
+): ConnectorEntry[] {
+  return entries.filter((entry) => entry.id !== "canvas-lms");
+}
 
 export function canOpenConnector(entry: ConnectorEntry): boolean {
   return entry.availability === "available" && connectableIds.has(entry.id);

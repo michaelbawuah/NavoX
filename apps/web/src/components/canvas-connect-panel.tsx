@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import {
+  type CanvasInstitution,
   canvasAuthorizationUrl,
-  canvasOrigin,
+  canvasInstitutions,
   canvasPermissions,
   canvasSelection,
 } from "../lib/canvas-setup";
@@ -15,7 +16,9 @@ export function CanvasConnectPanel({
   apiBaseUrl: string;
   onClose: () => void;
 }) {
-  const [origin, setOrigin] = useState("");
+  const [institutions, setInstitutions] = useState<CanvasInstitution[]>([]);
+  const [institutionId, setInstitutionId] = useState("");
+  const institution = institutions.find((item) => item.id === institutionId);
   const [selected, setSelected] = useState<string[]>([
     "academic.courses.read",
     "academic.assignments.read",
@@ -38,7 +41,11 @@ export function CanvasConnectPanel({
             "Canvas needs an institution-approved developer key before connecting.",
           );
         const data = await response.json();
-        if (!abort.signal.aborted) setOrigin(canvasOrigin(data.origin));
+        if (!abort.signal.aborted) {
+          const available = canvasInstitutions(data.institutions);
+          setInstitutions(available);
+          setInstitutionId(available.length === 1 ? available[0].id : "");
+        }
       })
       .catch((failure) => {
         if (!abort.signal.aborted)
@@ -63,7 +70,7 @@ export function CanvasConnectPanel({
     setConsent(false);
   }
   async function connect() {
-    if (pending || !origin || !consent) return;
+    if (pending || !institution || !consent) return;
     setPending(true);
     setError("");
     const abort = new AbortController();
@@ -80,6 +87,7 @@ export function CanvasConnectPanel({
           body: JSON.stringify({
             request_id: crypto.randomUUID(),
             capabilities: canvasSelection(selected),
+            institution_id: institution.id,
             confirmed: true,
           }),
         },
@@ -91,7 +99,7 @@ export function CanvasConnectPanel({
       const data = await response.json();
       if (!abort.signal.aborted)
         window.location.assign(
-          canvasAuthorizationUrl(data.authorization_url, origin),
+          canvasAuthorizationUrl(data.authorization_url, institution.origin),
         );
     } catch (failure) {
       if (!abort.signal.aborted)
@@ -112,11 +120,31 @@ export function CanvasConnectPanel({
           Close
         </button>
       </div>
+      <label htmlFor="canvas-institution">Your school</label>
+      <select
+        id="canvas-institution"
+        value={institutionId}
+        disabled={pending || institutions.length === 0}
+        onChange={(event) => {
+          setInstitutionId(event.target.value);
+          setConsent(false);
+        }}
+      >
+        <option value="">Choose a school</option>
+        {institutions.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.name}
+          </option>
+        ))}
+      </select>
       <p>
         Authorize NavoX on your institution’s Canvas website
-        {origin ? ` (${origin})` : ""}. Your Canvas password and personal access
-        tokens are never entered here.
+        {institution ? ` (${institution.origin})` : ""}. Your Canvas password
+        and personal access tokens are never entered here.
       </p>
+      {!institutions.length && !error ? (
+        <p>No approved schools are available yet.</p>
+      ) : null}
       <fieldset disabled={pending}>
         <legend>Choose what NavoX may read</legend>
         {canvasPermissions.map(([key, label]) => (
@@ -152,7 +180,7 @@ export function CanvasConnectPanel({
       {error ? <p role="alert">{error}</p> : null}
       <button
         type="button"
-        disabled={pending || !consent || !origin}
+        disabled={pending || !consent || !institution}
         onClick={() => void connect()}
       >
         {pending ? "Opening Canvas…" : "Continue to Canvas"}

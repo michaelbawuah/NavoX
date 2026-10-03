@@ -450,6 +450,9 @@ def calendar_document(
         metadata={
             "start_at": _text(start.get("dateTime"), 64),
             "end_at": _text(end.get("dateTime"), 64),
+            "scheduling_updated_at": _text(data.get("updated"), 64),
+            "location": _text(data.get("location"), 256),
+            "meeting_url": _text(data.get("hangoutLink"), 2048),
             "start_date": _text(start.get("date"), 10),
             "end_date": _text(end.get("date"), 10),
             "timezone": _text(start.get("timeZone"), 64),
@@ -684,19 +687,24 @@ class GoogleSourceGateway:
             headers: dict[str, str] = {}
             for header in data["payload"]["headers"]:
                 name, value = header["name"].lower(), header["value"]
-                if name not in {"message-id", "references", "in-reply-to", "subject"}:
+                if name not in {"message-id", "references", "in-reply-to", "subject", "from"}:
                     continue
                 if name in headers or not isinstance(value, str):
                     raise ValueError
                 headers[name] = value
             message_id = headers["message-id"]
             references = headers.get("references", headers.get("in-reply-to", ""))
+            authors = getaddresses([headers.get("from", "")])
+            source_author = (
+                authors[0][1].strip() if len(authors) == 1 and authors[0][1].strip() else None
+            )
             return GmailReplyMetadata(
                 source_message_id=external_id,
                 thread_id=data["threadId"],
                 source_subject=headers["subject"],
                 in_reply_to=message_id,
                 references=f"{references} {message_id}" if references else message_id,
+                source_author=source_author,
             )
         except (KeyError, TypeError, ValueError, AttributeError):
             raise GoogleSourceError(

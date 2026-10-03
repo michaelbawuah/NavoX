@@ -1,7 +1,20 @@
-export type NewsCategory = "world" | "us" | "business" | "technology" | "science";
+export type NewsCategory =
+  "world" | "us" | "business" | "technology" | "science";
 export type NewsVerification =
-  | "VERIFIED" | "CORROBORATED" | "ATTRIBUTED" | "DEVELOPING"
-  | "UNCONFIRMED" | "DISPUTED" | "CONTRADICTED" | "RETRACTED";
+  | "VERIFIED"
+  | "CORROBORATED"
+  | "ATTRIBUTED"
+  | "DEVELOPING"
+  | "UNCONFIRMED"
+  | "DISPUTED"
+  | "CONTRADICTED"
+  | "RETRACTED";
+
+export interface NewsImage {
+  url: string;
+  alt: string;
+  credit: string;
+}
 
 export interface NewsSourceItem {
   id: string;
@@ -10,6 +23,7 @@ export interface NewsSourceItem {
   headline: string;
   canonical_url: string;
   description: string | null;
+  image?: NewsImage | null;
   published_at: string;
   updated_at: string | null;
   event_started_at: string | null;
@@ -23,6 +37,7 @@ export interface NewsStory {
   id: string;
   headline: string;
   description: string | null;
+  image?: NewsImage | null;
   category: NewsCategory;
   verification_status: NewsVerification;
   lifecycle_status: string;

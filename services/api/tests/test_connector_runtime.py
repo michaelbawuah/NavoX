@@ -113,6 +113,67 @@ async def database() -> AsyncIterator[AsyncSession]:
 
 
 @pytest.mark.asyncio
+async def test_preview_read_is_fenced_and_does_not_persist_or_advance_sync(
+    database: AsyncSession,
+) -> None:
+    manifest = FixtureConnector({}).get_manifest()
+    registry = ConnectorRegistry()
+    registry.register(manifest, FixtureConnector)
+    runtime = ConnectorRuntime(registry)
+    user = User(email="preview@example.com")
+    workspace = Workspace(name="Preview workspace")
+    database.add_all([user, workspace])
+    await database.flush()
+    database.add(WorkspaceMembership(workspace_id=workspace.id, user_id=user.id))
+    definition = ConnectorDefinition(
+        connector_key=manifest.id,
+        version=manifest.version,
+        display_name=manifest.display_name,
+        connector_class=manifest.connector_class,
+        trust_level="NAVOX_FIRST_PARTY",
+        manifest=manifest.model_dump(mode="json", by_alias=True),
+    )
+    database.add(definition)
+    await database.flush()
+    connection = ConnectorConnection(
+        connector_definition_id=definition.id,
+        user_id=user.id,
+        workspace_id=workspace.id,
+        provider="fixture",
+        external_account_id="preview",
+        status="CONNECTED",
+        health_state="CONNECTED",
+        authorized_capabilities=["fixture.items.read"],
+        provider_capabilities=["fixture.items.read"],
+        config={},
+    )
+    database.add(connection)
+    await database.commit()
+    resources = await runtime.read_preview(
+        database,
+        connection_id=connection.id,
+        workspace_id=workspace.id,
+        user_id=user.id,
+        policy_allowed=frozenset({"fixture.items.read"}),
+    )
+    assert len(resources) == 1
+    assert resources[0].canonical["title"] == "Portable resource"
+    assert await database.get(ConnectorResource, resources[0].resource_id) is None
+    await database.refresh(connection)
+    assert connection.sync_cursor is None
+    connection.authorized_capabilities = []
+    await database.commit()
+    with pytest.raises(ConnectorRuntimeError):
+        await runtime.read_preview(
+            database,
+            connection_id=connection.id,
+            workspace_id=workspace.id,
+            user_id=user.id,
+            policy_allowed=frozenset({"fixture.items.read"}),
+        )
+
+
+@pytest.mark.asyncio
 async def test_runtime_persists_resources_and_advances_cursor_only_after_consumer_accepts(
     database: AsyncSession,
 ) -> None:

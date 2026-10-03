@@ -337,10 +337,10 @@ export function ApprovalPanel({
   return (
     <section className={`${styles.controlCard} ${styles.approvalCard}`}>
       <div className={styles.controlHeading}>
-        <p>External action</p>
-        <span className={styles.controlMeta}>Exact approval · R3</span>
+        <p>Review your email</p>
+        <span className={styles.controlMeta}>Your approval needed</span>
       </div>
-      <h2>Gmail send</h2>
+      <h2>Send with Gmail</h2>
 
       {error && (
         <p className={styles.inlineError} role="alert">
@@ -352,9 +352,9 @@ export function ApprovalPanel({
         <div className={styles.permissionGate}>
           <strong>Gmail sending is off.</strong>
           <p>
-            Google identity access does not include email authority. Enable only
-            the send scope when you want NavoX to prepare approved email
-            actions.
+            Connecting Google doesn’t give NavoX permission to send email.
+            Enable Gmail sending when you’re ready; every message still needs
+            your approval.
           </p>
           {connectionToUpgrade ? (
             <button
@@ -374,7 +374,7 @@ export function ApprovalPanel({
         <div className={styles.approvalPanel} aria-live="polite">
           <div className={styles.approvalTopline}>
             <div>
-              <span className={styles.riskBadge}>R3</span>
+              <span className={styles.riskBadge}>Email</span>
               <strong>{activeAction.status.replaceAll("_", " ")}</strong>
             </div>
             <small>
@@ -399,20 +399,14 @@ export function ApprovalPanel({
             </div>
           </dl>
           <div className={styles.emailBody}>
-            <span className={styles.emailBodyLabel}>Exact body</span>
+            <span className={styles.emailBodyLabel}>Message</span>
             <p>{activeAction.payload.body_text}</p>
-          </div>
-          <div className={styles.approvalHash}>
-            <span className={styles.approvalHashLabel}>
-              Approved payload fingerprint
-            </span>
-            <code>{activeAction.payload_hash}</code>
           </div>
 
           {activeAction.result.message_id && (
             <div className={styles.verificationReceipt}>
               <strong>Verified by Gmail</strong>
-              <span>Message {activeAction.result.message_id}</span>
+              <span>Your message was sent and confirmed.</span>
             </div>
           )}
           {activeAction.status === "uncertain" && (
@@ -476,7 +470,7 @@ export function ApprovalPanel({
                 </select>
               </label>
               <label>
-                Google connection
+                Gmail account
                 <select
                   onChange={(event) => setConnectionId(event.target.value)}
                   required

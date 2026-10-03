@@ -122,6 +122,129 @@ class ConnectorRuntime:
         self.page_budget = page_budget
         self.knowledge_settings = knowledge_settings
 
+    async def read_preview(
+        self,
+        database: AsyncSession,
+        *,
+        connection_id: UUID,
+        workspace_id: UUID,
+        user_id: UUID,
+        policy_allowed: frozenset[str],
+        max_pages: int = 12,
+        max_resources: int = 400,
+    ) -> tuple[CanonicalResource, ...]:
+        """Transient, bounded provider read with the normal connector authority fence.
+
+        It never persists a source body or advances a sync cursor. The caller may
+        project only fields from resources that survive the final scope recheck.
+        """
+        if not 1 <= max_pages <= 20 or not 1 <= max_resources <= 400:
+            raise ValueError("Invalid preview bound")
+        try:
+            connection = await owned_connector(
+                database,
+                connection_id=connection_id,
+                workspace_id=workspace_id,
+                user_id=user_id,
+                require_active=True,
+                lock_connection=False,
+            )
+        except ConnectorAccessDenied:
+            raise ConnectorRuntimeError("PERMISSION_DENIED", "Connector access denied") from None
+        definition = await database.get(
+            ConnectorDefinition, connection.connector_definition_id, populate_existing=True
+        )
+        if definition is None or not definition.active:
+            raise ConnectorRuntimeError("PERMISSION_DENIED", "Connector definition unavailable")
+        context = ConnectorConnectionContext.model_validate(
+            {
+                "id": connection.id,
+                "workspace_id": workspace_id,
+                "user_id": user_id,
+                "connector_id": definition.connector_key,
+                "provider": connection.provider,
+                "external_account_id": connection.external_account_id,
+                "status": connection.health_state,
+                "authorized_capabilities": connection.authorized_capabilities,
+                "config": connection.config,
+            }
+        )
+        try:
+            registered = self.registry.get(definition.connector_key)
+        except KeyError:
+            raise ConnectorRuntimeError("PERMISSION_DENIED", "Connector is unavailable") from None
+        manifest = registered.factory(context.config, None).get_manifest()
+        if manifest.id != registered.manifest.id or manifest.version != definition.version:
+            raise ConnectorRuntimeError("PERMISSION_DENIED", "Connector definition changed")
+        capabilities = self.capability_gateway.evaluate(
+            manifest=manifest,
+            provider_capabilities=set(connection.provider_capabilities),
+            user_authorized=set(connection.authorized_capabilities),
+            policy_allowed=policy_allowed,
+            health_state=context.status,
+        ).read
+        if not capabilities:
+            raise ConnectorRuntimeError("PERMISSION_DENIED", "Connector read permission is absent")
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        resources: list[CanonicalResource] = []
+        started_at = await database_now(database)
+        for _ in range(max_pages):
+            async with self._adapter(
+                database, context, manifest, capabilities, purpose="sync.read"
+            ) as connector:
+                async with asyncio.timeout(20):
+                    output = await connector.sync(
+                        SyncRequest(
+                            connection_id=connection_id,
+                            workspace_id=workspace_id,
+                            cursor=cursor,
+                            limit=100,
+                            capabilities=capabilities,
+                            started_at=started_at,
+                        )
+                    )
+            try:
+                page = SyncPage.model_validate(output.model_dump(mode="json"))
+            except (ValidationError, AttributeError, ValueError):
+                raise ConnectorRuntimeError(
+                    "INVALID_PROVIDER_RESPONSE", "Invalid connector page"
+                ) from None
+            for resource in page.resources:
+                self._validate_resource(context, manifest, resource)
+            resources.extend(page.resources)
+            if len(resources) > max_resources:
+                raise ConnectorRuntimeError(
+                    "INVALID_PROVIDER_RESPONSE", "Preview resource bound exceeded"
+                )
+            try:
+                current = await owned_connector(
+                    database,
+                    connection_id=connection_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    require_active=True,
+                    lock_connection=False,
+                )
+            except ConnectorAccessDenied:
+                raise ConnectorRuntimeError(
+                    "PERMISSION_DENIED", "Connector access denied"
+                ) from None
+            if current.config != context.config or not capabilities.issubset(
+                set(current.authorized_capabilities) & set(current.provider_capabilities)
+            ):
+                raise ConnectorRuntimeError("PERMISSION_DENIED", "Connector permission changed")
+            await self._check_authority(database, lock=False)
+            if not page.has_more:
+                return tuple(resources)
+            if not page.next_cursor or page.next_cursor in seen_cursors:
+                raise ConnectorRuntimeError(
+                    "INVALID_PROVIDER_RESPONSE", "Preview cursor did not progress"
+                )
+            seen_cursors.add(page.next_cursor)
+            cursor = page.next_cursor
+        raise ConnectorRuntimeError("INVALID_PROVIDER_RESPONSE", "Preview page bound exceeded")
+
     async def _check_authority(self, database: AsyncSession, *, lock: bool) -> None:
         if self.authority_check is not None:
             await self.authority_check(database, lock)

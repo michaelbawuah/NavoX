@@ -87,6 +87,7 @@ class TodayQueryResponse(BaseModel):
 
 SUPPORTED_QUERIES = [
     "What do I need to know today?",
+    "What am I missing today?",
     "What needs my attention?",
     "What is coming up this week?",
     "What am I waiting on?",

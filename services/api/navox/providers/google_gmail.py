@@ -5,9 +5,20 @@ from email.message import EmailMessage
 from typing import Any, Protocol, cast
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 GMAIL_SEND_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+
+_EMAIL_ADDRESS = TypeAdapter(EmailStr)
 
 
 class GmailProviderError(RuntimeError):
@@ -24,6 +35,19 @@ class GmailReplyMetadata(BaseModel):
     source_subject: str = Field(min_length=1, max_length=256, pattern=r"^[^\r\n]+$")
     in_reply_to: str = Field(min_length=1, max_length=900)
     references: str = Field(min_length=1, max_length=8000)
+    # Populated from the freshly fetched From header. ``None`` means the source
+    # has no single safe reply author; the knowledge-email draft path refuses it.
+    source_author: str | None = Field(default=None, max_length=320)
+
+    @field_validator("source_author")
+    @classmethod
+    def normalize_source_author(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            return str(_EMAIL_ADDRESS.validate_python(value.strip())).casefold()
+        except (ValidationError, AttributeError):
+            return None
 
     @model_validator(mode="after")
     def safe_message_ids(self) -> "GmailReplyMetadata":

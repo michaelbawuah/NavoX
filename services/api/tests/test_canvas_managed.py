@@ -37,6 +37,7 @@ from navox.db.session import get_database_session
 from navox.intelligence.extraction import ModelExtractionResponse
 
 ORIGIN = "https://canvas.example.edu"
+SECOND_ORIGIN = "https://canvas.second.edu"
 REFRESH = "refresh-SENTINEL-123"
 ACCESS = "access-SENTINEL-456"
 CAPS = list(canvas_oauth.CANVAS_SCOPES)
@@ -156,19 +157,25 @@ async def env(monkeypatch):
     monkeypatch.setattr(canvas, "dispatch_connector_sync", dispatch)
 
     async def resolver(host):
-        assert host == "canvas.example.edu"
+        assert host in {"canvas.example.edu", "canvas.second.edu"}
         return ["8.8.8.8"]
 
     async def handle(request):
         calls.append(request)
-        assert request.url.host == "8.8.8.8" and request.headers["host"] == "canvas.example.edu"
+        assert request.url.host == "8.8.8.8"
+        assert request.headers["host"] in {"canvas.example.edu", "canvas.second.edu"}
         path = request.url.path
         if state.hook:
             await state.hook(request)
         if path == "/login/oauth2/token":
             assert request.method == "POST"
             data = parse_qs(request.content.decode())
-            assert data["client_secret"] == ["application-SENTINEL"]
+            expected_secret = (
+                "application-SECOND"
+                if request.headers["host"] == "canvas.second.edu"
+                else "application-SENTINEL"
+            )
+            assert data["client_secret"] == [expected_secret]
             if data["grant_type"] == ["refresh_token"]:
                 assert data["refresh_token"] == [REFRESH]
                 assert data["redirect_uri"] == [settings.canvas_oauth_redirect_uri]
@@ -287,18 +294,121 @@ async def env(monkeypatch):
         await admin.dispose()
 
 
-async def begin(env, capabilities=None):
+async def begin(env, capabilities=None, institution_id=None):
     r = await env.client.post(
         "/api/v1/connectors/canvas-lms/connect",
         json={
             "request_id": str(uuid4()),
             "confirmed": True,
             "capabilities": CAPS if capabilities is None else capabilities,
+            **({"institution_id": institution_id} if institution_id else {}),
         },
     )
     assert r.status_code == 200, r.text
     url = r.json()["authorization_url"]
     return parse_qs(urlsplit(url).query)["state"][0], url
+
+
+def enable_two_schools(env):
+    env.settings.canvas_oauth_deployments = [
+        {
+            "id": "first",
+            "name": "First University",
+            "origin": ORIGIN,
+            "client_id": "12345",
+            "client_secret": "application-SENTINEL",
+        },
+        {
+            "id": "second",
+            "name": "Second College",
+            "origin": SECOND_ORIGIN,
+            "client_id": "67890",
+            "client_secret": "application-SECOND",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_multi_school_catalog_requires_explicit_selection_and_hides_secrets(env):
+    enable_two_schools(env)
+    response = await env.client.get("/api/v1/connectors/canvas-lms/setup")
+    assert response.status_code == 200
+    assert response.json()["institutions"] == [
+        {"id": "first", "name": "First University", "origin": ORIGIN},
+        {"id": "second", "name": "Second College", "origin": SECOND_ORIGIN},
+    ]
+    assert "application-SENTINEL" not in response.text
+    assert "application-SECOND" not in response.text
+    command = {"request_id": str(uuid4()), "confirmed": True, "capabilities": CAPS}
+    missing = await env.client.post("/api/v1/connectors/canvas-lms/connect", json=command)
+    unknown = await env.client.post(
+        "/api/v1/connectors/canvas-lms/connect",
+        json={**command, "institution_id": "unknown"},
+    )
+    assert missing.status_code == 400 and unknown.status_code == 400
+    assert not env.calls
+    _, url = await begin(env, institution_id="second")
+    assert urlsplit(url).netloc == "canvas.second.edu"
+    assert parse_qs(urlsplit(url).query)["client_id"] == ["67890"]
+
+
+@pytest.mark.asyncio
+async def test_multi_school_callback_binds_selected_school_and_separates_same_user_id(env):
+    enable_two_schools(env)
+    first_state, _ = await begin(env, institution_id="first")
+    second_state, _ = await begin(env, institution_id="second")
+    callback = "/api/v1/connectors/canvas-lms/callback"
+    for state in (first_state, second_state):
+        response = await env.client.get(callback, params={"state": state, "code": "fixture"})
+        assert response.status_code == 303, response.text
+    async with env.factory() as db:
+        rows = list(
+            await db.scalars(
+                select(ConnectorConnection).where(ConnectorConnection.provider == "canvas")
+            )
+        )
+        assert len(rows) == 2
+        assert {row.external_account_id for row in rows} == {f"{ORIGIN}:42", f"{SECOND_ORIGIN}:42"}
+        assert rows[0].id != rows[1].id
+    assert {request.headers["host"] for request in env.calls} == {
+        "canvas.example.edu",
+        "canvas.second.edu",
+    }
+    replay = await env.client.get(callback, params={"state": first_state, "code": "fixture"})
+    assert replay.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_multi_school_rotation_and_reconnect_are_bound_to_original_school(env):
+    enable_two_schools(env)
+    state, _ = await begin(env, institution_id="second")
+    env.settings.canvas_oauth_deployments[1]["client_secret"] = "rotated-secret"
+    blocked = await env.client.get(
+        "/api/v1/connectors/canvas-lms/callback", params={"state": state, "code": "fixture"}
+    )
+    assert blocked.status_code == 400 and not env.calls
+    env.settings.canvas_oauth_deployments[1]["client_secret"] = "application-SECOND"
+    completed = await env.client.get(
+        "/api/v1/connectors/canvas-lms/callback", params={"state": state, "code": "fixture"}
+    )
+    assert completed.status_code == 303
+    async with env.factory() as db:
+        row = await db.scalar(
+            select(ConnectorConnection).where(ConnectorConnection.provider == "canvas")
+        )
+        identifier = row.id
+    reconnect = await env.client.post(
+        f"/api/v1/connections/{identifier}/reauthorize",
+        json={"request_id": str(uuid4())},
+    )
+    assert reconnect.status_code == 200, reconnect.text
+    assert urlsplit(reconnect.json()["authorization_url"]).netloc == "canvas.second.edu"
+    env.settings.canvas_oauth_deployments[1]["client_secret"] = "rotated-secret"
+    blocked_reconnect = await env.client.post(
+        f"/api/v1/connections/{identifier}/reauthorize",
+        json={"request_id": str(uuid4())},
+    )
+    assert blocked_reconnect.status_code == 409
 
 
 async def connected(env, capabilities=None):

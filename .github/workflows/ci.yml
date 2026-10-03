@@ -23,6 +23,8 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run test
+      - name: Verify TypeScript-owned assistant migration contract
+        run: npm run migration:check --workspace=@navox/assistant-runtime
       - run: npm run build
 
   extension:
@@ -274,6 +276,11 @@ jobs:
           docker compose ps
           docker compose logs
           exit 1
+      - name: Verify assistant schema on Compose PostgreSQL
+        run: >-
+          docker compose exec -T
+          -e ASSISTANT_TEST_DATABASE_URL=postgres://navox:navox@postgres:5432/navox
+          web npm run migration:check --workspace=@navox/assistant-runtime
       - name: Verify account and workspace lifecycle
         run: |
           curl --fail --silent --show-error \
@@ -321,6 +328,32 @@ jobs:
             http://localhost:8000/api/v1/today/query > /tmp/navox-query.json
           grep -F '"intent":"today"' /tmp/navox-query.json
           grep -F '"title":"Verify Today loop"' /tmp/navox-query.json
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            --header "Origin: http://localhost:3000" \
+            --header "Content-Type: application/json" \
+            --data '{}' \
+            http://localhost:3000/api/v1/assistant/sessions > /tmp/navox-assistant-session.json
+          ASSISTANT_SESSION_ID="$(node -e 'const s=require("/tmp/navox-assistant-session.json").session; if(s.status!=="active") process.exit(1); process.stdout.write(s.id)')"
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            --header "Origin: http://localhost:3000" \
+            --header "Content-Type: application/json" \
+            --data '{"request_id":"88888888-8888-4888-8888-888888888888","text":"What am I missing today?","modality":"TEXT","timezone":"UTC","referents":[]}' \
+            "http://localhost:3000/api/v1/assistant/sessions/$ASSISTANT_SESSION_ID/messages" > /tmp/navox-assistant-turn.json
+          node -e 'const t=require("/tmp/navox-assistant-turn.json").turn; if(t.state!=="READY" || t.presentation.speak || !t.presentation.blocks.some(b=>b.kind==="ANSWER")) process.exit(1)'
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            "http://localhost:3000/api/v1/assistant/sessions/$ASSISTANT_SESSION_ID" > /tmp/navox-assistant-history.json
+          node -e 'const s=require("/tmp/navox-assistant-history.json").session; if(s.turns.length!==1) process.exit(1)'
+          curl --fail --silent --show-error \
+            --cookie /tmp/navox-session.cookie \
+            --header "Origin: http://localhost:3000" \
+            --header "Content-Type: application/json" \
+            --request DELETE \
+            --data '{}' \
+            "http://localhost:3000/api/v1/assistant/sessions/$ASSISTANT_SESSION_ID" > /tmp/navox-assistant-deleted.json
+          grep -F '"deleted":true' /tmp/navox-assistant-deleted.json
           curl --fail --silent --show-error \
             --cookie /tmp/navox-session.cookie \
             --header "Content-Type: application/json" \

@@ -9,6 +9,7 @@ from pydantic import Field, model_validator
 
 from navox.ai.foundation.contracts import (
     AITask,
+    AudioUnitPrice,
     Capability,
     Contract,
     Identifier,
@@ -36,6 +37,14 @@ class ModelDefinition(Contract):
     max_output_tokens: Annotated[int, Field(strict=True, ge=1)]
     input_cost_per_million: Money | None = None
     output_cost_per_million: Money | None = None
+    # Audio prices stay omitted while unset so historical snapshot JSON and its
+    # digest remain byte-identical for every registered text/embedding model.
+    transcription_cost_per_minute: AudioUnitPrice | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    synthesis_cost_per_1000_characters: AudioUnitPrice | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def check_token_limits(self) -> Self:

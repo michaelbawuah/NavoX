@@ -16,6 +16,8 @@ Identifier = Annotated[
 Version = Annotated[str, Field(min_length=1, max_length=32, pattern=r"^v[1-9][0-9]*(?:\.[0-9]+)*$")]
 TokenCount = Annotated[int, Field(strict=True, ge=0, le=1_000_000_000)]
 Money = Annotated[Decimal, Field(ge=0, le=1_000_000, allow_inf_nan=False)]
+# Audio is billed per minute of input or per 1000 input characters, never by token.
+AudioUnitPrice = Annotated[Decimal, Field(gt=0, le=1_000_000, allow_inf_nan=False)]
 
 
 class Contract(BaseModel):
@@ -42,6 +44,8 @@ class Capability(StrEnum):
     TOOL_PROPOSALS = "tool_proposals"
     VISION = "vision"
     EMBEDDINGS = "embeddings"
+    TRANSCRIPTION = "transcription"
+    SPEECH_SYNTHESIS = "speech_synthesis"
 
 
 class TaskType(StrEnum):
@@ -53,6 +57,8 @@ class TaskType(StrEnum):
     RANK = "rank"
     EMBED = "embed"
     DRAFT_COMMUNICATION = "draft_communication"
+    TRANSCRIBE = "transcribe"
+    SYNTHESIZE = "synthesize"
 
 
 class Profile(StrEnum):
@@ -68,6 +74,8 @@ class Profile(StrEnum):
     CODE_REASONING = "CODE_REASONING"
     ASSISTANT_INTERACTIVE = "ASSISTANT_INTERACTIVE"
     ASSISTANT_HIGH_REASONING = "ASSISTANT_HIGH_REASONING"
+    SPEECH_TRANSCRIPTION = "SPEECH_TRANSCRIPTION"
+    SPEECH_SYNTHESIS = "SPEECH_SYNTHESIS"
 
 
 class Sensitivity(StrEnum):

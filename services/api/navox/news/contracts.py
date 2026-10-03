@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from navox.connectors.builtin.generic_api import _sensitive_query_key
 from navox.connectors.network import validate_https_endpoint, validate_public_https_origin
 
 
@@ -184,15 +186,23 @@ class SourceDefinition(Contract):
     feed_type: FeedType
     endpoint: str = Field(max_length=2048)
     article_domains: tuple[str, ...] = Field(min_length=1, max_length=10)
+    image_domains: tuple[str, ...] = Field(default=(), max_length=20)
     category: Category
     poll_interval_seconds: int = Field(default=900, ge=60, le=86400)
     # Source/copy independence is operator reviewed, never assigned by an article or model.
     independence_group: str = Field(min_length=1, max_length=128)
     rights: ContentRights
     evidence_policy: SourceEvidencePolicy | None = None
+    api_connection_id: UUID | None = None
+    api_endpoint_name: str | None = Field(default=None, min_length=1, max_length=80)
 
     @model_validator(mode="after")
     def evidence_authority(self) -> SourceDefinition:
+        if self.feed_type == FeedType.API:
+            if self.api_connection_id is None or self.api_endpoint_name is None:
+                raise ValueError("API feeds require an owned approved credential connection")
+        elif self.api_connection_id is not None or self.api_endpoint_name is not None:
+            raise ValueError("Only API feeds can reference API credentials")
         policy = self.evidence_policy
         if policy is not None:
             if not self.identity_verified:
@@ -221,7 +231,7 @@ class SourceDefinition(Contract):
             raise ValueError("A public domain is required")
         return value.casefold()
 
-    @field_validator("article_domains")
+    @field_validator("article_domains", "image_domains")
     @classmethod
     def domains(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         return tuple(cls.domain_name(value) for value in values)
@@ -229,12 +239,51 @@ class SourceDefinition(Contract):
     @property
     def fingerprint(self) -> str:
         payload = self.model_dump(mode="json")
+        if not self.image_domains:
+            payload.pop("image_domains")
+        if self.api_connection_id is None:
+            payload.pop("api_connection_id")
+            payload.pop("api_endpoint_name")
         if self.evidence_policy is None:
             payload.pop("evidence_policy")
         else:
             payload["evidence_policy"]["origin_groups"] = sorted(self.evidence_policy.origin_groups)
         value = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(value.encode()).hexdigest()
+
+
+class NewsImage(Contract):
+    """A permitted publisher image, with its supplied description and credit."""
+
+    url: str = Field(min_length=1, max_length=2048)
+    alt: str = Field(min_length=1, max_length=500)
+    credit: str = Field(min_length=1, max_length=500)
+
+    @field_validator("url")
+    @classmethod
+    def public_image_url(cls, value: str) -> str:
+        value = source_url(value)
+        parsed = urlsplit(value)
+        host = parsed.hostname or ""
+        if (
+            parsed.port not in {None, 443}
+            or "." not in host
+            or host.rsplit(".", 1)[-1] in {"localhost", "local", "internal", "test", "invalid"}
+        ):
+            raise ValueError("Invalid image URL")
+        for key, _ in parse_qsl(parsed.query, keep_blank_values=True):
+            if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,40}", key):
+                raise ValueError("Invalid image URL")
+            if _sensitive_query_key(key):
+                raise ValueError("Invalid image URL")
+        return value
+
+    @field_validator("alt", "credit")
+    @classmethod
+    def visible_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Image description and credit are required")
+        return value.strip()
 
 
 class NewsItemInput(Contract):
@@ -247,6 +296,7 @@ class NewsItemInput(Contract):
     event_started_at: datetime | None = None
     event_ended_at: datetime | None = None
     description: str | None = Field(default=None, max_length=4000)
+    image: NewsImage | None = None
     categories: tuple[Category, ...] = Field(default=(), max_length=5)
     language: str = Field(default="en", max_length=32)
     region: str = Field(default="world", max_length=64)

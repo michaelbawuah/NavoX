@@ -261,7 +261,7 @@ class GoogleCalendarConnector:
             "showDeleted": "true",
             "fields": (
                 "items(id,recurringEventId,summary,description,organizer,attendees,"
-                "start,end,status,created,updated),nextPageToken,nextSyncToken"
+                "start,end,status,created,updated,location,htmlLink,hangoutLink),nextPageToken,nextSyncToken"
             ),
         }
         if state.token:

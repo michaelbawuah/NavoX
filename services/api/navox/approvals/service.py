@@ -9,7 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from navox.agent.audit import add_audit_event
 from navox.agent.hashing import action_security_hash, canonical_hash
 from navox.agent.provenance import record_plan_sources
-from navox.approvals.schemas import EditGmailSendRequest, PrepareGmailSendRequest
+from navox.approvals.schemas import (
+    EditGmailSendRequest,
+    KnowledgeEmailSendContext,
+    PrepareGmailSendRequest,
+)
 from navox.db.models import (
     Action,
     Approval,
@@ -141,10 +145,21 @@ class ApprovalService:
         *,
         user_id: UUID,
         workspace_id: UUID,
-        commitment_id: UUID,
+        commitment_id: UUID | None,
         request: PrepareGmailSendRequest,
         commit: bool = True,
+        source_context: KnowledgeEmailSendContext | None = None,
     ) -> tuple[Action, Approval, bool]:
+        # A null commitment is only reachable through the validated knowledge-email
+        # draft, which must carry its exact source binding and leave every
+        # commitment-scoped post-send behavior untouched.
+        if commitment_id is None:
+            if source_context is None or request.post_send_state != "unchanged":
+                raise ApprovalPermissionError(
+                    "A Gmail send without a commitment requires the validated draft source"
+                )
+        elif source_context is not None:
+            raise ApprovalConflictError("A commitment-bound Gmail send cannot carry a draft source")
         existing_plan = await database.scalar(
             select(Plan).where(
                 Plan.user_id == user_id,
@@ -179,19 +194,21 @@ class ApprovalService:
         if user.agent_paused:
             raise ApprovalPausedError("NavoX agent execution is paused")
 
-        commitment = await database.scalar(
-            select(Commitment).where(
-                Commitment.id == commitment_id,
-                Commitment.user_id == user_id,
-                Commitment.workspace_id == workspace_id,
+        commitment: Commitment | None = None
+        if commitment_id is not None:
+            commitment = await database.scalar(
+                select(Commitment).where(
+                    Commitment.id == commitment_id,
+                    Commitment.user_id == user_id,
+                    Commitment.workspace_id == workspace_id,
+                )
             )
-        )
-        if commitment is None:
-            raise ApprovalNotFoundError("Commitment not found")
-        if commitment.status not in PREPARABLE_COMMITMENT_STATUSES:
-            raise ApprovalConflictError(
-                "Only active confirmed commitments can prepare external actions"
-            )
+            if commitment is None:
+                raise ApprovalNotFoundError("Commitment not found")
+            if commitment.status not in PREPARABLE_COMMITMENT_STATUSES:
+                raise ApprovalConflictError(
+                    "Only active confirmed commitments can prepare external actions"
+                )
 
         connection = await database.scalar(
             select(Connection).where(
@@ -221,26 +238,37 @@ class ApprovalService:
             action_type="gmail.send",
             payload=payload,
         )
-        context_snapshot = {
-            "commitment": {
-                "id": str(commitment.id),
-                "type": commitment.commitment_type,
-                "title": commitment.title,
-                "status": commitment.status,
-            },
+        context_snapshot: dict[str, object] = {
+            "commitment": (
+                {
+                    "id": str(commitment.id),
+                    "type": commitment.commitment_type,
+                    "title": commitment.title,
+                    "status": commitment.status,
+                }
+                if commitment is not None
+                else None
+            ),
             "connection": {
                 "id": str(connection.id),
                 "provider": "google",
                 "sender": connection.external_email,
             },
         }
+        if source_context is not None:
+            # Selector-level binding only: never mail text.
+            context_snapshot["draft_source"] = source_context.model_dump(mode="json")
         plan = Plan(
             user_id=user_id,
             workspace_id=workspace_id,
-            objective_id=commitment.objective_id,
-            commitment_id=commitment.id,
+            objective_id=commitment.objective_id if commitment is not None else None,
+            commitment_id=commitment.id if commitment is not None else None,
             request_id=request.request_id,
-            goal=f"Send approved email for {commitment.title}",
+            goal=(
+                f"Send approved email for {commitment.title}"
+                if commitment is not None
+                else "Send the exact approved drafted email."
+            ),
             status="awaiting_approval",
             planner_version="approval-v1",
             context_snapshot=context_snapshot,
@@ -251,7 +279,10 @@ class ApprovalService:
         database.add(plan)
         await database.flush()
         await record_plan_sources(
-            database, plan, {commitment.id}, explicit_connections={connection.id}
+            database,
+            plan,
+            {commitment.id} if commitment is not None else set(),
+            explicit_connections={connection.id},
         )
 
         step = PlanStep(
@@ -271,7 +302,7 @@ class ApprovalService:
             user_id=user_id,
             workspace_id=workspace_id,
             plan_step_id=step.id,
-            commitment_id=commitment.id,
+            commitment_id=commitment.id if commitment is not None else None,
             provider="google",
             action_type="gmail.send",
             risk_level="R3",
@@ -304,7 +335,7 @@ class ApprovalService:
             entity_type="action",
             entity_id=action.id,
             metadata={
-                "commitment_id": str(commitment.id),
+                "commitment_id": str(commitment.id) if commitment is not None else None,
                 "action_type": action.action_type,
                 "risk_level": action.risk_level,
                 "payload_hash": security_hash,

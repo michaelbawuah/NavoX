@@ -31,6 +31,8 @@ class CanvasDeployment:
     client_id: str
     client_secret: SecretStr
     redirect_uri: str
+    institution_id: str = "legacy"
+    institution_name: str = "Canvas"
 
     @property
     def fingerprint(self) -> str:
@@ -41,43 +43,125 @@ class CanvasDeployment:
                     self.client_id,
                     self.redirect_uri,
                     self.client_secret.get_secret_value(),
+                    *([self.institution_id] if self.institution_id != "legacy" else []),
                 ]
             ).encode()
         ).hexdigest()
 
 
-def deployment(settings: Settings) -> CanvasDeployment:
+def _redirect_uri(settings: Settings) -> str:
+    callback = urlsplit(settings.canvas_oauth_redirect_uri)
+    if (
+        not callback.hostname
+        or callback.username
+        or callback.password
+        or callback.query
+        or callback.fragment
+        or callback.path != "/api/v1/connectors/canvas-lms/callback"
+        or (
+            callback.scheme != "https"
+            and not (
+                settings.app_environment in {"development", "test"}
+                and callback.scheme == "http"
+                and callback.hostname in {"localhost", "127.0.0.1"}
+            )
+        )
+    ):
+        raise ValueError
+    return settings.canvas_oauth_redirect_uri
+
+
+def deployments(settings: Settings) -> tuple[CanvasDeployment, ...]:
     try:
-        origin = approved_origin(settings.canvas_base_url)
-        callback = urlsplit(settings.canvas_oauth_redirect_uri)
+        redirect_uri = _redirect_uri(settings)
+        if settings.canvas_oauth_deployments:
+            result: list[CanvasDeployment] = []
+            ids: set[str] = set()
+            origins: set[str] = set()
+            for entry in settings.canvas_oauth_deployments:
+                if set(entry) != {"id", "name", "origin", "client_id", "client_secret"}:
+                    raise ValueError
+                institution_id, name = entry["id"], entry["name"]
+                client_id, secret = entry["client_id"], entry["client_secret"]
+                raw_origin = entry["origin"]
+                if (
+                    not isinstance(institution_id, str)
+                    or not 1 <= len(institution_id) <= 64
+                    or not all(
+                        c.isascii() and (c.islower() or c.isdigit() or c == "-")
+                        for c in institution_id
+                    )
+                    or not isinstance(name, str)
+                    or not 1 <= len(name.strip()) <= 100
+                    or not isinstance(client_id, str)
+                    or not client_id.isdigit()
+                    or not isinstance(secret, str)
+                    or not 1 <= len(secret) <= 4096
+                    or not isinstance(raw_origin, str)
+                ):
+                    raise ValueError
+                origin = approved_origin(raw_origin)
+                if institution_id in ids or origin in origins:
+                    raise ValueError
+                ids.add(institution_id)
+                origins.add(origin)
+                result.append(
+                    CanvasDeployment(
+                        origin,
+                        client_id,
+                        SecretStr(secret),
+                        redirect_uri,
+                        institution_id,
+                        name.strip(),
+                    )
+                )
+            return tuple(result)
         if (
             not settings.canvas_oauth_client_id.isdigit()
             or settings.canvas_oauth_client_secret is None
             or not settings.canvas_oauth_client_secret.get_secret_value()
-            or not callback.hostname
-            or callback.username
-            or callback.password
-            or callback.query
-            or callback.fragment
-            or callback.path != "/api/v1/connectors/canvas-lms/callback"
-            or (
-                callback.scheme != "https"
-                and not (
-                    settings.app_environment in {"development", "test"}
-                    and callback.scheme == "http"
-                    and callback.hostname in {"localhost", "127.0.0.1"}
-                )
-            )
         ):
             raise ValueError
-        return CanvasDeployment(
-            origin,
-            settings.canvas_oauth_client_id,
-            settings.canvas_oauth_client_secret,
-            settings.canvas_oauth_redirect_uri,
+        return (
+            CanvasDeployment(
+                approved_origin(settings.canvas_base_url),
+                settings.canvas_oauth_client_id,
+                settings.canvas_oauth_client_secret,
+                redirect_uri,
+            ),
         )
-    except ValueError:
+    except (ValueError, TypeError):
         raise ConnectorRuntimeError("PERMANENT_FAILURE", "Canvas OAuth is not configured") from None
+
+
+def deployment(settings: Settings) -> CanvasDeployment:
+    configured = deployments(settings)
+    if len(configured) != 1:
+        raise ConnectorRuntimeError("PERMANENT_FAILURE", "Select a Canvas institution")
+    return configured[0]
+
+
+def deployment_for_id(settings: Settings, institution_id: str) -> CanvasDeployment:
+    for config in deployments(settings):
+        if config.institution_id == institution_id:
+            return config
+    raise ConnectorRuntimeError("PERMANENT_FAILURE", "Canvas institution is unavailable")
+
+
+def deployment_for_fingerprint(settings: Settings, fingerprint: str) -> CanvasDeployment:
+    matches = [config for config in deployments(settings) if config.fingerprint == fingerprint]
+    if len(matches) != 1:
+        raise ConnectorRuntimeError("AUTH_REVOKED", "Canvas institution configuration changed")
+    return matches[0]
+
+
+def deployment_for_connection(
+    settings: Settings, origin: str, fingerprint: str
+) -> CanvasDeployment:
+    config = deployment_for_fingerprint(settings, fingerprint)
+    if config.origin != origin:
+        raise ConnectorRuntimeError("AUTH_REVOKED", "Canvas institution configuration changed")
+    return config
 
 
 def validate_capabilities(values: list[str]) -> frozenset[str]:

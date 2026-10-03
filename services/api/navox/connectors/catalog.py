@@ -46,6 +46,10 @@ def build_connector_registry(settings: Settings) -> ConnectorRegistry:
 
         registry.register(MANIFEST, StripeSandboxConnector)
     for approved in approved_generic_connectors(settings):
+        # News has its own rights, retention and source workflows. Do not route
+        # these credentials through operational extraction or generic polling.
+        if approved.usage == "NEWS":
+            continue
 
         def generic(
             config: Mapping[str, JsonValue],

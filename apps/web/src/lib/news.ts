@@ -25,8 +25,8 @@ export async function loadNewsFeed(
 }
 
 export const newsTrendingCaption =
-  "Trending reflects observed activity among the sources you can already read. " +
-  "It is not a measure of global popularity, importance or truth.";
+  "Stories drawing attention in your connected news sources. " +
+  "Trending does not measure worldwide popularity or importance, and does not confirm a report.";
 
 export const newsStatus: Record<NewsVerification, string> = {
   VERIFIED: "Verified",
@@ -60,6 +60,45 @@ export function safeNewsUrl(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+export function safeNewsImageUrl(value: string): string | null {
+  const safe = safeNewsUrl(value);
+  if (
+    !safe ||
+    Array.from(value).some(
+      (character) =>
+        character === "\\" ||
+        character.charCodeAt(0) <= 32 ||
+        character.charCodeAt(0) === 127,
+    )
+  )
+    return null;
+  const url = new URL(safe);
+  const host = url.hostname.toLowerCase();
+  if (
+    url.hash ||
+    (url.port && url.port !== "443") ||
+    !host.includes(".") ||
+    /^[\d.]+$/.test(host) ||
+    host.includes(":") ||
+    /(?:^|\.)(?:localhost|local|internal|test|invalid)$/.test(host)
+  )
+    return null;
+  for (const key of url.searchParams.keys()) {
+    if (!/^[A-Za-z][A-Za-z0-9_-]{0,40}$/.test(key)) return null;
+    if (
+      /(?:token|secret|password|credential|authorization|api.?key|session|signature|access.?key|auth)/i.test(
+        key,
+      )
+    )
+      return null;
+  }
+  return safe;
+}
+
+export function newsPublisher(value: string): string {
+  return value.replace(/\s+via\s+Perigon$/i, "").trim();
 }
 
 export class NewsRequestError extends Error {

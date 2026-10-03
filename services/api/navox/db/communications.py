@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import (
     JSON,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Integer,
@@ -21,12 +22,36 @@ from navox.db.base import Base
 
 class CommunicationDraft(Base):
     __tablename__ = "communication_drafts"
+    __table_args__ = (
+        CheckConstraint(
+            "binding_kind IN ('COMMITMENT', 'KNOWLEDGE_EMAIL')",
+            name="ck_communication_drafts_binding_kind",
+        ),
+        # A commitment draft always cites a real commitment; the knowledge-email
+        # binding never does, and instead pins the immutable Gmail message id.
+        CheckConstraint(
+            "(binding_kind = 'COMMITMENT' AND commitment_id IS NOT NULL)"
+            " OR (binding_kind = 'KNOWLEDGE_EMAIL' AND commitment_id IS NULL"
+            " AND source_external_id IS NOT NULL)",
+            name="ck_communication_drafts_binding_commitment",
+        ),
+    )
+
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     workspace_id: Mapped[UUID] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
     )
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    commitment_id: Mapped[UUID] = mapped_column(ForeignKey("commitments.id", ondelete="CASCADE"))
+    commitment_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("commitments.id", ondelete="CASCADE"), nullable=True
+    )
+    # Tagged source binding. Existing rows stay COMMITMENT; a knowledge-email
+    # draft carries the opaque SPEC-007 resource selector plus the exact Gmail
+    # external message id it was authorized against.
+    binding_kind: Mapped[str] = mapped_column(
+        String(32), default="COMMITMENT", server_default="COMMITMENT"
+    )
+    source_external_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
     source_connection_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("connections.id", ondelete="CASCADE"), index=True
     )

@@ -9,8 +9,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from navox.connectors.builtin.canvas import CANVAS_MANIFEST
+from navox.connectors.builtin.google_calendar import CALENDAR_MANIFEST
 from navox.db.knowledge import KnowledgeChunk, KnowledgeResource
 from navox.db.models import ConnectorConnection, ConnectorDefinition, ConnectorResource
+from navox.knowledge.class_schedule import class_source_snapshot
 from navox.knowledge.indexing import backfill_workspace
 from tests.knowledge_search_support import (
     CALENDAR_CAPABILITY,
@@ -128,12 +131,178 @@ async def seed_connected_resource(
 
 
 @pytest.mark.asyncio
+async def test_class_sources_require_current_connected_view_authority(knowledge_api) -> None:
+    async def stored_fixture_reader(database, *, workspace_id, user_id, settings):
+        del settings
+        return await class_source_snapshot(database, workspace_id=workspace_id, user_id=user_id)
+
+    knowledge_api["app"].state.class_source_reader = stored_fixture_reader
+    moment = datetime.now(UTC)
+    async with knowledge_api["factory"]() as database:
+        connections = []
+        for manifest_row, provider, capabilities in (
+            (CANVAS_MANIFEST, "canvas", ["academic.courses.read", "calendar.events.read"]),
+            (CALENDAR_MANIFEST, "google", ["calendar.events.read"]),
+        ):
+            definition = ConnectorDefinition(
+                connector_key=manifest_row.id,
+                version=manifest_row.version,
+                display_name=manifest_row.display_name,
+                connector_class=manifest_row.connector_class,
+                trust_level="NAVOX_FIRST_PARTY",
+                manifest=manifest_row.model_dump(mode="json", by_alias=True),
+            )
+            database.add(definition)
+            await database.flush()
+            connection = ConnectorConnection(
+                connector_definition_id=definition.id,
+                user_id=knowledge_api["user_id"],
+                workspace_id=knowledge_api["workspace_id"],
+                provider=provider,
+                external_account_id=f"class-{provider}",
+                status="CONNECTED",
+                health_state="CONNECTED",
+                authorized_capabilities=capabilities,
+                provider_capabilities=capabilities,
+            )
+            database.add(connection)
+            await database.flush()
+            connections.append(connection)
+        canvas, google = connections
+        for connection, provider, kind, external_id, parent, title, metadata in (
+            (
+                canvas,
+                "canvas",
+                "academic.course",
+                "course:42",
+                None,
+                "Economics 3120",
+                {"course_id": "42", "course_code": "ECON 3120"},
+            ),
+            (
+                canvas,
+                "canvas",
+                "calendar.event",
+                "event:1",
+                "course_42",
+                "ECON 3120 Lecture",
+                {
+                    "start_at": (moment + timedelta(hours=2)).isoformat(),
+                    "end_at": (moment + timedelta(hours=3)).isoformat(),
+                    "all_day": False,
+                    "scheduling_updated_at": (moment - timedelta(days=1)).isoformat(),
+                },
+            ),
+            (
+                google,
+                "google",
+                "calendar.event",
+                "event:2",
+                None,
+                "ECON 3120",
+                {
+                    "start_at": (moment + timedelta(hours=2, minutes=30)).isoformat(),
+                    "end_at": (moment + timedelta(hours=3)).isoformat(),
+                    "scheduling_updated_at": moment.isoformat(),
+                },
+            ),
+        ):
+            database.add(
+                ConnectorResource(
+                    id=uuid4(),
+                    workspace_id=knowledge_api["workspace_id"],
+                    connector_connection_id=connection.id,
+                    provider=provider,
+                    resource_type=kind,
+                    external_id=external_id,
+                    external_parent_id=parent,
+                    canonical={
+                        "source_type": kind,
+                        "subject": title,
+                        "occurred_at": moment.isoformat(),
+                        "metadata": metadata,
+                    },
+                    provider_metadata={},
+                    source_url=None,
+                    source_created_at=moment,
+                    source_updated_at=moment,
+                    retrieved_at=moment,
+                    content_hash=uuid4().hex.ljust(64, "0"),
+                )
+            )
+        await database.commit()
+    async with knowledge_api["factory"]() as database:
+        report = await backfill_workspace(
+            database,
+            workspace_id=knowledge_api["workspace_id"],
+            user_id=knowledge_api["user_id"],
+            now=moment,
+        )
+        await database.commit()
+    assert len(report.outcomes) == 3
+    response = await knowledge_api["client"].get("/api/v1/knowledge/class-sources")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["complete"] is True
+    assert len(body["courses"]) == 1
+    assert len(body["events"]) == 2
+    assert {row["provider"] for row in body["events"]} == {"canvas", "google"}
+    assert body["events"][0]["explicit_class_meeting"] is True
+    async with knowledge_api["factory"]() as database:
+        canvas = await database.scalar(
+            select(ConnectorConnection).where(ConnectorConnection.provider == "canvas")
+        )
+        assert canvas is not None
+        canvas.authorized_capabilities = []
+        await database.commit()
+    revoked = await knowledge_api["client"].get("/api/v1/knowledge/class-sources")
+    assert revoked.status_code == 200
+    assert revoked.json()["complete"] is True
+    assert revoked.json()["courses"] == []
+    assert len(revoked.json()["events"]) == 1
+    assert revoked.json()["events"][0]["provider"] == "google"
+
+
+@pytest.mark.asyncio
+async def test_class_navigation_binds_authenticated_owner_and_exact_selectors(
+    knowledge_api, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    connection_id = uuid4()
+    resource_id = uuid4()
+    observed: dict[str, object] = {}
+
+    async def target(database, **kwargs):
+        del database
+        observed.update(kwargs)
+        return "https://calendar.google.com/calendar/event?eid=2"
+
+    monkeypatch.setattr("navox.api.knowledge.live_class_navigation_target", target)
+    response = await knowledge_api["client"].get(
+        "/api/v1/knowledge/class-navigation",
+        params={"connection_id": str(connection_id), "resource_id": str(resource_id)},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"url": "https://calendar.google.com/calendar/event?eid=2"}
+    assert observed["workspace_id"] == knowledge_api["workspace_id"]
+    assert observed["user_id"] == knowledge_api["user_id"]
+    assert observed["connection_id"] == connection_id
+    assert observed["resource_id"] == resource_id
+
+
+@pytest.mark.asyncio
 async def test_search_is_disabled_by_default(knowledge_api) -> None:
     knowledge_api["app"].state.knowledge_settings = knowledge_api["disabled"]
     response = await knowledge_api["client"].get("/api/v1/search", params={"q": "budget"})
     assert response.status_code == 404
     detail = await knowledge_api["client"].get(f"/api/v1/knowledge/resources/{uuid4()}")
     assert detail.status_code == 404
+    classes = await knowledge_api["client"].get("/api/v1/knowledge/class-sources")
+    assert classes.status_code == 404
+    navigation = await knowledge_api["client"].get(
+        "/api/v1/knowledge/class-navigation",
+        params={"connection_id": str(uuid4()), "resource_id": str(uuid4())},
+    )
+    assert navigation.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -409,8 +578,14 @@ async def test_exclusion_writes_reject_mixed_or_foreign_targets_without_500(
 @pytest.mark.asyncio
 async def test_search_returns_nonempty_news_evidence_through_the_owned_service(
     knowledge_api,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from types import SimpleNamespace
+
+    # The fixture's News item and two-day rights window are anchored to NOW.
+    # Keep the API read on that clock so the story does not expire as wall time
+    # advances, while the owned story service still enforces its real bounds.
+    monkeypatch.setattr("navox.knowledge.service.utc_now", lambda: NOW)
 
     world = SimpleNamespace(
         workspace_id=knowledge_api["workspace_id"],

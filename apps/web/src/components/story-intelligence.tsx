@@ -84,19 +84,26 @@ function SourceLink({ url, label }: { url: string; label: string }) {
 }
 
 export function StorySummaryView({ summary }: { summary: NewsStorySummary }) {
-  if (summary.status === "PENDING")
-    return <p>Source-backed summary is being prepared.</p>;
-  if (summary.status === "SOURCES_CHANGED")
+  if (summary.status !== "READY")
     return (
-      <p>
-        The sources changed. Refresh this story to check for an updated summary.
-      </p>
+      <section
+        className={styles.summaryPanel}
+        aria-labelledby="news-summary-heading"
+      >
+        <h2 id="news-summary-heading">NavoX summary</h2>
+        <p>
+          {summary.status === "PENDING"
+            ? "NavoX is preparing the summary. Check back shortly."
+            : summary.status === "SOURCES_CHANGED"
+              ? "This story has changed. Refresh to check for an updated summary."
+              : "A detailed summary isn’t available for this story yet. You can read the full report at the original source."}
+        </p>
+      </section>
     );
-  if (summary.status !== "READY") return null;
 
   return (
     <section
-      className={styles.detailSection}
+      className={styles.summaryPanel}
       aria-labelledby="news-summary-heading"
     >
       <h2 id="news-summary-heading">NavoX summary</h2>
@@ -158,18 +165,26 @@ function StoryIntelligenceScope({
   availability,
 }: StoryIntelligenceProps) {
   const [summary, setSummary] = useState<NewsStorySummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
 
   useEffect(() => {
     const controller = new AbortController();
     setSummary(null);
+    setSummaryLoading(true);
     void newsRequest<NewsStorySummary>(`/stories/${story.id}/summary`, {
       signal: controller.signal,
     })
       .then((value) => {
-        if (!controller.signal.aborted) setSummary(value);
+        if (!controller.signal.aborted) {
+          setSummary(value);
+          setSummaryLoading(false);
+        }
       })
       .catch(() => {
-        if (!controller.signal.aborted) setSummary(null);
+        if (!controller.signal.aborted) {
+          setSummary(null);
+          setSummaryLoading(false);
+        }
       });
     return () => controller.abort();
   }, [story.id]);
@@ -187,7 +202,21 @@ function StoryIntelligenceScope({
 
   return (
     <>
-      {summary && <StorySummaryView summary={summary} />}
+      {summary ? (
+        <StorySummaryView summary={summary} />
+      ) : (
+        <section
+          className={styles.summaryPanel}
+          aria-labelledby="news-summary-heading"
+        >
+          <h2 id="news-summary-heading">NavoX summary</h2>
+          <p>
+            {summaryLoading
+              ? "Opening the summary…"
+              : "We couldn’t load the summary. Refresh this story, or read the original reporting below."}
+          </p>
+        </section>
+      )}
       <section className={styles.detailSection} aria-label="Explore this story">
         <h2>Explore this story</h2>
         <p>

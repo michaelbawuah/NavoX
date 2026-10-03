@@ -1,0 +1,22 @@
+navox.net {
+  encode zstd gzip
+  header {
+    X-Content-Type-Options nosniff
+    Referrer-Policy strict-origin-when-cross-origin
+    Permissions-Policy "microphone=(self), geolocation=(self), camera=()"
+    Strict-Transport-Security "max-age=604800"
+  }
+  handle /api/v1/assistant/* {
+    reverse_proxy 127.0.0.1:3000
+  }
+  handle /api/v1/* {
+    reverse_proxy 127.0.0.1:8000
+  }
+  handle {
+    reverse_proxy 127.0.0.1:3000
+  }
+}
+
+www.navox.net {
+  redir https://navox.net{uri} permanent
+}

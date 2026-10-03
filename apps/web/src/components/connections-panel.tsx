@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { canvasAuthorizationUrl } from "../lib/canvas-setup";
+import {
+  canvasAuthorizationUrl,
+  canvasInstitutions,
+} from "../lib/canvas-setup";
 import {
   type ConnectorEntry,
   canOpenConnector,
@@ -15,9 +18,9 @@ import {
   type ManagedConnection,
   matchesConnection,
   sourceStatus,
+  visibleConnectorCatalog,
 } from "../lib/connection-management";
 import { ApprovedConnectPanel } from "./approved-connect-panel";
-import { CanvasConnectPanel } from "./canvas-connect-panel";
 import { ConnectionLifecycleControls } from "./connection-lifecycle-controls";
 import styles from "./connections-panel.module.css";
 import { FileImportPanel } from "./file-import-panel";
@@ -71,7 +74,6 @@ export function ConnectionsPanel({
   const [tab, setTab] = useState<"connected" | "browse">("connected");
   const [query, setQuery] = useState("");
   const [showImport, setShowImport] = useState(false);
-  const [showCanvas, setShowCanvas] = useState(false);
   const [showRest, setShowRest] = useState(false);
   const [showMcp, setShowMcp] = useState(false);
   const [restReconnectId, setRestReconnectId] = useState<string | null>(null);
@@ -175,11 +177,18 @@ export function ConnectionsPanel({
               c.connector_id === "canvas-lms" && key === `${c.id}:reauthorize`,
           )
         ) {
-          const setup = await requestJson<{ origin: string }>(
+          const setup = await requestJson<{ institutions: unknown }>(
             "/connectors/canvas-lms/setup",
           );
+          const institutions = canvasInstitutions(setup.institutions);
+          const target = new URL(body.authorization_url ?? "").origin;
+          const institution = institutions.find(
+            (item) => item.origin === target,
+          );
+          if (!institution)
+            throw new Error("Canvas institution is unavailable.");
           window.location.assign(
-            canvasAuthorizationUrl(body.authorization_url, setup.origin),
+            canvasAuthorizationUrl(body.authorization_url, institution.origin),
           );
         } else
           window.location.assign(
@@ -234,7 +243,7 @@ export function ConnectionsPanel({
   );
   const search = query.trim().toLocaleLowerCase();
   const visibleCatalog = connectionPage(
-    catalog.filter((entry) =>
+    visibleConnectorCatalog(catalog).filter((entry) =>
       `${entry.name} ${entry.category} ${entry.description}`
         .toLocaleLowerCase()
         .includes(search),
@@ -517,22 +526,20 @@ export function ConnectionsPanel({
                 type="button"
                 disabled={pending !== null || !canOpenConnector(entry)}
                 onClick={() =>
-                  entry.id === "canvas-lms"
-                    ? setShowCanvas(true)
-                    : entry.id === "generic-import"
-                      ? setShowImport(true)
-                      : entry.id === "generic-rest-api"
-                        ? setShowRest(true)
-                        : entry.id === "mcp"
-                          ? setShowMcp(true)
-                          : entry.id === "google-workspace"
-                            ? void perform(
-                                `connect:${entry.id}`,
-                                `/connectors/${entry.id}/connect`,
-                                "",
-                                true,
-                              )
-                            : undefined
+                  entry.id === "generic-import"
+                    ? setShowImport(true)
+                    : entry.id === "generic-rest-api"
+                      ? setShowRest(true)
+                      : entry.id === "mcp"
+                        ? setShowMcp(true)
+                        : entry.id === "google-workspace"
+                          ? void perform(
+                              `connect:${entry.id}`,
+                              `/connectors/${entry.id}/connect`,
+                              "",
+                              true,
+                            )
+                          : undefined
                 }
               >
                 {pending === `connect:${entry.id}`
@@ -560,12 +567,6 @@ export function ConnectionsPanel({
             </p>
           ) : null}
         </div>
-      ) : null}
-      {showCanvas ? (
-        <CanvasConnectPanel
-          apiBaseUrl={apiBaseUrl}
-          onClose={() => setShowCanvas(false)}
-        />
       ) : null}
       {showImport ? (
         <FileImportPanel

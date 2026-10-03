@@ -1,0 +1,289 @@
+{
+  "generic_rest_connectors": [
+    {
+      "id": "perigon-trial",
+      "usage": "NEWS",
+      "config": {
+        "display_name": "Perigon trial news",
+        "provider": "perigon",
+        "base_url": "https://api.perigon.io",
+        "auth": "bearer",
+        "token_secret_name": "API_TOKEN",
+        "endpoints": [
+          {
+            "name": "ap",
+            "path": "/v1/articles/all",
+            "capability": "news.ap.read",
+            "resource_type": "news.ap",
+            "items_field": "articles",
+            "id_field": "articleId",
+            "subject_field": "title",
+            "content_field": null,
+            "occurred_at_field": "pubDate",
+            "source_url_field": "url",
+            "page_size_param": "size",
+            "page_size": 10,
+            "static_params": {
+              "source": "apnews.com",
+              "language": "en",
+              "sortBy": "date",
+              "showReprints": "false"
+            }
+          },
+          {
+            "name": "reuters",
+            "path": "/v1/articles/all",
+            "capability": "news.reuters.read",
+            "resource_type": "news.reuters",
+            "items_field": "articles",
+            "id_field": "articleId",
+            "subject_field": "title",
+            "content_field": null,
+            "occurred_at_field": "pubDate",
+            "source_url_field": "url",
+            "page_size_param": "size",
+            "page_size": 10,
+            "static_params": {
+              "source": "reuters.com",
+              "language": "en",
+              "sortBy": "date",
+              "showReprints": "false"
+            }
+          },
+          {
+            "name": "bbc",
+            "path": "/v1/articles/all",
+            "capability": "news.bbc.read",
+            "resource_type": "news.bbc",
+            "items_field": "articles",
+            "id_field": "articleId",
+            "subject_field": "title",
+            "content_field": null,
+            "occurred_at_field": "pubDate",
+            "source_url_field": "url",
+            "page_size_param": "size",
+            "page_size": 10,
+            "static_params": {
+              "source": "bbc.com",
+              "language": "en",
+              "sortBy": "date",
+              "showReprints": "false"
+            }
+          },
+          {
+            "name": "cnn",
+            "path": "/v1/articles/all",
+            "capability": "news.cnn.read",
+            "resource_type": "news.cnn",
+            "items_field": "articles",
+            "id_field": "articleId",
+            "subject_field": "title",
+            "content_field": null,
+            "occurred_at_field": "pubDate",
+            "source_url_field": "url",
+            "page_size_param": "size",
+            "page_size": 10,
+            "static_params": {
+              "source": "cnn.com",
+              "language": "en",
+              "sortBy": "date",
+              "showReprints": "false"
+            }
+          },
+          {
+            "name": "cnbc",
+            "path": "/v1/articles/all",
+            "capability": "news.cnbc.read",
+            "resource_type": "news.cnbc",
+            "items_field": "articles",
+            "id_field": "articleId",
+            "subject_field": "title",
+            "content_field": null,
+            "occurred_at_field": "pubDate",
+            "source_url_field": "url",
+            "page_size_param": "size",
+            "page_size": 10,
+            "static_params": {
+              "source": "cnbc.com",
+              "language": "en",
+              "sortBy": "date",
+              "showReprints": "false"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "news_source_catalog": [
+    {
+      "key": "ap-perigon",
+      "name": "AP via Perigon",
+      "domain": "apnews.com",
+      "source_type": "SYNDICATION",
+      "region": "us",
+      "language": "en",
+      "identity_verified": false,
+      "feed_type": "API",
+      "endpoint": "https://api.perigon.io/v1/articles/all",
+      "api_connection_id": "00000000-0000-0000-0000-000000000000",
+      "api_endpoint_name": "ap",
+      "article_domains": [
+        "apnews.com",
+        "www.apnews.com"
+      ],
+      "category": "us",
+      "poll_interval_seconds": 86400,
+      "independence_group": "perigon-trial",
+      "rights": {
+        "metadata_storage_allowed": true,
+        "snippet_storage_allowed": false,
+        "full_text_processing_allowed": false,
+        "full_text_storage_allowed": false,
+        "summary_generation_allowed": false,
+        "image_display_allowed": false,
+        "attribution_required": true,
+        "link_required": true,
+        "retention_days": 1,
+        "permission_reference": "https://perigon.io/CSA.pdf",
+        "reviewed_at": "2026-10-02T16:00:00Z",
+        "expires_at": "2026-10-30T16:00:00Z"
+      }
+    },
+    {
+      "key": "reuters-perigon",
+      "name": "Reuters via Perigon",
+      "domain": "reuters.com",
+      "source_type": "SYNDICATION",
+      "region": "world",
+      "language": "en",
+      "identity_verified": false,
+      "feed_type": "API",
+      "endpoint": "https://api.perigon.io/v1/articles/all",
+      "api_connection_id": "00000000-0000-0000-0000-000000000000",
+      "api_endpoint_name": "reuters",
+      "article_domains": [
+        "reuters.com",
+        "www.reuters.com"
+      ],
+      "category": "business",
+      "poll_interval_seconds": 86400,
+      "independence_group": "perigon-trial",
+      "rights": {
+        "metadata_storage_allowed": true,
+        "snippet_storage_allowed": false,
+        "full_text_processing_allowed": false,
+        "full_text_storage_allowed": false,
+        "summary_generation_allowed": false,
+        "image_display_allowed": false,
+        "attribution_required": true,
+        "link_required": true,
+        "retention_days": 1,
+        "permission_reference": "https://perigon.io/CSA.pdf",
+        "reviewed_at": "2026-10-02T16:00:00Z",
+        "expires_at": "2026-10-30T16:00:00Z"
+      }
+    },
+    {
+      "key": "bbc-perigon",
+      "name": "BBC via Perigon",
+      "domain": "bbc.com",
+      "source_type": "SYNDICATION",
+      "region": "world",
+      "language": "en",
+      "identity_verified": false,
+      "feed_type": "API",
+      "endpoint": "https://api.perigon.io/v1/articles/all",
+      "api_connection_id": "00000000-0000-0000-0000-000000000000",
+      "api_endpoint_name": "bbc",
+      "article_domains": [
+        "bbc.com",
+        "www.bbc.com"
+      ],
+      "category": "world",
+      "poll_interval_seconds": 86400,
+      "independence_group": "perigon-trial",
+      "rights": {
+        "metadata_storage_allowed": true,
+        "snippet_storage_allowed": false,
+        "full_text_processing_allowed": false,
+        "full_text_storage_allowed": false,
+        "summary_generation_allowed": false,
+        "image_display_allowed": false,
+        "attribution_required": true,
+        "link_required": true,
+        "retention_days": 1,
+        "permission_reference": "https://perigon.io/CSA.pdf",
+        "reviewed_at": "2026-10-02T16:00:00Z",
+        "expires_at": "2026-10-30T16:00:00Z"
+      }
+    },
+    {
+      "key": "cnn-perigon",
+      "name": "CNN via Perigon",
+      "domain": "cnn.com",
+      "source_type": "SYNDICATION",
+      "region": "world",
+      "language": "en",
+      "identity_verified": false,
+      "feed_type": "API",
+      "endpoint": "https://api.perigon.io/v1/articles/all",
+      "api_connection_id": "00000000-0000-0000-0000-000000000000",
+      "api_endpoint_name": "cnn",
+      "article_domains": [
+        "cnn.com",
+        "www.cnn.com"
+      ],
+      "category": "world",
+      "poll_interval_seconds": 86400,
+      "independence_group": "perigon-trial",
+      "rights": {
+        "metadata_storage_allowed": true,
+        "snippet_storage_allowed": false,
+        "full_text_processing_allowed": false,
+        "full_text_storage_allowed": false,
+        "summary_generation_allowed": false,
+        "image_display_allowed": false,
+        "attribution_required": true,
+        "link_required": true,
+        "retention_days": 1,
+        "permission_reference": "https://perigon.io/CSA.pdf",
+        "reviewed_at": "2026-10-02T16:00:00Z",
+        "expires_at": "2026-10-30T16:00:00Z"
+      }
+    },
+    {
+      "key": "cnbc-perigon",
+      "name": "CNBC via Perigon",
+      "domain": "cnbc.com",
+      "source_type": "SYNDICATION",
+      "region": "world",
+      "language": "en",
+      "identity_verified": false,
+      "feed_type": "API",
+      "endpoint": "https://api.perigon.io/v1/articles/all",
+      "api_connection_id": "00000000-0000-0000-0000-000000000000",
+      "api_endpoint_name": "cnbc",
+      "article_domains": [
+        "cnbc.com",
+        "www.cnbc.com"
+      ],
+      "category": "business",
+      "poll_interval_seconds": 86400,
+      "independence_group": "perigon-trial",
+      "rights": {
+        "metadata_storage_allowed": true,
+        "snippet_storage_allowed": false,
+        "full_text_processing_allowed": false,
+        "full_text_storage_allowed": false,
+        "summary_generation_allowed": false,
+        "image_display_allowed": false,
+        "attribution_required": true,
+        "link_required": true,
+        "retention_days": 1,
+        "permission_reference": "https://perigon.io/CSA.pdf",
+        "reviewed_at": "2026-10-02T16:00:00Z",
+        "expires_at": "2026-10-30T16:00:00Z"
+      }
+    }
+  ]
+}

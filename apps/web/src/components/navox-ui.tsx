@@ -11,14 +11,14 @@ import styles from "./navox-ui.module.css";
 export function NavoXNavigation({
   current,
 }: {
-  current: "Today" | "News" | "Search" | "Subscriptions";
+  current: "Today" | "Assistant" | "News" | "Search" | "Subscriptions";
 }) {
   return (
-    <nav aria-label="Workspace" className={styles.navigation}>
+    <nav aria-label="Main navigation" className={styles.navigation}>
       {(
         [
           ["Today", "/"],
-          ["NavoX", "/#ask-navox"],
+          ["Ask NavoX", "/navox"],
           ["News", "/news"],
           ["Search", "/navox/search"],
           ["Subscriptions", "/subscriptions"],
@@ -27,7 +27,15 @@ export function NavoXNavigation({
         <a
           key={label}
           href={url}
-          aria-current={current === label ? "page" : undefined}
+          aria-current={
+            (
+              current === "Assistant"
+                ? label === "Ask NavoX"
+                : current === label
+            )
+              ? "page"
+              : undefined
+          }
         >
           {label}
         </a>
@@ -48,7 +56,7 @@ export function NavoXPageHeader({
   return (
     <header className={styles.pageHeader}>
       <div>
-        <p className={styles.eyebrow}>NAVOX / NEWS</p>
+        <p className={styles.eyebrow}>NAVOX</p>
         <h1>{title}</h1>
         <p>{description}</p>
       </div>

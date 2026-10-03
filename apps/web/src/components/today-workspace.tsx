@@ -14,7 +14,6 @@ import {
   todayFilters,
   todaySections,
 } from "../lib/today-sections";
-import { AISettings } from "./ai-settings";
 import { ApprovalPanel } from "./approval-panel";
 import { CommunicationDrafts } from "./communication-drafts";
 import { ConnectionsPanel } from "./connections-panel";
@@ -226,7 +225,7 @@ function queryHeading(intent: string): string {
     forgetting: "Worth a second look",
     meeting_prep: "Next meeting prep",
     handleable: "NavoX can handle",
-    unsupported: "Try another operational question",
+    unsupported: "Try another question",
   };
   return headings[intent] ?? "NavoX briefing";
 }
@@ -432,7 +431,7 @@ export function TodayWorkspace({
       setTitle("");
       setDueAt("");
       setPriority("3");
-      setWorkspaceMessage("Commitment added to your operational state.");
+      setWorkspaceMessage("Added to your day.");
       await refreshToday();
     } catch {
       setWorkspaceError("NavoX could not save that commitment.");
@@ -456,10 +455,10 @@ export function TodayWorkspace({
       }
       setWorkspaceMessage(
         action === "complete"
-          ? "Commitment completed. Today is refreshed."
+          ? "Marked complete. Your day is up to date."
           : action === "dismiss"
             ? "Item marked as not a task and removed from Today."
-            : "Commitment state updated.",
+            : "Updated.",
       );
       await refreshToday();
     } catch {
@@ -493,11 +492,11 @@ export function TodayWorkspace({
       const plan = (await response.json()) as PlanDetail;
       setActivePlan(plan);
       setWorkspaceMessage(
-        "Bounded plan started. NavoX will only execute permitted R0/R1 steps.",
+        "NavoX is working on this. You’ll be asked to approve any email before it is sent.",
       );
       await refreshPlans();
     } catch {
-      setWorkspaceError("NavoX could not start that bounded plan.");
+      setWorkspaceError("NavoX couldn’t start this. Please try again.");
     } finally {
       setHandlingId(null);
     }
@@ -523,8 +522,8 @@ export function TodayWorkspace({
       setAgentPaused(state.paused);
       setWorkspaceMessage(
         state.paused
-          ? "Agent execution paused. New plans and future steps will fail closed."
-          : "Agent execution resumed.",
+          ? "NavoX is paused. Resume assistance when you’re ready."
+          : "NavoX is ready to help again.",
       );
     } catch {
       setWorkspaceError("NavoX could not update the agent state.");
@@ -675,39 +674,24 @@ export function TodayWorkspace({
                   <h3>{item.title}</h3>
                   <span className={styles.itemMeta}>
                     {setAside
-                      ? item.reasons[0]
+                      ? "Review when you have a moment"
                       : item.due_at
                         ? dueLabel(item.due_at, timezone)
-                        : item.reasons[0]}
+                        : "No due date"}
                   </span>
                   <span className={styles.expandHint}>Details & actions</span>
                 </summary>
                 <div className={styles.itemDetail}>
                   {item.description && <p>{item.description}</p>}
-                  {!setAside && item.reasons.length > 0 && (
-                    <p className={styles.mutedCopy}>
-                      {item.reasons.join(" · ")}
-                    </p>
-                  )}
                   <details className={styles.evidence}>
                     <summary>Why this is here</summary>
                     <p>
                       {item.created_by === "user"
-                        ? "You added this commitment."
-                        : `${Math.round(item.confidence * 100)}% confidence · ${item.status === "candidate" ? "Your confirmation is needed" : "Supported by connected sources"}`}
+                        ? "You added this."
+                        : item.status === "candidate"
+                          ? "Suggested from your connected apps. Confirm it if it belongs on your list."
+                          : "From your connected apps."}
                     </p>
-                    {item.factors && (
-                      <dl>
-                        {Object.entries(item.factors)
-                          .filter(([, value]) => value > 0)
-                          .map(([name, value]) => (
-                            <div key={name}>
-                              <dt>{name.replaceAll("_", " ")}</dt>
-                              <dd>{Math.round(value * 100)}%</dd>
-                            </div>
-                          ))}
-                      </dl>
-                    )}
                     <SourceReferences
                       sources={item.sources}
                       paused={agentPaused}
@@ -765,7 +749,7 @@ export function TodayWorkspace({
         </a>
         <NavoXNavigation current="Today" />
         <div className={styles.topbarMeta}>
-          <span>{account.workspace.name}</span>
+          <a href="#settings">Settings</a>
           <button onClick={() => void onSignOut()} type="button">
             Sign out
           </button>
@@ -782,18 +766,20 @@ export function TodayWorkspace({
             </span>
           </h1>
           <p className={styles.heroCopy}>
-            Your commitments, connected context, and next steps in one private
-            workspace. Stay informed, review the evidence, and decide what
-            happens next.
+            See what needs your attention, catch up on the news, or ask NavoX
+            for a hand.
           </p>
+          <a className={styles.askCta} href="/navox">
+            Ask NavoX <span aria-hidden="true">↗</span>
+          </a>
           <div className={styles.posture}>
             <span className={styles.liveDot} aria-hidden="true" />
             <div>
-              <small>Operational state</small>
+              <small>Your day</small>
               <strong>
                 {loadingToday
-                  ? "Syncing"
-                  : `${String(today?.total ?? 0)} active`}
+                  ? "Updating…"
+                  : `${String(today?.total ?? 0)} things to keep track of`}
               </strong>
             </div>
           </div>
@@ -875,8 +861,10 @@ export function TodayWorkspace({
           <aside className={styles.toolsColumn} aria-label="Workspace tools">
             <section className={styles.controlCard}>
               <div className={styles.controlHeading}>
-                <p>Ask NavoX</p>
-                <span className={styles.controlMeta}>Read-only</span>
+                <p>Quick overview</p>
+                <a className={styles.assistantLink} href="/navox">
+                  Talk with NavoX →
+                </a>
               </div>
               <h2>What do you need to know?</h2>
               <div id="ask-navox">
@@ -886,7 +874,7 @@ export function TodayWorkspace({
                   value={query}
                   placeholder="What needs my attention today?"
                   busy={querying}
-                  busyLabel="Reading state…"
+                  busyLabel="Checking…"
                   maxLength={500}
                   onChange={setQuery}
                   onSubmit={askNavox}
@@ -949,13 +937,12 @@ export function TodayWorkspace({
               )}
             </section>
             <details className={styles.toolDisclosure}>
-              <summary>Add a commitment</summary>
+              <summary>Add a task or event</summary>
               <section className={styles.controlCard}>
                 <div className={styles.controlHeading}>
                   <p>Capture</p>
-                  <span className={styles.controlMeta}>Manual · explicit</span>
                 </div>
-                <h2>Add a commitment</h2>
+                <h2>Add to your day</h2>
                 <form
                   className={styles.captureForm}
                   onSubmit={createCommitment}
@@ -1017,13 +1004,11 @@ export function TodayWorkspace({
               </section>
             </details>
             <details className={styles.toolDisclosure}>
-              <summary>Agent & plans</summary>
+              <summary>Activity</summary>
               <section className={`${styles.controlCard} ${styles.agentCard}`}>
                 <div className={styles.controlHeading}>
-                  <p>Agent runtime</p>
-                  <span className={styles.controlMeta}>
-                    Bounded · approval gated
-                  </span>
+                  <p>NavoX activity</p>
+                  <span className={styles.controlMeta}>You’re in control</span>
                 </div>
                 <div className={styles.agentStateRow}>
                   <div>
@@ -1044,33 +1029,25 @@ export function TodayWorkspace({
                     {togglingAgent
                       ? "Updating…"
                       : agentPaused
-                        ? "Resume agent"
-                        : "Pause agent"}
+                        ? "Resume assistance"
+                        : "Pause assistance"}
                   </button>
                 </div>
                 <p className={styles.mutedCopy}>
-                  Internal R0/R1 work can run automatically. Consequential R3
-                  actions, including Gmail send, require exact user approval
-                  before the provider boundary can execute them.
+                  NavoX can help prepare your next step. Review and approve the
+                  exact message before any email is sent.
                 </p>
 
                 {activePlan ? (
                   <div className={styles.planPanel} aria-live="polite">
                     <div className={styles.planHeader}>
                       <div>
-                        <small>Active plan</small>
+                        <small>In progress</small>
                         <h3>{activePlan.goal}</h3>
                       </div>
                       <span data-status={activePlan.status}>
                         {activePlan.status.replaceAll("_", " ")}
                       </span>
-                    </div>
-                    <div className={styles.planMeta}>
-                      <span>{activePlan.planner_version}</span>
-                      <span>
-                        {activePlan.steps.length} / {activePlan.max_steps} steps
-                      </span>
-                      <span>Replans {activePlan.replan_count} / 2</span>
                     </div>
                     <ol className={styles.planSteps}>
                       {activePlan.steps.map((step) => (
@@ -1081,11 +1058,7 @@ export function TodayWorkspace({
                           <div className={styles.stepBody}>
                             <div className={styles.stepTopline}>
                               <strong>{step.description}</strong>
-                              <span className={styles.riskBadge}>
-                                {step.risk_level}
-                              </span>
                             </div>
-                            <p>{step.action_type}</p>
                             <small>{step.status.replaceAll("_", " ")}</small>
                           </div>
                         </li>
@@ -1093,14 +1066,14 @@ export function TodayWorkspace({
                     </ol>
                     {activePlan.error_code && (
                       <p className={styles.planError}>
-                        Stopped safely:{" "}
-                        {activePlan.error_code.replaceAll("_", " ")}
+                        NavoX couldn’t finish this. Review the activity or try
+                        again.
                       </p>
                     )}
                   </div>
                 ) : recentPlans.length > 0 ? (
                   <div className={styles.recentPlans}>
-                    <small>Recent plans</small>
+                    <small>Recent activity</small>
                     {recentPlans.map((plan) => (
                       <button
                         key={plan.id}
@@ -1114,8 +1087,8 @@ export function TodayWorkspace({
                   </div>
                 ) : (
                   <p className={styles.emptyAgent}>
-                    Choose <strong>Handle this</strong> on a confirmed
-                    commitment to create the first bounded plan.
+                    Choose <strong>Handle this</strong> on a confirmed task to
+                    ask NavoX for help.
                   </p>
                 )}
               </section>
@@ -1149,20 +1122,20 @@ export function TodayWorkspace({
             </details>
           </aside>
         </div>
-        <ConnectionsPanel
-          agentPaused={agentPaused}
-          onConnectionsChanged={onConnectionsChanged}
-        />
-        <details className={styles.toolDisclosure}>
-          <summary>
-            Connected understanding · read access and advanced sync
-          </summary>
-          <AISettings />
-          <IntelligenceControls
-            connections={connections}
-            paused={agentPaused}
-            onRefresh={refreshToday}
+        <details id="settings" className={styles.toolDisclosure}>
+          <summary>Settings &amp; connected apps</summary>
+          <ConnectionsPanel
+            agentPaused={agentPaused}
+            onConnectionsChanged={onConnectionsChanged}
           />
+          <details className={styles.toolDisclosure}>
+            <summary>Refresh email &amp; calendar</summary>
+            <IntelligenceControls
+              connections={connections}
+              paused={agentPaused}
+              onRefresh={refreshToday}
+            />
+          </details>
         </details>
       </div>
     </main>

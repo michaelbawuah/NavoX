@@ -15,6 +15,8 @@ from sqlalchemy.exc import IntegrityError
 from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
 from navox.api.connector_management import require_origin
 from navox.api.knowledge_ask import router as knowledge_ask_router
+from navox.connectors.authorization import ConnectorAccessDenied
+from navox.knowledge.class_schedule import live_class_navigation_target, live_class_source_snapshot
 from navox.knowledge.embeddings import (
     EmbeddingGateway,
     SemanticDisabled,
@@ -48,6 +50,47 @@ from navox.knowledge.service import KnowledgeUnavailable, load_resource_detail, 
 
 router = APIRouter(tags=["knowledge"])
 router.include_router(knowledge_ask_router)
+
+
+@router.get("/knowledge/class-sources")
+async def class_sources(
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict[str, object]:
+    """Permission-fenced Canvas/Calendar projection for SPEC-008 next class."""
+    knowledge_enabled(settings.knowledge_enabled)
+    reader = getattr(request.app.state, "class_source_reader", live_class_source_snapshot)
+    return await reader(
+        database, workspace_id=account.workspace.id, user_id=account.user.id, settings=settings
+    )
+
+
+@router.get("/knowledge/class-navigation")
+async def class_navigation(
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    connection_id: UUID,
+    resource_id: UUID,
+) -> dict[str, str]:
+    """Resolve an upcoming class event only after a fresh scoped provider read."""
+    knowledge_enabled(settings.knowledge_enabled)
+    try:
+        url = await live_class_navigation_target(
+            database,
+            workspace_id=account.workspace.id,
+            user_id=account.user.id,
+            settings=settings,
+            connection_id=connection_id,
+            resource_id=resource_id,
+        )
+    except ConnectorAccessDenied:
+        url = None
+    if url is None:
+        raise HTTPException(404, "Class navigation is unavailable")
+    return {"url": url}
 
 
 def knowledge_enabled(enabled: bool) -> None:

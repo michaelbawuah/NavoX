@@ -143,7 +143,7 @@ export default function Home() {
   if (!sessionRestored && account === null) {
     return (
       <main aria-live="polite" className="shell">
-        Preparing your workspace…
+        Getting NavoX ready…
       </main>
     );
   }
@@ -168,7 +168,7 @@ export default function Home() {
         id="access-panel"
       >
         <div className="access-card-topline">
-          <span>YOUR WORKSPACE</span>
+          <span>WELCOME TO NAVOX</span>
           <span>✦</span>
         </div>
         <fieldset aria-label="Account access" className="auth-tabs">
@@ -196,14 +196,14 @@ export default function Home() {
           </button>
         </fieldset>
         <div className="access-card-heading">
-          <p className="access-step">Step 01 · Identity</p>
+          <p className="access-step">Your account</p>
           <h2 id="auth-heading" tabIndex={-1}>
             {mode === "register" ? "Make yourself at home" : "Welcome back"}
           </h2>
           <p>
             {mode === "register"
-              ? "A clearer day starts with your own workspace."
-              : "Your workspace is ready when you are."}
+              ? "Your day, a little easier."
+              : "Pick up where you left off."}
           </p>
         </div>
         <form className="auth-form" onSubmit={submit}>
@@ -253,7 +253,7 @@ export default function Home() {
             {isLoading
               ? "Working…"
               : mode === "register"
-                ? "Create my workspace"
+                ? "Create account"
                 : "Sign in"}
           </button>
         </form>
@@ -261,7 +261,7 @@ export default function Home() {
           <span aria-hidden="true" className="access-footnote-symbol">
             ⌁
           </span>
-          Passwords are protected with modern hashing.
+          Your account is private. Connect your apps when you’re ready.
         </p>
       </section>
     </NavoXCinematic>

@@ -556,6 +556,8 @@ class CanvasConnector:
                 "context_code": _text(event.get("context_code")),
                 "start_at": _text(event.get("start_at")),
                 "end_at": _text(event.get("end_at")),
+                "scheduling_updated_at": _text(event.get("updated_at")),
+                "status": _text(event.get("workflow_state")) or "active",
                 "all_day": bool(event.get("all_day", False)),
                 "location_name": _text(event.get("location_name")),
             },
