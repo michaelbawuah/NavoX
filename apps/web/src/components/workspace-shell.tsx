@@ -63,6 +63,21 @@ function Icon({ name }: { name: keyof typeof iconPaths }) {
   );
 }
 
+export function drawerFocusControls(navigation: HTMLElement): HTMLElement[] {
+  return Array.from(
+    navigation.querySelectorAll<HTMLElement>(
+      'a[href], button:not(:disabled), summary, [tabindex="0"]',
+    ),
+  ).filter((control) => {
+    const closedDisclosure = control.closest("details:not([open])");
+    return (
+      control.getClientRects().length > 0 &&
+      (!closedDisclosure ||
+        closedDisclosure.querySelector(":scope > summary") === control)
+    );
+  });
+}
+
 export function WorkspaceShell({
   current,
   children,
@@ -103,11 +118,7 @@ export function WorkspaceShell({
     navigation?.querySelector<HTMLButtonElement>("button")?.focus();
     const trapFocus = (event: KeyboardEvent) => {
       if (event.key !== "Tab" || !navigation) return;
-      const controls = Array.from(
-        navigation.querySelectorAll<HTMLElement>(
-          'a[href], button:not(:disabled), summary, [tabindex="0"]',
-        ),
-      ).filter((control) => control.getClientRects().length > 0);
+      const controls = drawerFocusControls(navigation);
       const first = controls[0];
       const last = controls.at(-1);
       if (event.shiftKey && document.activeElement === first) {
