@@ -22,6 +22,10 @@ class OutputRejected(ValueError):
         )
 
 
+class OutputLimitRejected(OutputRejected):
+    """A bounded output exceeded its contract; no partial text may be accepted."""
+
+
 def compile_schema(document: JSONDocument) -> Draft202012Validator:
     schema = json.loads(document.text)
 
@@ -55,7 +59,13 @@ def validate_output(
     try:
         value = json.loads(output.text)
         compile_schema(schema).validate(value)
-    except (ValueError, ValidationError, Unresolvable, RecursionError, KeyError, TypeError):
+    except ValidationError as error:
+        if error.validator == "maxLength":
+            raise OutputLimitRejected("AI output exceeded its length limit") from None
+        raise OutputRejected(
+            "AI output failed application validation", validation_code="schema_invalid"
+        ) from None
+    except (ValueError, Unresolvable, RecursionError, KeyError, TypeError):
         raise OutputRejected(
             "AI output failed application validation", validation_code="schema_invalid"
         ) from None

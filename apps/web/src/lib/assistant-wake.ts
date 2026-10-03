@@ -6,7 +6,6 @@ import type {
 
 const LANGUAGE = "en-US";
 const MIN_CONFIDENCE = 0.55;
-const MAX_SUFFIX = 500;
 const RESTART_DELAY_MS = 250;
 
 interface RecognitionAlternative {
@@ -64,7 +63,9 @@ export function resolveWakePhrase(
   if (!Number.isFinite(confidence) || confidence < MIN_CONFIDENCE) return null;
   const match = /^\s*hey[,.!?]*\s+navox\b[,.!?\s]*/i.exec(transcript);
   if (!match) return null;
-  const suffix = transcript.slice(match[0].length).trim().slice(0, MAX_SUFFIX);
+  // Preserve the whole local question; submission explicitly rejects an
+  // oversized suffix instead of asking the model about an altered prefix.
+  const suffix = transcript.slice(match[0].length).trim();
   return suffix ? { request_text: suffix, confidence } : { confidence };
 }
 

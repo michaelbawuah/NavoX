@@ -91,6 +91,45 @@ function harness(
 }
 
 describe("assistant turn runner", () => {
+  it.each(["TEXT", "VOICE"] as const)(
+    "refuses an oversized %s question without submitting a prefix",
+    async (modality) => {
+      const submit = vi.fn();
+      const context = harness(submit);
+      const question = "x".repeat(501);
+      await context.runner.run({
+        sessionId: "session-a",
+        modality,
+        text: question,
+      });
+      expect(submit).not.toHaveBeenCalled();
+      expect(context.appended).toEqual([]);
+      expect(context.notices).toEqual([
+        "That question is longer than 500 characters. Shorten it before sending.",
+      ]);
+      expect(question).toHaveLength(501);
+    },
+  );
+
+  it("submits every character of a question at the input limit", async () => {
+    const submit = vi.fn(async () => ({
+      session_id: "session-a",
+      turn: turn(),
+      replay: false,
+    }));
+    const context = harness(submit);
+    const question = "x".repeat(500);
+    await context.runner.run({
+      sessionId: "session-a",
+      modality: "TEXT",
+      text: question,
+    });
+    expect(submit).toHaveBeenCalledWith(
+      "session-a",
+      expect.objectContaining({ text: question }),
+    );
+    expect(context.notices).toEqual([]);
+  });
   it("drops a stale completion after clear and never speaks it", async () => {
     const gate = deferred<AssistantMessageResponse>();
     const context = harness(() => gate.promise);
@@ -691,6 +730,18 @@ function voiceRig(
 }
 
 describe("voice session lifecycle", () => {
+  it("reports an oversized transcript and never submits a shortened question", async () => {
+    const submit = vi.fn();
+    const rig = voiceRig(submit);
+    await rig.voiceTurn("x".repeat(501));
+    expect(submit).not.toHaveBeenCalled();
+    expect(rig.transcripts).toEqual([]);
+    expect(rig.appended).toEqual([]);
+    expect(rig.notices).toEqual([
+      "That question is longer than 500 characters. Shorten it before sending.",
+    ]);
+    expect(rig.session.current().transcript).toBeNull();
+  });
   it("keeps a typed turn silent and speaks a live voice turn", async () => {
     const rig = voiceRig();
     await rig.typedTurn("What am I missing today?");

@@ -270,6 +270,14 @@ class OpenAIAdapter(HTTPAdapter):
         }
 
     def decode(self, body: Mapping[str, Any]) -> ProviderResponse:
+        incomplete = body.get("incomplete_details")
+        if (
+            body.get("status") == "incomplete"
+            and not body.get("error")
+            and isinstance(incomplete, Mapping)
+            and incomplete.get("reason") == "max_output_tokens"
+        ):
+            raise AdapterFailure(ErrorCode.OUTPUT_LIMIT)
         if body.get("status") != "completed" or body.get("error") or body.get("incomplete_details"):
             raise invalid()
         texts = []

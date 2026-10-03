@@ -1,6 +1,7 @@
 import {
   automaticSpeechAllowed,
   initialVoiceState,
+  questionLimitNotice,
   reduceVoiceState,
   spokenTextForTurn,
   type VoiceEvent,
@@ -98,6 +99,11 @@ export function createAssistantTurnRunner(
     async run({ sessionId, modality, text, referents = [] }) {
       const question = text.trim();
       if (!sessionId || !question || busy) return;
+      const limitNotice = questionLimitNotice(question);
+      if (limitNotice) {
+        deps.onNotice(limitNotice, modality);
+        return;
+      }
       const token = generation;
       const current = () => token === generation;
       busy = true;
@@ -379,6 +385,7 @@ export function createVoiceSession(deps: VoiceSessionDeps): VoiceSession {
         if (!live()) return;
         const next = reduceVoiceState(state, { type: "TRANSCRIPT", text });
         publish(next);
+        if (next.error) deps.onNotice(next.error);
         if (next.state !== "TRANSCRIBING" || !next.transcript) return;
         deps.onTranscript(voiceTurnRequest(next.transcript));
         if (state.state === "TRANSCRIBING") dispatch({ type: "STOP" });

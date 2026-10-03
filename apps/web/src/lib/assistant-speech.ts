@@ -464,6 +464,12 @@ export function createSpeechAdapter(scope: unknown): SpeechAdapter {
         if (target.mode === "manual") {
           target.frames.push(frame);
           target.buffered += frame.length;
+          // Talk can still be finished by a second click, but ordinary speech
+          // ends automatically after the same local silence window.
+          if (target.activity?.observe(frame, context.sampleRate).ended) {
+            finishClip(target);
+            return;
+          }
         } else {
           const activity = target.activity?.observe(frame, context.sampleRate);
           if (target.phase === "monitoring") {
@@ -546,8 +552,7 @@ export function createSpeechAdapter(scope: unknown): SpeechAdapter {
       transcribe,
       phase: "opening",
       mode,
-      activity:
-        mode === "manual" ? null : new VoiceActivityDetector(mode === "barge"),
+      activity: new VoiceActivityDetector(mode === "barge"),
       onSpeech,
       preRollFrames: [],
       preRollSamples: 0,

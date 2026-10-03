@@ -20,10 +20,21 @@ import {
   parseActionHistory,
 } from "./activity";
 import {
+  broadNewsRequest,
+  broadReadPlan,
+  upcomingSubscriptionsRequest,
+} from "./broad-reads";
+import {
   assertRegistryIntegrity,
   capabilityForIntentKind,
 } from "./capabilities";
 import { answerNextClass, parseClassSourceSnapshot } from "./class-meetings";
+import {
+  CONVERSATION_OUTPUT_LIMIT,
+  CONVERSATION_OUTPUT_LIMIT_MESSAGE,
+  conversationReferences,
+  parseConversationAnswer,
+} from "./conversation";
 import { type DeliveryResolution, resolveDeliveryIntent } from "./delivery";
 import {
   decideEmailSearch,
@@ -86,6 +97,7 @@ import {
 } from "./store";
 import {
   answerSubscription,
+  answerUpcomingSubscriptions,
   clarifySubscriptions,
   parseSubscriptionCancellation,
   parseSubscriptionSearch,
@@ -536,25 +548,6 @@ export function createAssistantRuntime(
         blocks: [{ kind: "ANSWER" as const, text: "Hi, I'm listening." }],
       };
     }
-    if (input.delivery.conversation_only) {
-      const acknowledgment =
-        input.delivery.conversation_only === "ACKNOWLEDGMENT";
-      return {
-        plan,
-        state: "READY" as AssistantResponseState,
-        decision: presentDecision(
-          acknowledgment ? "delivery.acknowledgment" : "delivery.check_in",
-        ),
-        blocks: [
-          {
-            kind: "ANSWER" as const,
-            text: acknowledgment
-              ? "You're welcome."
-              : "I'm ready to help. What's on your mind?",
-          },
-        ],
-      };
-    }
     if (input.delivery.intent === "SUPPRESS") {
       return clarify(
         "delivery.suppressed",
@@ -699,6 +692,70 @@ export function createAssistantRuntime(
     return today.supported_queries.some(
       (example) => example.trim().toLocaleLowerCase("en-US") === normalized,
     );
+  }
+
+  /**
+   * Ordinary conversation has no capability, approval or action authority.
+   * The owning AI service qualifies and authorizes this separate prompt. Only
+   * its verified plain-text answers may be forwarded on a later turn.
+   */
+  async function conversationTurn(input: {
+    cookie: string;
+    scope: AccountScope;
+    record: AssistantSessionRecord;
+    request: AssistantMessageRequest;
+    turns: readonly AssistantTurnRecord[];
+  }): Promise<{
+    plan: IntentPlan;
+    state: AssistantResponseState;
+    decision: CapabilityDecision;
+    blocks: AssistantBlock[];
+  }> {
+    const assertScope = async () => {
+      const current = await scopeFor(input.cookie);
+      if (
+        current.user_id !== input.scope.user_id ||
+        current.workspace_id !== input.scope.workspace_id
+      )
+        throw new AssistantError("forbidden", "This account changed.", {
+          reason: "conversation_scope_changed",
+        });
+    };
+    await assertScope();
+    const raw = await deps.upstream.answerConversation(input.cookie, {
+      sessionId: input.record.navox_session_id,
+      utterance: input.request.text,
+      recentTurns: conversationReferences(input.turns, input.record.id),
+    });
+    const answer = parseConversationAnswer(raw, input.record.navox_session_id);
+    await assertScope();
+    return {
+      plan: deliveryPlan(input.request.text),
+      state: "READY",
+      decision: presentDecision(`conversation.answer:${answer.task_id}`),
+      blocks: [{ kind: "ANSWER", text: answer.answer }],
+    };
+  }
+
+  function conversationFailure(error: unknown): ReturnType<typeof planFailure> {
+    const failure = isAssistantError(error) ? error : toAssistantError(error);
+    const result = planFailure(failure);
+    if (failure.reason === "conversation_scope_changed") return result;
+    if (failure.reason === CONVERSATION_OUTPUT_LIMIT) {
+      return {
+        ...result,
+        blocks: noticeBlocks(result.state, CONVERSATION_OUTPUT_LIMIT_MESSAGE),
+      };
+    }
+    return {
+      ...result,
+      blocks: noticeBlocks(
+        result.state,
+        failure.code === "forbidden"
+          ? "NavoX conversation isn't available for this account yet."
+          : "NavoX conversation is temporarily unavailable. Please try again shortly.",
+      ),
+    };
   }
 
   /**
@@ -854,30 +911,36 @@ export function createAssistantRuntime(
     const pinned = planTurn({ text: input.request.text });
     const references = input.turns.slice(-LIMITS.maxPlanReferences);
 
-    // A free-form route is a SPEC-005 decision. When no qualified planner is
-    // available, only an exact SPEC-002 supported template can fall back.
+    // The exact Today fallback and the separately qualified text-only
+    // conversation route cannot grant a capability or bypass an invalid plan.
     let plan: IntentPlan;
     try {
       // Only the operator's own prior questions leave this runtime; answers from
       // other services are never forwarded as planner input.
-      const raw = await deps.upstream.planIntents(input.cookie, {
-        utterance: input.request.text,
-        recentReferences: references.map((turn) => turn.question),
-        sessionId: input.record.navox_session_id,
-      });
-      plan = parseIntentPlanEnvelope(raw, {
-        utterance: input.request.text,
-        sessionId: input.record.navox_session_id,
-        recentTurns: references.map((turn) => ({
-          turn_id: turn.id,
-          question: turn.question,
-        })),
-      });
-      plan = normalizeGenericNewsPlan(plan);
+      const readPlan = broadReadPlan(input.request.text);
+      if (readPlan !== null) {
+        plan = readPlan;
+      } else {
+        const raw = await deps.upstream.planIntents(input.cookie, {
+          utterance: input.request.text,
+          recentReferences: references.map((turn) => turn.question),
+          sessionId: input.record.navox_session_id,
+        });
+        plan = parseIntentPlanEnvelope(raw, {
+          utterance: input.request.text,
+          sessionId: input.record.navox_session_id,
+          recentTurns: references.map((turn) => ({
+            turn_id: turn.id,
+            question: turn.question,
+          })),
+        });
+        plan = normalizeGenericNewsPlan(plan);
+      }
     } catch (error) {
       if (isAssistantError(error) && error.code === "unauthorized") throw error;
       const failure = isAssistantError(error) ? error : toAssistantError(error);
       if (failure.reason === PLANNER_NO_PROVIDER) {
+        let todayFailure: unknown = null;
         try {
           const today = await deps.upstream.queryToday(input.cookie, {
             query: input.request.text,
@@ -895,7 +958,23 @@ export function createAssistantRuntime(
             fallbackError.code === "unauthorized"
           )
             throw fallbackError;
-          return { plan: pinned, ...planFailure(fallbackError, "today") };
+          todayFailure = fallbackError;
+        }
+        try {
+          return await conversationTurn(input);
+        } catch (conversationError) {
+          if (
+            isAssistantError(conversationError) &&
+            conversationError.code === "unauthorized"
+          )
+            throw conversationError;
+          if (
+            todayFailure !== null &&
+            isAssistantError(conversationError) &&
+            conversationError.code === "unsupported"
+          )
+            return { plan: pinned, ...planFailure(todayFailure, "today") };
+          return { plan: pinned, ...conversationFailure(conversationError) };
         }
       }
       return { plan: pinned, ...planFailure(error) };
@@ -981,7 +1060,10 @@ export function createAssistantRuntime(
         }
         if (definition.id === "subscription.search") {
           const selector = subscriptionSelector(intent);
-          if (selector === null) {
+          if (
+            selector === null &&
+            !upcomingSubscriptionsRequest(intent.question)
+          ) {
             return {
               plan,
               state: "CLARIFY",
@@ -996,7 +1078,10 @@ export function createAssistantRuntime(
             const rows = parseSubscriptionSearch(
               await deps.upstream.querySubscriptions(input.cookie, selector),
               selector,
+              now(),
             );
+            if (selector === null)
+              return { plan, ...answerUpcomingSubscriptions(rows) };
             if (rows.length !== 1)
               return { plan, ...clarifySubscriptions(rows) };
             // The second read must not cross an account switch while this turn
@@ -1044,7 +1129,10 @@ export function createAssistantRuntime(
           }
           try {
             const stories = parseNewsFeed(
-              await deps.upstream.getTrendingNews(input.cookie),
+              await deps.upstream.getTrendingNews(
+                input.cookie,
+                broadNewsRequest(intent.question)?.region,
+              ),
               now(),
             );
             if (selector === null) return { plan, ...newsTrends(stories) };
@@ -1215,6 +1303,47 @@ export function createAssistantRuntime(
         plan,
         ...planFailure(new AssistantError("invalid_request", "Empty plan")),
       };
+    const referencedConversation =
+      one.reference.kind === "RECENT_TURN" && one.reference.turn_id !== null
+        ? input.turns.find((turn) => turn.id === one.reference.turn_id)
+        : undefined;
+    const verifiedReference = referencedConversation
+      ? conversationReferences([referencedConversation], input.record.id)[0]
+      : undefined;
+    const conversationReferenceAllowed =
+      (one.reference.kind === "NONE" && one.reference.turn_id === null) ||
+      (verifiedReference !== undefined &&
+        conversationReferences(input.turns, input.record.id).some(
+          (reference) => reference.task_id === verifiedReference.task_id,
+        ));
+    // Named subjects copied from the question are still ordinary text, not
+    // connected context or capability authority. Only the owning read route
+    // can retrieve live facts, and connected follow-ups stay excluded above.
+    if (
+      plan.intents.length === 1 &&
+      one.kind === "assistant.clarify" &&
+      one.question === input.request.text &&
+      conversationReferenceAllowed &&
+      one.capability_id === null
+    ) {
+      try {
+        return await conversationTurn(input);
+      } catch (error) {
+        if (isAssistantError(error) && error.code === "unauthorized")
+          throw error;
+        const failure = isAssistantError(error)
+          ? error
+          : toAssistantError(error);
+        if (
+          (failure.code === "unsupported" ||
+            failure.code === "unavailable" ||
+            failure.code === "forbidden") &&
+          failure.reason !== "conversation_scope_changed"
+        )
+          return resolveOne(one);
+        return { plan, ...conversationFailure(error) };
+      }
+    }
     if (plan.intents.length === 1) return resolveOne(one);
 
     // A mixed consequential/unclear plan cannot trigger even a partial read.
@@ -1654,9 +1783,9 @@ export function createAssistantRuntime(
       }
 
       /**
-       * A delivery cue is classified before any planning. A cue-only utterance
-       * is answered from this same session's saved turns and never reaches the
-       * planner or a source; an embedded cue leaves general routing untouched.
+       * A delivery cue is classified before any planning. Replay and silence
+       * use this session's saved turns; standalone social conversation uses the
+       * qualified text-only model route. Embedded cues keep normal routing.
        */
       const delivery = resolveDeliveryIntent(request.text);
       /**
@@ -1681,11 +1810,28 @@ export function createAssistantRuntime(
             session_id: sessionId,
             scope,
           });
-          ({ plan, state, decision, blocks } = deliveryTurnOutcome({
-            text: request.text,
-            delivery,
-            turns,
-          }));
+          if (delivery.conversation_only) {
+            try {
+              ({ plan, state, decision, blocks } = await conversationTurn({
+                cookie: input.cookie,
+                scope,
+                record,
+                request,
+                turns,
+              }));
+            } catch (error) {
+              if (isAssistantError(error) && error.code === "unauthorized")
+                throw error;
+              plan = fallbackPlan;
+              ({ state, decision, blocks } = conversationFailure(error));
+            }
+          } else {
+            ({ plan, state, decision, blocks } = deliveryTurnOutcome({
+              text: request.text,
+              delivery,
+              turns,
+            }));
+          }
         } else {
           plan = fallbackPlan;
           if (request.referents.length > 0) {

@@ -5,6 +5,7 @@ import type {
   IntentPlan,
   PlannedIntent,
 } from "@navox/contracts";
+import { broadNewsRequest } from "./broad-reads";
 import { AssistantError } from "./errors";
 import { LIMITS } from "./limits";
 import {
@@ -139,6 +140,7 @@ export function normalizeGenericNewsPlan(plan: IntentPlan): IntentPlan {
           .replace(/\s+/g, " ")
           .trim();
         const generic =
+          broadNewsRequest(intent.question) !== null ||
           /^(?:what is trending(?: today| right now)?|what is (?:on|in) the news(?: today)?|what (?:is|are) the (?:latest )?headlines(?: today)?|what is the latest news)$/.test(
             question,
           );
@@ -148,9 +150,10 @@ export function normalizeGenericNewsPlan(plan: IntentPlan): IntentPlan {
           intent.reference.kind !== "NONE" ||
           (intent.entity.kind !== "NONE" &&
             (intent.entity.kind !== "TOPIC" ||
-              !genericSlots.has(
-                intent.entity.value?.toLocaleLowerCase("en-US") ?? "",
-              )))
+              (broadNewsRequest(intent.question) === null &&
+                !genericSlots.has(
+                  intent.entity.value?.toLocaleLowerCase("en-US") ?? "",
+                ))))
         )
           return intent;
         return {
@@ -329,7 +332,12 @@ function decision(
   reason: string,
 ): CapabilityDecision {
   return parseCapabilityDecision({
-    kind: state === "READY" ? "DELEGATE" : "CLARIFY",
+    kind:
+      state === "READY"
+        ? "DELEGATE"
+        : state === "UNAVAILABLE"
+          ? "UNAVAILABLE"
+          : "CLARIFY",
     capability_id: "news.read",
     target: "news.trending",
     reason,
@@ -381,12 +389,12 @@ export function newsTrends(stories: NewsStoryRecord[]): {
 } {
   if (stories.length === 0) {
     return {
-      state: "CLARIFY",
-      decision: decision("CLARIFY", "news.no_current_trends"),
+      state: "UNAVAILABLE",
+      decision: decision("UNAVAILABLE", "news.no_current_trends"),
       blocks: [
         {
           kind: "ANSWER",
-          text: "No current stories are available in your News feed. Try again later.",
+          text: "Current news is temporarily unavailable. Please try again later.",
         },
       ],
     };
@@ -399,7 +407,36 @@ export function newsTrends(stories: NewsStoryRecord[]): {
         kind: "ANSWER",
         text: "Here are a few headlines drawing attention in your news sources. Trending doesn’t mean a report is confirmed.",
       },
+      {
+        kind: "DETAILS",
+        // Short, attributed metadata fits in the spoken response. The complete
+        // headline and source links remain in the cards and citations below.
+        lines: stories.slice(0, 3).map((story) => {
+          const publisher = story.sources[0]?.source_name ?? "Source";
+          const source =
+            publisher.length > 40 ? `${publisher.slice(0, 39)}…` : publisher;
+          const headline =
+            story.headline.length > 105
+              ? `${story.headline.slice(0, 104)}…`
+              : story.headline;
+          return `${source}: ${headline}`;
+        }),
+      },
       ...stories.slice(0, 3).map(storyItem),
+      {
+        kind: "CITATIONS",
+        citations: stories.slice(0, 3).flatMap((story) =>
+          story.sources.slice(0, 1).map((source) => ({
+            provider: "navox",
+            source_type: "NEWS_ARTICLE",
+            external_resource_id:
+              source.canonical_url.length <= 512 ? source.canonical_url : null,
+            evidence_id: source.id,
+            connection_id: null,
+            observed_at: story.retrieved_at,
+          })),
+        ),
+      },
     ],
   };
 }

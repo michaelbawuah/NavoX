@@ -507,7 +507,7 @@ describe("click-to-speak replay control", () => {
 describe("voice status copy", () => {
   it("names every visible state", () => {
     expect(assistantVoiceLabel("LISTENING")).toMatch(/listening/i);
-    expect(assistantVoiceLabel("LISTENING")).toMatch(/press talk again/i);
+    expect(assistantVoiceLabel("LISTENING")).toMatch(/sends when you finish/i);
     expect(assistantVoiceLabel("TRANSCRIBING")).toMatch(
       /getting your question/i,
     );
@@ -523,7 +523,13 @@ describe("voice status copy", () => {
 });
 
 describe("voice controls", () => {
-  it("renders the microphone, mute and stop controls before any turn", () => {
+  it("explains the question limit without letting the browser cut off pasted text", () => {
+    const markup = renderToStaticMarkup(createElement(NavoXAssistant));
+    expect(markup).toContain("Questions can be up to 500 characters.");
+    expect(markup).toContain('aria-describedby="navox-question-limit"');
+    expect(markup).not.toMatch(/maxLength|maxlength/);
+  });
+  it("renders the microphone and mute controls, with Stop hidden while idle", () => {
     const markup = renderToStaticMarkup(createElement(NavoXAssistant));
     expect(markup).toContain(
       'aria-pressed="false" aria-label="Start recording"',
@@ -531,14 +537,7 @@ describe("voice controls", () => {
     expect(markup).toContain(
       'aria-pressed="false" aria-label="Mute spoken answers"',
     );
-    expect(markup).toContain('aria-label="Stop listening and speech"');
-    // Stop is a command, not a toggle.
-    const labelIndex = markup.indexOf('aria-label="Stop listening and speech"');
-    const stopTag = markup.slice(
-      markup.lastIndexOf("<button", labelIndex),
-      markup.indexOf(">", labelIndex),
-    );
-    expect(stopTag).not.toContain("aria-pressed");
+    expect(markup).not.toContain('aria-label="Stop listening and speech"');
     // The microphone is the start/finish toggle; Stop is the separate command.
     expect(markup).toContain("The microphone records after you press");
     expect(markup).toContain('aria-label="Turn Hands-Free on"');

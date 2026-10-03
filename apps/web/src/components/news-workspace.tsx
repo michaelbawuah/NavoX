@@ -357,8 +357,11 @@ export function NewsWorkspace() {
           onRetry={() => setSelection((value) => ({ ...value }))}
         />
       ) : !loading && !availability?.feed ? (
-        <NavoXEmptyState title="News is getting ready.">
-          <p>Connect a news source in Settings to start seeing headlines.</p>
+        <NavoXEmptyState title="News is temporarily unavailable.">
+          <p>
+            Current headlines aren’t available right now. Please try again
+            later.
+          </p>
           <a href="/">Back to Today →</a>
         </NavoXEmptyState>
       ) : null}
@@ -411,7 +414,7 @@ export function NewsWorkspace() {
                 <p>
                   {feed === "saved"
                     ? "Save any story and you’ll find it here."
-                    : "Add a source below, or check another category as new reports arrive."}
+                    : "No current reports are available in this category. Please try again later."}
                 </p>
               </NavoXEmptyState>
             ))}

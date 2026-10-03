@@ -24,7 +24,7 @@ from navox.ai.foundation.contracts import (
 from navox.ai.foundation.persistence import model_key
 from navox.ai.routing import rank_eligible, reserve_cost
 from navox.ai.store import GatewayStore
-from navox.ai.validation import OutputRejected, compile_schema, validate_output
+from navox.ai.validation import OutputLimitRejected, OutputRejected, compile_schema, validate_output
 from navox.db.ai_registry import AITaskRun
 from navox.intelligence.contracts import SourceDocument
 
@@ -34,6 +34,13 @@ class GatewayUnavailable(AIProviderError):
         super().__init__(
             "No eligible provider produced a validated result", code="provider_unavailable"
         )
+
+
+class GatewayOutputLimit(GatewayUnavailable):
+    """A generation reached its output bound; never a partial answer or clarification."""
+
+    def __init__(self) -> None:
+        AIProviderError.__init__(self, "The answer exceeded its output limit", code="output_limit")
 
 
 class GatewayRuntime:
@@ -218,10 +225,7 @@ class GatewayRuntime:
                         raise TimeoutError
                     async with asyncio.timeout(remaining):
                         response = await adapter.execute(request)
-                    if (
-                        response.model != model.reference.model
-                        or response.finish_reason != FinishReason.STOP
-                    ):
+                    if response.model != model.reference.model:
                         raise OutputRejected("Provider result does not match selected model")
                     run.usage = response.usage.model_dump()
                     input_total = (
@@ -246,10 +250,18 @@ class GatewayRuntime:
                     if cost is not None:
                         measured += cost
                         spent += cost - reservation
-                        if cost > reservation:
-                            raise OutputRejected("Provider usage exceeded reserved budget")
                     else:
                         all_cost_known = False
+                    if response.finish_reason == FinishReason.LENGTH or (
+                        response.usage.output_tokens is not None
+                        and response.usage.output_tokens > task.max_output_tokens
+                    ):
+                        raise OutputLimitRejected("Provider output exceeded its token limit")
+                    if response.finish_reason != FinishReason.STOP:
+                        raise OutputRejected("Provider result did not match the finish contract")
+                    if cost is not None:
+                        if cost > reservation:
+                            raise OutputRejected("Provider usage exceeded reserved budget")
                     validate_output(
                         response.output, binding.output_schema.document, semantic_validator
                     )
@@ -283,7 +295,9 @@ class GatewayRuntime:
                     raise
                 except Exception as error:
                     detail = (
-                        ProviderError(code=ErrorCode.INVALID_RESPONSE)
+                        ProviderError(code=ErrorCode.OUTPUT_LIMIT)
+                        if isinstance(error, OutputLimitRejected)
+                        else ProviderError(code=ErrorCode.INVALID_RESPONSE)
                         if isinstance(error, OutputRejected)
                         else adapter.classify_error(error)
                     )
@@ -294,6 +308,8 @@ class GatewayRuntime:
                         all_cost_known = False
                         input_total, output_total = None, None
                     await self.store.health(key, detail)
+                    if detail.code == ErrorCode.OUTPUT_LIMIT:
+                        raise GatewayOutputLimit() from None
                 else:
                     await self.store.health(key, None)
                     result = AIResult(
@@ -324,6 +340,8 @@ class GatewayRuntime:
                     await asyncio.shield(self.store.trace(run))
         except asyncio.CancelledError:
             run.status, run.error_code = "FAILED", "cancelled"
+            raise
+        except GatewayOutputLimit:
             raise
         except Exception:
             if run.status == "STARTED":

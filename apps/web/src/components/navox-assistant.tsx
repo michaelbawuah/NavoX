@@ -2,6 +2,7 @@
 
 import {
   initialVoiceState,
+  questionLimitNotice,
   type VoiceSessionState,
 } from "@navox/assistant-runtime/voice";
 import type {
@@ -68,7 +69,7 @@ import { NavoXNavigation } from "./navox-ui";
 export function assistantVoiceLabel(state: AssistantVoiceState): string {
   switch (state) {
     case "LISTENING":
-      return "Listening… Press Talk again to send, or Stop to cancel.";
+      return "Listening… Speak naturally. Your question sends when you finish, or press Talk to send now.";
     case "TRANSCRIBING":
       return "Getting your question…";
     case "THINKING":
@@ -92,7 +93,8 @@ function citationLabel(citation: AssistantCitation): string {
     canvas: "Canvas",
     navox: "NavoX",
   };
-  if (citation.source_type === "NEWS_CLAIM") return "Original article";
+  if (["NEWS_CLAIM", "NEWS_ARTICLE"].includes(citation.source_type))
+    return "Original article";
   if (citation.source_type === "NEWS_STORY") return "View sources";
   const source =
     citation.source_type === "EMAIL"
@@ -105,12 +107,11 @@ function citationLabel(citation: AssistantCitation): string {
 
 function CitationText({ citation }: { citation: AssistantCitation }) {
   const storyId = citation.external_resource_id ?? citation.evidence_id;
-  const href =
-    citation.source_type === "NEWS_CLAIM"
-      ? safeSourceUrl(citation.external_resource_id)
-      : citation.source_type === "NEWS_STORY" && storyId
-        ? `/news/stories/${encodeURIComponent(storyId)}`
-        : null;
+  const href = ["NEWS_CLAIM", "NEWS_ARTICLE"].includes(citation.source_type)
+    ? safeSourceUrl(citation.external_resource_id)
+    : citation.source_type === "NEWS_STORY" && storyId
+      ? `/news/stories/${encodeURIComponent(storyId)}`
+      : null;
   return href ? (
     <a
       className={styles.sourceLink}
@@ -533,7 +534,7 @@ export function AssistantTurnViewBlock({
           title="Speak the answer"
         >
           <SpeakerIcon />
-          <span>Read aloud</span>
+          <span className={styles.srOnly}>Read aloud</span>
         </button>
       ) : null}
       {sessionId && (
@@ -943,6 +944,12 @@ export function NavoXAssistant() {
     ) => {
       const trimmed = question.trim();
       if (!sessionId || !trimmed || busy) return;
+      const limitNotice = questionLimitNotice(trimmed);
+      if (limitNotice) {
+        setNotice(limitNotice);
+        if (modality === "VOICE") voiceSession().turnFailed(limitNotice);
+        return;
+      }
       setNotice(null);
       if (modality === "VOICE") {
         // Open the turn before the request so its answer carries this token.
@@ -1198,6 +1205,7 @@ export function NavoXAssistant() {
   );
 
   const status = assistantVoiceLabel(voice.state);
+  const questionLimit = questionLimitNotice(text);
 
   return (
     <section className={styles.assistant} aria-label="NavoX assistant">
@@ -1205,7 +1213,7 @@ export function NavoXAssistant() {
       <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}>YOUR PERSONAL ASSISTANT</p>
-          <h1>What’s on your mind?</h1>
+          <h1>{turns.length === 0 ? "What’s on your mind?" : "NavoX"}</h1>
         </div>
         <button
           type="button"
@@ -1216,9 +1224,11 @@ export function NavoXAssistant() {
         </button>
       </header>
 
-      <p className={styles.intro}>
-        Your day, your questions, your next step. Type a question or tap Talk.
-      </p>
+      {turns.length === 0 && (
+        <p className={styles.intro}>
+          Your day, your questions, your next step. Type a question or tap Talk.
+        </p>
+      )}
 
       {notice && (
         <p className={styles.error} role="alert">
@@ -1309,7 +1319,8 @@ export function NavoXAssistant() {
           <input
             type="text"
             value={text}
-            maxLength={500}
+            aria-describedby="navox-question-limit"
+            aria-invalid={questionLimit ? true : undefined}
             placeholder="Ask NavoX…"
             onChange={(event) => setText(event.target.value)}
             disabled={connecting || !sessionId}
@@ -1317,7 +1328,13 @@ export function NavoXAssistant() {
         </label>
         <button
           type="submit"
-          disabled={connecting || !sessionId || busy || !text.trim()}
+          disabled={
+            connecting ||
+            !sessionId ||
+            busy ||
+            !text.trim() ||
+            Boolean(questionLimit)
+          }
         >
           {busy ? "Checking…" : "Send"}
         </button>
@@ -1339,28 +1356,37 @@ export function NavoXAssistant() {
           {controls.capturing ? <StopIcon /> : <MicIcon />}
           <span>{controls.capturing ? "Send recording" : "Talk"}</span>
         </button>
-        <button
-          type="button"
-          className={styles.stopButton}
-          onClick={stopEverything}
-          aria-label={
-            handsFreePhase === "CONVERSATION"
-              ? "End conversation and return to wake listening"
-              : "Stop listening and speech"
-          }
-          title={
-            handsFreePhase === "CONVERSATION"
-              ? "End conversation and return to wake listening"
-              : "Stop listening and speech"
-          }
-          disabled={
-            !controls.stopAvailable && handsFreePhase !== "CONVERSATION"
-          }
-        >
-          <StopIcon />
-          <span>Stop</span>
-        </button>
+        {(controls.stopAvailable || handsFreePhase === "CONVERSATION") && (
+          <button
+            type="button"
+            className={styles.stopButton}
+            onClick={stopEverything}
+            aria-label={
+              handsFreePhase === "CONVERSATION"
+                ? "End conversation and return to wake listening"
+                : "Stop listening and speech"
+            }
+            title={
+              handsFreePhase === "CONVERSATION"
+                ? "End conversation and return to wake listening"
+                : "Stop listening and speech"
+            }
+            disabled={
+              !controls.stopAvailable && handsFreePhase !== "CONVERSATION"
+            }
+          >
+            <StopIcon />
+            <span>Stop</span>
+          </button>
+        )}
       </form>
+      <p
+        id="navox-question-limit"
+        className={questionLimit ? styles.error : styles.status}
+        role={questionLimit ? "alert" : undefined}
+      >
+        {questionLimit ?? "Questions can be up to 500 characters."}
+      </p>
 
       <div className={styles.voiceTools}>
         <button

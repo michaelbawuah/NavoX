@@ -124,12 +124,16 @@ COMMUNICATION_V2_INSTRUCTIONS = (
 
 
 def builtin_prompts() -> tuple[tuple[PromptDefinition, ...], tuple[SchemaDefinition, ...]]:
+    from navox.ai.conversation import conversation_artifacts
     from navox.ai.embedding_contracts import embedding_artifacts
     from navox.knowledge.ask_contracts import answer_artifacts
     from navox.news.ai_contracts import news_artifacts
 
     schemas: list[SchemaDefinition] = []
     prompts: list[PromptDefinition] = []
+    conversation_prompt, conversation_schema = conversation_artifacts()
+    prompts.append(conversation_prompt)
+    schemas.append(conversation_schema)
     embedding_prompt, embedding_schema = embedding_artifacts()
     prompts.append(embedding_prompt)
     schemas.append(embedding_schema)

@@ -92,6 +92,29 @@ function captureScope(sampleRate = 16_000) {
   };
 }
 
+describe("Talk speech end", () => {
+  it("submits a spoken question after silence and releases the microphone without a second click", async () => {
+    const { scope, processors, tracks } = captureScope();
+    const transcribe = vi.fn(async () => "What is next?");
+    const onTranscript = vi.fn();
+    const adapter = createSpeechAdapter(scope);
+    adapter.startListening(
+      { onTranscript, onEnd: vi.fn(), onError: vi.fn() },
+      transcribe,
+    );
+    await Promise.resolve();
+    processors[0]?.emit(tone(3200));
+    for (let frame = 0; frame < 9; frame += 1)
+      processors[0]?.emit(new Float32Array(1600));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(onTranscript).toHaveBeenCalledWith("What is next?");
+    expect(tracks[0]?.stop).toHaveBeenCalled();
+    expect(adapter.finishListening()).toBe(false);
+  });
+});
+
 function synthesisScope() {
   const created: string[] = [];
   const revoked: string[] = [];

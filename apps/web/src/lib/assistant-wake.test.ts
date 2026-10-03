@@ -73,7 +73,7 @@ describe("local Hey NavoX adapter", () => {
     expect(wake.active).toBe(false);
   });
 
-  it("only accepts a direct final wake phrase and preserves a bounded suffix", async () => {
+  it("only accepts a direct final wake phrase and preserves its suffix", async () => {
     const wake = adapter();
     const heard: WakeWordEvent[] = [];
     await wake.start((event) => heard.push(event));
@@ -209,8 +209,9 @@ describe("wake phrase boundary", () => {
     expect(resolveWakePhrase("Hey NavoX", Number.NaN)).toBeNull();
     expect(resolveWakePhrase("Hey NavoX", 0.54)).toBeNull();
   });
-  it("bounds same-utterance text", () => {
-    const found = resolveWakePhrase(`Hey NavoX, ${"a".repeat(600)}`, 0.9);
-    expect(found?.request_text).toHaveLength(500);
+  it("preserves oversized same-utterance text for explicit submission rejection", () => {
+    const question = "a".repeat(600);
+    const found = resolveWakePhrase(`Hey NavoX, ${question}`, 0.9);
+    expect(found?.request_text).toBe(question);
   });
 });

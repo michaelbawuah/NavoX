@@ -334,11 +334,8 @@ export function SearchWorkspace() {
       </header>
       <main id="search-main" className={styles.main}>
         <section className={styles.intro}>
-          <h1>Search your connected world</h1>
-          <p>
-            Look across the sources you already authorized. Results show only
-            what you can still open, and every item links back to its source.
-          </p>
+          <h1>Find what you need</h1>
+          <p>Search your email, events, and saved information in one place.</p>
         </section>
         <form className={styles.form} onSubmit={submit} aria-busy={busy}>
           {mode !== "ASK" && (
@@ -356,63 +353,71 @@ export function SearchWorkspace() {
               />
             </label>
           )}
-          <div className={styles.controls}>
-            <fieldset className={styles.modes}>
-              <legend>Mode</legend>
-              {modes.map(([value, label]) => (
-                <label key={value} data-active={mode === value}>
-                  <input
-                    type="radio"
-                    name="mode"
-                    value={value}
-                    checked={mode === value}
-                    onChange={() => setMode(value)}
-                  />
-                  {label}
-                </label>
-              ))}
-            </fieldset>
-            {mode !== "ASK" && (
-              <>
-                <label className={styles.field} htmlFor="search-type">
-                  <span>Type</span>
-                  <select
-                    id="search-type"
-                    value={resourceType}
-                    onChange={(event) => setResourceType(event.target.value)}
-                  >
-                    <option value="">Any type</option>
-                    {filterTypes.map((value) => (
-                      <option key={value} value={value}>
-                        {resourceTypeLabel(value)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className={styles.field} htmlFor="search-from">
-                  <span>From</span>
-                  <input
-                    id="search-from"
-                    type="date"
-                    value={from}
-                    onChange={(event) => setFrom(event.target.value)}
-                  />
-                </label>
-                <label className={styles.field} htmlFor="search-to">
-                  <span>To</span>
-                  <input
-                    id="search-to"
-                    type="date"
-                    value={to}
-                    onChange={(event) => setTo(event.target.value)}
-                  />
-                </label>
-                <button type="submit" disabled={busy || !query.trim()}>
-                  {busy ? "Searching…" : "Search"}
-                </button>
-              </>
-            )}
-          </div>
+          <details className={styles.options}>
+            <summary>
+              Filters &amp; options{" "}
+              {from || to ? "· Custom dates" : "· All time"}
+            </summary>
+            <div className={styles.controls}>
+              <fieldset className={styles.modes}>
+                <legend>Mode</legend>
+                {modes.map(([value, label]) => (
+                  <label key={value} data-active={mode === value}>
+                    <input
+                      type="radio"
+                      name="mode"
+                      value={value}
+                      checked={mode === value}
+                      onChange={() => setMode(value)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </fieldset>
+              {mode !== "ASK" && (
+                <>
+                  <label className={styles.field} htmlFor="search-type">
+                    <span>Type</span>
+                    <select
+                      id="search-type"
+                      value={resourceType}
+                      onChange={(event) => setResourceType(event.target.value)}
+                    >
+                      <option value="">Any type</option>
+                      {filterTypes.map((value) => (
+                        <option key={value} value={value}>
+                          {resourceTypeLabel(value)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={styles.field} htmlFor="search-from">
+                    <span>From</span>
+                    <input
+                      id="search-from"
+                      type="date"
+                      value={from}
+                      onChange={(event) => setFrom(event.target.value)}
+                    />
+                  </label>
+                  <label className={styles.field} htmlFor="search-to">
+                    <span>To</span>
+                    <input
+                      id="search-to"
+                      type="date"
+                      value={to}
+                      onChange={(event) => setTo(event.target.value)}
+                    />
+                  </label>
+                </>
+              )}
+            </div>
+          </details>
+          {mode !== "ASK" && (
+            <button type="submit" disabled={busy || !query.trim()}>
+              {busy ? "Searching…" : "Search"}
+            </button>
+          )}
         </form>
 
         {mode === "ASK" ? (

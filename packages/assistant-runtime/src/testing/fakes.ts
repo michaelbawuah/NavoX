@@ -1,3 +1,4 @@
+import type { ConversationReference } from "../conversation";
 import { AssistantError } from "../errors";
 import type { AccountScope, NavoxUpstream } from "../gateway";
 import { PLANNER_NO_PROVIDER } from "../gateway";
@@ -480,6 +481,12 @@ export interface FakeUpstream extends NavoxUpstream {
       recentReferences: string[];
       sessionId: string | null;
     }[];
+    conversation: {
+      cookie: string;
+      utterance: string;
+      recentTurns: ConversationReference[];
+      sessionId: string;
+    }[];
     email: { query: string; limit: number | undefined }[];
     resourceDetail: { cookie: string; id: string }[];
     classNavigation: {
@@ -487,7 +494,7 @@ export interface FakeUpstream extends NavoxUpstream {
       connectionId: string;
       resourceId: string;
     }[];
-    subscriptions: { cookie: string; selector: string }[];
+    subscriptions: { cookie: string; selector: string | null }[];
     cancellation: { cookie: string; id: string }[];
     trendingNews: string[];
     newsStory: { cookie: string; id: string }[];
@@ -502,6 +509,8 @@ export interface FakeUpstream extends NavoxUpstream {
   todayError: AssistantError | null;
   plan: unknown | (() => Promise<unknown>);
   planError: AssistantError | null;
+  conversation: unknown | (() => Promise<unknown>);
+  conversationError: AssistantError | null;
   email: unknown | (() => Promise<unknown>);
   emailError: AssistantError | null;
   resourceDetail: unknown | (() => Promise<unknown>);
@@ -692,6 +701,7 @@ export function createFakeUpstream(
       sessions: [],
       today: [],
       plan: [],
+      conversation: [],
       email: [],
       resourceDetail: [],
       classNavigation: [],
@@ -720,6 +730,11 @@ export function createFakeUpstream(
     todayError: null,
     plan: intentEnvelope(CLARIFY_PLAN),
     planError: UNCONFIGURED_PLANNER,
+    conversation: null,
+    conversationError: new AssistantError(
+      "unsupported",
+      "No fake conversation route configured.",
+    ),
     email: emailSearchPayload([]),
     emailError: null,
     resourceDetail: null,
@@ -770,6 +785,18 @@ export function createFakeUpstream(
       const plan = upstream.plan;
       return typeof plan === "function" ? await plan() : plan;
     },
+    async answerConversation(cookie, input) {
+      upstream.calls.conversation.push({
+        cookie,
+        utterance: input.utterance,
+        recentTurns: [...input.recentTurns],
+        sessionId: input.sessionId,
+      });
+      if (upstream.conversationError) throw upstream.conversationError;
+      const answer = upstream.conversation;
+      return typeof answer === "function" ? await answer() : answer;
+    },
+
     async searchEmail(cookie, input) {
       upstream.calls.account.push(cookie);
       upstream.calls.email.push({ query: input.query, limit: input.limit });

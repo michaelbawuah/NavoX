@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { LIMITS } from "./limits";
+import { buildPresentationPlan } from "./presentation";
 import {
   answerSubscription,
+  answerUpcomingSubscriptions,
   parseSubscriptionCancellation,
   parseSubscriptionSearch,
   subscriptionSelector,
@@ -37,6 +40,93 @@ function attempt(status: string, verification_status: string) {
 }
 
 describe("read-only subscription evidence", () => {
+  it("speaks the next three saved renewal names and recorded dates", () => {
+    const now = new Date("2026-10-01T12:00:00Z");
+    const subscriptions = [
+      {
+        ...row,
+        id: "1aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        name: "Netflix",
+        next_renewal_at: "2026-10-15T12:00:00Z",
+      },
+      {
+        ...row,
+        id: "2aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        name: "Adobe",
+        next_renewal_at: "2026-10-04T12:00:00Z",
+      },
+      {
+        ...row,
+        id: "3aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        name: "Spotify",
+        next_renewal_at: "2026-10-20T12:00:00Z",
+      },
+    ];
+    const answer = answerUpcomingSubscriptions(
+      parseSubscriptionSearch({ intent: "UPCOMING", subscriptions }, null, now),
+    );
+    const presentation = buildPresentationPlan({
+      modality: "VOICE",
+      delivery: "AUTOMATIC",
+      decision: answer.decision,
+      blocks: answer.blocks,
+    });
+    expect(presentation.speak).toBe(true);
+    for (const subscription of subscriptions) {
+      expect(presentation.speech_text).toContain(subscription.name);
+      expect(presentation.speech_text).toContain(subscription.next_renewal_at);
+    }
+    expect(presentation.speech_text!.length).toBeLessThanOrEqual(
+      LIMITS.maxSpeechLength,
+    );
+    expect(presentation.speech_text!.indexOf("Adobe")).toBeLessThan(
+      presentation.speech_text!.indexOf("Netflix"),
+    );
+    expect(answer.blocks.filter((block) => block.kind === "ITEM")).toHaveLength(
+      3,
+    );
+    expect(answer.decision.action_state).toBe("NONE");
+  });
+  it("answers a next-30-days aggregate without implying complete account coverage", () => {
+    const now = new Date("2026-10-01T12:00:00Z");
+    const rows = parseSubscriptionSearch(
+      { intent: "UPCOMING", subscriptions: [row] },
+      null,
+      now,
+    );
+    const answer = answerUpcomingSubscriptions(rows);
+    expect(answer.state).toBe("READY");
+    expect(answer.blocks[0]).toMatchObject({
+      text: expect.stringContaining("next 30 days"),
+    });
+    expect(answer.decision.action_state).toBe("NONE");
+    expect(answerUpcomingSubscriptions([]).blocks[0]).toMatchObject({
+      text: expect.stringContaining("you’ve added or NavoX has found"),
+    });
+    for (const next_renewal_at of [
+      null,
+      "2026-09-30T12:00:00Z",
+      "2026-12-01T12:00:00Z",
+    ]) {
+      expect(() =>
+        parseSubscriptionSearch(
+          { intent: "UPCOMING", subscriptions: [{ ...row, next_renewal_at }] },
+          null,
+          now,
+        ),
+      ).toThrow();
+    }
+    expect(() =>
+      parseSubscriptionSearch(
+        {
+          intent: "UPCOMING",
+          subscriptions: [{ ...row, status: "CANCELLED" }],
+        },
+        null,
+        now,
+      ),
+    ).toThrow();
+  });
   it("only searches an entity copied from the user question", () => {
     const intent = {
       kind: "subscription.search",

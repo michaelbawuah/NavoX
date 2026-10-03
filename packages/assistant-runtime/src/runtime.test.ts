@@ -2679,27 +2679,36 @@ describe("adaptive response modality", () => {
     {
       text: "Thank you.",
       modality: "VOICE",
-      answer: "You're welcome.",
+      answer: "Happy to help with your question.",
       speak: true,
     },
     {
       text: "Thanks",
       modality: "TEXT",
-      answer: "You're welcome.",
+      answer: "Glad that was useful to you.",
       speak: false,
     },
     {
       text: "How are you doing today?",
       modality: "VOICE",
-      answer: "I'm ready to help. What's on your mind?",
+      answer: "I'm here and ready to talk through your day.",
       speak: true,
     },
   ])(
-    "saves and replays a $modality social reply without a planner dependency",
+    "saves and replays a verified $modality model reply without action authority",
     async ({ text, modality, answer, speak }) => {
       const context = await withSession({
         planError: new AssistantError("unavailable", "Planner timed out."),
       });
+      context.upstream.conversationError = null;
+      context.upstream.conversation = {
+        task_id: "aaaaaaaa-0000-4000-8000-000000000003",
+        trace_id: "aaaaaaaa-0000-4000-8000-000000000004",
+        session_id: NAVOX_SESSION_ID,
+        turn_sequence: 1,
+        answer,
+        actions_executed: false,
+      };
       const input = {
         cookie: COOKIE,
         session_id: context.sessionId,
@@ -2708,6 +2717,9 @@ describe("adaptive response modality", () => {
       const response = await context.runtime.submitTurn(input);
       expect(response.turn.state).toBe("READY");
       expect(response.turn.decision?.kind).toBe("PRESENT");
+      expect(response.turn.decision?.reason).toBe(
+        "conversation.answer:aaaaaaaa-0000-4000-8000-000000000003",
+      );
       expect(response.turn.decision?.requires_approval).toBe(false);
       expect(response.turn.action_refs).toEqual([]);
       expect(response.turn.presentation?.blocks).toEqual([
@@ -2716,9 +2728,11 @@ describe("adaptive response modality", () => {
       expect(response.turn.presentation?.speak).toBe(speak);
       expect(context.upstream.calls.plan).toEqual([]);
       expect(context.upstream.calls.today).toEqual([]);
+      expect(context.upstream.calls.conversation).toHaveLength(1);
       const replay = await context.runtime.submitTurn(input);
       expect(replay.turn.id).toBe(response.turn.id);
       expect(context.upstream.calls.plan).toEqual([]);
+      expect(context.upstream.calls.conversation).toHaveLength(1);
     },
   );
 

@@ -60,8 +60,9 @@ async def test_display_preferences_are_validated_persisted_and_private(runtime_e
     client, _ = runtime_env
     before = (await client.get("/api/v1/workspace/preferences")).json()
     assert before["weather_visible"] is False
+    assert before["timezone_selected"] is False
     payload = dict(
-        before,
+        {key: value for key, value in before.items() if key != "timezone_selected"},
         timezone="America/New_York",
         clock_format="24h",
         temperature_unit="fahrenheit",
@@ -69,7 +70,9 @@ async def test_display_preferences_are_validated_persisted_and_private(runtime_e
         weather_city="Ithaca",
     )
     assert (await client.post("/api/v1/workspace/preferences", json=payload)).json() == payload
-    assert (await client.get("/api/v1/workspace/preferences")).json() == payload
+    assert (await client.get("/api/v1/workspace/preferences")).json() == dict(
+        payload, timezone_selected=True
+    )
     assert (
         await client.post("/api/v1/workspace/preferences", json=dict(payload, timezone="fake/time"))
     ).status_code == 422
