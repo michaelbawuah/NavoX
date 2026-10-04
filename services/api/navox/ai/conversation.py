@@ -298,6 +298,11 @@ async def converse(
         request=request,
     )
     await context.build(task, {})
+    # Public ordinary access is bound by server code to this verified native
+    # session/task. Generic feature runtimes never receive this entitlement.
+    runtime = GatewayRuntime(
+        runtime.store.for_conversation(task, request.session_id), runtime.adapters
+    )
 
     def semantic(value: Any) -> None:
         answer = ConversationAnswer.model_validate(value)

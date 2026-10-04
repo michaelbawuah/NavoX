@@ -144,3 +144,61 @@ async def test_availability_separates_bounded_views_from_reserved_research(
     assert "x_trends" not in result
     await env.client.post("/api/v1/auth/logout", headers=env.headers)
     assert (await env.client.get("/api/v1/news/availability")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_source_options_require_the_current_accounts_api_connection(subscription_env):
+    from test_news_api_feeds import definition as api_definition
+    from test_news_api_feeds import setup
+
+    from navox.db.models import ConnectorConnection
+
+    env = subscription_env
+    approved_settings, private_config, _, _, _, private_connection_id = await setup(env.factory)
+    env.settings.news_feed_enabled = True
+    env.settings.generic_rest_connectors = approved_settings.generic_rest_connectors
+    public_config = definition()
+    env.settings.news_source_catalog = [
+        private_config.model_dump(mode="json"),
+        public_config.model_dump(mode="json"),
+    ]
+
+    # The foreign owner's catalog template is not an option for this signed-in account.
+    response = await env.client.get("/api/v1/news/sources")
+    assert response.status_code == 200
+    assert [option["key"] for option in response.json()] == [public_config.key]
+    denied = await env.client.post(
+        f"/api/v1/news/sources/{private_config.key}/activate",
+        json={"request_id": str(uuid4())},
+        headers=env.headers,
+    )
+    assert denied.status_code == 404
+
+    # An exact approved connector belonging to this account remains selectable.
+    private_connection = await env.database.get(ConnectorConnection, private_connection_id)
+    owned_connection = ConnectorConnection(
+        connector_definition_id=private_connection.connector_definition_id,
+        user_id=env.user_id,
+        workspace_id=env.workspace_id,
+        provider=private_connection.provider,
+        external_account_id="owned-news-fixture",
+        authorized_capabilities=list(private_connection.authorized_capabilities),
+        provider_capabilities=list(private_connection.provider_capabilities),
+        config=private_connection.config,
+    )
+    env.database.add(owned_connection)
+    await env.database.commit()
+    owned_config = api_definition(owned_connection.id)
+    env.settings.news_source_catalog = [
+        owned_config.model_dump(mode="json"),
+        public_config.model_dump(mode="json"),
+    ]
+    response = await env.client.get("/api/v1/news/sources")
+    assert response.status_code == 200
+    assert [option["key"] for option in response.json()] == [owned_config.key, public_config.key]
+
+    # Losing read consent removes the source option, without broadening its scope.
+    owned_connection.authorized_capabilities = []
+    await env.database.commit()
+    response = await env.client.get("/api/v1/news/sources")
+    assert [option["key"] for option in response.json()] == [public_config.key]

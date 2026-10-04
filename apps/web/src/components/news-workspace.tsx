@@ -166,6 +166,46 @@ export function NewsFeedTabs({
   );
 }
 
+export function NewsEmptyFeed({
+  feed,
+  sources,
+}: {
+  feed: Feed;
+  sources: NewsSourceOption[];
+}) {
+  if (feed === "saved")
+    return (
+      <NavoXEmptyState title="Keep a story for later.">
+        <p>Save any story and you’ll find it here.</p>
+        {sources.length > 0 ? (
+          <a href="/news">Browse latest stories →</a>
+        ) : (
+          <a href="/navox">Ask NavoX →</a>
+        )}
+      </NavoXEmptyState>
+    );
+  if (sources.length === 0)
+    return (
+      <NavoXEmptyState title="News isn’t available for your account yet.">
+        <p>
+          Current headlines aren’t ready here yet. You can still ask NavoX
+          questions and use your connected apps.
+        </p>
+        <a href="/navox">Ask NavoX →</a>
+      </NavoXEmptyState>
+    );
+  return (
+    <NavoXEmptyState title="No stories here yet.">
+      <p>
+        {sources.some((source) => source.status === "active")
+          ? "Your sources have no current stories in this view. Try another category or refresh a source."
+          : "Choose a news source to start your feed."}
+      </p>
+      <a href="#news-sources">Choose news sources →</a>
+    </NavoXEmptyState>
+  );
+}
+
 export function NewsWorkspace() {
   const [selection, setSelection] = useState<{ feed: Feed }>({ feed: "top" });
   const { feed } = selection;
@@ -324,7 +364,7 @@ export function NewsWorkspace() {
           <h1>News</h1>
           <p>Stories from your sources, with the context to understand them.</p>
         </div>
-        {availability?.feed && !signedOut && (
+        {availability?.feed && !signedOut && sources.length > 0 && (
           <a className={styles.settingsLink} href="#news-sources">
             Manage sources
           </a>
@@ -357,16 +397,18 @@ export function NewsWorkspace() {
       ) : null}
       {availability?.feed && !signedOut && !error && (
         <>
-          <NewsFeedTabs
-            feed={feed}
-            reviewedImportance={
-              stories.length > 0 &&
-              stories.every(
-                (story) => story.ranking_basis === "REVIEWED_IMPORTANCE",
-              )
-            }
-            onSelect={(value) => setSelection({ feed: value })}
-          />
+          {sources.length > 0 && (
+            <NewsFeedTabs
+              feed={feed}
+              reviewedImportance={
+                stories.length > 0 &&
+                stories.every(
+                  (story) => story.ranking_basis === "REVIEWED_IMPORTANCE",
+                )
+              }
+              onSelect={(value) => setSelection({ feed: value })}
+            />
+          )}
           {feed === "top" && stories.length > 0 && (
             <p className={styles.notice}>
               {stories.every(
@@ -394,140 +436,128 @@ export function NewsWorkspace() {
                 ))}
               </div>
             ) : (
-              <NavoXEmptyState
-                title={
-                  feed === "saved"
-                    ? "Keep a story for later."
-                    : "No stories here yet."
-                }
-              >
-                <p>
-                  {feed === "saved"
-                    ? "Save any story and you’ll find it here."
-                    : sources.some((source) => source.status === "active")
-                      ? "Your sources have no current stories in this view. Try another category or refresh a source."
-                      : "Choose a news source to start your feed."}
-                </p>
-                {feed === "saved" ? (
-                  <button
-                    type="button"
-                    onClick={() => setSelection({ feed: "top" })}
-                  >
-                    Browse latest stories
-                  </button>
-                ) : (
-                  <a href="#news-sources">Choose news sources →</a>
-                )}
-              </NavoXEmptyState>
+              <NewsEmptyFeed feed={feed} sources={sources} />
             ))}
-          <section className={styles.settings} aria-label="Your news settings">
-            <details>
-              <summary>Stories you follow</summary>
-              {!loading && (
-                <FollowedStoryUpdates refreshing={loading || busy !== null} />
-              )}
-            </details>
-            <details>
-              <summary>Your interests</summary>
-              {preferences && (
-                <form onSubmit={savePreferences}>
-                  <fieldset>
-                    <legend>Choose your categories</legend>
-                    {categories.map(([value, label]) => (
-                      <label key={value}>
-                        <input
-                          type="checkbox"
-                          name="category"
-                          value={value}
-                          defaultChecked={preferences.categories.includes(
-                            value,
-                          )}
-                        />
-                        {label}
-                      </label>
-                    ))}
-                  </fieldset>
-                  <label htmlFor="news-topics">Topics you follow</label>
-                  <input
-                    id="news-topics"
-                    name="topics"
-                    defaultValue={preferences.topics.join(", ")}
-                    maxLength={1000}
-                    placeholder="Space, renewable energy, local transport"
-                  />
-                  <p>
-                    Separate topics with commas. These choices shape For you.
-                  </p>
-                  <label htmlFor="news-entities">
-                    People, organizations and places you follow
-                  </label>
-                  <input
-                    id="news-entities"
-                    name="entities"
-                    defaultValue={preferences.entities.join(", ")}
-                    maxLength={1000}
-                    placeholder="NASA, Nvidia, Ghana, Ithaca"
-                  />
-                  <p>
-                    Add only the entities you choose. NavoX does not infer a
-                    sensitive political profile.
-                  </p>
-                  <button disabled={busy === "preferences"} type="submit">
-                    Save interests
-                  </button>
-                </form>
-              )}
-            </details>
-            <details id="news-sources" open={!loading && stories.length === 0}>
-              <summary>Your sources</summary>
-              <p>Add sources to start receiving their reports.</p>
-              {sources.length === 0 && <p>No sources are available yet.</p>}
-              <ul>
-                {sources.map((source) => (
-                  <li key={source.key}>
-                    <div>
-                      <strong>{source.name}</strong>
-                      <small>
-                        {source.domain}
-                        {source.last_success_at
-                          ? ` · Last checked ${newsTime(source.last_success_at)}`
-                          : ""}
-                      </small>
-                    </div>
-                    {source.status === "active" ? (
-                      <div className={styles.actions}>
-                        <button
-                          disabled={busy === source.key}
-                          onClick={() => void sourceCommand(source, "refresh")}
-                          type="button"
-                        >
-                          Refresh
-                        </button>
-                        <button
-                          disabled={busy === source.key}
-                          onClick={() => void sourceCommand(source, "disable")}
-                          type="button"
-                        >
-                          Remove
-                        </button>
+          {sources.length > 0 && (
+            <section
+              className={styles.settings}
+              aria-label="Your news settings"
+            >
+              <details>
+                <summary>Stories you follow</summary>
+                {!loading && (
+                  <FollowedStoryUpdates refreshing={loading || busy !== null} />
+                )}
+              </details>
+              <details>
+                <summary>Your interests</summary>
+                {preferences && (
+                  <form onSubmit={savePreferences}>
+                    <fieldset>
+                      <legend>Choose your categories</legend>
+                      {categories.map(([value, label]) => (
+                        <label key={value}>
+                          <input
+                            type="checkbox"
+                            name="category"
+                            value={value}
+                            defaultChecked={preferences.categories.includes(
+                              value,
+                            )}
+                          />
+                          {label}
+                        </label>
+                      ))}
+                    </fieldset>
+                    <label htmlFor="news-topics">Topics you follow</label>
+                    <input
+                      id="news-topics"
+                      name="topics"
+                      defaultValue={preferences.topics.join(", ")}
+                      maxLength={1000}
+                      placeholder="Space, renewable energy, local transport"
+                    />
+                    <p>
+                      Separate topics with commas. These choices shape For you.
+                    </p>
+                    <label htmlFor="news-entities">
+                      People, organizations and places you follow
+                    </label>
+                    <input
+                      id="news-entities"
+                      name="entities"
+                      defaultValue={preferences.entities.join(", ")}
+                      maxLength={1000}
+                      placeholder="NASA, Nvidia, Ghana, Ithaca"
+                    />
+                    <p>
+                      Add only the entities you choose. NavoX does not infer a
+                      sensitive political profile.
+                    </p>
+                    <button disabled={busy === "preferences"} type="submit">
+                      Save interests
+                    </button>
+                  </form>
+                )}
+              </details>
+              <details
+                id="news-sources"
+                open={!loading && stories.length === 0}
+              >
+                <summary>Your sources</summary>
+                <p>Add sources to start receiving their reports.</p>
+                {sources.length === 0 && <p>No sources are available yet.</p>}
+                <ul>
+                  {sources.map((source) => (
+                    <li key={source.key}>
+                      <div>
+                        <strong>{source.name}</strong>
+                        <small>
+                          {source.domain}
+                          {source.last_success_at
+                            ? ` · Last checked ${newsTime(source.last_success_at)}`
+                            : ""}
+                        </small>
                       </div>
-                    ) : (
-                      <button
-                        disabled={busy === source.key}
-                        onClick={() => void sourceCommand(source, "activate")}
-                        type="button"
-                      >
-                        Add source
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          </section>
+                      {source.status === "active" ? (
+                        <div className={styles.actions}>
+                          <button
+                            disabled={busy === source.key}
+                            onClick={() =>
+                              void sourceCommand(source, "refresh")
+                            }
+                            type="button"
+                          >
+                            Refresh
+                          </button>
+                          <button
+                            disabled={busy === source.key}
+                            onClick={() =>
+                              void sourceCommand(source, "disable")
+                            }
+                            type="button"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          disabled={busy === source.key}
+                          onClick={() => void sourceCommand(source, "activate")}
+                          type="button"
+                        >
+                          Add source
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </section>
+          )}
         </>
       )}
-      {availability?.chat && !signedOut && (
+      {availability?.chat && !signedOut && sources.length > 0 && (
         <div className={styles.newsQuestions}>
           <NewsChat />
         </div>

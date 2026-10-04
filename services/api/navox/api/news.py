@@ -11,7 +11,8 @@ from sqlalchemy import select
 from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
 from navox.api.connector_management import require_origin
 from navox.db.news import NewsSource, NewsSourceFeed
-from navox.news.contracts import NewsError, NewsItemRead
+from navox.news.api_feeds import approved_api_connection
+from navox.news.contracts import FeedType, NewsError, NewsItemRead
 from navox.news.ingestion import ingest_source, purge_unavailable, visible_items
 from navox.news.registry import activate_source, catalog, owned_source, revoke_rights
 from navox.news.stories import index_source
@@ -77,6 +78,19 @@ async def sources(
     by_key = {row.source_key: row for row in rows}
     result: list[dict[str, object]] = []
     for definition in definitions.values():
+        if definition.feed_type == FeedType.API:
+            try:
+                await approved_api_connection(
+                    database,
+                    settings,
+                    definition,
+                    workspace_id=account.workspace.id,
+                    user_id=account.user.id,
+                )
+            except NewsError:
+                # An operator catalog template is not this account's read authority.
+                # Keep unusable, owner-bound connections out of another user's UI.
+                continue
         row = by_key.get(definition.key)
         feed = (
             await database.scalar(select(NewsSourceFeed).where(NewsSourceFeed.source_id == row.id))
