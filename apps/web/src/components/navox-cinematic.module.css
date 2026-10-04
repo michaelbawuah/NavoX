@@ -210,6 +210,8 @@
   color: #a8bbc6;
 }
 .textLink {
+  color: inherit;
+  text-decoration: none;
   background: none;
   border: 0;
   border-bottom: 1px solid #b5d4e63d;

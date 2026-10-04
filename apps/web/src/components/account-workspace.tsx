@@ -141,7 +141,8 @@ export function AccountWorkspace({
     }
   }
 
-  if (!sessionRestored && account === null) {
+  // The public homepage is readable before hydration and session restoration.
+  if (!sessionRestored && account === null && view !== "today") {
     return (
       <main aria-live="polite" className="shell">
         Getting NavoX ready…
