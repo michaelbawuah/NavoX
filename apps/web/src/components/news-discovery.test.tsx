@@ -2,8 +2,13 @@ import type { NewsStory } from "@navox/contracts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { loadNewsFeed, NewsRequestError, newsFeedPath } from "../lib/news";
-import { NewsFeedTabs } from "./news-workspace";
+import {
+  loadNewsFeed,
+  NewsRequestError,
+  newsFeedPath,
+  newsRequest,
+} from "../lib/news";
+import { NewsEmptyFeed, NewsFeedTabs } from "./news-workspace";
 import { RelatedStoryList } from "./related-stories";
 
 const story: NewsStory = {
@@ -155,5 +160,63 @@ describe("Related stories", () => {
     expect(html).toContain("A measured observation");
     expect(html).toContain("Not confirmed");
     expect(html).not.toContain("confidence");
+  });
+});
+
+describe("News account availability", () => {
+  it("explains an unprovisioned feed without unusable source actions", () => {
+    const html = renderToStaticMarkup(
+      createElement(NewsEmptyFeed, { feed: "top", sources: [] }),
+    );
+    expect(html).toContain("News isn’t available for your account yet.");
+    expect(html).toContain("Current headlines aren’t ready here yet.");
+    expect(html).toContain('href="/navox"');
+    expect(html).not.toContain("Choose news sources");
+    expect(html).not.toContain("Add source");
+    expect(html).not.toContain("connector");
+    expect(html).not.toContain("workflow");
+  });
+
+  it("keeps source choice and saved-story guidance separate", () => {
+    const source = {
+      key: "science",
+      id: null,
+      name: "Science",
+      domain: "science.example",
+      category: "science" as const,
+      status: "disabled",
+      health: "not_started",
+      last_success_at: null,
+    };
+    const available = renderToStaticMarkup(
+      createElement(NewsEmptyFeed, { feed: "top", sources: [source] }),
+    );
+    expect(available).toContain("Choose a news source");
+    expect(available).toContain('href="#news-sources"');
+    const saved = renderToStaticMarkup(
+      createElement(NewsEmptyFeed, { feed: "saved", sources: [] }),
+    );
+    expect(saved).toContain("Keep a story for later.");
+    expect(saved).not.toContain("Choose news sources");
+  });
+
+  it("does not mislabel source access as a missing story", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("private", { status: 404 })),
+    );
+    try {
+      await expect(newsRequest("/sources/owner-only/activate")).rejects.toThrow(
+        "This news source isn’t available for your account.",
+      );
+      await expect(newsRequest("/stories/expired")).rejects.toThrow(
+        "This story is no longer available.",
+      );
+      await expect(newsRequest("/top")).rejects.toThrow(
+        "News is temporarily unavailable. Please try again later.",
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

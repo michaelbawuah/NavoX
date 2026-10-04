@@ -10,6 +10,7 @@ from pydantic import Field, field_validator
 
 from navox.ai.foundation.contracts import (
     AITask,
+    Capability,
     Contract,
     LatencyClass,
     Profile,
@@ -54,6 +55,8 @@ class RoutingTaskScope(Contract):
 class PolicyRules(Contract):
     grants: tuple[ProviderGrant, ...] = ()
     task_scopes: tuple[RoutingTaskScope, ...] | None = Field(default=None, max_length=100)
+    # Operator-only rollout; never inferred from a signup or model output.
+    allow_personal_conversation: Annotated[bool, Field(strict=True)] = False
     preferred_provider: Provider | None = None
     allow_fallback: bool = False
     max_fallbacks: Annotated[int, Field(strict=True, ge=0, le=3)] = 0
@@ -66,6 +69,65 @@ class PolicyRules(Contract):
         if len({g.provider for g in value}) != len(value):
             raise ValueError("Duplicate provider grant")
         return value
+
+
+PUBLIC_CONVERSATION_MODEL = "openai:gpt-5.6-luna"
+
+
+def personal_conversation_rule(
+    task: AITask, operator: PolicyRules, *, owns_personal_workspace: bool
+) -> PolicyRules | None:
+    """Extend only the reviewed ordinary binding, intersecting existing grants.
+
+    The published operator allowlist is left intact. This ephemeral rule admits
+    the current principal only; workspace/user denials still intersect it.
+    """
+
+    if (
+        not operator.allow_personal_conversation
+        or not owns_personal_workspace
+        or operator.task_scopes is None
+        or any(scope.matches(task) for scope in operator.task_scopes)
+        or task.task_type != TaskType.REASON
+        or task.profile != Profile.ASSISTANT_INTERACTIVE
+        or task.prompt != VersionedRef(name="assistant_conversation", version="v1")
+        or task.output_schema != VersionedRef(name="assistant_conversation", version="v1")
+        or task.sensitivity != Sensitivity.PERSONAL
+        or task.capability_requirements
+        != frozenset({Capability.TEXT, Capability.STRUCTURED_OUTPUT})
+        or task.context_references
+        or task.latency_class != LatencyClass.INTERACTIVE
+        or task.quality_class != QualityClass.HIGH
+        or task.max_cost > Decimal("0.01")
+        or task.max_output_tokens != 1000
+        or task.provider_policy.allow_fallback
+        or task.provider_policy.max_fallbacks != 0
+    ):
+        return None
+    grants = tuple(
+        ProviderGrant(provider=Provider.OPENAI, sensitivities=frozenset({Sensitivity.PERSONAL}))
+        for grant in operator.grants
+        if grant.provider == Provider.OPENAI and Sensitivity.PERSONAL in grant.sensitivities
+    )
+    scope = RoutingTaskScope(
+        workspace_id=task.workspace_id,
+        user_id=task.user_id,
+        task_type=task.task_type,
+        profile=task.profile,
+        prompt=task.prompt,
+        output_schema=task.output_schema,
+        sensitivity=task.sensitivity,
+    )
+    return operator.model_copy(
+        update={
+            "task_scopes": (scope,),
+            "grants": grants,
+            "max_cost": min(operator.max_cost, Decimal("0.01")),
+            "allow_fallback": False,
+            "max_fallbacks": 0,
+            "allow_shadow": False,
+        }
+    )
 
 
 class UserPreferences(Contract):

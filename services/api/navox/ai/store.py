@@ -4,7 +4,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -14,11 +14,13 @@ from navox.ai.foundation.contracts import AITask, ProviderPolicy
 from navox.ai.foundation.persistence import RegistryStore
 from navox.ai.foundation.registry import RegistrySnapshot
 from navox.ai.routing import (
+    PUBLIC_CONVERSATION_MODEL,
     EvaluationEvidence,
     PolicyRules,
     RoutingWeights,
     UserPreferences,
     intersect_policy,
+    personal_conversation_rule,
     preference_scope_key,
 )
 from navox.db.ai_registry import (
@@ -31,7 +33,8 @@ from navox.db.ai_registry import (
     AIRoutingPolicy,
     AITaskRun,
 )
-from navox.db.models import User, WorkspaceMembership
+from navox.db.communications import AssistantSession
+from navox.db.models import User, Workspace, WorkspaceMembership
 
 
 def utc(value: datetime | None) -> datetime | None:
@@ -50,9 +53,26 @@ class RoutingSnapshot:
 
 class GatewayStore:
     def __init__(
-        self, factory: async_sessionmaker[AsyncSession], operator_policy: PolicyRules
+        self,
+        factory: async_sessionmaker[AsyncSession],
+        operator_policy: PolicyRules,
+        *,
+        conversation_task_id: UUID | None = None,
+        conversation_session_id: UUID | None = None,
     ) -> None:
         self.factory, self.operator_policy = factory, operator_policy
+        self._conversation_task_id = conversation_task_id
+        self._conversation_session_id = conversation_session_id
+
+    def for_conversation(self, task: AITask, session_id: UUID) -> "GatewayStore":
+        """Server-only binding after ConversationContext checks; no HTTP policy field."""
+
+        return GatewayStore(
+            self.factory,
+            self.operator_policy,
+            conversation_task_id=task.id,
+            conversation_session_id=session_id,
+        )
 
     async def authorize(self, task: AITask) -> None:
         async with self.factory() as db:
@@ -72,7 +92,32 @@ class GatewayStore:
             registry = await RegistryStore(db).load()
             if registry is None:
                 raise ValueError("AI catalog is not configured")
-            rules = [self.operator_policy]
+            workspace = await db.get(Workspace, task.workspace_id)
+            conversation_session = (
+                await db.scalar(
+                    select(AssistantSession).where(
+                        AssistantSession.id == self._conversation_session_id,
+                        AssistantSession.workspace_id == task.workspace_id,
+                        AssistantSession.user_id == task.user_id,
+                        AssistantSession.mode == "PERSONAL",
+                        AssistantSession.status == "active",
+                    )
+                )
+                if self._conversation_task_id == task.id
+                and self._conversation_session_id is not None
+                else None
+            )
+            conversation_rule = personal_conversation_rule(
+                task,
+                self.operator_policy,
+                owns_personal_workspace=(
+                    conversation_session is not None
+                    and member.role == "owner"
+                    and workspace is not None
+                    and workspace.workspace_type == "personal"
+                ),
+            )
+            rules = [conversation_rule or self.operator_policy]
             for scope in ("workspace", str(task.user_id)):
                 row = await db.get(AIRoutingPolicy, (task.workspace_id, scope))
                 if row:
@@ -111,6 +156,11 @@ class GatewayStore:
                     if not assignment.shadow_enabled or not all(r.allow_shadow for r in rules):
                         continue
                 elif bucket >= assignment.rollout_percent:
+                    continue
+                if (
+                    conversation_rule is not None
+                    and assignment.model_id != PUBLIC_CONVERSATION_MODEL
+                ):
                     continue
                 model = await db.get(AIModel, assignment.model_id)
                 provider = await db.get(AIProvider, model.provider) if model else None

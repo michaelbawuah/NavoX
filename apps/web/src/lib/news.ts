@@ -127,10 +127,16 @@ export async function newsRequest<T>(
       response.status === 401
         ? "Sign in to see your news."
         : response.status === 404
-          ? "This story is no longer available."
-          : response.status === 429
-            ? "News was refreshed recently. Please try again shortly."
-            : "We couldn’t refresh your news. Please try again.";
+          ? path.startsWith("/sources")
+            ? "This news source isn’t available for your account."
+            : path.startsWith("/stories/")
+              ? "This story is no longer available."
+              : "News is temporarily unavailable. Please try again later."
+          : response.status === 403
+            ? "This news isn’t available for your account."
+            : response.status === 429
+              ? "News was refreshed recently. Please try again shortly."
+              : "We couldn’t refresh your news. Please try again.";
     throw new NewsRequestError(response.status, message);
   }
   return response.json() as Promise<T>;
