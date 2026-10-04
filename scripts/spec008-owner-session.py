@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
-"""Create a private local SPEC-008 acceptance session through normal login."""
+"""Create a private local acceptance session for explicitly supplied owner scope.
 
+Pass --email, --user-id and --workspace-id, or set the corresponding
+NAVOX_ACCEPTANCE_EMAIL, NAVOX_ACCEPTANCE_USER_ID and NAVOX_ACCEPTANCE_WORKSPACE_ID
+environment variables. These inputs select the account to verify; they do not
+grant provider permissions or approve any action.
+"""
+
+import argparse
 import getpass
 import http.cookiejar
 import json
@@ -10,25 +17,44 @@ import sys
 import tempfile
 import urllib.error
 import urllib.request
+from uuid import UUID
 
-EMAIL = "michaelbaffourawuah706@gmail.com"
-EXPECTED_USER = "b1842045-a1a1-499b-ae41-f53bcb99d0f9"
-EXPECTED_WORKSPACE = "aad0f47a-4948-44df-8e52-60f6d7a918e3"
 DESTINATION = Path("/private/tmp/navox-spec008-owner-auth.json")
 BASE_URL = "http://127.0.0.1:8000/api/v1"
 
 
-def main():
+def owner_arguments(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--email", default=os.environ.get("NAVOX_ACCEPTANCE_EMAIL"))
+    parser.add_argument("--user-id", default=os.environ.get("NAVOX_ACCEPTANCE_USER_ID"))
+    parser.add_argument(
+        "--workspace-id", default=os.environ.get("NAVOX_ACCEPTANCE_WORKSPACE_ID")
+    )
+    args = parser.parse_args(argv)
+    for field in ("email", "user_id", "workspace_id"):
+        value = getattr(args, field)
+        if not value or not value.strip():
+            parser.error(f"--{field.replace('_', '-')} or its environment variable is required")
+    for field in ("user_id", "workspace_id"):
+        try:
+            setattr(args, field, str(UUID(getattr(args, field))))
+        except ValueError:
+            parser.error(f"--{field.replace('_', '-')} must be a UUID")
+    return args
+
+
+def main(argv=None):
+    args = owner_arguments(argv)
     if not sys.stdin.isatty():
         raise SystemExit("Run this helper in your Mac's Terminal.")
     jar = http.cookiejar.CookieJar()
     opener = urllib.request.build_opener(
         urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(jar)
     )
-    password = getpass.getpass(f"NavoX password for {EMAIL}: ")
+    password = getpass.getpass(f"NavoX password for {args.email}: ")
     request = urllib.request.Request(
         f"{BASE_URL}/auth/login",
-        data=json.dumps({"email": EMAIL, "password": password}).encode(),
+        data=json.dumps({"email": args.email, "password": password}).encode(),
         headers={"Content-Type": "application/json"},
     )
     del password
@@ -43,9 +69,9 @@ def main():
         raise SystemExit("NavoX could not be reached. No session exported.") from None
     if (
         account != verified
-        or verified.get("email") != EMAIL
-        or verified.get("id") != EXPECTED_USER
-        or verified.get("workspace", {}).get("id") != EXPECTED_WORKSPACE
+        or verified.get("email") != args.email
+        or verified.get("id") != args.user_id
+        or verified.get("workspace", {}).get("id") != args.workspace_id
     ):
         raise SystemExit("Account/workspace did not match the approved owner scope.")
     cookies = [cookie for cookie in jar if cookie.name == "navox_session"]
@@ -53,9 +79,9 @@ def main():
         raise SystemExit("A valid NavoX session was not returned.")
     payload = {
         "cookie": f"navox_session={cookies[0].value}",
-        "user_id": EXPECTED_USER,
-        "workspace_id": EXPECTED_WORKSPACE,
-        "email": EMAIL,
+        "user_id": args.user_id,
+        "workspace_id": args.workspace_id,
+        "email": args.email,
     }
     with tempfile.NamedTemporaryFile(
         mode="w", prefix="navox-owner-session-", dir=DESTINATION.parent,

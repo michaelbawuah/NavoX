@@ -311,8 +311,8 @@ jobs:
             --data '{"email":"owner@example.com","password":"twelve-character-password"}' \
             http://localhost:8000/api/v1/auth/extension/login > /tmp/navox-extension-login.json
           EXTENSION_TOKEN="$(python -c 'import json; print(json.load(open("/tmp/navox-extension-login.json"))["access_token"])')"
-          grep -F '"token_type":"bearer"' /tmp/navox-extension-login.json
-          grep -F '"email":"owner@example.com"' /tmp/navox-extension-login.json
+          grep -Fq '"token_type":"bearer"' /tmp/navox-extension-login.json
+          grep -Fq '"email":"owner@example.com"' /tmp/navox-extension-login.json
           curl --fail --silent --show-error \
             --header "Authorization: Bearer $EXTENSION_TOKEN" \
             http://localhost:8000/api/v1/auth/me > /tmp/navox-extension-me.json

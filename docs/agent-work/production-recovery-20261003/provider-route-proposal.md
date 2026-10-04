@@ -27,9 +27,13 @@ three scopes with the task/profile/prompt/schema/sensitivity above:
 
 | Principal | User ID | Workspace ID |
 | --- | --- | --- |
-| Owner | `b1842045-a1a1-499b-ae41-f53bcb99d0f9` | `aad0f47a-4948-44df-8e52-60f6d7a918e3` |
-| Controlled canary | `45f3b9b1-8c67-4e40-885a-49209e77015f` | `b3128162-94cb-4db2-a098-5ef351a16a37` |
-| Isolated fresh acceptance account | `2a328833-324b-4c27-85ea-69e939883e0e` | `39c16ca5-97b2-48bb-8948-64971eb7cc63` |
+| Owner | `[redacted]` | `[redacted]` |
+| Controlled canary | `[redacted]` | `[redacted]` |
+| Isolated fresh acceptance account | `[redacted]` | `[redacted]` |
+
+The six identifiers are redacted from this public copy. The original three exact
+user/workspace pairs remain the proposed scope in the private approval record;
+`[redacted]` is not a wildcard, replacement identity, or additional approval.
 
 This proposal does not grant conversation access to all present or future accounts.
 It does not add providers, remove the principal allowlist, or change existing

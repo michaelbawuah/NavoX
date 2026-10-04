@@ -1,335 +1,163 @@
 # NavoX
 
-NavoX is an AI Operations Platform that helps people understand, prioritize, and safely handle work across their connected tools.
+**A personal AI assistant for the work scattered across your inbox, calendar, classes, and subscriptions.**
 
-The current implementation includes the **Engineering Foundation through Milestone 9 Evaluation and Hardening**: identity and personal workspaces, authenticated content-minimized events, the Commitment Engine, Today, the bounded agent runtime, exact-action Gmail approval/execution, deterministic proactive intelligence, the Chrome side panel, and a measurable release-quality evaluation gate. NavoX now derives auditable deadline, meeting, renewal, promise, follow-up, and waiting-on-response signals from saved operational state, applies user-controlled quiet hours and fatigue policy, prepares dynamic daily briefings, and uses Temporal for durable lifecycle timers. Google sign-in remains identity-only by default; Gmail send authority is still separate and approval-bound. Milestone 7 adds no Gmail-read, Calendar-read, or Drive-read authority and performs no proactive provider writes.
+[Open NavoX](https://navox.net) · [Architecture](#architecture) · [Run locally](#run-locally) · [Verification](#verification)
 
-## SPEC-002 Operational Intelligence
+NavoX brings connected information into a daily view and a persistent conversation.
+Ask what needs your attention, find a source, prepare for a meeting, or draft a reply.
+When a request changes something outside NavoX, the application separates preparation,
+approval, execution, and verification.
 
-SPEC-002 now connects authorized Gmail/Calendar changes to evidence-backed
-observations, deterministic resolution, commitment state, attention, Today, and
-bounded feedback. The implementation covers M1–M7; live provider acceptance and
-model-quality targets are reported separately from synthetic regression tests.
+## See it in action
 
-- Explicit read consent and account binding; incremental history/sync cursors.
-- Schema-validated model proposals, exact evidence checks and minimal storage.
-- Scoped identities, timezone-aware date windows, deduplication and correction.
-- Conservative completion/waiting inference, with preserved user decisions.
-- Shared explainable Today/proactive ranking and bounded preference learning.
-- Temporal source processing, time reevaluation, watch renewal and reconciliation.
-- Configurable date, live time and optional city weather.
+![NavoX interface with sample priorities](docs/media/navox-interface.jpg)
 
-See [operation and verification](docs/architecture/spec-002-operations.md) for
-configuration, read-scope consent, scan boundaries and live-validation steps.
-The authoritative architecture remains
-[ SPEC-002 ](docs/architecture/SPEC-002-navox-operational-intelligence.md).
+[![NavoX walkthrough preview](docs/media/navox-walkthrough.gif)](docs/media/navox-walkthrough.mp4)
 
-## SPEC-004 Subscriptions
+**[Watch the walkthrough](docs/media/navox-walkthrough.mp4)**
 
-The authenticated [Subscriptions dashboard](http://localhost:3000/subscriptions)
-tracks known recurring costs, evidence, renewals, trials and price changes. Manual
-entries and authorized connector evidence share the existing Today attention
-system. Costs stay separate by currency; Keep, Review Later and corrections retain
-their provenance.
+The guided video uses real captures of the public interactive example workspace:
+Today, Upcoming, Waiting, source details, and task search. Its data is authored for
+the example. It does not demonstrate authenticated account retrieval or sending.
 
-Reviewed provider capabilities can execute cancellation after an exact R4
-confirmation. A submitted request remains pending until independently verified.
-Provider profiles are disabled by default; unsupported services show an honest
-manual fallback. See [SPEC-004 implementation and acceptance](docs/architecture/spec-004-subscriptions.md)
-for setup, the disposable Temporal demonstration and live-validation boundaries.
+## What it does
 
-## Repository layout
+| Area | Implemented behavior |
+| --- | --- |
+| Daily priorities | Evidence-backed commitments, upcoming meetings, follow-ups, and user-controlled attention preferences. |
+| Connected accounts | Explicitly authorized Gmail, Google Calendar, and institution-configured Canvas connections. |
+| Conversations and search | Saved sessions, bounded multi-intent planning, source-linked retrieval, and clarification when evidence is ambiguous. |
+| Voice | Recorded microphone input, gateway-routed speech-to-text and text-to-speech, read-aloud controls, and text/voice delivery preferences. |
+| Subscriptions | Recurring costs, renewals, trials, and price changes; amounts remain separate by currency. |
+| News | Source-backed stories, questions, and follow-up research, with source rights and freshness checks. |
+| Chrome side panel | The same API, priorities, plan status, and exact-action review, plus explicitly initiated page-note capture. |
 
-```text
-apps/web/              Next.js web client
-services/api/          FastAPI API, SQLAlchemy models, Alembic migrations, tests
-workflows/temporal/    Temporal worker entry point
-packages/contracts/    Shared TypeScript API contracts
-packages/ui/           Reserved shared UI package
-docs/architecture/     Authoritative product and system specification
-docs/adr/              Accepted architecture decisions
-.github/workflows/     CI
+The repository contains these implementations; connector access and live AI availability
+depend on the deployed workspace, OAuth configuration, and approved provider routes.
+Hands-free recognition is browser-dependent. A test suite passing does not establish
+live voice quality or complete end-to-end acceptance of every integration.
+
+## Engineering decisions
+
+- **One provider boundary.** Python HTTP adapters support OpenAI, Anthropic Claude,
+  and Google Gemini behind a versioned gateway. Exact model/task/prompt/schema
+  qualification, sensitivity grants, token/cost limits, and circuit breakers govern
+  serving. Adapter support does not automatically enable a model or a fallback.
+- **Approval binds the action.** Email review displays the exact recipient, subject,
+  and body. Material edits invalidate prior approval. The worker rechecks ownership,
+  permissions, version, and payload hash before execution. Ambiguous send failures
+  enter manual review instead of being blindly retried.
+- **Durability without hidden authority.** Temporal coordinates source processing,
+  attention timers, and bounded workflows. The assistant goal worker receives an
+  opaque goal ID and rechecks saved state; it cannot approve or execute an action.
+- **Scoped state and evidence.** PostgreSQL stores owned sessions, source references,
+  plans, approval versions, and audit events. Retrieval and action boundaries
+  revalidate workspace/account access rather than trusting a client-supplied ID.
+
+## Architecture
+
+```mermaid
+flowchart TD
+    Web["Next.js web client"] --> Assistant[TypeScript assistant runtime]
+    Extension[Chrome side panel] --> API[FastAPI application and policy]
+    Assistant --> API
+    Assistant --> DB[(PostgreSQL)]
+    Assistant --> Temporal[Temporal workers]
+    API --> DB
+    API --> Temporal
+    API --> Gateway[Qualified AI gateway]
+    API --> Connectors[Authorized connectors]
+    Gateway --> Providers["OpenAI · Claude · Gemini"]
+    Connectors --> Sources["Gmail · Calendar · Canvas"]
 ```
 
-## Prerequisites
+The TypeScript runtime owns conversation orchestration and its session schema.
+The Python API owns connector permissions, provider routing, operational state,
+and consequential action policy. They share contracts without duplicating authority.
 
-- Node.js 20.9 or later (the repository currently uses Node 24)
-- npm 11 or later
-- Python 3.12
-- [uv](https://docs.astral.sh/uv/)
-- Docker Engine with Docker Compose v2 for local PostgreSQL and Temporal
+| Path | Responsibility |
+| --- | --- |
+| `apps/web` | Next.js interface and authenticated assistant routes |
+| `apps/extension` | Manifest V3 side panel and explicit capture |
+| `packages/assistant-runtime` | Session orchestration, voice contracts, and bounded goal workflows |
+| `packages/contracts` | Shared TypeScript API contracts |
+| `services/api/navox` | FastAPI services, connectors, retrieval, gateway, and policy |
+| `services/api/migrations` | Python-owned PostgreSQL migrations |
+| `evals` | Synthetic evaluation cases and reference baselines |
+| `docs/architecture` | Design decisions, operational procedures, and acceptance boundaries |
 
-## First-time setup
+## Run locally
+
+The container path requires Git and Docker Engine/Desktop with Compose v2.
+Images pin Python 3.12, Node 24, PostgreSQL 17, and Temporal.
 
 ```bash
 git clone https://github.com/michaelbawuah/NavoX.git
 cd NavoX
 cp .env.example .env
+docker compose up --build
+```
+
+Open [the web app](http://localhost:3000), [API documentation](http://localhost:8000/docs),
+or [Temporal UI](http://localhost:8080). Register a local account to explore the shell.
+The stack applies the Python and TypeScript migrations before the web service starts.
+First startup can take several minutes while dependencies and images build.
+
+The example environment starts with AI providers disabled and blank OAuth credentials.
+It does not connect to an inbox or start paid model requests. Configure your own
+credentials outside version control, then follow the [gateway setup](docs/architecture/spec-005-gateway.md)
+and [connector operations](docs/architecture/spec-002-operations.md) procedures.
+Google sign-in alone does not grant Gmail read/send access.
+
+For host development, use Node 24, npm 11, Python 3.12, and `uv`.
+The [reference guide](docs/reference-guide.md#first-time-setup) contains terminal-by-terminal
+setup, and the [deployment guide](deploy/README.md) covers the production overlay.
+
+### Chrome extension
+
+```bash
 npm ci
-(cd services/api && uv sync --all-groups)
-docker compose up -d postgres temporal temporal-ui
-(cd services/api && uv run alembic upgrade head)
+npm run build --workspace=@navox/extension
 ```
 
-Start the API in one terminal:
+In `chrome://extensions`, enable Developer mode, select **Load unpacked**, and choose
+`apps/extension/dist`. The local build uses the local API and web app. Deployment
+origins and the permission boundary are documented in the
+[extension guide](docs/architecture/milestone-8-chrome-extension.md).
+
+## Verification
+
+The [reviewed hosted CI checkpoint](https://github.com/michaelbawuah/NavoX/actions/runs/37160769439),
+`df9397d`, recorded **2,820 API tests**, **437 web tests with 14 skipped**, and
+**8 extension tests**. These are regression results for that source checkpoint,
+not a production accuracy or availability claim. The assistant runtime has a
+separate suite with database/Temporal-dependent cases.
+
+The [CI workflow](.github/workflows/ci.yml) checks lint, types, builds, migrations,
+dependency security, deterministic release evaluation, and Compose integration.
+Evaluation fixtures are synthetic; live provider qualification is separate.
 
 ```bash
-cd services/api
-uv run fastapi dev navox/api/main.py
+npm ci
+npm run lint
+npm run typecheck
+npm run test
+npm run build
+bash scripts/check-api.sh
 ```
 
-Start the web client in another:
+The API gate uses the committed `uv.lock` and requires disposable PostgreSQL/Temporal
+services for the complete infrastructure-dependent suite. Missing infrastructure or
+skipped cases must be reported; they are not a substitute for a passing full gate.
+See [AGENTS.md](AGENTS.md) for the exact publication requirements.
 
-```bash
-npm run dev --workspace=@navox/web
-```
-
-Open the web shell at `http://localhost:3000`, API documentation at `http://localhost:8000/docs`, and the Temporal UI at `http://localhost:8080`.
-
-To run the Temporal worker after services are ready:
-
-```bash
-cd services/api
-uv run python -m navox.workflows.worker
-```
-
-The worker hosts the foundation workflow, Milestone 5's `HandleCommitmentWorkflow`, Milestone 6's durable `ApprovedActionWorkflow`, and Milestone 7's commitment-lifecycle, follow-up, meeting-preparation, and daily-briefing workflows. Docker Compose starts the same worker automatically.
-
-To run all checks that do not require local Docker services:
-
-```bash
-npm run lint && npm run typecheck && npm run test && npm run build
-(cd services/api && uv run ruff check . && uv run ruff format --check . && uv run mypy navox && uv run pytest)
-(cd services/api && uv run alembic upgrade head --sql > /tmp/navox-schema.sql)
-```
-
-## Environment and secrets
-
-Copy `.env.example` to `.env`; it contains local-only defaults and empty placeholders. Never commit `.env` or real credentials. Passwords are Argon2-hashed; browser sessions use HttpOnly, SameSite cookies backed by hashed server-side tokens. Google OAuth refresh tokens are encrypted using `GOOGLE_TOKEN_ENCRYPTION_KEY` and are referenced from connection records rather than stored in plaintext application columns.
-
-To enable the optional Google connection locally, create a Google Cloud OAuth **Web application** client and set `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, and `GOOGLE_TOKEN_ENCRYPTION_KEY` in `.env`. Register this exact authorized redirect URI:
-
-```text
-http://localhost:8000/api/v1/connections/google/callback
-```
-
-Generate the encryption key without printing any other secret material:
-
-```bash
-(cd services/api && uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
-```
-
-Milestone 2's event endpoints are intentionally not configured by local defaults. Calendar and Drive notifications must use a server-created notification channel with an opaque channel token; Gmail needs an authenticated Pub/Sub push subscription. Set the four `GOOGLE_*PUSH*` event-delivery values only in protected deployment configuration after a public HTTPS endpoint exists. Do not put those values in source control or expose them to the browser.
-
-## Authentication endpoints
-
-- `POST /api/v1/auth/register` creates an account, one personal workspace, owner membership, and session.
-- `POST /api/v1/auth/login` creates a new server-side session.
-- `GET /api/v1/auth/me` returns the authenticated account and accessible personal workspace.
-- `POST /api/v1/auth/logout` revokes the current server-side session.
-
-## Google connection endpoints
-
-- `GET /api/v1/connections/google/start` creates a state- and PKCE-protected Google authorization request for the current personal workspace.
-- `GET /api/v1/connections/google/callback` finishes the provider callback and redirects to the web client; it never returns tokens to the browser.
-- `GET /api/v1/connections/google` lists only the current user's workspace-scoped Google connections.
-- `POST /api/v1/connections/google/{connection_id}/health` validates a stored connection with Google’s token endpoint only; it does not access any Google content API.
-- `GET /api/v1/connections/google/{connection_id}/gmail-send/start` begins a separate incremental OAuth grant for only `gmail.send`. Identity sign-in never silently adds email authority.
-
-## Provider event endpoints
-
-These public machine-to-machine endpoints never receive a user or workspace ID from the caller. NavoX resolves ownership only from a stored connection or server-created notification channel, stores normalized references and hashes rather than raw provider content, and treats repeated delivery IDs as idempotent.
-
-- `POST /api/v1/events/calendar` accepts a Google Calendar notification only when its channel ID, resource ID, and server-issued channel token match an active stored subscription.
-- `POST /api/v1/events/drive` uses the same server-created-channel verification for Drive notifications.
-- `POST /api/v1/events/gmail` requires both a configured Pub/Sub verification token and a signed Google Pub/Sub OIDC JWT, then records the Gmail history-change reference against exactly one active Google connection.
-
-The watch-creation and renewal worker that creates Calendar/Drive channels and Gmail mailbox watches is intentionally deferred until users explicitly opt into the appropriate Google content scopes. The event pipeline is ready to receive those authenticated notifications, but does not fetch or retain mail, calendar, or Drive content yet.
-
-## Commitment Engine
-
-Milestone 3 provides a provider-neutral internal boundary for structured AI extraction. Untrusted model output is accepted only as a strict JSON shape, rejects undeclared fields and instruction-like content, requires timezone-aware due dates, and cannot specify tools or external actions. The deterministic policy then applies these local thresholds:
-
-- Confidence at or above `COMMITMENT_HIGH_CONFIDENCE_THRESHOLD` (default `0.85`) creates a `confirmed` commitment.
-- Confidence at or above `COMMITMENT_MODERATE_CONFIDENCE_THRESHOLD` (default `0.65`) and below the high threshold creates a `candidate` for review.
-- Lower-confidence candidates are suppressed.
-
-Created commitments retain only normalized facts and source references. Provenance links each commitment to its incoming event; raw provider content is not copied into NavoX. The engine also stores safe `depends_on`, `blocks`, and `related_to` relation edges. Evaluation fixtures in `evals/commitments/` cover instruction-like output, undeclared execution fields, malformed relations, and false-positive candidates.
-
-Authenticated review endpoints are workspace- and user-scoped:
-
-- `GET /api/v1/commitments` lists the current user's commitments; pass `?status=candidate` to focus review.
-- `GET /api/v1/commitments/{commitment_id}` returns its normalized facts, provenance references, and outgoing relation edges.
-- `POST /api/v1/commitments/{commitment_id}/confirm` confirms a moderate-confidence candidate.
-- `POST /api/v1/commitments/{commitment_id}/reject` rejects a moderate-confidence candidate.
-
-There is intentionally no client-facing endpoint to submit extraction output, and these endpoints never trigger an external action.
-
-
-## Evaluation and hardening
-
-Milestone 9 adds an offline, deterministic release gate over the same policies and
-boundaries used by the product. The committed evaluation data is synthetic and
-contains no user content.
-
-Run it from `services/api`:
-
-```bash
-uv run python -m navox.evaluation --fail-on-gate \
-  --output /tmp/navox-evaluation.json \
-  --markdown /tmp/navox-evaluation.md
-```
-
-The gate measures commitment precision/recall, structured-output reliability,
-malicious-output rejection, false-positive suppression, proactive attention
-policy, action-policy behavior, documented security-control evidence, and
-reliability invariants such as plan bounds, exact approval TTL, event/action
-idempotency constraints, and Gmail at-most-once semantics.
-
-Provider snapshots share one schema so future OpenAI, Gemini, Claude, or other
-provider runs can be compared on the same labeled cases for quality, latency,
-tokens, and estimated cost. The committed `synthetic-reference-v1` snapshot is
-only a deterministic plumbing baseline and is not represented as a live model
-benchmark.
-
-API hardening also adds opaque request correlation IDs, server timing, metadata-
-only structured request logs that omit query strings, non-cacheable API
-responses, defensive response headers, explicit CORS client headers, and
-production HTTPS configuration validation.
-
-CI publishes `navox-evaluation-report` as a build artifact and blocks the
-Compose integration gate when evaluation thresholds fail.
-
-See `docs/architecture/milestone-9-evaluation-hardening.md` for the complete
-boundary and remaining deployment-level work.
-
-## Local containers
-
-`docker compose up --build` starts PostgreSQL, Temporal, Temporal UI, a one-time database migration service, API, and web services. `docker compose down` stops them; append `-v` only when intentionally discarding local database data.
+Further reading: [approval and verified execution](docs/architecture/milestone-6-approval-execution.md),
+[retrieval and connected intelligence](docs/agent-work/spec-006-007/SEARCH-REPORT.md),
+[gateway qualification](docs/architecture/spec-005-live-acceptance.md), and
+[bounded goal workflows](docs/agent-work/spec-008/M14B-BOUNDED-WORKFLOWS-WORKER-REPORT.md).
 
 ## License
 
-The repository is private and no open-source license has been selected yet. No permission is granted for external use until the owner makes that legal decision.
-
-
-## Bounded agent endpoints
-
-- `POST /api/v1/commitments/{id}/handle` creates an idempotent, persisted plan and dispatches its safe steps to Temporal.
-- `GET /api/v1/plans` lists recent plans in the authenticated workspace.
-- `GET /api/v1/plans/{id}` returns persisted step, action, risk, result, and workflow progress.
-- `GET /api/v1/agent/state` returns whether agent execution is paused.
-- `POST /api/v1/agent/pause` prevents new plans and causes future steps to fail closed at policy evaluation.
-- `POST /api/v1/agent/resume` re-enables bounded execution.
-
-Milestone 5 has a hard eight-step ceiling and two-replan design limit. The current deterministic planner uses three internal actions: `navox.commitment.inspect` (R0), `navox.context.prepare` (R1), and `navox.next_steps.prepare` (R1). Gmail, Calendar, and Drive contracts are registered with fixed risk and permission requirements so future planners cannot invent or downgrade risk, but provider executors remain disabled until the matching scope and milestone are deliberately implemented. R2+ actions are never executed by the Milestone 5 worker.
-
-
-## Approval and verified execution
-
-Milestone 6 adds the first consequential external action: **Gmail send (R3)**. NavoX prepares the exact email first and persists the canonical security-relevant payload, its hash, an expiring versioned approval, the plan step, and the action record. The user can revise, approve, or reject that exact action.
-
-- `POST /api/v1/commitments/{id}/actions/gmail-send/prepare` prepares an R3 send without contacting Gmail.
-- `GET /api/v1/actions` and `GET /api/v1/actions/{id}` expose tenant-scoped persisted action/approval status.
-- `POST /api/v1/actions/{id}/edit` supersedes the previous approval and creates a new payload hash/version.
-- `POST /api/v1/actions/{id}/approve` authorizes only the currently hashed payload.
-- `POST /api/v1/actions/{id}/reject` terminates the prepared action without provider execution.
-
-Security and reliability invariants:
-
-- approvals expire after 15 minutes;
-- material edits invalidate the previous approval;
-- pause invalidates an approved-but-not-yet-executed action and requires fresh approval;
-- approval consumption is serialized with database row locks;
-- Gmail permission and sender/connection ownership are revalidated at execution time;
-- Gmail `messages.send` is treated as at-most-once because the provider does not expose an idempotency key;
-- after the provider request begins, ambiguous transport failures enter `manual_review` and are never blindly retried;
-- a returned Gmail message ID is the independent verification signal stored in the action result and audit event.
-
-See `docs/architecture/milestone-6-approval-execution.md` for the full boundary.
-
-
-## Proactive NavoX
-
-Milestone 7 turns persisted operational state into proactive, explainable attention signals. The engine uses deterministic score components—urgency, consequence, user priority, objective relevance, actionability, waiting duration, interruption cost, and notification fatigue—and stores the full breakdown alongside every signal.
-
-The default attention tiers are evaluation policy, not hidden model behavior:
-
-- `notify_now`: score 85–100, subject to quiet hours, pause state, cooldown, and daily interruption budget;
-- `briefing`: score 65–84, or a higher score whose interruption is suppressed by fatigue policy;
-- `dashboard`: score 40–64;
-- `suppressed`: below 40, snoozed, dismissed, or otherwise not appropriate to surface.
-
-Every visible signal answers what is happening, why it matters, and which bounded NavoX capability can help. Opening a briefing manually does not count as an interruption. Only actual notify-now surfacing contributes to notification fatigue.
-
-Authenticated proactive endpoints:
-
-- `GET /api/v1/proactive/preferences` reads quiet hours, thresholds, briefing hour, cooldown, and interruption budget.
-- `POST /api/v1/proactive/preferences` updates those user-controlled policies and the workspace timezone.
-- `POST /api/v1/proactive/evaluate` deterministically refreshes proactive state.
-- `GET /api/v1/proactive/briefing` recomputes a fresh briefing from current state and records only an audit snapshot.
-- `GET /api/v1/proactive/meeting-prep` prepares the next saved meeting from NavoX state and related commitments.
-- `POST /api/v1/proactive/signals/{id}/snooze` suppresses a signal until an explicit future timestamp.
-- `POST /api/v1/proactive/signals/{id}/dismiss` dismisses the current material version of a signal.
-- `POST /api/v1/proactive/activate` idempotently starts durable Temporal scheduling for the workspace and eligible commitments.
-
-Today chat now also supports “What am I forgetting?”, “Prepare me for my next meeting”, “Anything costing me money soon?”, and “What can you handle for me?” using the same saved state rather than a separate chat memory.
-
-The current `notify_now` label is an **in-product attention tier**. Milestone 7 does not claim OS push, SMS, email-notification, or mobile background delivery. Scheduled workflows keep state and briefing readiness durable; a future delivery channel must be added explicitly and permissioned separately.
-
-See `docs/architecture/milestone-7-proactive-navox.md` for scoring, fatigue, persistence, workflow, and safety invariants.
-
-
-## Chrome extension
-
-Milestone 8 adds a Chrome Manifest V3 side panel under `apps/extension/`. It is
-a thin client of the same NavoX API and does not contain a second agent runtime.
-
-The side panel exposes:
-
-- Today and proactive briefing state;
-- operational queries such as “What am I forgetting?”;
-- Handle this for saved commitments;
-- recent bounded-plan progress;
-- exact persisted R3 approval review and explicit approve/reject gestures;
-- snooze and dismiss controls for proactive signals.
-
-The extension deliberately requests only `sidePanel`, `storage`, and one
-explicit NavoX API host permission. It has no content scripts and requests no
-`tabs`, `activeTab`, `scripting`, `cookies`, or `webRequest`
-permission. It does not read the page the user is viewing.
-
-Build the local extension:
-
-```bash
-npm ci
-npm run build --workspace=@navox/extension
-```
-
-Then open `chrome://extensions`, enable **Developer mode**, choose
-**Load unpacked**, and select:
-
-```text
-apps/extension/dist
-```
-
-The local build talks to `http://localhost:8000` and links to the web
-workspace at `http://localhost:3000`. For a deployed environment, build with
-one explicit HTTPS API and web origin:
-
-```bash
-NAVOX_EXTENSION_API_ORIGIN=https://your-api.example \
-NAVOX_EXTENSION_WEB_ORIGIN=https://your-web.example \
-npm run build --workspace=@navox/extension
-```
-
-The build rejects insecure non-local HTTP origins, forbidden browser
-permissions, content scripts, and remote/dynamic executable code.
-
-Extension authentication uses a separate opaque bearer session. The password is
-sent only during login and is never stored by the extension. Chrome stores the
-opaque session in extension-local storage; PostgreSQL stores only its hash.
-Extension logout revokes that extension session without revoking the user's web
-session.
-
-See `docs/architecture/milestone-8-chrome-extension.md` for the browser
-permission, authentication, and safety boundary.
+No open-source license has been granted. The source is available for inspection;
+all rights are reserved by the owner.
