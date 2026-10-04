@@ -259,17 +259,13 @@ export function NavoXCinematic({ children }: { children: ReactNode }) {
                         <em>Reimagined.</em>
                       </h2>
                       <p className={styles.body}>
-                        Messages, meetings, and commitments.
+                        Tasks, email, calendar plans, subscriptions, and news.
                         <br />
-                        One place to see your next move.
+                        One personal workspace for your next move.
                       </p>
-                      <button
-                        type="button"
-                        className={styles.textLink}
-                        onClick={() => go(1)}
-                      >
-                        Step into your orbit <span>↓</span>
-                      </button>
+                      <a className={styles.textLink} href="/navox">
+                        Open NavoX <span>↗</span>
+                      </a>
                     </>
                   )}
                   {index === 1 && (

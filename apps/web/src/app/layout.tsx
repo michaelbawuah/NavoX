@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
+import { publicSite } from "../lib/public-site";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "NavoX — Your day. In perspective.",
-  description:
-    "Your personal assistant for a clearer day. Keep up with tasks, classes, messages and news.",
+  metadataBase: new URL(publicSite.url),
+  title: publicSite.title,
+  description: publicSite.description,
+  robots: { index: false, follow: false },
 };
 
 export default function RootLayout({
