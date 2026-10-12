@@ -13,7 +13,7 @@ The accepted uncommitted S006-SURF-1 and S006-EVAL-1 work was left untouched.
 | `services/api/tests/test_news_adversarial.py` | New module, 13 tests, 924 lines |
 | `services/api/navox/news/evidence.py` | +9 lines: membership check in `review_evidence` |
 
-No other path was modified. `CODEX-HANDOFF-20260929-1304.md` and `docs/agent-work/`
+No other path was modified. Local continuation notes and `docs/agent-work/`
 bundle directories other than `spec-006-adversarial/` were left alone.
 
 ## Per-case outcome

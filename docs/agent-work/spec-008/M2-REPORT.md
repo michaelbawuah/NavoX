@@ -4,7 +4,8 @@ Status: **ready_for_review** (Flash worker; M2 only, not full SPEC-008)
 Branch: `spec-008-navoxbot`, stacked on `bb0a7c96f4f9a7a6e9acb50fad431f8c546c6256`.
 No commit, push, deployment, provider activation, paid provider call or
 production migration was made. `M1-REPORT.md`, `CHECKPOINT.md`, `DESIGN.md`,
-`ACCEPTANCE-MATRIX.md`, `AGENTS.md`, `.github/workflows`, deployment flags and
+`ACCEPTANCE-MATRIX.md`, development quality requirements, `.github/workflows`,
+deployment flags and
 the untracked SPEC-006/007 material were not modified.
 This revision includes the root-review correction pass: SPEC-005 envelope
 validation on the runtime boundary, a no-provider fallback scoped to the

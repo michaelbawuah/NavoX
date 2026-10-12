@@ -179,8 +179,13 @@ async def test_clear_user_actions_and_alerts_surface_with_the_correct_reason(
     task = await db.get(Commitment, ids[0])
     assert task.status == "confirmed"
     assert task.intelligence_metadata["email_relevance"]["intent"] == intent
+    # Evaluate this fixed-date fixture on its own clock, before freshness expiry.
     today = await build_today_projection(
-        db, user_id=connection.user_id, workspace_id=connection.workspace_id, timezone_name="UTC"
+        db,
+        user_id=connection.user_id,
+        workspace_id=connection.workspace_id,
+        timezone_name="UTC",
+        now=doc.retrieved_at,
     )
     item = (today.needs_attention + today.coming_up)[0]
     if kind == "alert":

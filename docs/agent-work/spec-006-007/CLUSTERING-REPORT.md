@@ -11,7 +11,8 @@ own work and does not claim SPEC-006 completion)
   commit, stage, push, deploy, activation, owner-database migration or paid
   provider call.
 - Contracts read in full: `CLUSTERING-BRIEF.md`, `NEWS-REMAINDER-DESIGN.md`,
-  `AGENTS.md`, the clustering sections of `/tmp/SPEC-006_NavoX_Complete.txt`, and
+  the development quality gate then in effect, the clustering sections of
+  `/tmp/SPEC-006_NavoX_Complete.txt`, and
   root's consolidated acceptance-correction message.
 
 ## Correction cycle (root acceptance correction)

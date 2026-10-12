@@ -20,7 +20,7 @@ WORKSPACE: `/Users/mba_steins/NavoX`, branch `spec-006-news-intelligence`, HEAD
 `prepare_news_conversation_activity` was already callable exactly as written, so
 the "only if it genuinely needs a correction" escape hatch in the brief was not
 used. No other path was touched, including the accepted S006-SURF-1, S006-EVAL-1
-and S006-ADV-1 work, `CODEX-HANDOFF-20260929-1304.md` and `docs/agent-work/`
+and S006-ADV-1 work, local continuation notes and `docs/agent-work/`
 directories owned by other bundles.
 
 ## What changed

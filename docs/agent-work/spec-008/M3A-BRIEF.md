@@ -82,5 +82,6 @@ The Flash writer owns the minimal `services/api` model/migration, communication
 draft generation/service/API and approval-source contract changes plus focused
 tests and `docs/agent-work/spec-008/M3A-REPORT.md`. It does not edit TypeScript,
 M1/M2 reports, checkpoint/design/acceptance matrix, CI/deployment flags,
-AGENTS.md, parent SPEC files or unrelated untracked logs. It is not alone in
+development quality requirements, parent SPEC files or unrelated untracked logs.
+It is not alone in
 the repository; preserve root and user edits and accommodate existing changes.

@@ -150,7 +150,8 @@ bash scripts/check-api.sh
 The API gate uses the committed `uv.lock` and requires disposable PostgreSQL/Temporal
 services for the complete infrastructure-dependent suite. Missing infrastructure or
 skipped cases must be reported; they are not a substitute for a passing full gate.
-See [AGENTS.md](AGENTS.md) for the exact publication requirements.
+See [development quality checks](docs/development/api-quality.md) for the exact
+publication requirements.
 
 Further reading: [approval and verified execution](docs/architecture/milestone-6-approval-execution.md),
 [retrieval and connected intelligence](docs/agent-work/spec-006-007/SEARCH-REPORT.md),

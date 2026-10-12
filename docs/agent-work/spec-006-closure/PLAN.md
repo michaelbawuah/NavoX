@@ -7,7 +7,7 @@ Goal: close every SPEC-006 acceptance item that can be closed with offline code 
 evidence, and record the ones that cannot with their exact external dependency.
 
 Baseline: branch `spec-006-news-intelligence`, HEAD `5573ba4`, working tree clean
-apart from untracked `CODEX-HANDOFF-20260929-1304.md` and `docs/agent-work/`.
+apart from untracked local continuation notes and `docs/agent-work/`.
 PR #21 stays draft. Publication of anything produced here needs a fresh user-run
 commit and push, because this sandbox keeps `.git` read-only and the approval
 reviewer is unavailable.

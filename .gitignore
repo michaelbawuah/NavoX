@@ -23,3 +23,8 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/*.local.json
+
+# Local coding-assistant instructions and session handoffs
+AGENTS.md
+CLAUDE.md
+CODEX-HANDOFF-*.md

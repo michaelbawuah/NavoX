@@ -120,8 +120,9 @@ Implement PDF search/query/ask/resource/related/entity/recent routes with existi
 auth/origin conventions. Exclusion and session routes may be added to support the
 specified behavior. Use /navox Search/Ask page and shared SPEC-006 components, source
 links, filters, recent search, followups, loading/status, retry/empty/outage states.
-Read apps/web/AGENTS.md and installed Next documentation. Never expose implementation
-jargon/scores. Keyboard, mobile, reduced-motion, focus and semantic structure matter.
+Read [development quality checks](../../development/api-quality.md) and installed
+Next documentation. Never expose implementation jargon/scores. Keyboard, mobile,
+reduced-motion, focus and semantic structure matter.
 
 Validation: behavioral permission/injection/version/freshness regressions, source
 projections, no-content retention, RRF/no duplicate ranks, finite vector/version

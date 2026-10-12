@@ -64,7 +64,8 @@ tests inside `services/api`; the TypeScript shared contracts, runtime
 planner/capability adapter, Next assistant routes and focused tests; and one
 phase report. Existing SPEC-001–007 decision, source and action logic remains
 owned by those services. Public assistant API handlers remain TypeScript. Do
-not edit deployment flags, `.github/workflows`, `AGENTS.md`, M1 reporting or
+not edit deployment flags, `.github/workflows`, development quality requirements,
+M1 reporting or
 unrelated SPEC files. Do not commit, push, activate providers or make paid
 calls.
 
