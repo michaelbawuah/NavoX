@@ -142,6 +142,92 @@ describe("SPEC-005 intent bridge", () => {
     expect(intent?.requires_clarification).toBe(false);
   });
 
+  it.each([
+    ["Do not What did Sarah email me", ["What did Sarah email me"]],
+    [
+      "What did Sarah email me and delete my calendar",
+      ["What did Sarah email me"],
+    ],
+    ["What did Sarah email me about the renewal?", ["What did Sarah email me"]],
+    [
+      "What did Sarah email me and cancel my subscription and what's the weather today?",
+      ["What did Sarah email me", "what's the weather today?"],
+    ],
+    [
+      "What did Sarah email me unless it is confidential and what's the weather today?",
+      ["What did Sarah email me", "what's the weather today?"],
+    ],
+    [
+      "What did Sarah email me and What did Sarah email me",
+      ["What did Sarah email me"],
+    ],
+  ] as const)("rejects omitted request text in %s", (utterance, questions) => {
+    const plan = {
+      version: 1,
+      intents: questions.map(
+        (question) =>
+          upstreamPlan({
+            question,
+            entity: { kind: "NONE", value: null, confidence: 1 },
+          }).intents[0],
+      ),
+    };
+    expect(() =>
+      parseUpstreamIntentPlan(plan, { utterance, recentTurns: [] }),
+    ).toThrow(/omitted part of the request/i);
+  });
+
+  it.each([" and ", ", and also ", "; then ", " plus ", "… ALSO ", ", "])(
+    "allows explicit joiners and punctuation: %s",
+    (separator) => {
+      const questions = [
+        "What did Sarah email me",
+        "what's the weather today?",
+      ];
+      const plan = {
+        version: 1,
+        intents: questions.map(
+          (question) =>
+            upstreamPlan({
+              question,
+              entity: { kind: "NONE", value: null, confidence: 1 },
+            }).intents[0],
+        ),
+      };
+      expect(
+        parseUpstreamIntentPlan(plan, {
+          utterance: ` (${questions[0]})${separator}(${questions[1]}) `,
+          recentTurns: [],
+        }).intents.map((intent) => intent.question),
+      ).toEqual(questions);
+    },
+  );
+
+  it.each([
+    "what am I missing today, and read it to me",
+    "what am I missing today, but don't read it to me",
+  ])("preserves an embedded delivery instruction: %s", (utterance) => {
+    const intent = {
+      route: "today.read",
+      entity: { kind: "NONE", value: null, confidence: 1 },
+    };
+    expect(
+      parseUpstreamIntentPlan(
+        upstreamPlan({ ...intent, question: utterance }),
+        {
+          utterance,
+          recentTurns: [],
+        },
+      ).intents[0]?.question,
+    ).toBe(utterance);
+    expect(() =>
+      parseUpstreamIntentPlan(
+        upstreamPlan({ ...intent, question: "what am I missing today" }),
+        { utterance, recentTurns: [] },
+      ),
+    ).toThrow(/omitted part of the request/i);
+  });
+
   it("accepts the time.now route in the current plan version", () => {
     const plan = parseUpstreamIntentPlan(
       upstreamPlan({

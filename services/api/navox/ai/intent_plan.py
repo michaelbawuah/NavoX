@@ -14,6 +14,7 @@ model or provider fails honestly instead of guessing a route.
 from __future__ import annotations
 
 import json
+import unicodedata
 from collections.abc import Mapping
 from decimal import Decimal
 from enum import StrEnum
@@ -468,7 +469,19 @@ def intent_plan_json_schema(
 
 
 def validate_plan_spans(plan: IntentPlan, utterance: str) -> None:
-    """Reject invented or overlapping planner text before it reaches a runtime."""
+    """Reject invented, overlapping or omitted requests before runtime delegation."""
+
+    def is_separator(value: str) -> bool:
+        # Only punctuation and explicit joiners may sit outside a copied span.
+        # In particular, dropping a negation, qualifier or action clause cannot
+        # turn a compound request into an independently authorized lookup.
+        tokens = "".join(
+            " "
+            if character.isspace() or unicodedata.category(character).startswith("P")
+            else character
+            for character in value
+        ).split()
+        return all(token.casefold() in {"and", "also", "then", "plus"} for token in tokens)
 
     end = 0
     for intent in plan.intents:
@@ -478,11 +491,15 @@ def validate_plan_spans(plan: IntentPlan, utterance: str) -> None:
         start = utterance.find(question, end)
         if start < 0:
             raise ValueError("Intent question spans must be exact and ordered")
+        if not is_separator(utterance[end:start]):
+            raise ValueError("Intent question spans must cover the full request")
         end = start + len(question)
         if len(plan.intents) > 1:
             for slot in (intent.entity.value, intent.time.expression):
                 if slot is not None and slot.casefold() not in question.casefold():
                     raise ValueError("Intent slots must occur within their question span")
+    if not is_separator(utterance[end:]):
+        raise ValueError("Intent question spans must cover the full request")
 
 
 def intent_plan_task(

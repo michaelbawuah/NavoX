@@ -5,6 +5,8 @@ x-node-database-url: &node-db postgres://navox:${NAVOX_DATABASE_PASSWORD:?Set a 
 x-production-api-environment: &api-environment
   DATABASE_URL: *python-db
   APP_ENVIRONMENT: production
+  # Credential-free reviewed templates only. Each owner still chooses and activates sources.
+  NEWS_PUBLIC_SOURCES_ENABLED: "true"
   WEB_ORIGIN: ${NAVOX_PUBLIC_ORIGIN:?Set the public HTTPS origin}
   GOOGLE_OAUTH_REDIRECT_URI: ${NAVOX_PUBLIC_ORIGIN}/api/v1/connections/google/callback
   CANVAS_OAUTH_REDIRECT_URI: ${NAVOX_PUBLIC_ORIGIN}/api/v1/connectors/canvas-lms/callback

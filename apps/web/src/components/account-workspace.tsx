@@ -3,8 +3,9 @@
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import {
   type Account,
-  authenticate,
+  authenticateAccountAccess,
   type GoogleConnection,
+  loadGoogleConnections,
   restoreAccountAccess,
 } from "../lib/account-access";
 import { NavoXCinematic } from "./navox-cinematic";
@@ -91,8 +92,11 @@ export function AccountWorkspace({
         ? { email, password, display_name: displayName }
         : { email, password };
     try {
-      setAccount(await authenticate(apiBaseUrl, mode, payload));
-      setConnectionsUnavailable(false);
+      const access = await authenticateAccountAccess(apiBaseUrl, mode, payload);
+      setAccount(access.account);
+      setConnections(access.connections);
+      setConnectionsUnavailable(Boolean(access.connectionsError));
+      setMessage(access.connectionsError);
       setPassword("");
     } catch (error) {
       setMessage(
@@ -107,19 +111,18 @@ export function AccountWorkspace({
 
   const refreshConnections = useCallback(async () => {
     try {
-      const response = await fetch(`${apiBaseUrl}/connections/google`, {
-        credentials: "include",
-        cache: "no-store",
-      });
-      if (!response.ok)
-        throw new Error("Connection controls could not refresh.");
-      setConnections((await response.json()) as GoogleConnection[]);
+      setConnections(await loadGoogleConnections(apiBaseUrl));
       setConnectionsUnavailable(false);
       setMessage("");
     } catch (error) {
       // Do not leave older approval/read controls advertising a stale active account.
       setConnections([]);
       setConnectionsUnavailable(true);
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Connected apps could not be loaded. Please retry.",
+      );
       throw error;
     }
   }, []);
@@ -135,7 +138,14 @@ export function AccountWorkspace({
         throw new Error("We couldn’t sign you out. Please try again.");
       setAccount(null);
       setConnections([]);
+      setConnectionsUnavailable(false);
       setMessage("");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "We couldn’t sign you out. Please try again.",
+      );
     } finally {
       setIsLoading(false);
     }
@@ -240,12 +250,13 @@ export function AccountWorkspace({
                 mode === "register" ? "new-password" : "current-password"
               }
               minLength={mode === "register" ? 12 : 1}
+              maxLength={128}
               onChange={(event) => setPassword(event.target.value)}
               required
               type="password"
               value={password}
             />
-            {mode === "register" && <small>Use at least 12 characters.</small>}
+            {mode === "register" && <small>Use 12 to 128 characters.</small>}
           </label>
           {message && (
             <p className="form-message" role="alert">

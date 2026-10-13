@@ -909,7 +909,13 @@ export function createAssistantRuntime(
     blocks: AssistantBlock[];
   }> {
     const pinned = planTurn({ text: input.request.text });
-    const references = input.turns.slice(-LIMITS.maxPlanReferences);
+    // The planner accepts shorter references than this runtime accepts turns.
+    // Omit overlong questions rather than truncating their meaning, then bind
+    // returned ordinals against this exact same list. Ordinary conversation
+    // retains its independently qualified, full-length history.
+    const references = input.turns
+      .filter((turn) => turn.question.length <= LIMITS.maxPlanReferenceLength)
+      .slice(-LIMITS.maxPlanReferences);
 
     // The exact Today fallback and the separately qualified text-only
     // conversation route cannot grant a capability or bypass an invalid plan.

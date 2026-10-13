@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>PMEL Highlights</title>
+    <item>
+      <title>Ocean research mission update</title>
+      <link>https://www.pmel.noaa.gov/news-and-media/highlights/ocean-research-mission</link>
+      <description>&lt;p&gt;Researchers share an update from an ocean survey.&lt;/p&gt;</description>
+      <pubDate>Tue, 06 Oct 2026 05:00:00 -0700</pubDate>
+      <dc:creator>NOAA</dc:creator>
+      <guid isPermaLink="true">https://www.pmel.noaa.gov/news-and-media/highlights/ocean-research-mission</guid>
+    </item>
+  </channel>
+</rss>

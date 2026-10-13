@@ -475,6 +475,89 @@ def test_compound_spans_are_exact_ordered_and_slot_grounded():
             )
 
 
+@pytest.mark.parametrize(
+    ("utterance", "questions"),
+    (
+        ("Do not What did Sarah email me", ("What did Sarah email me",)),
+        (
+            "What did Sarah email me and delete my calendar",
+            ("What did Sarah email me",),
+        ),
+        (
+            "What did Sarah email me about the renewal?",
+            ("What did Sarah email me",),
+        ),
+        (
+            "What did Sarah email me and cancel my subscription and what's the weather today?",
+            ("What did Sarah email me", "what's the weather today?"),
+        ),
+        (
+            "What did Sarah email me unless it is confidential and what's the weather today?",
+            ("What did Sarah email me", "what's the weather today?"),
+        ),
+        (
+            "What did Sarah email me and What did Sarah email me",
+            ("What did Sarah email me",),
+        ),
+    ),
+)
+def test_plan_spans_reject_omitted_requests_and_qualifiers(utterance, questions):
+    intents = [
+        {
+            **intent_first_intent(),
+            "question": question,
+            "entity": {"kind": "NONE", "value": None, "confidence": 1},
+        }
+        for question in questions
+    ]
+    with pytest.raises(ValueError, match="cover the full request"):
+        validate_plan_spans(
+            IntentPlan.model_validate({"version": 1, "intents": intents}), utterance
+        )
+
+
+@pytest.mark.parametrize(
+    "separator", (" and ", ", and also ", "; then ", " plus ", "… ALSO ", ", ")
+)
+def test_plan_spans_allow_explicit_joiners_and_punctuation(separator):
+    first = "What did Sarah email me"
+    second = "what's the weather today?"
+    intents = [
+        {
+            **intent_first_intent(),
+            "question": question,
+            "entity": {"kind": "NONE", "value": None, "confidence": 1},
+        }
+        for question in (first, second)
+    ]
+    validate_plan_spans(
+        IntentPlan.model_validate({"version": 1, "intents": intents}),
+        f" ({first}){separator}({second}) ",
+    )
+
+
+@pytest.mark.parametrize(
+    "utterance",
+    (
+        "what am I missing today, and read it to me",
+        "what am I missing today, but don't read it to me",
+    ),
+)
+def test_plan_spans_preserve_embedded_delivery_instructions(utterance):
+    intent = {
+        **intent_first_intent(),
+        "route": "today.read",
+        "question": utterance,
+        "entity": {"kind": "NONE", "value": None, "confidence": 1},
+    }
+    validate_plan_spans(IntentPlan.model_validate({"version": 1, "intents": [intent]}), utterance)
+    intent["question"] = "what am I missing today"
+    with pytest.raises(ValueError, match="cover the full request"):
+        validate_plan_spans(
+            IntentPlan.model_validate({"version": 1, "intents": [intent]}), utterance
+        )
+
+
 def test_plan_contract_has_no_action_surface():
     assert set(IntentPlan.model_fields) == {"version", "intents"}
     assert set(intent_first_intent()) == {
@@ -499,7 +582,13 @@ def test_plan_contract_has_no_action_surface():
 @pytest.mark.asyncio
 async def test_authenticated_plan_returns_routes_and_audits_the_task(intent_env):
     env = intent_env
-    adapter = await install_runtime(env, models=True)
+    adapter = await install_runtime(
+        env,
+        models=True,
+        adapter_output=json.dumps(
+            plan_payload(question="What did Sarah email me about the renewal?")
+        ),
+    )
     created = await env.client.post("/api/v1/ai/sessions")
     assert created.status_code == 201
     session_id = created.json()["id"]
@@ -540,6 +629,21 @@ async def test_authenticated_plan_returns_routes_and_audits_the_task(intent_env)
         assert run.schema == "assistant_intent_plan@v9"
         assert run.profile == Profile.PLANNING_HIGH.value
         assert run.status == "COMPLETED" and run.shadow is False
+
+
+@pytest.mark.asyncio
+async def test_authenticated_plan_rejects_an_omitted_action_clause(intent_env):
+    env = intent_env
+    adapter = await install_runtime(env, models=True)
+    response = await env.client.post(
+        "/api/v1/ai/assistant/intents",
+        json={"utterance": "What did Sarah email me and delete my calendar"},
+    )
+    assert response.status_code == 503
+    assert len(adapter.calls) == 1
+    async with env.factory() as database:
+        runs = list(await database.scalars(select(AITaskRun)))
+        assert runs and all(run.status == "FAILED" for run in runs)
 
 
 @pytest.mark.asyncio

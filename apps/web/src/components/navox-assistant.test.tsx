@@ -58,6 +58,37 @@ const turn: AssistantTurnView = {
 };
 
 describe("assistant transcript rendering", () => {
+  it("offers follow-ups as reviewable questions without submitting a turn", () => {
+    const presentation = turn.presentation;
+    if (!presentation) throw new Error("The fixture must have a presentation.");
+    const suggestionTurn: AssistantTurnView = {
+      ...turn,
+      presentation: {
+        ...presentation,
+        blocks: [{ kind: "SUGGESTIONS", queries: ["What should I do first?"] }],
+      },
+    };
+    const useSuggestion = vi.fn();
+    const markup = renderToStaticMarkup(
+      createElement(AssistantTurnViewBlock, {
+        turn: suggestionTurn,
+        onUseSuggestion: useSuggestion,
+      }),
+    );
+    expect(markup).toContain('aria-label="Suggested follow-up questions"');
+    expect(markup).toContain(
+      '<button type="button">What should I do first?</button>',
+    );
+    expect(useSuggestion).not.toHaveBeenCalled();
+    const readOnly = renderToStaticMarkup(
+      createElement(AssistantTurnViewBlock, { turn: suggestionTurn }),
+    );
+    expect(readOnly).toContain("What should I do first?");
+    expect(readOnly).not.toContain(
+      '<button type="button">What should I do first?</button>',
+    );
+  });
+
   it("keeps the selected email workspace beside its response without duplicate actions", () => {
     const emailTurn: AssistantTurnView = {
       ...turn,

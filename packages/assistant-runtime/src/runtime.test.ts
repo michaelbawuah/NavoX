@@ -840,6 +840,48 @@ describe("durable per-request claims", () => {
     expect(duplicate.replay).toBe(true);
   });
 
+  it("does not take over a live request after a slow planning and read chain", async () => {
+    const store = createMemoryStore();
+    const gate = deferred<TodayQueryResult>();
+    let currentTime = NOW;
+    const upstream = createFakeUpstream({ today: () => gate.promise });
+    const runtime = createAssistantRuntime({
+      store,
+      upstream,
+      now: () => currentTime,
+      newId: ids(),
+    });
+    const session = await runtime.createSession({ cookie: COOKIE });
+    const claim = vi.spyOn(store, "claimRequest");
+    const body = {
+      request_id: REQUEST_ID,
+      text: "What is today?",
+      modality: "TEXT" as const,
+    };
+    const first = runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: session.id,
+      body,
+    });
+    await waitUntil(() => upstream.calls.today.length === 1);
+    // A valid turn can pass the old 30-second lease while planning and then
+    // reading sources. Its concurrent retry must still wait for that owner.
+    currentTime = new Date(NOW.getTime() + 40_000);
+    const second = runtime.submitTurn({
+      cookie: COOKIE,
+      session_id: session.id,
+      body,
+    });
+    await waitUntil(() => claim.mock.calls.length === 2);
+    expect(upstream.calls.today).toHaveLength(1);
+    gate.resolve(DEFAULT_TODAY);
+    const [owner, duplicate] = await Promise.all([first, second]);
+    expect(upstream.calls.today).toHaveLength(1);
+    expect(store.turns).toHaveLength(1);
+    expect(duplicate.turn.id).toBe(owner.turn.id);
+    expect(duplicate.replay).toBe(true);
+  });
+
   it("refuses a changed payload for an in-flight id without another Today call", async () => {
     const context = await sessionWithDelayedToday();
     const first = context.runtime.submitTurn({
@@ -2943,7 +2985,7 @@ describe("adaptive response modality", () => {
         intents: [
           {
             route: "today.read",
-            question: "what am I missing today",
+            question: "what am I missing today, and read it to me",
             entity: { kind: "NONE", value: null, confidence: 0.5 },
             time: { kind: "NONE", expression: null, confidence: 1 },
             reference: { kind: "NONE", ordinal: null },
@@ -2965,7 +3007,7 @@ describe("adaptive response modality", () => {
     });
     // The question reached its owning service with the operator's own words.
     expect(context.upstream.calls.today[0]?.query).toBe(
-      "what am I missing today",
+      "what am I missing today, and read it to me",
     );
     expect(response.turn.state).toBe("READY");
     expect(response.turn.presentation?.presentation).toBe("BOTH");
@@ -2982,7 +3024,7 @@ describe("adaptive response modality", () => {
         intents: [
           {
             route: "today.read",
-            question: "what am I missing today",
+            question: "what am I missing today, but don't read it to me",
             entity: { kind: "NONE", value: null, confidence: 0.5 },
             time: { kind: "NONE", expression: null, confidence: 1 },
             reference: { kind: "NONE", ordinal: null },

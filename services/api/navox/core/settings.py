@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     stripe_sandbox_enabled: bool = False
     # News is opt-in. Only deployment-reviewed definitions can choose endpoints/rights.
     news_feed_enabled: bool = False
+    # Makes reviewed credential-free source templates selectable; activation remains owner-scoped.
+    news_public_sources_enabled: bool = False
     news_chat_enabled: bool = False
     news_intelligence_enabled: bool = False
     news_deep_research_enabled: bool = False

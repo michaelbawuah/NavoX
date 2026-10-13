@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>BEA News Releases</title>
+    <item name="International Trade">
+      <dbId>102</dbId>
+      <title>International trade data release</title>
+      <link>https://www.bea.gov/news/2026/international-trade-data</link>
+      <guid isPermaLink="true">https://www.bea.gov/news/2026/international-trade-data</guid>
+      <description>&lt;p&gt;New estimates of international trade are available.&lt;/p&gt;</description>
+      <data><main><current><infoDate>August 2026</infoDate></current></main></data>
+      <pubDate>Tue, 06 Oct 2026 08:30:00 EDT</pubDate>
+    </item>
+    <item>
+      <title>Research paper</title>
+      <link>https://apps.bea.gov/research/paper</link>
+      <pubDate>Mon, 05 Oct 2026 08:30:00 EDT</pubDate>
+    </item>
+    <item>
+      <title>Relative link cannot broaden the catalog</title>
+      <link>/news/2026/unreviewed-relative-link</link>
+      <pubDate>Mon, 05 Oct 2026 08:30:00 EDT</pubDate>
+    </item>
+  </channel>
+</rss>

@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pwdlib import PasswordHash
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +27,11 @@ class RegistrationRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=12, max_length=128)
     display_name: str = Field(min_length=1, max_length=256)
+
+    @field_validator("display_name", mode="before")
+    @classmethod
+    def trim_display_name(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
 
 class LoginRequest(BaseModel):

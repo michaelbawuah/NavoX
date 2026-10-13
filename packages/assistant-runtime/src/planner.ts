@@ -68,6 +68,15 @@ function upstreamInvalid(message: string): never {
   throw new AssistantError("invalid_request", message);
 }
 
+/** Unplanned text may contain joiners, never another request or qualifier. */
+function isSpanSeparator(value: string): boolean {
+  const joiners = new Set(["and", "also", "then", "plus"]);
+  return value
+    .split(/[\s\p{P}]+/u)
+    .filter(Boolean)
+    .every((token) => joiners.has(token.toLocaleLowerCase("en-US")));
+}
+
 /**
  * Validates one SPEC-005 plan against this runtime's own registry.
  *
@@ -126,6 +135,8 @@ export function parseUpstreamIntentPlan(
     const start = input.utterance.indexOf(question, spanEnd);
     if (start < 0)
       upstreamInvalid("The planner invented or reordered a question span.");
+    if (!isSpanSeparator(input.utterance.slice(spanEnd, start)))
+      upstreamInvalid("The planner omitted part of the request.");
     spanEnd = start + question.length;
     const definition = capabilityForIntentKind(raw.route);
     const [planned] = parseIntentPlan(
@@ -167,6 +178,8 @@ export function parseUpstreamIntentPlan(
       upstreamInvalid("The planner invented a time outside its question span.");
     return bindRecentTurnReference(planned, input.recentTurns);
   });
+  if (!isSpanSeparator(input.utterance.slice(spanEnd)))
+    upstreamInvalid("The planner omitted part of the request.");
   return parseIntentPlan({ version: 1, intents }, { allowBoundTurn: true });
 }
 

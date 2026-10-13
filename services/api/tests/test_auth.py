@@ -74,6 +74,60 @@ async def test_registration_rejects_a_duplicate_email(client: AsyncClient) -> No
 
 
 @pytest.mark.asyncio
+async def test_registration_trims_the_name_before_creating_the_workspace(
+    client: AsyncClient,
+) -> None:
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "owner@example.com",
+            "password": "twelve-character-password",
+            "display_name": "  Owner  ",
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["display_name"] == "Owner"
+    assert response.json()["workspace"]["name"] == "Owner's workspace"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("display_name", ["", "   ", "\t\n", "N" * 257])
+async def test_registration_rejects_blank_or_overlong_names(
+    client: AsyncClient, display_name: str
+) -> None:
+    response = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "owner@example.com",
+            "password": "twelve-character-password",
+            "display_name": display_name,
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "display_name"]
+    assert (await client.get("/api/v1/auth/me")).status_code == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("endpoint", "password"),
+    [
+        ("register", "p" * 11),
+        ("register", "p" * 129),
+        ("login", ""),
+        ("login", "p" * 129),
+    ],
+)
+async def test_authentication_enforces_password_length(
+    client: AsyncClient, endpoint: str, password: str
+) -> None:
+    payload = {"email": "owner@example.com", "password": password, "display_name": "Owner"}
+    response = await client.post(f"/api/v1/auth/{endpoint}", json=payload)
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "password"]
+
+
+@pytest.mark.asyncio
 async def test_login_and_logout_revoke_the_server_side_session(client: AsyncClient) -> None:
     payload = {
         "email": "owner@example.com",

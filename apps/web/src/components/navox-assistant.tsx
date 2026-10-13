@@ -303,10 +303,12 @@ export function AssistantBlockView({
   block,
   sessionId,
   turnId,
+  onUseSuggestion,
 }: {
   block: AssistantBlock;
   sessionId?: string;
   turnId?: string;
+  onUseSuggestion?: (question: string) => void;
 }) {
   switch (block.kind) {
     case "ANSWER":
@@ -430,9 +432,20 @@ export function AssistantBlockView({
     }
     case "SUGGESTIONS":
       return (
-        <ul className={styles.details}>
+        <ul
+          className={styles.followUps}
+          aria-label="Suggested follow-up questions"
+        >
           {block.queries.map((query) => (
-            <li key={query}>{query}</li>
+            <li key={query}>
+              {onUseSuggestion ? (
+                <button type="button" onClick={() => onUseSuggestion(query)}>
+                  {query}
+                </button>
+              ) : (
+                query
+              )}
+            </li>
           ))}
         </ul>
       );
@@ -479,6 +492,7 @@ export function AssistantTurnViewBlock({
   onStopDraftSpeech,
   draftSpeakingKey,
   sessionId,
+  onUseSuggestion,
 }: {
   turn: AssistantTurnView;
   onSpeak?: (turn: AssistantTurnView) => void;
@@ -487,6 +501,7 @@ export function AssistantTurnViewBlock({
   onStopDraftSpeech?: () => void;
   draftSpeakingKey?: string | null;
   sessionId?: string;
+  onUseSuggestion?: (question: string) => void;
 }) {
   const blocks = turn.presentation?.blocks ?? [];
   const keys = uniqueKeys(blockBases(blocks));
@@ -521,6 +536,7 @@ export function AssistantTurnViewBlock({
                     block={block}
                     sessionId={sessionId}
                     turnId={turn.id}
+                    onUseSuggestion={onUseSuggestion}
                   />
                   {onSelectEmail &&
                     turn.state === "CLARIFY" &&
@@ -801,6 +817,7 @@ export function NavoXAssistant() {
   const [turns, setTurns] = useState<AssistantTurnView[]>([]);
   const [goals, setGoals] = useState<AssistantGoalView[]>([]);
   const [text, setText] = useState("");
+  const questionInputRef = useRef<HTMLInputElement | null>(null);
   const [voice, setVoice] = useState<VoiceSessionState>(initialVoiceState);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1276,6 +1293,14 @@ export function NavoXAssistant() {
                 key={turn.id}
                 turn={turn}
                 sessionId={sessionId ?? undefined}
+                onUseSuggestion={
+                  !busy && !connecting && sessionId
+                    ? (question) => {
+                        setText(question);
+                        questionInputRef.current?.focus();
+                      }
+                    : undefined
+                }
                 onSpeak={
                   controls.readAloudAvailable
                     ? (target) => speak(target)
@@ -1345,6 +1370,7 @@ export function NavoXAssistant() {
               <label className={styles.field}>
                 <span className={styles.srOnly}>Question</span>
                 <input
+                  ref={questionInputRef}
                   type="text"
                   value={text}
                   aria-describedby="navox-question-limit"
@@ -1556,7 +1582,10 @@ export function NavoXAssistant() {
                     type="button"
                     key={question}
                     disabled={!sessionId}
-                    onClick={() => setText(question)}
+                    onClick={() => {
+                      setText(question);
+                      questionInputRef.current?.focus();
+                    }}
                     aria-label={question}
                   >
                     <span aria-hidden="true">{icon}</span>

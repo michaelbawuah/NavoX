@@ -15,6 +15,7 @@ from navox.news.api_feeds import approved_api_connection
 from navox.news.contracts import FeedType, NewsError, NewsItemRead
 from navox.news.ingestion import ingest_source, purge_unavailable, visible_items
 from navox.news.registry import activate_source, catalog, owned_source, revoke_rights
+from navox.news.rights import Operation, require_operation
 from navox.news.stories import index_source
 
 router = APIRouter(prefix="/news", tags=["news"])
@@ -77,7 +78,14 @@ async def sources(
     )
     by_key = {row.source_key: row for row in rows}
     result: list[dict[str, object]] = []
+    now = datetime.now(UTC)
     for definition in definitions.values():
+        if not definition.rights.reviewed_at <= now < definition.rights.expires_at:
+            continue
+        try:
+            require_operation(Operation.METADATA, definition.rights)
+        except NewsError:
+            continue
         if definition.feed_type == FeedType.API:
             try:
                 await approved_api_connection(

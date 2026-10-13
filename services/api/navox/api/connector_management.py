@@ -74,6 +74,17 @@ async def list_connectors(
     from navox.api.canvas import configured
 
     result = list(CATALOG)
+    try:
+        google_vault(settings)
+    except HTTPException:
+        result = [
+            entry.model_copy(
+                update={"availability": "setup_pending", "setup_label": "Setup not enabled yet"}
+            )
+            if entry.id == "google-workspace"
+            else entry
+            for entry in result
+        ]
     result = [
         entry.model_copy(update={"availability": "available", "setup_label": "Connect REST API"})
         if entry.id == "generic-rest-api" and rest_keys(settings)
@@ -122,7 +133,7 @@ async def connect_catalog_entry(
 ) -> GoogleAuthorizationStartResponse:
     del payload
     require_origin(request, settings.web_origin)
-    entry = catalog_entry(connector_id)
+    entry = await describe_connector(connector_id, current_account, settings)
     if entry.availability != "available" or entry.id != "google-workspace":
         raise HTTPException(409, "Use the connector-specific setup flow")
     return await start_google_authorization(current_account, database, settings)

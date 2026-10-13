@@ -1,6 +1,8 @@
 """Operator-defined catalog and owner-scoped activation. Feed content cannot alter it."""
 
+import json
 from datetime import datetime
+from importlib.resources import files
 from uuid import UUID
 
 from sqlalchemy import delete, select
@@ -18,11 +20,26 @@ def catalog(settings: Settings) -> dict[str, SourceDefinition]:
         definitions = [
             SourceDefinition.model_validate(item) for item in settings.news_source_catalog
         ]
-    except ValueError:
+        result = {definition.key: definition for definition in definitions}
+        if len(result) != len(definitions):
+            raise ValueError("Duplicate operator source keys")
+        if settings.news_public_sources_enabled:
+            public_sources = json.loads(
+                files("navox.news").joinpath("public_sources.json").read_text()
+            )
+            if not isinstance(public_sources, list):
+                raise ValueError("Invalid public source catalog")
+            public_definitions = [SourceDefinition.model_validate(item) for item in public_sources]
+            public_catalog = {definition.key: definition for definition in public_definitions}
+            if len(public_catalog) != len(public_definitions):
+                raise ValueError("Duplicate public source keys")
+            for definition in public_definitions:
+                existing = result.get(definition.key)
+                if existing is not None and existing.fingerprint != definition.fingerprint:
+                    raise ValueError("Conflicting public source definition")
+                result[definition.key] = definition
+    except (OSError, ValueError):
         raise NewsError("invalid_source") from None
-    result = {definition.key: definition for definition in definitions}
-    if len(result) != len(definitions):
-        raise NewsError("invalid_source")
     return result
 
 

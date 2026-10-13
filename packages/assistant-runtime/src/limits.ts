@@ -10,6 +10,8 @@ export const LIMITS = {
   maxIntents: 4,
   /** Recent user turns this runtime may send to SPEC-005 for follow-up planning. */
   maxPlanReferences: 4,
+  /** Mirrors the owning intent planner's MAX_REFERENCE_LENGTH, not turn length. */
+  maxPlanReferenceLength: 240,
   /** Longest clarification question accepted from a plan. */
   maxClarificationLength: 240,
   /** Longest entity/time expression copied from the operator's own words. */
@@ -38,12 +40,16 @@ export const LIMITS = {
   retentionDays: 30,
   /** Upstream request timeout. */
   requestTimeoutMs: 10_000,
+  /** The AI gateway allows 30 seconds of provider work, plus API overhead. */
+  aiRequestTimeoutMs: 35_000,
+  /** Drafting may fetch Gmail for 30 seconds, then use the 30-second AI budget. */
+  draftRequestTimeoutMs: 65_000,
   /** How long a duplicate waits for the owning request to finish. */
   claimWaitMs: 5_000,
   /** Poll interval while waiting for a claimed request to resolve. */
   claimPollMs: 25,
-  /** A pending claim older than this is treated as abandoned and taken over. */
-  claimStaleMs: 30_000,
+  /** Covers planning and four sequential reads with their ownership checks. */
+  claimStaleMs: 360_000,
   /** Sessions removed per bounded purge statement. */
   purgeBatchSize: 500,
   /** Default cadence for the bounded retention purge. */

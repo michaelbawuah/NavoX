@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>USGS Significant Earthquakes</title>
+  <entry>
+    <id>urn:earthquake-usgs-gov:us:fixture-event</id>
+    <title>M 6.0 - Ocean earthquake</title>
+    <updated>2026-10-13T17:00:00.000Z</updated>
+    <link rel="alternate" type="text/html" href="https://earthquake.usgs.gov/earthquakes/eventpage/fixture-event" />
+    <summary type="html">&lt;p&gt;An earthquake has been recorded.&lt;/p&gt;</summary>
+  </entry>
+</feed>
