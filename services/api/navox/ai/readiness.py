@@ -19,11 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from navox.ai.catalog import catalog_template
 from navox.ai.context import reject_credentials
 from navox.ai.control import evaluation_passes
+from navox.ai.conversation import CONVERSATION_PROMPT, CONVERSATION_SCHEMA
 from navox.ai.domains import DOMAIN_TASKS, Domain, domain_prompt_reference, domain_reference
 from navox.ai.features import configured_secrets
 from navox.ai.foundation.contracts import Contract, Profile, Provider, Sensitivity, TaskType
 from navox.ai.foundation.persistence import RegistryStore, canonical, digest, model_key
 from navox.ai.foundation.registry import RegistrySnapshot, validate_registry_update
+from navox.ai.intent_plan import INTENT_PLAN_PROMPT, INTENT_PLAN_SCHEMA
 from navox.ai.prompts import COMMUNICATION_PROMPT_V2, EXTRACTION_PROMPT, EXTRACTION_SCHEMA
 from navox.ai.routing import EvaluationEvidence, PolicyRules
 from navox.ai.store import utc
@@ -50,6 +52,31 @@ def task_bindings() -> list[tuple[str, Profile, TaskType, str, str]]:
             TaskType.DRAFT_COMMUNICATION,
             f"{COMMUNICATION_PROMPT_V2.name}@{COMMUNICATION_PROMPT_V2.version}",
             "communication_draft@v1",
+        )
+    )
+    bindings.extend(
+        (
+            name,
+            profile,
+            task_type,
+            f"{prompt.name}@{prompt.version}",
+            f"{schema.name}@{schema.version}",
+        )
+        for name, profile, task_type, prompt, schema in (
+            (
+                "assistant_intent_plan",
+                Profile.PLANNING_HIGH,
+                TaskType.PLAN,
+                INTENT_PLAN_PROMPT,
+                INTENT_PLAN_SCHEMA,
+            ),
+            (
+                "assistant_conversation",
+                Profile.ASSISTANT_INTERACTIVE,
+                TaskType.REASON,
+                CONVERSATION_PROMPT,
+                CONVERSATION_SCHEMA,
+            ),
         )
     )
     bindings.extend(

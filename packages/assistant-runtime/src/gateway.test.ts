@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { AssistantError } from "./errors";
 import { createNavoxUpstream, type FetchLike } from "./gateway";
+import { LIMITS } from "./limits";
 
 const base = "https://navox.example/api/v1";
 const cookie = "navox_session=abc123";
@@ -17,7 +18,203 @@ function json(payload: unknown, status = 200): Response {
   });
 }
 
+function delayedFetch(payload: unknown, delayMs: number): FetchLike {
+  return async (_url, init) =>
+    new Promise<Response>((resolve, reject) => {
+      const timer = setTimeout(() => resolve(json(payload)), delayMs);
+      init?.signal?.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          reject(new DOMException("Request aborted", "AbortError"));
+        },
+        { once: true },
+      );
+    });
+}
+
 describe("NavoX API gateway", () => {
+  it.each(["planner", "conversation"] as const)(
+    "accepts a %s answer after the ordinary read deadline",
+    async (route) => {
+      vi.useFakeTimers();
+      try {
+        const upstream = createNavoxUpstream({
+          baseUrl: base,
+          fetchImpl: delayedFetch({ answer: "Ready" }, 12_000),
+        });
+        const request =
+          route === "planner"
+            ? upstream.planIntents(cookie, {
+                utterance: "Explain photosynthesis",
+                recentReferences: [],
+                sessionId: null,
+              })
+            : upstream.answerConversation(cookie, {
+                utterance: "Explain photosynthesis",
+                recentTurns: [],
+                sessionId: "55555555-5555-4555-8555-555555555555",
+              });
+        const result = expect(request).resolves.toEqual({ answer: "Ready" });
+        await vi.advanceTimersByTimeAsync(12_000);
+        await result;
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("keeps ordinary reads within their shorter deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const upstream = createNavoxUpstream({
+        baseUrl: base,
+        fetchImpl: delayedFetch(account, 12_000),
+      });
+      const result = expect(
+        upstream.fetchAccount(cookie),
+      ).rejects.toMatchObject({
+        code: "unavailable",
+      });
+      await vi.advanceTimersByTimeAsync(LIMITS.requestTimeoutMs);
+      await result;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts an AI request that exceeds its own deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const upstream = createNavoxUpstream({
+        baseUrl: base,
+        fetchImpl: delayedFetch({ answer: "Too late" }, 40_000),
+      });
+      const result = expect(
+        upstream.answerConversation(cookie, {
+          utterance: "Explain photosynthesis",
+          recentTurns: [],
+          sessionId: "55555555-5555-4555-8555-555555555555",
+        }),
+      ).rejects.toMatchObject({ code: "unavailable" });
+      await vi.advanceTimersByTimeAsync(LIMITS.aiRequestTimeoutMs);
+      await result;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("allows source retrieval and AI generation to finish a draft", async () => {
+    vi.useFakeTimers();
+    try {
+      const upstream = createNavoxUpstream({
+        baseUrl: base,
+        fetchImpl: delayedFetch({ draft: "Ready for review" }, 50_000),
+      });
+      const result = expect(
+        upstream.createKnowledgeEmailDraft(cookie, {
+          sourceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          instructions: "Write a concise reply",
+        }),
+      ).resolves.toEqual({ draft: "Ready for review" });
+      await vi.advanceTimersByTimeAsync(50_000);
+      await result;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts generation after the bounded draft deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const upstream = createNavoxUpstream({
+        baseUrl: base,
+        fetchImpl: delayedFetch({ draft: "Too late" }, 70_000),
+      });
+      const result = expect(
+        upstream.createKnowledgeEmailDraft(cookie, {
+          sourceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          instructions: "Write a concise reply",
+        }),
+      ).rejects.toMatchObject({ code: "unavailable" });
+      await vi.advanceTimersByTimeAsync(LIMITS.draftRequestTimeoutMs);
+      await result;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps manual draft revision on the ordinary deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const upstream = createNavoxUpstream({
+        baseUrl: base,
+        fetchImpl: delayedFetch({ draft: "Edited" }, 12_000),
+      });
+      const result = expect(
+        upstream.reviseCommunicationDraft(
+          cookie,
+          "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          {
+            expectedVersion: 1,
+            to: "recipient@example.com",
+            subject: "Re: Meeting",
+            body: "See you tomorrow.",
+          },
+        ),
+      ).rejects.toMatchObject({ code: "unavailable" });
+      await vi.advanceTimersByTimeAsync(LIMITS.requestTimeoutMs);
+      await result;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses separate bounded timeout overrides for reads, conversation and drafting", async () => {
+    vi.useFakeTimers();
+    try {
+      const upstream = createNavoxUpstream({
+        baseUrl: base,
+        timeoutMs: 100,
+        aiTimeoutMs: 200,
+        draftTimeoutMs: 300,
+        fetchImpl: delayedFetch({ answer: "Ready" }, 150),
+      });
+      const read = expect(upstream.fetchAccount(cookie)).rejects.toMatchObject({
+        code: "unavailable",
+      });
+      const conversation = expect(
+        upstream.answerConversation(cookie, {
+          utterance: "Explain photosynthesis",
+          recentTurns: [],
+          sessionId: "55555555-5555-4555-8555-555555555555",
+        }),
+      ).resolves.toEqual({ answer: "Ready" });
+      const draft = expect(
+        upstream.createKnowledgeEmailDraft(cookie, {
+          sourceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          instructions: "Write a concise reply",
+        }),
+      ).resolves.toEqual({ answer: "Ready" });
+      await vi.advanceTimersByTimeAsync(150);
+      await Promise.all([read, conversation, draft]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    { timeoutMs: -1 },
+    { aiTimeoutMs: Number.NaN },
+    { draftTimeoutMs: Number.POSITIVE_INFINITY },
+    { aiTimeoutMs: LIMITS.aiRequestTimeoutMs + 1 },
+    { draftTimeoutMs: LIMITS.draftRequestTimeoutMs + 1 },
+  ])("rejects an unbounded timeout override %j", (timeouts) => {
+    expect(() => createNavoxUpstream({ baseUrl: base, ...timeouts })).toThrow(
+      /timeout.*bounds/i,
+    );
+  });
+
   it("uses the scoped upcoming and regional endpoints without a named selector", async () => {
     const fetchImpl = vi.fn(async () => json([])) as unknown as FetchLike;
     const upstream = createNavoxUpstream({ baseUrl: base, fetchImpl });

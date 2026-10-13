@@ -1,11 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
 from test_news_foundation import NOW, definition, rss
 
 from navox.api import news, news_stories
-from navox.db.news import NewsSource
+from navox.db.news import NewsSource, NewsStoryPreference
 from navox.news.feeds import parse_feed
 from navox.news.ingestion import store_item
 from navox.news.registry import current_rights
@@ -95,6 +95,65 @@ async def test_feed_preferences_saves_and_revocation(subscription_env):
         headers=env.headers,
     )
     assert (await env.client.get(path)).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_saved_and_dismissed_preferences_apply_before_feed_candidate_limit(subscription_env):
+    env = subscription_env
+    saved_story, source = await setup_story(env)
+    config = definition()
+    saved_story.last_updated_at = NOW - timedelta(minutes=1)
+    env.database.add(
+        NewsStoryPreference(
+            cluster_id=saved_story.id,
+            workspace_id=env.workspace_id,
+            user_id=env.user_id,
+            saved=True,
+            dismissed=False,
+            followed=False,
+        )
+    )
+    candidate = parse_feed(rss(), config)[0][0]
+    rights = await current_rights(env.database, source)
+    newer_stories = []
+    for number in range(101):
+        item = await store_item(
+            env.database,
+            source,
+            rights,
+            config,
+            candidate.model_copy(
+                update={
+                    "external_id": f"newer-{number}",
+                    "canonical_url": f"https://science.example.com/observation-{number}",
+                    "headline": f"Independent measured observation {number}",
+                    "description": f"Independent source statement {number}.",
+                }
+            ),
+            now=NOW,
+        )
+        newer_stories.append(await index_item(env.database, item, {config.key: config}, now=NOW))
+    await env.database.commit()
+
+    response = await env.client.get("/api/v1/news/saved")
+    assert response.status_code == 200
+    assert [story["id"] for story in response.json()] == [str(saved_story.id)]
+
+    env.database.add_all(
+        NewsStoryPreference(
+            cluster_id=story.id,
+            workspace_id=env.workspace_id,
+            user_id=env.user_id,
+            saved=False,
+            dismissed=True,
+            followed=False,
+        )
+        for story in newer_stories
+    )
+    await env.database.commit()
+    response = await env.client.get("/api/v1/news/top")
+    assert response.status_code == 200
+    assert [story["id"] for story in response.json()] == [str(saved_story.id)]
 
 
 @pytest.mark.asyncio

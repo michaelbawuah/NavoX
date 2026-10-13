@@ -232,6 +232,7 @@ export function TodayWorkspace({
   const [workspaceError, setWorkspaceError] = useState("");
   const [workspaceMessage, setWorkspaceMessage] = useState("");
   const [loadingToday, setLoadingToday] = useState(true);
+  const [retryingConnections, setRetryingConnections] = useState(false);
   const todayRequest = useRef(0);
   const [mutatingId, setMutatingId] = useState<string | null>(null);
 
@@ -246,6 +247,17 @@ export function TodayWorkspace({
   const [handlingId, setHandlingId] = useState<string | null>(null);
   const [activePlan, setActivePlan] = useState<PlanDetail | null>(null);
   const [recentPlans, setRecentPlans] = useState<PlanSummary[]>([]);
+
+  async function retryConnections() {
+    setRetryingConnections(true);
+    try {
+      await onConnectionsChanged();
+    } catch {
+      // AccountWorkspace keeps the connection error visible for another retry.
+    } finally {
+      setRetryingConnections(false);
+    }
+  }
 
   const refreshToday = useCallback(async () => {
     const requestNumber = ++todayRequest.current;
@@ -979,7 +991,25 @@ export function TodayWorkspace({
           )}
         </header>
 
-        {(workspaceError || workspaceMessage || message) && (
+        {connectionsUnavailable && (
+          <div className={styles.errorBanner} role="alert">
+            <p>{message || "Connected apps could not be loaded."}</p>
+            <button
+              className={styles.secondaryAction}
+              disabled={retryingConnections}
+              onClick={() => void retryConnections()}
+              type="button"
+            >
+              {retryingConnections
+                ? "Checking connections…"
+                : "Retry connections"}
+            </button>
+          </div>
+        )}
+
+        {(workspaceError ||
+          workspaceMessage ||
+          (message && !connectionsUnavailable)) && (
           <div
             className={
               workspaceError ? styles.errorBanner : styles.statusBanner

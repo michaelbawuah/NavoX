@@ -123,10 +123,27 @@ export interface NavoxUpstream {
 export interface NavoxUpstreamConfig {
   baseUrl: string;
   fetchImpl?: FetchLike;
+  /** Ordinary reads; optional overrides may shorten their maximum deadline. */
   timeoutMs?: number;
+  aiTimeoutMs?: number;
+  draftTimeoutMs?: number;
 }
 
 const SIGNED_OUT = "Sign in to use the assistant.";
+
+function boundedTimeout(
+  configured: number | undefined,
+  maximum: number,
+): number {
+  const timeout = configured ?? maximum;
+  if (!Number.isSafeInteger(timeout) || timeout <= 0 || timeout > maximum) {
+    throw new AssistantError(
+      "misconfigured",
+      "The assistant request timeout is outside its supported bounds.",
+    );
+  }
+  return timeout;
+}
 
 /**
  * The SPEC-005 intent route has exactly one 503 meaning: no qualified AI
@@ -258,14 +275,34 @@ export function createNavoxUpstream(
     );
   }
   const fetchImpl = config.fetchImpl ?? ((input, init) => fetch(input, init));
-  const timeoutMs = config.timeoutMs ?? LIMITS.requestTimeoutMs;
+  const timeoutMs = boundedTimeout(config.timeoutMs, LIMITS.requestTimeoutMs);
+  const aiTimeoutMs = boundedTimeout(
+    config.aiTimeoutMs,
+    LIMITS.aiRequestTimeoutMs,
+  );
+  const draftTimeoutMs = boundedTimeout(
+    config.draftTimeoutMs,
+    LIMITS.draftRequestTimeoutMs,
+  );
 
   async function send(
     path: string,
-    input: { method: "GET" | "POST" | "PATCH"; cookie: string; body?: unknown },
+    input: {
+      method: "GET" | "POST" | "PATCH";
+      cookie: string;
+      body?: unknown;
+      deadline?: "AI" | "DRAFT";
+    },
   ): Promise<Response> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(
+      () => controller.abort(),
+      input.deadline === "DRAFT"
+        ? draftTimeoutMs
+        : input.deadline === "AI"
+          ? aiTimeoutMs
+          : timeoutMs,
+    );
     const headers: Record<string, string> = {};
     if (input.cookie) headers.cookie = input.cookie;
     if (input.body !== undefined) headers["content-type"] = "application/json";
@@ -379,6 +416,7 @@ export function createNavoxUpstream(
       const response = await send("/ai/assistant/intents", {
         method: "POST",
         cookie,
+        deadline: "AI",
         body: {
           utterance: input.utterance,
           recent_references: [...input.recentReferences],
@@ -401,6 +439,7 @@ export function createNavoxUpstream(
       const response = await send(path, {
         method: "POST",
         cookie,
+        deadline: "AI",
         body: {
           utterance: input.utterance,
           recent_turns: [...input.recentTurns],
@@ -621,6 +660,7 @@ export function createNavoxUpstream(
       const response = await send(path, {
         method: "POST",
         cookie,
+        deadline: "DRAFT",
         body: { source_id: input.sourceId, instructions: input.instructions },
       });
       if (!response.ok) throw statusError(response.status, path);

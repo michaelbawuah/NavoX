@@ -24,6 +24,33 @@ export async function loadNewsFeed(
   return newsRequest<NewsStory[]>(newsFeedPath(feed), { signal });
 }
 
+/** Keep a successful activation even when the first refresh cannot finish. */
+export async function addNewsSource(key: string): Promise<string> {
+  const source = await newsRequest<{ id: string; status: string }>(
+    `/sources/${encodeURIComponent(key)}/activate`,
+    {
+      method: "POST",
+      body: JSON.stringify({ request_id: crypto.randomUUID() }),
+    },
+  );
+  if (source.status !== "active" || typeof source.id !== "string" || !source.id)
+    throw new Error("This source couldn’t be added. Please try again.");
+  try {
+    const refresh = await newsRequest<{ status: string }>(
+      `/sources/${encodeURIComponent(source.id)}/refresh`,
+      {
+        method: "POST",
+        body: JSON.stringify({ request_id: crypto.randomUUID() }),
+      },
+    );
+    return refresh.status === "COMPLETED"
+      ? "Source added and refreshed."
+      : "Source added. Its first refresh didn’t finish. Use Refresh to try again.";
+  } catch {
+    return "Source added. Its first refresh didn’t finish. Use Refresh to try again.";
+  }
+}
+
 export const newsTrendingCaption =
   "Stories drawing attention in your connected news sources. " +
   "Trending does not measure worldwide popularity or importance, and does not confirm a report.";

@@ -6,7 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import exists, select
 
 from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
 from navox.api.connector_management import require_origin
@@ -122,6 +122,17 @@ async def feed(
             NewsStory.user_id == account.user.id,
             NewsStory.suppressed.is_(False),
         )
+        preferences = select(NewsStoryPreference.cluster_id).where(
+            NewsStoryPreference.cluster_id == NewsStory.id,
+            NewsStoryPreference.workspace_id == account.workspace.id,
+            NewsStoryPreference.user_id == account.user.id,
+        )
+        # Filter private reading choices before bounding candidates. Otherwise a
+        # saved story disappears behind newer unsaved stories, and dismissed
+        # stories can consume the whole visible feed's candidate window.
+        query = query.where(~exists(preferences.where(NewsStoryPreference.dismissed.is_(True))))
+        if mode == "saved":
+            query = query.where(exists(preferences.where(NewsStoryPreference.saved.is_(True))))
         if category is not None:
             query = query.where(NewsStory.primary_category == category)
         rows = await database.scalars(

@@ -10,6 +10,7 @@ import pytest
 import pytest_asyncio
 from cryptography.fernet import Fernet
 from httpx import ASGITransport, AsyncClient, MockTransport, Request, Response
+from pydantic import SecretStr
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -413,6 +414,32 @@ async def test_catalog_is_authenticated_and_does_not_claim_unfinished_setup(env)
     env.client.cookies.clear()
     assert (await env.client.get("/api/v1/connectors")).status_code == 401
     assert (await env.client.get("/api/v1/connections")).status_code == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("google_oauth_client_id", ""),
+        ("google_oauth_client_secret", None),
+        ("google_oauth_client_secret", SecretStr("")),
+        ("google_token_encryption_key", None),
+        ("google_token_encryption_key", SecretStr("invalid-key")),
+    ],
+)
+async def test_google_setup_requires_oauth_credentials_and_valid_vault(env, field, value):
+    setattr(env.settings, field, value)
+    response = await env.client.get("/api/v1/connectors/google-workspace")
+    assert response.status_code == 200
+    entry = response.json()
+    assert entry["availability"] == "setup_pending"
+    assert entry["setup_label"] == "Setup not enabled yet"
+    catalog = (await env.client.get("/api/v1/connectors")).json()
+    assert next(item for item in catalog if item["id"] == "google-workspace") == entry
+    denied = await env.client.post("/api/v1/connectors/google-workspace/connect", json=command())
+    assert denied.status_code == 409
+    # Existing account state remains accessible; only new OAuth setup is unavailable.
+    assert any(row["id"] == str(env.id) for row in await overview(env))
 
 
 @pytest.mark.asyncio

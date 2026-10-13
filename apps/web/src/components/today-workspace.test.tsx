@@ -45,6 +45,8 @@ describe("workspace destinations", () => {
       }),
     );
     expect(markup).toContain("Connected apps could not be loaded");
+    expect(markup).toContain("Retry connections");
+    expect(markup).toContain('role="alert"');
     expect(markup).not.toContain("Connect your apps");
     expect(markup).toContain("Upcoming agenda");
   });

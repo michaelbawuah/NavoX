@@ -11,10 +11,18 @@ from test_ai_operational_domains import operational_runtime
 
 from navox.ai import readiness
 from navox.ai.catalog import catalog_template
+from navox.ai.conversation import CONVERSATION_PROMPT, CONVERSATION_SCHEMA
 from navox.ai.domains import Domain, domain_prompt_reference, domain_reference
-from navox.ai.foundation.contracts import Provider, Sensitivity
+from navox.ai.foundation.contracts import Profile, Provider, Sensitivity, TaskType
 from navox.ai.foundation.persistence import RegistryStore, canonical, digest
-from navox.ai.readiness import TraceManifest, inventory, propose_catalog, trace_coverage
+from navox.ai.intent_plan import INTENT_PLAN_PROMPT, INTENT_PLAN_SCHEMA
+from navox.ai.readiness import (
+    TraceManifest,
+    inventory,
+    propose_catalog,
+    task_bindings,
+    trace_coverage,
+)
 from navox.core.settings import Settings
 from navox.db.ai_registry import AIEvaluationRun, AIProfileAssignment, AITaskRun
 
@@ -32,6 +40,22 @@ def prior_catalog():
             "prompts": tuple(p for p in template.prompts if p.reference not in new_refs),
             "schemas": tuple(s for s in template.schemas if s.reference not in new_refs),
         }
+    )
+
+
+def test_assistant_readiness_tracks_the_shipped_intent_and_conversation_contracts():
+    bindings = {binding[0]: binding[1:] for binding in task_bindings()}
+    assert bindings["assistant_intent_plan"] == (
+        Profile.PLANNING_HIGH,
+        TaskType.PLAN,
+        f"{INTENT_PLAN_PROMPT.name}@{INTENT_PLAN_PROMPT.version}",
+        f"{INTENT_PLAN_SCHEMA.name}@{INTENT_PLAN_SCHEMA.version}",
+    )
+    assert bindings["assistant_conversation"] == (
+        Profile.ASSISTANT_INTERACTIVE,
+        TaskType.REASON,
+        f"{CONVERSATION_PROMPT.name}@{CONVERSATION_PROMPT.version}",
+        f"{CONVERSATION_SCHEMA.name}@{CONVERSATION_SCHEMA.version}",
     )
 
 
@@ -71,7 +95,7 @@ async def test_inventory_matches_current_task_binding_and_does_not_count_old_evi
     )
     async with ai_database() as db:
         current = await inventory(db, settings)
-        assert len(current["bindings"]) == 14
+        assert len(current["bindings"]) == 18
         assert sum(b["qualification_passes"] for b in current["bindings"]) == 8
         assert all(
             not b["qualification_passes"]
@@ -87,6 +111,46 @@ async def test_inventory_matches_current_task_binding_and_does_not_count_old_evi
         assert all(not b["qualification_passes"] for b in newer["bindings"])
         assert len(list(await db.scalars(select(AIEvaluationRun)))) == 8
         assert newer["live_acceptance_complete"] is False
+
+
+@pytest.mark.asyncio
+async def test_inventory_exposes_closed_assistant_routes_without_calls_or_policy_changes(
+    ai_database,
+):
+    _runtime, adapters = await operational_runtime(ai_database)
+    settings = Settings(_env_file=None, ai_provider_policy={})
+    async with ai_database() as db:
+        for assignment in await db.scalars(select(AIProfileAssignment)):
+            assignment.rollout_percent = 0
+        await db.commit()
+        registry_before = await RegistryStore(db).load()
+        evaluations_before = list(await db.scalars(select(AIEvaluationRun.id)))
+        report = await inventory(db, settings)
+        assistant_rows = [
+            row
+            for row in report["bindings"]
+            if row["task"] in {"assistant_intent_plan", "assistant_conversation"}
+        ]
+        assert len(assistant_rows) == 4
+        assert all(row["binding_published"] for row in assistant_rows)
+        assert all(not row["qualification_passes"] for row in assistant_rows)
+        assert all(
+            row["evaluation_id"] is None and row["evidence"] is None for row in assistant_rows
+        )
+        assert all(
+            row["operator_sensitivities"] == [] and row["traffic_percent"] == 0
+            for row in assistant_rows
+        )
+        assert report["workspace_user_policy_checked"] is False
+        assert report["live_acceptance_complete"] is False
+        assert await RegistryStore(db).load() == registry_before
+        assert list(await db.scalars(select(AIEvaluationRun.id))) == evaluations_before
+        assert all(
+            assignment.rollout_percent == 0 and not assignment.shadow_enabled
+            for assignment in await db.scalars(select(AIProfileAssignment))
+        )
+    assert settings.ai_provider_policy == {}
+    assert all(not adapter.calls for adapter in adapters.values())
 
 
 @pytest.mark.asyncio

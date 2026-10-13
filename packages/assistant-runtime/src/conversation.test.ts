@@ -7,6 +7,7 @@ import {
 } from "./conversation";
 import { AssistantError } from "./errors";
 import { createNavoxUpstream, type FetchLike } from "./gateway";
+import { LIMITS } from "./limits";
 import { createAssistantRuntime } from "./runtime";
 import {
   CLARIFY_PLAN,
@@ -63,6 +64,89 @@ async function setup() {
 }
 
 describe("ordinary conversation in the saved assistant", () => {
+  it("omits overlong planner references without losing ordinary history or ordinal ownership", async () => {
+    const { submit, upstream, store } = await setup();
+    const planIntents = upstream.planIntents;
+    upstream.planIntents = async (cookie, input) => {
+      // Mirror the owning API's validation instead of letting a permissive
+      // fake accept the invalid history that caused the production failure.
+      if (
+        input.recentReferences.some(
+          (question) => question.length > LIMITS.maxPlanReferenceLength,
+        )
+      )
+        throw new AssistantError(
+          "unavailable",
+          "Planner history was rejected.",
+        );
+      return planIntents(cookie, input);
+    };
+    const questions = [
+      "Explain photosynthesis",
+      "x".repeat(241),
+      "y".repeat(240),
+      "z".repeat(500),
+      "Explain respiration",
+    ];
+    for (const [index, question] of questions.entries()) {
+      upstream.conversation = {
+        ...envelope(),
+        task_id: `aaaaaaaa-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        turn_sequence: index + 1,
+      };
+      const response = await submit(
+        question,
+        `bbbbbbbb-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      );
+      expect(response.turn.state).toBe("READY");
+    }
+    upstream.plan = intentEnvelope({
+      version: 1,
+      intents: [
+        {
+          ...CLARIFY_PLAN.intents[0],
+          reference: { kind: "RECENT_TURN", ordinal: 2, turn_id: null },
+        },
+      ],
+    });
+    const response = await submit(
+      "Explain that more simply",
+      "bbbbbbbb-0000-4000-8000-000000000006",
+    );
+    expect(response.turn.state).toBe("READY");
+    expect(upstream.calls.plan.at(-1)?.recentReferences).toEqual([
+      questions[0],
+      questions[2],
+      questions[4],
+    ]);
+    expect(
+      upstream.calls.conversation
+        .at(-1)
+        ?.recentTurns.map((turn) => turn.question),
+    ).toEqual(questions.slice(-4));
+    // A conversation answer uses a delivery plan, so inspect the planner's
+    // bound reference by making a read route use that same filtered ordinal.
+    upstream.plan = intentEnvelope({
+      version: 1,
+      intents: [
+        {
+          ...CLARIFY_PLAN.intents[0],
+          route: "assistant.navigate",
+          reference: { kind: "RECENT_TURN", ordinal: 2, turn_id: null },
+          requires_clarification: false,
+          clarification: null,
+        },
+      ],
+    });
+    const navigate = await submit(
+      "Open that answer",
+      "bbbbbbbb-0000-4000-8000-000000000007",
+    );
+    expect(navigate.turn.plan?.intents[0]?.reference.turn_id).toBe(
+      store.turns[2]?.id,
+    );
+  });
+
   it("presents a verified model answer, with no capability or action delegation", async () => {
     const { submit, upstream } = await setup();
     const response = await submit();

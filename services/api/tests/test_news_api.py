@@ -1,6 +1,6 @@
 """Authenticated news source control and projections; no model/provider requests."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -55,6 +55,33 @@ async def test_source_catalog_requires_auth_and_never_accepts_client_rights(subs
     assert rights.policy["full_text_storage_allowed"] is False
     await env.client.post("/api/v1/auth/logout", headers=env.headers)
     assert (await env.client.get("/api/v1/news/sources")).status_code == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "rights",
+    [
+        {"metadata_storage_allowed": False},
+        {"expires_at": NOW},
+        {"reviewed_at": NOW + timedelta(seconds=1)},
+    ],
+)
+async def test_source_picker_omits_currently_unusable_rights(subscription_env, rights):
+    env = subscription_env
+    config = definition(**rights)
+    env.settings.news_feed_enabled = True
+    env.settings.news_source_catalog = [config.model_dump(mode="json")]
+
+    response = await env.client.get("/api/v1/news/sources")
+    assert response.status_code == 200
+    assert response.json() == []
+    # Hiding an unusable option does not replace activation-time enforcement.
+    response = await env.client.post(
+        f"/api/v1/news/sources/{config.key}/activate",
+        json={"request_id": str(uuid4())},
+        headers=env.headers,
+    )
+    assert response.status_code == 409
 
 
 @pytest.mark.asyncio
@@ -147,12 +174,23 @@ async def test_availability_separates_bounded_views_from_reserved_research(
 
 
 @pytest.mark.asyncio
-async def test_source_options_require_the_current_accounts_api_connection(subscription_env):
+async def test_source_options_require_the_current_accounts_api_connection(
+    subscription_env, monkeypatch
+):
+    from test_news_api_feeds import NOW as API_NOW
     from test_news_api_feeds import definition as api_definition
     from test_news_api_feeds import setup
 
+    from navox.api import news
     from navox.db.models import ConnectorConnection
 
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return API_NOW if tz is not None else API_NOW.replace(tzinfo=None)
+
+    # Both fixtures must have current reviewed rights when testing ownership.
+    monkeypatch.setattr(news, "datetime", Clock)
     env = subscription_env
     approved_settings, private_config, _, _, _, private_connection_id = await setup(env.factory)
     env.settings.news_feed_enabled = True

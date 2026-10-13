@@ -10,6 +10,7 @@ import type {
 } from "@navox/contracts";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import {
+  addNewsSource,
   loadNewsFeed,
   type NewsFeed,
   NewsRequestError,
@@ -301,8 +302,13 @@ export function NewsWorkspace() {
     setBusy(source.key);
     setNotice("");
     try {
+      if (action === "activate") {
+        setNotice(await addNewsSource(source.key));
+        setSelection((value) => ({ ...value }));
+        return;
+      }
       const result = await newsRequest<{ status: string }>(
-        `/sources/${action === "activate" ? source.key : source.id}/${action}`,
+        `/sources/${source.id}/${action}`,
         {
           method: "POST",
           body: JSON.stringify({ request_id: crypto.randomUUID() }),
@@ -312,11 +318,9 @@ export function NewsWorkspace() {
       setNotice(
         result.status === "FAILED"
           ? "This source couldn’t refresh. Try again later."
-          : action === "activate"
-            ? "Source added. Reports will appear after its next refresh."
-            : action === "disable"
-              ? "Source removed."
-              : "Source refreshed.",
+          : action === "disable"
+            ? "Source removed."
+            : "Source refreshed.",
       );
     } catch (reason) {
       setNotice(
