@@ -231,6 +231,23 @@ async def reviewed_task_views(
             result.append(view)
             continue
         allowed = source["authorized"] is True
+        if source.get("source_kind") == "email":
+            result.append(
+                view.model_copy(
+                    update={
+                        "source_needs_review": source["needs_review"],
+                        "source_reviewable": False,
+                        "source_current_revision": None,
+                        "source_current_title": None,
+                        "source_current_due_at": None,
+                        "source_review_notice": "This email source changed or is unavailable. "
+                        "Open Email actions to refresh this existing task, or archive it."
+                        if source["needs_review"]
+                        else None,
+                    }
+                )
+            )
+            continue
         notice = None
         if source["needs_review"]:
             notice = (
@@ -264,6 +281,8 @@ async def eligible_tasks(
     user_id: UUID,
     workspace_id: UUID,
     views: list[TaskView],
+    *,
+    include_stale_email: bool = False,
 ) -> list[TaskView]:
     """Archived course work stays saved, but is not an active planning input."""
     course_ids = {row.course_id for row in views if row.course_id is not None}
@@ -281,7 +300,19 @@ async def eligible_tasks(
         if course_ids
         else set()
     )
-    return [row for row in views if row.course_id is None or row.course_id in active_ids]
+    eligible = [row for row in views if row.course_id is None or row.course_id in active_ids]
+    if include_stale_email:
+        return eligible
+    from navox.student_email.service import email_task_snapshots
+
+    snapshots = await email_task_snapshots(
+        database,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        task_ids=[row.id for row in eligible if row.status == "active"],
+    )
+    stale = {str(row["task_id"]) for row in snapshots if row["needs_review"] is True}
+    return [row for row in eligible if str(row.id) not in stale]
 
 
 async def current_sources(
@@ -340,7 +371,13 @@ async def current_sources(
                 or item.revision != view.source_revision,
             }
         )
-    return result
+    from navox.student_email.service import email_task_snapshots
+
+    email_sources = await email_task_snapshots(
+        database, user_id=user_id, workspace_id=workspace_id, task_ids=[view.id for view in views]
+    )
+    result.extend({**source, "source_kind": "email"} for source in email_sources)
+    return sorted(result, key=lambda source: str(source["task_id"]))
 
 
 async def _course(
@@ -740,13 +777,16 @@ async def snapshot(
         )
     task_rows = await tasks(database, user_id, workspace_id)
     eligible = await eligible_tasks(database, user_id, workspace_id, task_rows)
+    reviewable = await eligible_tasks(
+        database, user_id, workspace_id, task_rows, include_stale_email=True
+    )
     source_states = await current_sources(
-        database, user_id, workspace_id, [row for row in eligible if row.status == "active"]
+        database, user_id, workspace_id, [row for row in reviewable if row.status == "active"]
     )
     if any(source["needs_review"] is True for source in source_states):
         raise schedule.StudentError(
             409,
-            "An imported assignment changed or is unavailable. "
+            "A saved task source changed or is unavailable. "
             "Review its task source or archive it before planning",
         )
     history = list(
@@ -1217,9 +1257,7 @@ async def undo_outcome(
             [task_view(task)],
         )
     ):
-        raise schedule.StudentError(
-            409, "The school assignment changed. Review its task source before undoing"
-        )
+        raise schedule.StudentError(409, "The task source changed. Review it before undoing")
     task.remaining_minutes = int(prior_task["remaining_minutes"])
     task.actual_minutes = int(prior_task["actual_minutes"])
     task.status = str(prior_task["status"])
@@ -1308,6 +1346,9 @@ async def forget_source_tasks(
 
 
 async def invalidate_snapshots(database: AsyncSession, user_id: UUID, workspace_id: UUID) -> None:
+    from navox.student_recovery.service import invalidate_recovery_previews
+
+    await invalidate_recovery_previews(database, user_id, workspace_id)
     await database.execute(
         delete(StudentPlanningPreview).where(
             StudentPlanningPreview.user_id == user_id,
@@ -1329,6 +1370,9 @@ async def invalidate_snapshots(database: AsyncSession, user_id: UUID, workspace_
 
 async def forget_planning_data(database: AsyncSession, user_id: UUID, workspace_id: UUID) -> None:
     """Explicit student-data reset hook; caller holds User lock and commits atomically."""
+    from navox.student_recovery.service import invalidate_recovery_previews
+
+    await invalidate_recovery_previews(database, user_id, workspace_id)
     for model in (
         StudentPlanningCommand,
         StudentPlanningPreview,

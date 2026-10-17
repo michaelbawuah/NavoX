@@ -59,6 +59,8 @@ from navox.routines.activities import (
 )
 from navox.routines.dispatcher import RECONCILIATION_WORKFLOW_ID as ROUTINE_RECONCILIATION_ID
 from navox.student_alerts.activities import reconcile_student_alerts_activity
+from navox.student_email.activities import cleanup_email_reviews_activity
+from navox.student_recovery.activities import purge_expired_recovery_previews_activity
 from navox.subscriptions.activities import (
     cancellation_state_activity,
     execute_cancellation_activity,
@@ -118,6 +120,8 @@ from navox.workflows.proactive import (
 )
 from navox.workflows.routines import PersonalRoutineReconciliationWorkflow, PersonalRoutineWorkflow
 from navox.workflows.student_alerts import StudentAlertReconciliationWorkflow
+from navox.workflows.student_email import StudentEmailCleanupWorkflow
+from navox.workflows.student_recovery import StudentRecoveryCleanupWorkflow
 from navox.workflows.subscriptions import (
     CancellationContradictionWorkflow,
     CancelSubscriptionWorkflow,
@@ -144,6 +148,8 @@ async def main() -> None:
             PersonalRoutineReconciliationWorkflow,
             StudentAlertReconciliationWorkflow,
             LmsFeedReconciliationWorkflow,
+            StudentRecoveryCleanupWorkflow,
+            StudentEmailCleanupWorkflow,
             KnowledgeResourceIngestWorkflow,
             KnowledgeResourceUpdateWorkflow,
             KnowledgeResourceDeleteWorkflow,
@@ -192,6 +198,8 @@ async def main() -> None:
             reconcile_routines_activity,
             reconcile_student_alerts_activity,
             reconcile_lms_feeds_activity,
+            purge_expired_recovery_previews_activity,
+            cleanup_email_reviews_activity,
             knowledge_delete_activity,
             knowledge_embedding_activity,
             knowledge_reindex_activity,
@@ -294,6 +302,24 @@ async def main() -> None:
             await client.start_workflow(
                 LmsFeedReconciliationWorkflow.run,
                 id="navox-lms-feed-reconciliation-v1",
+                task_queue=settings.temporal_task_queue,
+            )
+        except WorkflowAlreadyStartedError:
+            pass
+        # Receipt ciphertext expires even when recovery creation or AI is disabled.
+        try:
+            await client.start_workflow(
+                StudentRecoveryCleanupWorkflow.run,
+                id="navox-student-recovery-cleanup-v1",
+                task_queue=settings.temporal_task_queue,
+            )
+        except WorkflowAlreadyStartedError:
+            pass
+        # Private email receipt expiry continues when email creation or AI is disabled.
+        try:
+            await client.start_workflow(
+                StudentEmailCleanupWorkflow.run,
+                id="navox-student-email-cleanup-v1",
                 task_queue=settings.temporal_task_queue,
             )
         except WorkflowAlreadyStartedError:
