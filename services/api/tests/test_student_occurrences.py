@@ -49,10 +49,14 @@ def test_maximum_sections_and_month_have_bounded_conflict_construction(monkeypat
     args = dict(
         start_at=datetime(2026, 10, 1, tzinfo=UTC), end_at=datetime(2026, 11, 1, tzinfo=UTC)
     )
-    rows, fixed, conflicts, warnings = occurrences.project([course], [], [], [], **args)
+    issues = []
+    rows, fixed, conflicts, warnings = occurrences.project(
+        [course], [], [], [], class_issues=issues, **args
+    )
     assert len(rows) == 6_200 and fixed == []
     assert len(conflicts) == constructed == 200
     assert occurrences.TRUNCATED_CONFLICTS_WARNING in warnings
+    assert issues == []  # Conflict truncation does not make class times incomplete.
     # Alerts and future-search paths do not construct even one conflict.
     constructed = 0
     rows, _, conflicts, warnings = occurrences.project(

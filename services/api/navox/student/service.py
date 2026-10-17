@@ -25,6 +25,7 @@ from navox.db.student import (
 from navox.student.ics import PARSER_VERSION, parse_timetable_ics
 from navox.student.occurrences import (
     TRUNCATED_CONFLICTS_WARNING,
+    ClassProjectionIssue,
     local_moment,
     occurs_on,
     project,
@@ -528,6 +529,7 @@ async def list_occurrences(
     start_at: datetime,
     end_at: datetime,
     include_cancelled: bool = False,
+    class_issues: list[ClassProjectionIssue] | None = None,
 ) -> list[Occurrence]:
     await owner(database, user_id, workspace_id)
     courses, fixed, edits, breaks = await state_for_window(
@@ -542,6 +544,7 @@ async def list_occurrences(
         end_at=end_at,
         include_cancelled=include_cancelled,
         include_conflicts=False,
+        class_issues=class_issues,
     )
     return result
 
@@ -554,6 +557,7 @@ async def timetable(
     day: date | None = None,
     days: int = 7,
     now: datetime | None = None,
+    class_issues: list[ClassProjectionIssue] | None = None,
 ) -> TimetableView:
     user = await owner(database, user_id, workspace_id)
     moment = now or await database_now(database)
@@ -567,7 +571,7 @@ async def timetable(
         database, user_id, workspace_id, start, end
     )
     items, fixed_items, conflicts, warnings = project(
-        courses, fixed, edits, breaks, start_at=start, end_at=end
+        courses, fixed, edits, breaks, start_at=start, end_at=end, class_issues=class_issues
     )
     return TimetableView(
         server_now=moment,
@@ -622,7 +626,18 @@ async def lookup(
             at = at_value
         else:
             at = datetime.combine(selected, time.min, zone).astimezone(UTC)
-    view = await timetable(database, user_id, workspace_id, day=selected, days=1, now=moment)
+    class_issues: list[ClassProjectionIssue] = []
+    view = await timetable(
+        database,
+        user_id,
+        workspace_id,
+        day=selected,
+        days=1,
+        now=moment,
+        class_issues=class_issues,
+    )
+    if class_issues:
+        raise incomplete_lookup_error(class_issues)
     matches = select_lookup(
         view.occurrences, mode=mode, at=at, day=selected, timezone=user.timezone
     )
@@ -634,12 +649,28 @@ async def lookup(
     for offset in range(0, 367, 31):
         start = search_from + timedelta(days=offset)
         end = search_from + timedelta(days=min(offset + 31, 367))
+        search_issues: list[ClassProjectionIssue] = []
         values = await list_occurrences(
-            database, user_id=user_id, workspace_id=workspace_id, start_at=start, end_at=end
+            database,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            start_at=start,
+            end_at=end,
+            class_issues=search_issues,
         )
         upcoming = next(
             (item for item in values if not item.cancelled and item.start_at > at), None
         )
+        # A later valid class is not necessarily next if an earlier active
+        # meeting could not be projected. A known candidate before the affected
+        # local day remains trustworthy.
+        relevant_issues = [
+            issue
+            for issue in search_issues
+            if upcoming is None or issue.day_start <= upcoming.start_at
+        ]
+        if relevant_issues:
+            raise incomplete_lookup_error(relevant_issues)
         if upcoming is not None:
             break
         # Empty courses cannot produce a later class.
@@ -662,6 +693,15 @@ async def lookup(
         next_upcoming=upcoming,
         reason=reason,
         conflicts=view.conflicts,
+    )
+
+
+def incomplete_lookup_error(issues: list[ClassProjectionIssue]) -> StudentError:
+    first = min(issues, key=lambda issue: (issue.day_start, issue.timezone))
+    return StudentError(
+        409,
+        f"A class on {first.day.isoformat()} ({first.timezone}) cannot be placed safely "
+        "across a clock change. Add a one-day time correction in Classes, then ask again.",
     )
 
 

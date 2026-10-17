@@ -1,6 +1,7 @@
 """Pure bounded wall-clock projection. No providers, models or inferred class times."""
 
 from bisect import bisect_left
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -20,6 +21,16 @@ MAX_CONFLICTS = 200
 TRUNCATED_CONFLICTS_WARNING = (
     "Only the first 200 overlaps are shown. Narrow the date range to review more."
 )
+
+
+@dataclass(frozen=True)
+class ClassProjectionIssue:
+    """An active class has no trustworthy instant on this local calendar day."""
+
+    day: date
+    timezone: str
+    day_start: datetime
+    day_end: datetime
 
 
 def local_moment(day: date, clock: str, timezone: str, *, strict: bool = False) -> datetime | None:
@@ -61,6 +72,7 @@ def project(
     end_at: datetime,
     include_cancelled: bool = True,
     include_conflicts: bool = True,
+    class_issues: list[ClassProjectionIssue] | None = None,
 ) -> tuple[list[Occurrence], list[FixedOccurrence], list[Conflict], list[str]]:
     if start_at.tzinfo is None or end_at.tzinfo is None or not start_at < end_at:
         raise ValueError("An aware, increasing time window is required")
@@ -97,6 +109,17 @@ def project(
                             "A class falls in a daylight-saving clock change "
                             "and needs a one-day correction."
                         )
+                        if not cancelled and class_issues is not None:
+                            day_start = datetime.combine(day, time.min, zone).astimezone(UTC)
+                            day_end = datetime.combine(
+                                day + timedelta(days=1), time.min, zone
+                            ).astimezone(UTC)
+                            if day_end <= day_start:
+                                day_end = day_start + timedelta(days=1)
+                            if day_start < end_at and day_end > start_at:
+                                class_issues.append(
+                                    ClassProjectionIssue(day, meeting.timezone, day_start, day_end)
+                                )
                     elif start < end_at and end > start_at and (include_cancelled or not cancelled):
                         occurrences.append(
                             Occurrence(

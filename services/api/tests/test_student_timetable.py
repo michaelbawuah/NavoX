@@ -336,6 +336,157 @@ async def test_dst_keeps_wall_clock_time_and_at_lookup_rejects_gap_and_fold(stud
 
 
 @pytest.mark.asyncio
+async def test_dst_gap_class_returns_actionable_error_instead_of_false_empty_lookup(
+    student_env, monkeypatch
+):
+    await register(student_env)
+    course = await create_course(student_env, term_start="2027-03-01", term_end="2027-04-01")
+    meeting = await create_meeting(
+        student_env, course, weekdays=[6], start_time="02:30", end_time="03:30"
+    )
+
+    async def clock(_database):
+        return datetime(2027, 3, 14, 7, 15, tzinfo=UTC)
+
+    monkeypatch.setattr(service, "database_now", clock)
+    table = await student_env.client.get("/api/v1/student/timetable?date=2027-03-14&days=1")
+    assert table.status_code == 200 and table.json()["occurrences"] == []
+    assert any("clock change" in item for item in table.json()["warnings"])
+    for query in (
+        "mode=now",
+        "mode=next",
+        "mode=day&date=2027-03-14",
+        "mode=at&date=2027-03-14&time=03:15",
+    ):
+        result = await student_env.client.get("/api/v1/student/lookup?" + query)
+        assert result.status_code == 409, result.text
+        assert "2027-03-14" in result.json()["detail"]
+        assert "one-day time correction" in result.json()["detail"]
+    corrected = await student_env.client.put(
+        f"/api/v1/student/meetings/{meeting['id']}/exceptions/2027-03-14",
+        json={"revision": 1, "start_time": "03:30", "end_time": "04:30"},
+    )
+    assert corrected.status_code == 200, corrected.text
+    repaired = await student_env.client.get("/api/v1/student/lookup?mode=next")
+    assert repaired.status_code == 200, repaired.text
+    assert repaired.json()["next_upcoming"]["start_at"] == "2027-03-14T07:30:00Z"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("days_before", [2, 42])
+async def test_future_search_refuses_to_skip_incomplete_class_before_a_later_valid_one(
+    student_env,
+    monkeypatch,
+    days_before,
+):
+    from datetime import timedelta
+
+    await register(student_env)
+    gap = await create_course(student_env, term_start="2027-03-14", term_end="2027-03-14")
+    await create_meeting(student_env, gap, weekdays=[6], start_time="02:30", end_time="03:30")
+    later = await create_course(
+        student_env, code="MATH 2940", name="Math", term_start="2027-03-15", term_end="2027-04-01"
+    )
+    await create_meeting(student_env, later, weekdays=[0], start_time="09:00", end_time="10:00")
+
+    async def clock(_database):
+        return datetime(2027, 3, 14, 5, tzinfo=UTC) - timedelta(days=days_before)
+
+    monkeypatch.setattr(service, "database_now", clock)
+    result = await student_env.client.get("/api/v1/student/lookup?mode=next")
+    assert result.status_code == 409, result.text
+    assert "2027-03-14" in result.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_known_next_class_before_a_future_gap_is_still_returned(student_env, monkeypatch):
+    await register(student_env)
+    course = await create_course(student_env, term_start="2027-03-01", term_end="2027-04-01")
+    await create_meeting(student_env, course, weekdays=[6], start_time="02:30", end_time="03:30")
+    await create_meeting(student_env, course, weekdays=[5], start_time="09:00", end_time="10:00")
+
+    async def clock(_database):
+        return datetime(2027, 3, 12, 20, tzinfo=UTC)
+
+    monkeypatch.setattr(service, "database_now", clock)
+    result = await student_env.client.get("/api/v1/student/lookup?mode=next")
+    assert result.status_code == 200, result.text
+    assert result.json()["next_upcoming"]["start_at"] == "2027-03-13T14:00:00Z"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("excluded", ["cancelled", "break"])
+async def test_cancelled_or_break_gap_class_does_not_make_lookup_incomplete(
+    student_env,
+    monkeypatch,
+    excluded,
+):
+    await register(student_env)
+    course = await create_course(student_env, term_start="2027-03-14", term_end="2027-03-14")
+    meeting = await create_meeting(
+        student_env, course, weekdays=[6], start_time="02:30", end_time="03:30"
+    )
+    if excluded == "cancelled":
+        response = await student_env.client.put(
+            f"/api/v1/student/meetings/{meeting['id']}/exceptions/2027-03-14",
+            json={"revision": 1, "cancelled": True},
+        )
+        assert response.status_code == 200, response.text
+    else:
+        response = await student_env.client.post(
+            "/api/v1/student/breaks",
+            json={
+                "name": "Spring break",
+                "start_date": "2027-03-14",
+                "end_date": "2027-03-14",
+            },
+        )
+        assert response.status_code == 201, response.text
+
+    async def clock(_database):
+        return datetime(2027, 3, 14, 7, 15, tzinfo=UTC)
+
+    monkeypatch.setattr(service, "database_now", clock)
+    result = await student_env.client.get("/api/v1/student/lookup?mode=now")
+    assert result.status_code == 200, result.text
+    assert result.json()["occurrences"] == [] and result.json()["next_upcoming"] is None
+
+
+@pytest.mark.asyncio
+async def test_fixed_block_gap_warning_does_not_poison_a_complete_class_lookup(
+    student_env, monkeypatch
+):
+    await register(student_env)
+    course = await create_course(student_env, term_start="2027-03-01", term_end="2027-04-01")
+    await create_meeting(student_env, course, weekdays=[0], start_time="09:00", end_time="10:00")
+    fixed = await student_env.client.post(
+        "/api/v1/student/fixed-blocks",
+        json={
+            "title": "Campus shift",
+            "weekdays": [6],
+            "start_time": "02:30",
+            "end_time": "03:30",
+            "timezone": "America/New_York",
+            "term_start": "2027-03-01",
+            "term_end": "2027-04-01",
+        },
+    )
+    assert fixed.status_code == 201, fixed.text
+
+    async def clock(_database):
+        return datetime(2027, 3, 14, 7, 15, tzinfo=UTC)
+
+    monkeypatch.setattr(service, "database_now", clock)
+    table = (
+        await student_env.client.get("/api/v1/student/timetable?date=2027-03-14&days=1")
+    ).json()
+    assert any("fixed block" in warning for warning in table["warnings"])
+    result = await student_env.client.get("/api/v1/student/lookup?mode=next")
+    assert result.status_code == 200, result.text
+    assert result.json()["next_upcoming"]["start_at"] == "2027-03-15T13:00:00Z"
+
+
+@pytest.mark.asyncio
 async def test_timetable_requires_auth_owner_and_personal_workspace(student_env):
     assert (await student_env.client.get("/api/v1/student/timetable")).status_code == 401
     first = await register(student_env)
