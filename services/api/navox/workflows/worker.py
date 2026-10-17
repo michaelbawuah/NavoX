@@ -51,12 +51,27 @@ from navox.proactive.activities import (
     prepare_meeting_activity,
     record_scheduled_briefing_activity,
 )
+from navox.routines.activities import (
+    reconcile_routines_activity,
+    routine_failure_activity,
+    routine_tick_activity,
+)
+from navox.routines.dispatcher import RECONCILIATION_WORKFLOW_ID as ROUTINE_RECONCILIATION_ID
 from navox.subscriptions.activities import (
     cancellation_state_activity,
     execute_cancellation_activity,
     pending_subscriptions_activity,
     reevaluate_subscription_activity,
     verify_cancellation_activity,
+)
+from navox.thread_watches.activities import (
+    check_thread_watch_activity,
+    pending_thread_watches_activity,
+)
+from navox.thread_watches.dispatcher import RECONCILIATION_WORKFLOW_ID
+from navox.thread_watches.workflows import (
+    ThreadWatchCheckWorkflow,
+    ThreadWatchReconciliationWorkflow,
 )
 from navox.workflows.approved_action import ApprovedActionWorkflow
 from navox.workflows.connectors import (
@@ -98,6 +113,7 @@ from navox.workflows.proactive import (
     FollowUpWorkflow,
     MeetingPreparationWorkflow,
 )
+from navox.workflows.routines import PersonalRoutineReconciliationWorkflow, PersonalRoutineWorkflow
 from navox.workflows.subscriptions import (
     CancellationContradictionWorkflow,
     CancelSubscriptionWorkflow,
@@ -118,6 +134,10 @@ async def main() -> None:
         client,
         task_queue=settings.temporal_task_queue,
         workflows=[
+            ThreadWatchCheckWorkflow,
+            ThreadWatchReconciliationWorkflow,
+            PersonalRoutineWorkflow,
+            PersonalRoutineReconciliationWorkflow,
             KnowledgeResourceIngestWorkflow,
             KnowledgeResourceUpdateWorkflow,
             KnowledgeResourceDeleteWorkflow,
@@ -159,6 +179,11 @@ async def main() -> None:
             DailyBriefingWorkflow,
         ],
         activities=[
+            check_thread_watch_activity,
+            pending_thread_watches_activity,
+            routine_tick_activity,
+            routine_failure_activity,
+            reconcile_routines_activity,
             knowledge_delete_activity,
             knowledge_embedding_activity,
             knowledge_reindex_activity,
@@ -225,6 +250,24 @@ async def main() -> None:
             await client.start_workflow(
                 SubscriptionReconciliationWorkflow.run,
                 id="navox-subscription-reconciliation-v1",
+                task_queue=settings.temporal_task_queue,
+            )
+        except WorkflowAlreadyStartedError:
+            pass
+        # Explicit read-only watches continue independently of AI availability.
+        try:
+            await client.start_workflow(
+                ThreadWatchReconciliationWorkflow.run,
+                id=RECONCILIATION_WORKFLOW_ID,
+                task_queue=settings.temporal_task_queue,
+            )
+        except WorkflowAlreadyStartedError:
+            pass
+        # Recover enabled saved-data routines even when the API stopped before dispatch.
+        try:
+            await client.start_workflow(
+                PersonalRoutineReconciliationWorkflow.run,
+                id=ROUTINE_RECONCILIATION_ID,
                 task_queue=settings.temporal_task_queue,
             )
         except WorkflowAlreadyStartedError:

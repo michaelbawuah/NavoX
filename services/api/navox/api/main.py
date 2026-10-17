@@ -25,13 +25,16 @@ from navox.api.knowledge import router as knowledge_router
 from navox.api.knowledge_graph import router as knowledge_graph_router
 from navox.api.knowledge_lifecycle import router as knowledge_lifecycle_router
 from navox.api.mcp import router as mcp_router
+from navox.api.memory import router as memory_router
 from navox.api.middleware import RequestHardeningMiddleware
 from navox.api.news import router as news_router
 from navox.api.news_conversations import router as news_conversations_router
 from navox.api.news_following import router as news_following_router
 from navox.api.news_stories import router as news_stories_router
 from navox.api.proactive import router as proactive_router
+from navox.api.routines import router as routines_router
 from navox.api.subscriptions import router as subscriptions_router
+from navox.api.thread_watches import router as thread_watches_router
 from navox.api.today import router as today_router
 from navox.api.workspace import router as workspace_router
 from navox.core.settings import get_settings
@@ -48,7 +51,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=[settings.web_origin],
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "DELETE"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
         expose_headers=["Server-Timing", "X-Request-ID"],
         max_age=600,
@@ -79,6 +82,9 @@ def create_app() -> FastAPI:
     app.include_router(connector_events_router, prefix="/api/v1")
     app.include_router(commitments_router, prefix="/api/v1")
     app.include_router(communication_router, prefix="/api/v1")
+    app.include_router(thread_watches_router, prefix="/api/v1")
+    app.include_router(routines_router, prefix="/api/v1")
+    app.include_router(memory_router, prefix="/api/v1")
     app.include_router(ai_operations_router, prefix="/api/v1")
     app.include_router(commitment_actions_router, prefix="/api/v1")
     app.include_router(today_router, prefix="/api/v1")

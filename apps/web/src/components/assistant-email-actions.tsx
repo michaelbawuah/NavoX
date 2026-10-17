@@ -17,6 +17,7 @@ import {
   synthesizeAssistantEmailDraftSpeech,
 } from "../lib/assistant-client";
 import styles from "./navox-assistant.module.css";
+import { SavedMemoryPicker } from "./personal-memory";
 
 function errorText(error: unknown): string {
   return error instanceof Error
@@ -230,6 +231,13 @@ export function AssistantEmailActions({
             onChange={(event) => setInstructions(event.target.value)}
             maxLength={4000}
             disabled={busy || recovering}
+          />
+          <SavedMemoryPicker
+            value={instructions}
+            onChange={setInstructions}
+            maxLength={4000}
+            disabled={busy || recovering}
+            kinds={["reply_length", "tone", "signoff"]}
           />
           <button
             type="button"

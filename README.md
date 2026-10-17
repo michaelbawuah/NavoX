@@ -27,6 +27,9 @@ data: Today, Upcoming, Waiting, source details, and task search.
 | Daily priorities | Review commitments, meetings, and follow-ups; adjust attention preferences and quiet hours. |
 | Connected accounts | Connect Gmail, Google Calendar, and institution-configured Canvas accounts with explicit permissions. |
 | Conversations and search | Resume saved chats, ask about connected sources, and handle requests with multiple intents. |
+| Reply watches | Choose a reminder after a verified email send; check the Gmail thread for a reply and manage watches in Inbox. |
+| Personal routines | Preview a morning priorities, Friday catch-up, or no-reply review, then schedule it in Planner. Results use saved data. |
+| Saved preferences | Edit or forget your reply style and reusable details in Settings; choose which to add visibly to a message. |
 | Voice | Record a question, hear a response, and choose text or voice delivery. |
 | Subscriptions | Track recurring costs, renewals, trials, and price changes, grouped by currency. |
 | News | Read source-linked stories, save items, and ask follow-up questions. |

@@ -16,6 +16,8 @@ import {
   selectReplySource,
 } from "../lib/email-workflow";
 import workflowStyles from "./communication-drafts.module.css";
+import { SavedMemoryPicker } from "./personal-memory";
+import { WatchSentEmail } from "./thread-watch-panel";
 import styles from "./today-workspace.module.css";
 
 const api =
@@ -44,6 +46,7 @@ type SendAction = {
   verified_at?: string | null;
   payload_hash: string;
   payload: {
+    connection_id?: string;
     sender: string;
     to: string;
     subject: string;
@@ -51,7 +54,7 @@ type SendAction = {
     draft_id?: string;
     draft_version?: number;
   };
-  result: { message_id?: string };
+  result: { message_id?: string; thread_id?: string | null };
 };
 
 async function request<T>(
@@ -570,16 +573,34 @@ export function CommunicationDrafts({
           />
         </label>
         {!manual && (
-          <label>
-            What should the reply say?
-            <textarea
-              maxLength={4000}
-              rows={3}
+          <>
+            <label>
+              What should the reply say?
+              <textarea
+                maxLength={4000}
+                rows={3}
+                value={instructions}
+                disabled={
+                  busy ||
+                  paused ||
+                  (!!action && action.status !== "awaiting_approval")
+                }
+                onChange={(event) => setInstructions(event.target.value)}
+                placeholder="For example: Thank Maya and ask whether Friday afternoon works."
+              />
+            </label>
+            <SavedMemoryPicker
               value={instructions}
-              onChange={(event) => setInstructions(event.target.value)}
-              placeholder="For example: Thank Maya and ask whether Friday afternoon works."
+              onChange={setInstructions}
+              maxLength={4000}
+              disabled={
+                busy ||
+                paused ||
+                (!!action && action.status !== "awaiting_approval")
+              }
+              kinds={["reply_length", "tone", "signoff"]}
             />
-          </label>
+          </>
         )}
         {!manual && (
           <button
@@ -908,6 +929,11 @@ export function CommunicationDrafts({
               action.result.message_id && (
                 <p>Gmail confirmed the sent message.</p>
               )}
+            <WatchSentEmail
+              action={action}
+              connections={connections}
+              paused={paused}
+            />
             <button
               type="button"
               disabled={busy}

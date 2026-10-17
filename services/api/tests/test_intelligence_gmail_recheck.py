@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
+from sqlalchemy.dialects import postgresql
 from test_intelligence_evidence import PRIVATE, QUOTE, owned_evidence  # noqa: F401
 from test_intelligence_runtime import runtime_env  # noqa: F401
 
@@ -24,6 +25,8 @@ from navox.db.models import (
     ObservationEvidence,
     OperationalObservation,
     User,
+    Workspace,
+    WorkspaceMembership,
 )
 from navox.intelligence.extraction import OperationalExtraction, source_document_hash
 from navox.providers.google_sources import GoogleSourceError
@@ -126,6 +129,37 @@ async def duplicate_card(state):
         )
         await db.commit()
         return card.id
+
+
+@pytest.mark.asyncio
+async def test_locked_recheck_authority_precedes_connection_and_workspace_precedes_card(
+    legacy, monkeypatch
+):
+    """Prevent the legacy->owner inversion against connector/watch revocation locks."""
+    state = legacy
+    statements = []
+    async with state.factory() as database:
+        scalar = database.scalar
+
+        async def record(statement, *args, **kwargs):
+            sql = str(statement.compile(dialect=postgresql.dialect()))
+            if " FOR " in sql:
+                statements.append((statement.column_descriptions[0]["entity"], sql))
+            return await scalar(statement, *args, **kwargs)
+
+        monkeypatch.setattr(database, "scalar", record)
+        scope = dict(
+            connection_id=state.connection_id,
+            user_id=state.user_id,
+            workspace_id=state.workspace_id,
+        )
+        await api.authorize(database, **scope, lock=True)
+        await api.load_card(database, commitment_id=state.card_id, **scope, lock=True)
+    locked = [entity for entity, _ in statements]
+    assert locked.index(WorkspaceMembership) < locked.index(User) < locked.index(Connection)
+    assert locked.index(Workspace) < locked.index(Commitment)
+    # Audit FK checks remain compatible with these short claim/apply locks.
+    assert all("FOR NO KEY UPDATE" in sql for _, sql in statements)
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,7 @@ from navox.db.models import (
     PlanStep,
     WorkflowRef,
 )
+from navox.db.thread_watches import ThreadWatch
 
 
 async def record_plan_sources(
@@ -141,6 +142,17 @@ async def erase_source_plans(
         (a.workspace_id, a.user_id) != (workspace_id, user_id) for a in approvals
     ):
         raise HTTPException(409, "Plan source provenance needs manual review")
+    action_ids = {action.id for action in actions}
+    foreign_watch = await database.scalar(
+        select(ThreadWatch.id)
+        .where(
+            ThreadWatch.action_id.in_(action_ids),
+            (ThreadWatch.workspace_id != workspace_id) | (ThreadWatch.user_id != user_id),
+        )
+        .limit(1)
+    )
+    if foreign_watch is not None:
+        raise HTTPException(409, "Watch source provenance needs manual review")
     uncertain = {a.id for a in actions if a.status == "uncertain"}
     if any(a.status not in terminal | {"uncertain"} for a in actions) or any(
         a.status in {"pending", "approved"}
@@ -154,6 +166,7 @@ async def erase_source_plans(
         database, workspace_id=workspace_id, user_id=user_id, connection_ids=connection_ids
     )
     await database.execute(delete(Approval).where(Approval.id.in_([a.id for a in approvals])))
+    await database.execute(delete(ThreadWatch).where(ThreadWatch.action_id.in_(action_ids)))
     await database.execute(delete(Action).where(Action.id.in_([a.id for a in actions])))
     await database.execute(delete(PlanStep).where(PlanStep.plan_id.in_(ids)))
     await database.execute(delete(PlanSource).where(PlanSource.plan_id.in_(ids)))
