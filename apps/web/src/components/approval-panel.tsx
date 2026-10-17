@@ -7,6 +7,11 @@ import {
   useMemo,
   useState,
 } from "react";
+import {
+  emailSendOutcome,
+  manualEmailApprovalPayload,
+  mayStartAnotherEmail,
+} from "../lib/email-workflow";
 import styles from "./today-workspace.module.css";
 
 const apiBaseUrl =
@@ -79,6 +84,7 @@ interface ApprovalPanelProps {
   commitments: CommitmentOption[];
   connections: GoogleConnection[];
   onStateChanged: () => Promise<void>;
+  showComposer?: boolean;
 }
 
 async function apiError(response: Response): Promise<string> {
@@ -118,6 +124,7 @@ export function ApprovalPanel({
   commitments,
   connections,
   onStateChanged,
+  showComposer = true,
 }: ApprovalPanelProps) {
   const gmailConnections = useMemo(
     () =>
@@ -266,7 +273,11 @@ export function ApprovalPanel({
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ request_id: crypto.randomUUID() }),
+          body: JSON.stringify(
+            decision === "approve"
+              ? manualEmailApprovalPayload(activeAction)
+              : { request_id: crypto.randomUUID() },
+          ),
         },
       );
       if (!response.ok) {
@@ -340,7 +351,7 @@ export function ApprovalPanel({
         <p>Review your email</p>
         <span className={styles.controlMeta}>Your approval needed</span>
       </div>
-      <h2>Send with Gmail</h2>
+      <h2>{showComposer ? "Send with Gmail" : "Email approvals"}</h2>
 
       {error && (
         <p className={styles.inlineError} role="alert">
@@ -375,7 +386,7 @@ export function ApprovalPanel({
           <div className={styles.approvalTopline}>
             <div>
               <span className={styles.riskBadge}>Email</span>
-              <strong>{activeAction.status.replaceAll("_", " ")}</strong>
+              <strong>{emailSendOutcome(activeAction).label}</strong>
             </div>
             <small>
               {activeAction.approval?.status === "pending"
@@ -403,12 +414,14 @@ export function ApprovalPanel({
             <p>{activeAction.payload.body_text}</p>
           </div>
 
-          {activeAction.result.message_id && (
-            <div className={styles.verificationReceipt}>
-              <strong>Verified by Gmail</strong>
-              <span>Your message was sent and confirmed.</span>
-            </div>
-          )}
+          {activeAction.status === "completed" &&
+            activeAction.verified_at &&
+            activeAction.result.message_id && (
+              <div className={styles.verificationReceipt}>
+                <strong>Verified by Gmail</strong>
+                <span>Your message was sent and confirmed.</span>
+              </div>
+            )}
           {activeAction.status === "uncertain" && (
             <p className={styles.manualReview}>
               Gmail&apos;s outcome could not be confirmed. NavoX will not retry
@@ -437,17 +450,18 @@ export function ApprovalPanel({
               </button>
             </div>
           )}
-          {terminal(activeAction.status) && (
-            <button
-              className={styles.secondaryAction}
-              onClick={() => setActiveAction(null)}
-              type="button"
-            >
-              Prepare another email
-            </button>
-          )}
+          {terminal(activeAction.status) &&
+            mayStartAnotherEmail(activeAction) && (
+              <button
+                className={styles.secondaryAction}
+                onClick={() => setActiveAction(null)}
+                type="button"
+              >
+                {showComposer ? "Prepare another email" : "Back to approvals"}
+              </button>
+            )}
         </div>
-      ) : (
+      ) : editing || showComposer ? (
         <form
           className={styles.approvalForm}
           onSubmit={editing ? saveEdit : prepare}
@@ -557,9 +571,14 @@ export function ApprovalPanel({
             </small>
           )}
         </form>
+      ) : (
+        <p>
+          Prepared emails and their send status appear here. Start with Draft a
+          reply above, then review the exact message before sending.
+        </p>
       )}
 
-      {recentActions.length > 1 && (
+      {recentActions.length > 0 && (
         <div className={styles.recentActions}>
           <span className={styles.recentActionsLabel}>
             Recent Gmail actions

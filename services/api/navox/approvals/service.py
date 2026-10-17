@@ -395,6 +395,24 @@ class ApprovalService:
             user_id=user_id,
             workspace_id=workspace_id,
         )
+        if (
+            action.action_type == "gmail.send"
+            and expected_payload_hash is not None
+            and (
+                expected_payload_hash != action.payload_hash
+                or expected_payload_hash
+                != action_security_hash(
+                    provider=action.provider,
+                    action_type=action.action_type,
+                    payload=action.payload,
+                )
+            )
+        ):
+            # Manual sends have no versioned draft binding. Honor their exact
+            # reviewed payload too, including retries of an earlier decision.
+            raise ApprovalConflictError(
+                "Email changed; review the current content before approving"
+            )
         if action.payload.get("draft_id") is not None:
             from navox.communication.service import check_draft_approval
 

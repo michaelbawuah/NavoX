@@ -1,0 +1,141 @@
+.panel {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  padding: clamp(1.1rem, 3vw, 1.7rem);
+  border: 1px solid rgb(132 190 207 / 25%);
+  border-radius: 1.1rem;
+  background:
+    radial-gradient(ellipse at top right, rgb(97 223 196 / 9%), transparent 65%),
+    linear-gradient(145deg, #111f35, #0a1222);
+  color: #e9f0fc;
+}
+.topline,
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+.topline {
+  justify-content: space-between;
+}
+.eyebrow {
+  color: #8be7d0;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.topline a {
+  color: #a8bad1;
+  font-size: 0.72rem;
+}
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #91a3bd;
+  font-size: 0.72rem;
+}
+.steps li span {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid rgb(145 168 207 / 24%);
+  border-radius: 50%;
+  font-size: 0.68rem;
+}
+.steps li[aria-current="step"] {
+  color: #eff8ff;
+  font-weight: 700;
+}
+.steps li[aria-current="step"] span,
+.steps li[data-complete="true"] span {
+  border-color: rgb(97 223 196 / 60%);
+  background: rgb(97 223 196 / 10%);
+  color: #a3f6e1;
+}
+.introduction h2 {
+  margin: 0;
+  font-size: clamp(1.2rem, 2vw, 1.5rem);
+  letter-spacing: -0.035em;
+}
+.introduction p,
+.connect p,
+.recovery p {
+  max-width: 52rem;
+  margin: 0.55rem 0 0;
+  color: #a8bad1;
+  font-size: 0.8rem;
+  line-height: 1.65;
+}
+.connect,
+.recovery {
+  display: grid;
+  gap: 0.65rem;
+  justify-items: start;
+}
+.primary,
+.secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.6rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+.primary {
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, #a3f6e1, #61dfc4);
+  color: #05231e;
+}
+.secondary {
+  justify-self: start;
+  border: 1px solid rgb(145 168 207 / 24%);
+  background: rgb(18 30 53 / 65%);
+  color: #d9e2f4;
+}
+.panel button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.footer {
+  padding-top: 0.9rem;
+  border-top: 1px solid rgb(145 168 207 / 14%);
+}
+.footnote {
+  color: #91a3bd;
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+.error {
+  color: #ffc8cd;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  margin: 0;
+}
+.panel :focus-visible {
+  outline: 2px solid #61dfc4;
+  outline-offset: 3px;
+}
+@media (max-width: 480px) {
+  .steps {
+    display: grid;
+    gap: 0.65rem;
+  }
+}

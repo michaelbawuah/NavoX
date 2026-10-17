@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   TodayWorkspace,
   type TodayWorkspaceView,
+  workspaceCanDraftReply,
   workspaceItemGroups,
 } from "./today-workspace";
 
@@ -53,6 +54,11 @@ describe("workspace destinations", () => {
   it("keeps the daily agenda visible and treats loading as unconfirmed data", () => {
     const markup = renderView();
     expect(markup).toContain("Upcoming agenda");
+    expect(markup).toContain('id="daily-briefing"');
+    expect(markup).toContain("Your daily focus");
+    expect(markup).toContain("Connect an account");
+    expect(markup).toContain("Review your day");
+    expect(markup).not.toContain("Handle this");
     expect(markup).toContain("Loading your agenda");
     expect(markup).toContain('aria-busy="true"');
     expect(markup).not.toContain("You’re caught up");
@@ -68,7 +74,8 @@ describe("workspace destinations", () => {
     expect(markup).toContain('id="drafts"');
     expect(markup).toContain('id="approvals"');
     expect(markup).toContain("Generate draft");
-    expect(markup).toContain("Send with Gmail");
+    expect(markup).toContain("Email approvals");
+    expect(markup).not.toContain("Send with Gmail");
     expect(markup).toContain("Needs reply");
     expect(markup).toContain("Follow-ups");
     expect(markup).not.toContain("<summary>Email actions</summary>");
@@ -79,6 +86,7 @@ describe("workspace destinations", () => {
     const markup = renderView("planner");
     expect(markup).toContain("Tasks &amp; events");
     expect(markup).toContain('id="capture-heading"');
+    expect(markup).toContain('id="add-task"');
     expect(markup).toContain("What needs to happen?");
     for (const type of [
       "task",
@@ -157,5 +165,60 @@ describe("real Today source routing", () => {
       "email-meeting",
       "email-deadline",
     ]);
+  });
+});
+
+describe("workspace reply entry", () => {
+  const item = {
+    type: "task",
+    status: "confirmed",
+    sources: [
+      {
+        provider: "google",
+        source_type: "gmail_message",
+        external_resource_id: "message-1",
+        connection_id: "mailbox-1",
+      },
+    ],
+  };
+  const connection = {
+    id: "mailbox-1",
+    provider: "google" as const,
+    external_email: "owner@example.test",
+    status: "active",
+    granted_scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+    last_checked_at: null,
+    last_error: null,
+  };
+  it("opens drafting only for the current readable source mailbox", () => {
+    expect(workspaceCanDraftReply(item, [connection])).toBe(true);
+    expect(
+      workspaceCanDraftReply(item, [{ ...connection, id: "another-mailbox" }]),
+    ).toBe(false);
+    expect(
+      workspaceCanDraftReply(item, [{ ...connection, status: "revoked" }]),
+    ).toBe(false);
+    expect(
+      workspaceCanDraftReply(item, [{ ...connection, granted_scopes: [] }]),
+    ).toBe(false);
+    expect(
+      workspaceCanDraftReply(
+        {
+          ...item,
+          sources: [{ ...item.sources[0], external_resource_id: " " }],
+        },
+        [connection],
+      ),
+    ).toBe(false);
+  });
+  it("keeps suggestions, finished requests, and calendar work on their review path", () => {
+    for (const status of ["candidate", "completed", "cancelled", "dismissed"])
+      expect(workspaceCanDraftReply({ ...item, status }, [connection])).toBe(
+        false,
+      );
+    for (const type of ["meeting", "deadline", "renewal"])
+      expect(workspaceCanDraftReply({ ...item, type }, [connection])).toBe(
+        false,
+      );
   });
 });

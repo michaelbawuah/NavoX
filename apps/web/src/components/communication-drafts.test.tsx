@@ -85,5 +85,50 @@ describe("versioned draft approval", () => {
     expect(markup).toContain("no readable Gmail message");
     expect(markup).toMatch(/disabled=""[^>]*>Generate draft/);
     expect(markup).not.toContain("Approve and send now");
+    expect(markup).toContain("Write email yourself");
+  });
+  it("opens an eligible selected request with its real saved context", () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    try {
+      const markup = renderToStaticMarkup(
+        createElement(CommunicationDrafts, {
+          commitments: [
+            {
+              id: "owned",
+              title: "Send the project outline",
+              description: "Maya asked for the revised outline before Friday.",
+            },
+            { id: "other", title: "Other request" },
+          ],
+          selectedCommitmentId: "owned",
+          connections: [],
+          paused: false,
+          onStateChanged: vi.fn(),
+        }),
+      );
+      expect(markup).toContain("Replying to your saved request");
+      expect(markup).toContain(
+        "Maya asked for the revised outline before Friday.",
+      );
+      expect(markup).toContain('value="owned" selected=""');
+      expect(markup).not.toContain("Approve and send now");
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it("does not turn an unknown linked request into another request", () => {
+    const markup = renderToStaticMarkup(
+      createElement(CommunicationDrafts, {
+        commitments: [{ id: "owned", title: "Owned request" }],
+        selectedCommitmentId: "foreign",
+        connections: [],
+        paused: false,
+        onStateChanged: vi.fn(),
+      }),
+    );
+    expect(markup).not.toContain("Replying to your saved request");
+    expect(markup).not.toContain('value="owned" selected=""');
   });
 });

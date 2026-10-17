@@ -9,13 +9,16 @@ import {
   useRef,
   useState,
 } from "react";
+import { hasGoogleReadAccess } from "../lib/setup-progress";
 import type { TodaySource } from "../lib/source-references";
 import { consumerTodaySections } from "../lib/today-sections";
 import { AISettings } from "./ai-settings";
 import { ApprovalPanel } from "./approval-panel";
 import { CommunicationDrafts } from "./communication-drafts";
 import { ConnectionsPanel } from "./connections-panel";
+import { DailyFocus } from "./daily-focus";
 import { DismissCommitment } from "./dismiss-commitment";
+import { GuidedSetup } from "./guided-setup";
 import {
   IntelligenceControls,
   IntelligenceFeedback,
@@ -87,6 +90,32 @@ export function workspaceItemGroups<
         (!isEmail(item) || ["meeting", "deadline"].includes(item.type)),
     ),
   };
+}
+
+export function workspaceCanDraftReply(
+  item: Pick<TodayItem, "type" | "status" | "sources">,
+  connections: GoogleConnection[],
+): boolean {
+  return (
+    ["task", "follow_up", "promise"].includes(item.type) &&
+    !["candidate", "completed", "cancelled", "dismissed"].includes(
+      item.status,
+    ) &&
+    item.sources.some(
+      (source) =>
+        source.provider === "google" &&
+        source.source_type === "gmail_message" &&
+        !!source.external_resource_id?.trim() &&
+        connections.some(
+          (connection) =>
+            connection.id === source.connection_id &&
+            connection.status === "active" &&
+            connection.granted_scopes.includes(
+              "https://www.googleapis.com/auth/gmail.readonly",
+            ),
+        ),
+    )
+  );
 }
 
 interface TodayPayload {
@@ -183,6 +212,15 @@ async function readApiError(response: Response): Promise<string> {
   return "NavoX could not complete that request.";
 }
 
+function focusSection(id: string) {
+  const target = document.getElementById(id);
+  if (!target) return;
+  target.closest("details")?.setAttribute("open", "");
+  target.tabIndex = -1;
+  target.scrollIntoView({ block: "start", behavior: "smooth" });
+  target.focus({ preventScroll: true });
+}
+
 function isTerminalPlan(status: string): boolean {
   return ["completed", "blocked", "failed", "dispatch_failed"].includes(status);
 }
@@ -225,11 +263,21 @@ export function TodayWorkspace({
   onSignOut,
 }: TodayWorkspaceProps) {
   const needsConnectionSetup =
-    connections.length === 0 && !connectionsUnavailable;
+    !connectionsUnavailable &&
+    !connections.some((connection) => connection.status === "active");
+  const needsReadSetup = !connections.some(
+    (connection) =>
+      connection.status === "active" && hasGoogleReadAccess(connection),
+  );
   const [showSetAside, setShowSetAside] = useState(false);
   const [timezone, setTimezone] = useState(account.timezone ?? "UTC");
   const [today, setToday] = useState<TodayPayload | null>(null);
   const [workspaceError, setWorkspaceError] = useState("");
+  const [todayError, setTodayError] = useState("");
+  const [selectedReplyId, setSelectedReplyId] = useState<string | null>(null);
+  const [replySelectionKey, setReplySelectionKey] = useState(0);
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const handledRouteSelection = useRef(false);
   const [workspaceMessage, setWorkspaceMessage] = useState("");
   const [loadingToday, setLoadingToday] = useState(true);
   const [retryingConnections, setRetryingConnections] = useState(false);
@@ -262,7 +310,7 @@ export function TodayWorkspace({
   const refreshToday = useCallback(async () => {
     const requestNumber = ++todayRequest.current;
     setLoadingToday(true);
-    setWorkspaceError("");
+    setTodayError("");
     const params = new URLSearchParams({ timezone });
     try {
       const response = await fetch(`${apiBaseUrl}/today?${params.toString()}`, {
@@ -271,14 +319,14 @@ export function TodayWorkspace({
       });
       if (requestNumber !== todayRequest.current) return;
       if (!response.ok) {
-        setWorkspaceError(await readApiError(response));
+        setTodayError(await readApiError(response));
         return;
       }
       const payload = (await response.json()) as TodayPayload;
       if (requestNumber === todayRequest.current) setToday(payload);
     } catch {
       if (requestNumber === todayRequest.current)
-        setWorkspaceError("Your day could not be refreshed. Please try again.");
+        setTodayError("Your day could not be refreshed. Please try again.");
     } finally {
       if (requestNumber === todayRequest.current) setLoadingToday(false);
     }
@@ -379,7 +427,12 @@ export function TodayWorkspace({
     const seen = new Set<string>();
     return combined
       .filter((item) => {
-        if (seen.has(item.id) || item.status === "candidate") {
+        if (
+          seen.has(item.id) ||
+          ["candidate", "completed", "cancelled", "dismissed"].includes(
+            item.status,
+          )
+        ) {
           return false;
         }
         seen.add(item.id);
@@ -388,6 +441,7 @@ export function TodayWorkspace({
       .map((item) => ({
         id: item.id,
         title: item.title,
+        description: item.description,
         status: item.status,
       }));
   }, [today]);
@@ -472,7 +526,7 @@ export function TodayWorkspace({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             request_id: crypto.randomUUID(),
-            goal: `Safely handle ${itemTitle}`,
+            goal: `Prepare the next step for ${itemTitle}`,
           }),
         },
       );
@@ -483,7 +537,7 @@ export function TodayWorkspace({
       const plan = (await response.json()) as PlanDetail;
       setActivePlan(plan);
       setWorkspaceMessage(
-        "NavoX is working on this. You’ll be asked to approve any email before it is sent.",
+        "NavoX is preparing a suggested next step. Check Activity for the result.",
       );
       await refreshPlans();
     } catch {
@@ -493,7 +547,27 @@ export function TodayWorkspace({
     }
   }
 
+  function canDraftReply(item: TodayItem) {
+    return workspaceCanDraftReply(item, connections);
+  }
+
+  function openReply(item: TodayItem) {
+    if (view !== "inbox") {
+      window.location.assign(
+        `/inbox?reply=${encodeURIComponent(item.id)}#drafts`,
+      );
+      return;
+    }
+    setSelectedReplyId(item.id);
+    setReplySelectionKey((key) => key + 1);
+    focusSection("drafts");
+  }
+
   async function handleCommitment(item: TodayItem) {
+    if (canDraftReply(item)) {
+      openReply(item);
+      return;
+    }
     await handleCommitmentById(item.id, item.title);
   }
 
@@ -574,7 +648,11 @@ export function TodayWorkspace({
             onClick={() => void handleCommitment(item)}
             type="button"
           >
-            {handlingId === item.id ? "Planning…" : "Handle this"}
+            {handlingId === item.id
+              ? "Preparing…"
+              : canDraftReply(item)
+                ? "Draft reply"
+                : "Plan next step"}
           </button>
         </div>
       );
@@ -606,7 +684,11 @@ export function TodayWorkspace({
           onClick={() => void handleCommitment(item)}
           type="button"
         >
-          {handlingId === item.id ? "Planning…" : "Handle this"}
+          {handlingId === item.id
+            ? "Preparing…"
+            : canDraftReply(item)
+              ? "Draft reply"
+              : "Plan next step"}
         </button>
       </div>
     );
@@ -639,6 +721,39 @@ export function TodayWorkspace({
       item.type === "renewal" &&
       !["completed", "cancelled", "dismissed"].includes(item.status),
   );
+  const reviewItem = allItems.find(
+    (item) => item.id === reviewId && item.status === "candidate",
+  );
+
+  useEffect(() => {
+    if (
+      view !== "inbox" ||
+      !today ||
+      loadingToday ||
+      handledRouteSelection.current
+    )
+      return;
+    const requestedId = new URLSearchParams(window.location.search).get(
+      "reply",
+    );
+    const owned = approvalCommitments.find((item) => item.id === requestedId);
+    handledRouteSelection.current = true;
+    if (owned) {
+      setSelectedReplyId(owned.id);
+      setReplySelectionKey((key) => key + 1);
+      focusSection("drafts");
+    }
+  }, [view, today, loadingToday, approvalCommitments]);
+
+  const reviewItemId = reviewItem?.id;
+  useEffect(() => {
+    if (!reviewItemId) return;
+    const frame = window.requestAnimationFrame(() =>
+      focusSection("review-suggestion"),
+    );
+    return () => window.cancelAnimationFrame(frame);
+  }, [reviewItemId]);
+
   const page = {
     today: {
       current: "Today" as const,
@@ -690,11 +805,11 @@ export function TodayWorkspace({
             <p>
               {loadingToday
                 ? "Loading your saved items…"
-                : workspaceError
+                : todayError
                   ? "Your saved items could not be refreshed. Try again using Refresh."
                   : emptyCopy}
             </p>
-            {!loadingToday && !workspaceError && (
+            {!loadingToday && !todayError && (
               <Link href={needsConnectionSetup ? "/connections" : "/planner"}>
                 {needsConnectionSetup ? "Connect your apps" : "Add a task"}
               </Link>
@@ -774,7 +889,11 @@ export function TodayWorkspace({
 
   function renderCapture() {
     return (
-      <section className={styles.controlCard} aria-labelledby="capture-heading">
+      <section
+        className={styles.controlCard}
+        aria-labelledby="capture-heading"
+        id="add-task"
+      >
         <h2 id="capture-heading">Add a task</h2>
         <p className={styles.mutedCopy}>
           Save a task, meeting, or deadline to your planner.
@@ -876,7 +995,9 @@ export function TodayWorkspace({
                 <h3>{activePlan.goal}</h3>
               </div>
               <span data-status={activePlan.status}>
-                {activePlan.status.replaceAll("_", " ")}
+                {activePlan.status === "completed"
+                  ? "Next step prepared"
+                  : activePlan.status.replaceAll("_", " ")}
               </span>
             </div>
             <ol className={styles.planSteps}>
@@ -911,14 +1032,19 @@ export function TodayWorkspace({
                 type="button"
               >
                 <span>{plan.goal}</span>
-                <b>{plan.status.replaceAll("_", " ")}</b>
+                <b>
+                  {plan.status === "completed"
+                    ? "Next step prepared"
+                    : plan.status.replaceAll("_", " ")}
+                </b>
               </button>
             ))}
           </div>
         ) : (
           <p className={styles.emptyAgent}>
-            Choose <strong>Handle this</strong> on a confirmed task to ask NavoX
-            for help.
+            Choose <strong>Plan next step</strong> on a confirmed task to
+            prepare a suggestion. For email requests, choose{" "}
+            <strong>Draft reply</strong>.
           </p>
         )}
       </section>
@@ -953,11 +1079,11 @@ export function TodayWorkspace({
             <p>
               {loadingToday
                 ? "Loading your agenda…"
-                : workspaceError
+                : todayError
                   ? "Your agenda could not be refreshed."
                   : "No upcoming meetings or deadlines are saved yet."}
             </p>
-            {!loadingToday && !workspaceError && (
+            {!loadingToday && !todayError && (
               <Link href="/planner">Plan your next step</Link>
             )}
           </div>
@@ -1008,56 +1134,80 @@ export function TodayWorkspace({
         )}
 
         {(workspaceError ||
+          (view !== "today" && todayError) ||
           workspaceMessage ||
           (message && !connectionsUnavailable)) && (
           <div
             className={
-              workspaceError ? styles.errorBanner : styles.statusBanner
+              workspaceError || (view !== "today" && todayError)
+                ? styles.errorBanner
+                : styles.statusBanner
             }
-            role={workspaceError ? "alert" : "status"}
+            role={
+              workspaceError || (view !== "today" && todayError)
+                ? "alert"
+                : "status"
+            }
           >
-            {workspaceError || workspaceMessage || message}
+            {workspaceError ||
+              (view !== "today" && todayError) ||
+              workspaceMessage ||
+              message}
           </div>
         )}
 
         {view === "today" && (
           <div className={styles.focusLayout}>
             <div className={styles.focusColumn}>
-              {needsConnectionSetup && (
-                <section
-                  className={styles.setupCard}
-                  aria-labelledby="setup-heading"
-                >
-                  <span className={styles.setupIcon} aria-hidden="true">
-                    ↗
-                  </span>
-                  <div>
-                    <h2 id="setup-heading">Make your day easier</h2>
-                    <p>
-                      Connect your email and calendar to see requests and
-                      deadlines here. You can also start with a task.
-                    </p>
-                    <div className={styles.setupActions}>
-                      <Link className={styles.primaryLink} href="/connections">
-                        Connect your apps
-                      </Link>
-                      <Link className={styles.textLink} href="/planner">
-                        Add a task
-                      </Link>
-                    </div>
-                  </div>
-                </section>
+              {!connectionsUnavailable &&
+                (needsReadSetup || today?.total === 0) && (
+                  <GuidedSetup
+                    key={`${account.id}:${account.workspace.id}`}
+                    connections={connections}
+                    paused={agentPaused}
+                    itemCount={today?.total ?? 0}
+                    loading={loadingToday || !!todayError}
+                    onConnectionsChanged={onConnectionsChanged}
+                    onRefresh={refreshToday}
+                  />
+                )}
+              <div id="daily-briefing">
+                <DailyFocus
+                  payload={today}
+                  loading={loadingToday}
+                  error={todayError}
+                  now={Date.now()}
+                  paused={agentPaused}
+                  busyItemId={handlingId ?? mutatingId}
+                  canDraftReply={canDraftReply}
+                  onPrepare={handleCommitment}
+                  onReview={(item) => setReviewId(item.id)}
+                  onRefresh={refreshToday}
+                />
+              </div>
+              {reviewItem && (
+                <div id="review-suggestion">
+                  {renderSection("Review suggestion", [reviewItem], "")}
+                </div>
               )}
-              {renderSection(
-                "Needs your attention",
-                sections["Needs your attention"],
-                "You’re caught up on your saved items. New requests will appear here as your apps sync.",
+              {sections["Needs your attention"].length > 0 && (
+                <details className={styles.toolDisclosure}>
+                  <summary>
+                    All priorities{" "}
+                    <span>{sections["Needs your attention"].length}</span>
+                  </summary>
+                  {renderSection(
+                    "Needs your attention",
+                    sections["Needs your attention"],
+                    "No active priorities in your saved items.",
+                  )}
+                </details>
               )}
               <section
                 className={styles.quickLinks}
                 aria-label="Continue your day"
               >
-                <Link href="/inbox#approvals">
+                <Link href="/inbox">
                   <strong>Review email</strong>
                   <span>
                     Drafts, replies, and approvals{" "}
@@ -1123,7 +1273,7 @@ export function TodayWorkspace({
                   <p className={styles.emptyState}>
                     {loadingToday
                       ? "Loading renewals…"
-                      : workspaceError
+                      : todayError
                         ? "Renewals could not be refreshed."
                         : "No upcoming renewals in your saved items."}
                   </p>
@@ -1163,7 +1313,10 @@ export function TodayWorkspace({
               aria-label="Email drafts"
             >
               <CommunicationDrafts
+                key={`${account.id}:${account.workspace.id}`}
                 commitments={approvalCommitments}
+                selectedCommitmentId={selectedReplyId}
+                selectionKey={replySelectionKey}
                 connections={connections}
                 paused={agentPaused}
                 onStateChanged={refreshToday}
@@ -1175,6 +1328,7 @@ export function TodayWorkspace({
               aria-label="Exact message approvals"
             >
               <ApprovalPanel
+                showComposer={false}
                 agentPaused={agentPaused}
                 commitments={approvalCommitments}
                 connections={connections}

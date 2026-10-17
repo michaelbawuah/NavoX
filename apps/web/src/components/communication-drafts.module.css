@@ -1,0 +1,43 @@
+.requestContext {
+  display: grid;
+  gap: 0.45rem;
+  padding: 1rem;
+  border: 1px solid var(--line, #d9e4e7);
+  border-radius: 14px;
+  background: var(--panel, #f6fafb);
+}
+
+.requestContext > span {
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
+.requestContext > strong {
+  font-size: 1.05rem;
+  line-height: 1.45;
+}
+
+.requestContext p,
+.outcome p,
+.notice p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.notice,
+.outcome {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--aqua, #68d7c8) 10%, transparent);
+  border: 1px solid var(--line, #d9e4e7);
+}
+
+.outcome[data-tone="attention"] {
+  background: color-mix(in srgb, #d99f54 12%, transparent);
+}
+
+.outcome[data-tone="success"] {
+  background: color-mix(in srgb, #49a687 12%, transparent);
+}
