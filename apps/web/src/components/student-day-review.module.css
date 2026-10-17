@@ -1,0 +1,244 @@
+.panel {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  color: #edf5f7;
+}
+.card {
+  border: 1px solid #35505b;
+  border-radius: 1rem;
+  padding: clamp(1rem, 2.2vw, 1.5rem);
+  background: #132631;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  background:
+    radial-gradient(ellipse at top right, #285044, transparent 75%), #172e36;
+}
+.panel h1 {
+  font-size: clamp(1.7rem, 3vw, 2.3rem);
+  letter-spacing: -0.04em;
+  margin: 0.3rem 0 0.7rem;
+  line-height: 1.2;
+}
+.panel h2 {
+  font-size: 1.2rem;
+  letter-spacing: -0.025em;
+  margin: 0 0 0.65rem;
+}
+.panel h3 {
+  font-size: 1rem;
+  margin: 0.9rem 0 0.5rem;
+}
+.panel p {
+  line-height: 1.65;
+  margin: 0.4rem 0 0.8rem;
+}
+.panel .eyebrow {
+  font-size: 0.68rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #b3e6ce;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+}
+.muted,
+.hint {
+  color: #b8cbd1;
+  font-size: 0.88rem;
+}
+.hint {
+  font-size: 0.77rem;
+}
+.notice {
+  color: #c7e6de;
+  padding: 0 0.2rem;
+}
+.warning {
+  background: #3c3026;
+  border: 1px solid #977443;
+  border-radius: 0.7rem;
+  color: #ffe1a9;
+  padding: 0.85rem 1rem;
+  line-height: 1.65;
+}
+.privateSurface {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+.privateSurface[hidden] {
+  display: none;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+.heading,
+.controls,
+.modes,
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+.heading {
+  align-items: start;
+}
+.modes,
+.actions {
+  justify-content: flex-start;
+}
+.modes {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.actions {
+  margin-top: 1rem;
+}
+.controls {
+  padding: 0.2rem;
+}
+.panel button {
+  font: inherit;
+  border: 1px solid #5d7c88;
+  border-radius: 0.65rem;
+  background: #203d49;
+  color: #eff9fc;
+  padding: 0.7rem 1rem;
+  min-height: 2.7rem;
+  cursor: pointer;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+.panel button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.panel .primary {
+  background: #b0e7cd;
+  color: #102f28;
+  border-color: #b0e7cd;
+  font-weight: 700;
+}
+.modes button[aria-pressed="true"] {
+  background: #36594f;
+  color: #e1f7e9;
+  border-color: #a0c8b1;
+}
+.panel a {
+  color: #b9e8d7;
+  text-underline-offset: 0.2em;
+  line-height: 1.6;
+}
+.panel :is(button, a, summary):focus-visible {
+  outline: 3px solid #c0f3dc;
+  outline-offset: 4px;
+}
+.badge,
+.partial {
+  border: 1px solid #4a7469;
+  border-radius: 2rem;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.7rem;
+  color: #c9ebde;
+}
+.partial {
+  border-color: #977443;
+  color: #ffe1a9;
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 7.5rem), 1fr));
+  gap: 0.7rem;
+  margin: 1rem 0;
+}
+.metrics > div {
+  border: 1px solid #34515c;
+  padding: 0.8rem;
+  border-radius: 0.7rem;
+}
+.metrics dt {
+  font-size: 0.74rem;
+  color: #b8cbd1;
+  line-height: 1.5;
+}
+.metrics dd {
+  font-size: 1.35rem;
+  font-weight: 600;
+  margin: 0.4rem 0 0;
+}
+.records {
+  padding: 0;
+  list-style: none;
+}
+.records li {
+  padding: 0.8rem 0;
+  border-bottom: 1px solid #34515c;
+}
+.records li > div {
+  display: grid;
+  gap: 0.3rem;
+}
+.records span {
+  font-size: 0.78rem;
+  color: #b8cbd1;
+  line-height: 1.6;
+}
+.inset {
+  background: #0e222c;
+  border: 1px solid #34515c;
+  border-radius: 0.75rem;
+  padding: 1rem;
+  margin: 0.8rem 0;
+}
+.more summary {
+  cursor: pointer;
+  color: #b9e8d7;
+  line-height: 1.6;
+  font-size: 0.85rem;
+}
+.goals {
+  display: grid;
+  gap: 0.6rem;
+}
+.goalCount {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+.summary {
+  border-color: #557969;
+  background: #1b3339;
+}
+@media (max-width: 850px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .controls > .primary,
+  .modes {
+    width: 100%;
+  }
+  .modes button {
+    flex: 1;
+  }
+  .hero > button {
+    width: auto;
+  }
+  .card {
+    border-radius: 0.8rem;
+  }
+}
