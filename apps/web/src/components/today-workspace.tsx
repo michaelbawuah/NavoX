@@ -26,8 +26,11 @@ import {
 } from "./intelligence-controls";
 import { OperationalAssistance } from "./operational-assistance";
 import { PagedList } from "./paged-list";
+import { PersonalMemoryPanel } from "./personal-memory";
+import { PersonalRoutines } from "./personal-routines";
 import { ProactivePanel } from "./proactive-panel";
 import { SourceReferences } from "./source-references";
+import { ThreadWatchPanel } from "./thread-watch-panel";
 import styles from "./today-workspace.module.css";
 import { WorkspaceShell } from "./workspace-shell";
 
@@ -1203,6 +1206,18 @@ export function TodayWorkspace({
                   )}
                 </details>
               )}
+              <ThreadWatchPanel
+                key={`${account.id}:${account.workspace.id}`}
+                compact
+                paused={agentPaused}
+                eligibleCommitmentIds={allItems
+                  .filter(canDraftReply)
+                  .map((item) => item.id)}
+                onDraftReply={(id) => {
+                  const item = allItems.find((row) => row.id === id);
+                  if (item && canDraftReply(item)) openReply(item);
+                }}
+              />
               <section
                 className={styles.quickLinks}
                 aria-label="Continue your day"
@@ -1336,6 +1351,19 @@ export function TodayWorkspace({
               />
             </section>
             <div id="follow-ups">
+              <div id="thread-watches">
+                <ThreadWatchPanel
+                  key={`${account.id}:${account.workspace.id}`}
+                  paused={agentPaused}
+                  eligibleCommitmentIds={allItems
+                    .filter(canDraftReply)
+                    .map((item) => item.id)}
+                  onDraftReply={(id) => {
+                    const item = allItems.find((row) => row.id === id);
+                    if (item && canDraftReply(item)) openReply(item);
+                  }}
+                />
+              </div>
               {renderSection(
                 "Follow-ups",
                 inboxItems.filter((item) =>
@@ -1393,19 +1421,27 @@ export function TodayWorkspace({
                 ),
                 "Your planner is ready. Add your first task or connect Calendar and Canvas for meetings and deadlines.",
               )}
-              <ProactivePanel
-                agentPaused={agentPaused}
-                completedDeadlines={(today?.completed_recently ?? []).filter(
-                  (item) => item.type === "deadline",
-                )}
-                deadlines={[
-                  ...(today?.needs_attention ?? []),
-                  ...(today?.coming_up ?? []),
-                ].filter((item) => item.type === "deadline")}
-                handlingId={handlingId}
-                onHandleCommitment={handleCommitmentById}
+              <PersonalRoutines
+                key={`${account.id}:${account.workspace.id}`}
+                paused={agentPaused}
                 timezone={timezone}
               />
+              <details className={styles.toolDisclosure}>
+                <summary>Briefing and notification preferences</summary>
+                <ProactivePanel
+                  agentPaused={agentPaused}
+                  completedDeadlines={(today?.completed_recently ?? []).filter(
+                    (item) => item.type === "deadline",
+                  )}
+                  deadlines={[
+                    ...(today?.needs_attention ?? []),
+                    ...(today?.coming_up ?? []),
+                  ].filter((item) => item.type === "deadline")}
+                  handlingId={handlingId}
+                  onHandleCommitment={handleCommitmentById}
+                  timezone={timezone}
+                />
+              </details>
               <OperationalAssistance items={allItems} paused={agentPaused} />
               <details className={styles.toolDisclosure}>
                 <summary>Completed & recent updates</summary>
@@ -1475,6 +1511,9 @@ export function TodayWorkspace({
                   Manage connected apps
                 </Link>
               </section>
+              <PersonalMemoryPanel
+                key={`${account.id}:${account.workspace.id}`}
+              />
               <AISettings />
             </div>
             <div className={styles.focusColumn}>

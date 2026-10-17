@@ -46,6 +46,8 @@ from navox.db.models import (
     User,
     WorkspaceMembership,
 )
+from navox.db.routines import PersonalRoutine, RoutineRun
+from navox.db.thread_watches import ThreadWatch
 from navox.subscriptions.provenance import erase_source_subscriptions
 
 
@@ -394,7 +396,19 @@ async def delete_learned_data(
             )
             .limit(1)
         )
-        if foreign_commitment is not None or foreign_observation is not None:
+        foreign_watch = await database.scalar(
+            select(ThreadWatch.id)
+            .where(
+                ThreadWatch.connection_id.in_(provenance_ids),
+                (ThreadWatch.workspace_id != workspace_id) | (ThreadWatch.user_id != user_id),
+            )
+            .limit(1)
+        )
+        if (
+            foreign_commitment is not None
+            or foreign_observation is not None
+            or foreign_watch is not None
+        ):
             raise HTTPException(409, "Source provenance needs manual review")
     source_ids = (
         list(
@@ -478,6 +492,29 @@ async def delete_learned_data(
         .limit(1)
     ):
         raise HTTPException(409, "Person identity provenance needs manual review")
+    # Connection rows are retained after deletion. Remove watch metadata before
+    # removing its action provenance, and erase copied routine result snapshots.
+    if provenance_ids:
+        await database.execute(
+            delete(ThreadWatch).where(
+                ThreadWatch.connection_id.in_(provenance_ids),
+                ThreadWatch.workspace_id == workspace_id,
+                ThreadWatch.user_id == user_id,
+            )
+        )
+    owner_routines = select(PersonalRoutine.id).where(
+        PersonalRoutine.user_id == user_id,
+        PersonalRoutine.workspace_id == workspace_id,
+    )
+    await database.execute(delete(RoutineRun).where(RoutineRun.routine_id.in_(owner_routines)))
+    await database.execute(
+        update(PersonalRoutine)
+        .where(
+            PersonalRoutine.user_id == user_id,
+            PersonalRoutine.workspace_id == workspace_id,
+        )
+        .values(last_result=None)
+    )
     await erase_source_plans(
         database,
         workspace_id=workspace_id,

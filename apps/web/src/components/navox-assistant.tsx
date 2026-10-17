@@ -64,6 +64,7 @@ import {
   type DraftSpeechRequest,
 } from "./assistant-email-actions";
 import styles from "./navox-assistant.module.css";
+import { SavedMemoryPicker } from "./personal-memory";
 import { WorkspaceShell } from "./workspace-shell";
 
 export function assistantVoiceLabel(state: AssistantVoiceState): string {
@@ -1444,6 +1445,18 @@ export function NavoXAssistant() {
                 </button>
               </div>
             </form>
+            <SavedMemoryPicker
+              value={text}
+              onChange={(next) => setText(next.replace(/\r?\n+/g, " "))}
+              maxLength={500}
+              disabled={
+                connecting ||
+                !sessionId ||
+                busy ||
+                controls.listening ||
+                controls.transcribing
+              }
+            />
             <p
               id="navox-question-limit"
               className={questionLimit ? styles.error : styles.limitHint}

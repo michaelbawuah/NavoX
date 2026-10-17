@@ -12,6 +12,7 @@ import {
   manualEmailApprovalPayload,
   mayStartAnotherEmail,
 } from "../lib/email-workflow";
+import { WatchSentEmail } from "./thread-watch-panel";
 import styles from "./today-workspace.module.css";
 
 const apiBaseUrl =
@@ -428,6 +429,11 @@ export function ApprovalPanel({
               automatically; review Sent mail before taking another action.
             </p>
           )}
+          <WatchSentEmail
+            action={activeAction}
+            connections={connections}
+            paused={agentPaused}
+          />
 
           {approvalPending && (
             <div className={styles.approvalActions}>

@@ -118,18 +118,11 @@ async def authorize(
         .execution_options(populate_existing=True)
     )
     if lock:
-        statement = statement.with_for_update(key_share=True)
-    if await database.scalar(statement) is None:
-        raise unavailable(404, "Google connection not found.")
-    if lock:
         # Serialize the short claim/apply transaction with pause or membership removal.
-        # Follow feedback's workspace-before-card order; permit foreign-key key-share locks.
-        await database.scalar(
-            select(Workspace).where(Workspace.id == workspace_id).with_for_update(key_share=True)
-        )
-        await database.scalar(
-            select(User).where(User.id == user_id).with_for_update(key_share=True)
-        )
+        # Match connector lifecycle's membership -> user -> legacy authority order.
+        # This path never acquires native connector locks. The workspace must still
+        # precede every card lock, matching feedback and ordinary card mutations.
+        # NO KEY UPDATE permits the foreign-key key-share locks used by audit rows.
         await database.scalar(
             select(WorkspaceMembership)
             .where(
@@ -138,6 +131,15 @@ async def authorize(
             )
             .with_for_update(key_share=True)
         )
+        await database.scalar(
+            select(User).where(User.id == user_id).with_for_update(key_share=True)
+        )
+        await database.scalar(
+            select(Workspace).where(Workspace.id == workspace_id).with_for_update(key_share=True)
+        )
+        statement = statement.with_for_update(key_share=True)
+    if await database.scalar(statement) is None:
+        raise unavailable(404, "Google connection not found.")
     return await readable_connection(
         database,
         connection_id=connection_id,
