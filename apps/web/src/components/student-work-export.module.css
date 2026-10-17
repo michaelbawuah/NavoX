@@ -1,0 +1,249 @@
+.panel {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  color: #edf5f7;
+}
+.card,
+.preview {
+  border: 1px solid #35505b;
+  border-radius: 1rem;
+  padding: clamp(1rem, 2.2vw, 1.5rem);
+  background: #132631;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  background:
+    radial-gradient(ellipse at top right, #285044, transparent 75%), #172e36;
+}
+.panel h2 {
+  font-size: 1.45rem;
+  letter-spacing: -0.035em;
+  margin: 0.3rem 0 0.6rem;
+}
+.panel h3 {
+  font-size: 1.05rem;
+  margin: 0.3rem 0 0.7rem;
+}
+.panel p {
+  line-height: 1.65;
+  margin: 0.4rem 0 0.8rem;
+}
+.panel .eyebrow {
+  font-size: 0.68rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #b3e6ce;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+}
+.muted,
+.hint {
+  color: #b8cbd1;
+  font-size: 0.88rem;
+}
+.hint {
+  font-size: 0.77rem;
+}
+.notice {
+  color: #c7e6de;
+  padding: 0 0.2rem;
+}
+.warning {
+  background: #3c3026;
+  border: 1px solid #977443;
+  border-radius: 0.7rem;
+  color: #ffe1a9;
+  padding: 0.85rem 1rem;
+  line-height: 1.65;
+}
+.privateSurface {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+.privateSurface[hidden] {
+  display: none;
+}
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+.fields {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.panel label {
+  display: grid;
+  gap: 0.45rem;
+  font-size: 0.86rem;
+  color: #d5e4e8;
+}
+.panel input,
+.panel textarea {
+  font: inherit;
+  min-height: 2.8rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #52707c;
+  background: #0e202b;
+  color: #eff8fa;
+  border-radius: 0.6rem;
+  color-scheme: dark;
+}
+.panel textarea {
+  resize: vertical;
+  line-height: 1.65;
+  tab-size: 4;
+}
+.panel input::placeholder,
+.panel textarea::placeholder {
+  color: #91a8b3;
+}
+.panel .check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  line-height: 1.6;
+  margin: 0.5rem 0;
+  flex-wrap: wrap;
+}
+.check input {
+  flex: none;
+  width: 1.05rem;
+  min-height: 1.05rem;
+  height: 1.05rem;
+  padding: 0;
+  margin: 0.25rem 0;
+  accent-color: #9ce5bf;
+}
+.savedLabel {
+  white-space: pre-wrap;
+  font-weight: 600;
+  color: #c9ebde;
+}
+.confirmations {
+  border-block: 1px solid #35505b;
+  padding: 0.7rem 0;
+}
+.panel button {
+  font: inherit;
+  border: 1px solid #5d7c88;
+  border-radius: 0.65rem;
+  background: #203d49;
+  color: #eff9fc;
+  padding: 0.7rem 1rem;
+  min-height: 2.7rem;
+  cursor: pointer;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+.panel button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.panel .primary {
+  background: #b0e7cd;
+  color: #102f28;
+  border-color: #b0e7cd;
+  font-weight: 700;
+  justify-self: start;
+}
+.panel :is(button, input, textarea):focus-visible {
+  outline: 3px solid #c0f3dc;
+  outline-offset: 4px;
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+.limits {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.limits span {
+  border: 1px solid #436258;
+  border-radius: 2rem;
+  font-size: 0.72rem;
+  padding: 0.35rem 0.65rem;
+  color: #c9ebde;
+}
+.preview {
+  background: #f3f5ed;
+  color: #172f35;
+}
+.preview h3 {
+  white-space: pre-wrap;
+  font-size: 1.2rem;
+}
+.preview .eyebrow {
+  color: #345e53;
+}
+.preview .hint {
+  color: #425b62;
+}
+.metadata {
+  display: grid;
+  gap: 0.7rem;
+  border-block: 1px solid #b7c8c4;
+  padding: 0.9rem 0;
+  margin: 1rem 0;
+}
+.metadata > div {
+  display: grid;
+  gap: 0.2rem;
+}
+.metadata dt {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #425b62;
+}
+.metadata dd {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  font-size: 0.85rem;
+}
+.textPreview {
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+  min-height: 8rem;
+  margin: 1rem 0;
+}
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .actions,
+  .panel button {
+    width: 100%;
+  }
+  .actions button {
+    flex: 1;
+  }
+  .card,
+  .preview {
+    border-radius: 0.8rem;
+  }
+}
