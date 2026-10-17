@@ -35,6 +35,7 @@ from navox.knowledge.activities import (
     knowledge_resource_activity,
     knowledge_source_page_activity,
 )
+from navox.lms_feeds.activities import reconcile_lms_feeds_activity
 from navox.news.activities import (
     ingest_news_source_activity,
     news_clustering_activity,
@@ -103,6 +104,7 @@ from navox.workflows.knowledge import (
     KnowledgeResourceIngestWorkflow,
     KnowledgeResourceUpdateWorkflow,
 )
+from navox.workflows.lms_feeds import LmsFeedReconciliationWorkflow
 from navox.workflows.news import (
     NewsConversationRefreshWorkflow,
     NewsSourceIngestionWorkflow,
@@ -141,6 +143,7 @@ async def main() -> None:
             PersonalRoutineWorkflow,
             PersonalRoutineReconciliationWorkflow,
             StudentAlertReconciliationWorkflow,
+            LmsFeedReconciliationWorkflow,
             KnowledgeResourceIngestWorkflow,
             KnowledgeResourceUpdateWorkflow,
             KnowledgeResourceDeleteWorkflow,
@@ -188,6 +191,7 @@ async def main() -> None:
             routine_failure_activity,
             reconcile_routines_activity,
             reconcile_student_alerts_activity,
+            reconcile_lms_feeds_activity,
             knowledge_delete_activity,
             knowledge_embedding_activity,
             knowledge_reindex_activity,
@@ -281,6 +285,15 @@ async def main() -> None:
             await client.start_workflow(
                 StudentAlertReconciliationWorkflow.run,
                 id="navox-student-alert-reconciliation-v1",
+                task_queue=settings.temporal_task_queue,
+            )
+        except WorkflowAlreadyStartedError:
+            pass
+        # Expired feed previews are forgotten even while network reads are disabled.
+        try:
+            await client.start_workflow(
+                LmsFeedReconciliationWorkflow.run,
+                id="navox-lms-feed-reconciliation-v1",
                 task_queue=settings.temporal_task_queue,
             )
         except WorkflowAlreadyStartedError:

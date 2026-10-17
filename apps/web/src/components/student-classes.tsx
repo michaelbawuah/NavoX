@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { productFeatures } from "../lib/product-features";
 import {
   type StudentScreenshotCandidate,
   studentClassPrefill,
@@ -1810,6 +1811,11 @@ function StudentClassesAccount({
                               <p className={styles.courseCode}>{course.code}</p>
                             )}
                             <h3>{course.name}</h3>
+                            {productFeatures.studentCoursework && (
+                              <Link href={`/classes/${course.id}`}>
+                                Open course workspace
+                              </Link>
+                            )}
                             <p className={styles.courseMeta}>
                               {course.term_start} — {course.term_end}
                               {course.professor && ` · ${course.professor}`}
@@ -2363,11 +2369,13 @@ function StudentDataReset({
   const [requestId] = useState(() => crypto.randomUUID());
   return (
     <details className={styles.disclosure}>
-      <summary>Forget my student timetable and profile</summary>
+      <summary>Forget my student data</summary>
       <p className={styles.warning}>
         This permanently forgets all your saved courses, class sections, one-day
-        changes, shifts, breaks, student profile, and import previews. Other
-        NavoX data stays in place. To drop a single course, archive it instead.
+        changes, shifts, breaks, student profile, notification devices and
+        settings, calendar feeds and their private links, study tasks, plan
+        history, course notes, files, and import previews. To drop a single
+        course and keep its history, archive it instead.
       </p>
       <label className={styles.check}>
         <input

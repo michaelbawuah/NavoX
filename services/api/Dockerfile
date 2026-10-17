@@ -4,9 +4,9 @@ FROM python:3.12-slim
 COPY --from=uv /uv /uvx /bin/
 WORKDIR /app
 
-# Timetable screenshots are read locally; no image is uploaded to an AI provider.
+# Timetable images and course PDFs are read locally.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml uv.lock ./

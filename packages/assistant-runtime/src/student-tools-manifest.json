@@ -1,0 +1,171 @@
+{
+  "rules": {
+    "external_execution": false,
+    "planning_requires_acceptance": true,
+    "private_context_contract": "student_tool_selector@v1",
+    "tool_results_are_data": true
+  },
+  "tools": [
+    {
+      "description": "Read the current server clock in the student timezone.",
+      "effect": "read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "max_result_bytes": 8192,
+      "name": "clock.read",
+      "provider_cost_usd": "0",
+      "sensitivity": "PERSONAL"
+    },
+    {
+      "description": "Read owned timetable occurrences using the server clock, recurrence and exceptions.",
+      "effect": "read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "date": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          },
+          "day_offset": {
+            "maximum": 6,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mode": {
+            "enum": ["now", "next", "at", "day"],
+            "type": "string"
+          },
+          "time": {
+            "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+            "type": "string"
+          },
+          "weekday": {
+            "maximum": 6,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": ["mode"],
+        "type": "object"
+      },
+      "max_result_bytes": 8192,
+      "name": "classes.lookup",
+      "provider_cost_usd": "0",
+      "sensitivity": "PERSONAL"
+    },
+    {
+      "description": "Read saved owned course metadata. No files, syllabus, grades or hidden memory.",
+      "effect": "read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 40,
+            "minLength": 1,
+            "type": "string"
+          },
+          "course_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "max_result_bytes": 8192,
+      "name": "course.info",
+      "provider_cost_usd": "0",
+      "sensitivity": "PERSONAL"
+    },
+    {
+      "description": "Read at most twelve saved owned tasks and their remaining effort.",
+      "effect": "read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "course_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 12,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "status": {
+            "enum": ["active", "completed", "archived", "all"],
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "max_result_bytes": 8192,
+      "name": "tasks.read",
+      "provider_cost_usd": "0",
+      "sensitivity": "PERSONAL"
+    },
+    {
+      "description": "Create a concrete owned planning preview. Saving a plan requires separate explicit review and acceptance.",
+      "effect": "review",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "date": {
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          },
+          "days": {
+            "maximum": 7,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "max_result_bytes": 8192,
+      "name": "plan.preview",
+      "provider_cost_usd": "0",
+      "sensitivity": "PERSONAL"
+    },
+    {
+      "description": "Read owned learning calendar feed names, domains and sync status; never private feed URLs.",
+      "effect": "read",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "max_result_bytes": 8192,
+      "name": "feeds.read",
+      "provider_cost_usd": "0",
+      "sensitivity": "PERSONAL"
+    },
+    {
+      "description": "Prepare a review card for refreshing one owned feed. Does not queue or fetch it.",
+      "effect": "review",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "feed_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": ["feed_id"],
+        "type": "object"
+      },
+      "max_result_bytes": 8192,
+      "name": "feed.refresh_review",
+      "provider_cost_usd": "0",
+      "sensitivity": "PERSONAL"
+    }
+  ],
+  "version": "student-tools.v1"
+}
