@@ -41,6 +41,8 @@ class Provider(StrEnum):
 class Capability(StrEnum):
     TEXT = "text"
     STRUCTURED_OUTPUT = "structured_output"
+    # Closed, schema-bound proposals validated/executed by the host. This does
+    # not imply native function-call wire items or provider-hosted execution.
     TOOL_PROPOSALS = "tool_proposals"
     VISION = "vision"
     EMBEDDINGS = "embeddings"
