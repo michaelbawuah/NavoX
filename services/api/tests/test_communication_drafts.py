@@ -31,11 +31,13 @@ from navox.api.main import create_app
 from navox.approvals import execution
 from navox.approvals.execution import execute_approved_gmail_send
 from navox.communication import generation
+from navox.connectors.builtin.google import mirror_google_document
 from navox.core.settings import Settings, get_settings
 from navox.db.communications import CommunicationDraft, CommunicationDraftVersion
-from navox.db.models import Approval, CommitmentSource, Connection
+from navox.db.models import Approval, CommitmentSource, Connection, User
 from navox.db.session import get_database_session
 from navox.intelligence.contracts import SourceDocument
+from navox.providers.google_sources import GMAIL_READ_SCOPE
 
 
 @pytest_asyncio.fixture
@@ -60,6 +62,224 @@ async def approval_environment(ai_database):
         transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         yield client, ai_database, settings
+
+
+async def reply_source_environment(approval_environment):
+    client, factory, settings = approval_environment
+    account = await register(client)
+    commitment = await create_commitment(client)
+    connection_id = await add_google_connection(factory, settings, account)
+    async with factory() as db:
+        connection = await db.get(Connection, connection_id)
+        connection.granted_scopes = [*connection.granted_scopes, GMAIL_READ_SCOPE]
+        source = CommitmentSource(
+            commitment_id=UUID(commitment["id"]),
+            connection_id=connection_id,
+            provider="google",
+            source_type="gmail_message",
+            external_resource_id="source-message",
+            source_metadata={
+                "subject": "Untrusted retained subject",
+                "sender": "untrusted@example.com",
+                "body": "Never return stored message content",
+            },
+        )
+        db.add(source)
+        await db.commit()
+        source_id = source.id
+    return client, factory, settings, account, commitment, connection_id, source_id
+
+
+@pytest.mark.asyncio
+async def test_reply_sources_return_owned_mailbox_binding_without_fetching_or_content(
+    approval_environment, monkeypatch
+):
+    client, _, _, _, commitment, connection_id, source_id = await reply_source_environment(
+        approval_environment
+    )
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Listing reply sources must not call Google or an AI provider")
+
+    monkeypatch.setattr(communication, "build_runtime", forbidden)
+    monkeypatch.setattr(generation, "access_token_for_connection", forbidden)
+    monkeypatch.setattr(generation.GoogleSourceGateway, "gmail_message", forbidden)
+    response = await client.get(f"/api/v1/communication-drafts/sources/{commitment['id']}")
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "id": str(source_id),
+            "external_id": "source-message",
+            "provider": "Gmail",
+            "connection_id": str(connection_id),
+            "label": "Gmail message · owner@example.com",
+            "account_email": "owner@example.com",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("withdrawal", ["read_scope", "disconnected", "paused"])
+async def test_reply_sources_recheck_current_read_authority(approval_environment, withdrawal):
+    client, factory, _, account, commitment, connection_id, _ = await reply_source_environment(
+        approval_environment
+    )
+    async with factory() as db:
+        connection = await db.get(Connection, connection_id)
+        if withdrawal == "read_scope":
+            connection.granted_scopes = [
+                scope for scope in connection.granted_scopes if scope != GMAIL_READ_SCOPE
+            ]
+        elif withdrawal == "disconnected":
+            connection.status = "disconnected"
+        else:
+            owner = await db.get(User, UUID(account["id"]))
+            owner.agent_paused = True
+        await db.commit()
+    response = await client.get(f"/api/v1/communication-drafts/sources/{commitment['id']}")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_reply_sources_reject_foreign_commitment_and_mismatched_connection(
+    approval_environment,
+):
+    client, factory, _, _, owner_commitment, owner_connection, _ = await reply_source_environment(
+        approval_environment
+    )
+    await register(client, email="other@example.com")
+    foreign_response = await client.get(
+        f"/api/v1/communication-drafts/sources/{owner_commitment['id']}"
+    )
+    assert foreign_response.status_code == 200
+    assert foreign_response.json() == []
+
+    other_commitment = await create_commitment(client)
+    async with factory() as db:
+        db.add(
+            CommitmentSource(
+                commitment_id=UUID(other_commitment["id"]),
+                connection_id=owner_connection,
+                provider="google",
+                source_type="gmail_message",
+                external_resource_id="foreign-message",
+            )
+        )
+        await db.commit()
+    mismatched_response = await client.get(
+        f"/api/v1/communication-drafts/sources/{other_commitment['id']}"
+    )
+    assert mismatched_response.status_code == 200
+    assert mismatched_response.json() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mailbox",
+    [
+        None,
+        "invalid mailbox",
+        "Owner <owner@example.com>",
+        "owner@example.com\r\nBcc: other@example.com",
+    ],
+)
+async def test_reply_sources_omit_unknown_or_invalid_mailbox_metadata(
+    approval_environment, mailbox
+):
+    client, factory, _, _, commitment, connection_id, _ = await reply_source_environment(
+        approval_environment
+    )
+    async with factory() as db:
+        connection = await db.get(Connection, connection_id)
+        connection.external_email = mailbox
+        await db.commit()
+    response = await client.get(f"/api/v1/communication-drafts/sources/{commitment['id']}")
+    assert response.status_code == 200
+    option = response.json()[0]
+    assert option["label"] == "Gmail message"
+    assert option["connection_id"] == str(connection_id)
+    assert "account_email" not in option
+    assert "sender" not in option
+    assert "subject" not in option
+
+
+@pytest.mark.asyncio
+async def test_reply_sources_filter_unreadable_sources_before_limit(approval_environment):
+    client, factory, _, _, commitment, connection_id, source_id = await reply_source_environment(
+        approval_environment
+    )
+    async with factory() as db:
+        connection = await db.get(Connection, connection_id)
+        unreadable = Connection(
+            user_id=connection.user_id,
+            workspace_id=connection.workspace_id,
+            provider="google",
+            external_account_id="send-only-mailbox",
+            status="active",
+            granted_scopes=["https://www.googleapis.com/auth/gmail.send"],
+        )
+        db.add(unreadable)
+        await db.flush()
+        for index in range(21):
+            db.add(
+                CommitmentSource(
+                    commitment_id=UUID(commitment["id"]),
+                    connection_id=unreadable.id,
+                    provider="google",
+                    source_type="gmail_message",
+                    external_resource_id=f"unreadable-{index}",
+                    extracted_at=datetime.now(UTC) + timedelta(minutes=1),
+                )
+            )
+        await db.commit()
+    response = await client.get(f"/api/v1/communication-drafts/sources/{commitment['id']}")
+    assert response.status_code == 200
+    assert [source["id"] for source in response.json()] == [str(source_id)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tombstone_mailbox", ["source", "other"])
+async def test_reply_sources_honor_known_tombstones_only_for_the_bound_mailbox(
+    approval_environment, tombstone_mailbox
+):
+    client, factory, _, _, commitment, connection_id, source_id = await reply_source_environment(
+        approval_environment
+    )
+    async with factory() as db:
+        connection = await db.get(Connection, connection_id)
+        if tombstone_mailbox == "other":
+            connection = Connection(
+                user_id=connection.user_id,
+                workspace_id=connection.workspace_id,
+                provider="google",
+                external_account_id="other-mailbox",
+                status="active",
+                granted_scopes=[GMAIL_READ_SCOPE],
+            )
+            db.add(connection)
+            await db.flush()
+        moment = datetime.now(UTC)
+        canonical = await mirror_google_document(
+            db,
+            legacy_connection=connection,
+            document=SourceDocument(
+                id=uuid4(),
+                workspace_id=connection.workspace_id,
+                provider="google",
+                source_type="gmail_message",
+                external_id="source-message",
+                occurred_at=moment,
+                retrieved_at=moment,
+                metadata={"status": "deleted"},
+            ),
+        )
+        assert canonical.deleted
+        await db.commit()
+    response = await client.get(f"/api/v1/communication-drafts/sources/{commitment['id']}")
+    assert response.status_code == 200
+    expected = [] if tombstone_mailbox == "source" else [str(source_id)]
+    assert [source["id"] for source in response.json()] == expected
 
 
 class DraftRuntime:

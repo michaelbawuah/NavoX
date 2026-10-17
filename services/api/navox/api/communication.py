@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
+from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy import select
 
 from navox.ai.configured import build_runtime
@@ -41,9 +42,10 @@ from navox.communication.service import (
 )
 from navox.db.communications import CommunicationDraft, CommunicationDraftVersion
 from navox.providers.google_oauth import GoogleAccessTokenError
-from navox.providers.google_sources import GoogleSourceError
+from navox.providers.google_sources import GMAIL_READ_SCOPE, GoogleSourceError
 
 router = APIRouter(prefix="/communication-drafts", tags=["communication"])
+_MAILBOX = TypeAdapter(EmailStr)
 
 
 async def detail(
@@ -191,31 +193,105 @@ async def list_drafts(
 async def list_sources(
     commitment_id: UUID, account: CurrentAccountDependency, database: DatabaseSession
 ) -> list[dict[str, str]]:
-    from navox.db.models import Commitment, CommitmentSource, Connection
+    from navox.db.models import (
+        Commitment,
+        CommitmentSource,
+        Connection,
+        ConnectorConnection,
+        ConnectorResource,
+    )
 
+    if account.user.agent_paused:
+        return []
+    # Establish current mailbox read authority before selecting source identities.
+    # Stored source metadata is not authority and is deliberately not loaded here.
+    connections = (
+        await database.execute(
+            select(Connection.id, Connection.external_email, Connection.granted_scopes).where(
+                Connection.workspace_id == account.workspace.id,
+                Connection.user_id == account.user.id,
+                Connection.provider == "google",
+                Connection.status == "active",
+            )
+        )
+    ).all()
+    mailboxes: dict[UUID, str | None] = {}
+    for connection_id, external_email, scopes in connections:
+        if GMAIL_READ_SCOPE not in (scopes or []):
+            continue
+        mailbox = None
+        if isinstance(external_email, str) and not any(
+            character in external_email for character in "\r\n<>"
+        ):
+            try:
+                mailbox = str(_MAILBOX.validate_python(external_email))
+            except ValidationError:
+                pass
+        mailboxes[connection_id] = mailbox
+    if not mailboxes:
+        return []
+
+    # An existing canonical tombstone is a stronger signal than an old
+    # commitment attachment. Match the mailbox as well as the message ID: Gmail
+    # identifiers from another connected account cannot retire this source.
+    known_deleted_source = (
+        select(ConnectorResource.id)
+        .join(
+            ConnectorConnection,
+            ConnectorResource.connector_connection_id == ConnectorConnection.id,
+        )
+        .where(
+            ConnectorConnection.legacy_connection_id == CommitmentSource.connection_id,
+            ConnectorConnection.workspace_id == account.workspace.id,
+            ConnectorConnection.user_id == account.user.id,
+            ConnectorConnection.provider == "google",
+            ConnectorResource.workspace_id == account.workspace.id,
+            ConnectorResource.provider == "google",
+            ConnectorResource.resource_type == "communication.message",
+            ConnectorResource.external_id == CommitmentSource.external_resource_id,
+            ConnectorResource.deleted.is_(True),
+        )
+        .correlate(CommitmentSource)
+        .exists()
+    )
     rows = (
-        await database.scalars(
-            select(CommitmentSource)
+        await database.execute(
+            select(
+                CommitmentSource.id,
+                CommitmentSource.connection_id,
+                CommitmentSource.external_resource_id,
+            )
             .join(Commitment)
-            .join(Connection, CommitmentSource.connection_id == Connection.id)
             .where(
                 Commitment.id == commitment_id,
                 Commitment.workspace_id == account.workspace.id,
                 Commitment.user_id == account.user.id,
-                Connection.workspace_id == account.workspace.id,
-                Connection.user_id == account.user.id,
-                Connection.status == "active",
+                CommitmentSource.connection_id.in_(mailboxes),
                 CommitmentSource.provider == "google",
                 CommitmentSource.source_type == "gmail_message",
+                CommitmentSource.external_resource_id.is_not(None),
+                CommitmentSource.external_resource_id != "",
+                ~known_deleted_source,
             )
-            .order_by(CommitmentSource.extracted_at.desc())
+            .order_by(CommitmentSource.extracted_at.desc(), CommitmentSource.id)
             .limit(20)
         )
     ).all()
-    return [
-        {"id": str(row.id), "external_id": row.external_resource_id or "", "provider": "Gmail"}
-        for row in rows
-    ]
+    result = []
+    for index, (source_id, connection_id, external_id) in enumerate(rows, start=1):
+        mailbox = mailboxes[connection_id]
+        message_label = f"Gmail message {index}" if len(rows) > 1 else "Gmail message"
+        option = {
+            "id": str(source_id),
+            "external_id": external_id,
+            "provider": "Gmail",
+            "connection_id": str(connection_id),
+            "label": f"{message_label} · {mailbox}" if mailbox else message_label,
+        }
+        if mailbox is not None:
+            option["account_email"] = mailbox
+        result.append(option)
+    return result
 
 
 @router.get("/{draft_id}")

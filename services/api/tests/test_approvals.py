@@ -477,6 +477,147 @@ async def test_edit_supersedes_old_approval_and_changes_exact_hash(
     assert [approval.status for approval in approvals] == ["superseded", "pending"]
 
 
+async def manual_email_environment(approval_environment):
+    client, session_factory, settings = approval_environment
+    account = await register(client)
+    commitment = await create_commitment(client)
+    connection_id = await add_google_connection(session_factory, settings, account)
+    prepared = await prepare_action(
+        client,
+        commitment_id=commitment["id"],
+        connection_id=connection_id,
+    )
+    return client, session_factory, commitment, connection_id, prepared
+
+
+@pytest.mark.asyncio
+async def test_manual_email_approval_rejects_stale_hash_after_edit_and_on_retries(
+    approval_environment,
+):
+    client, session_factory, _, _, prepared = await manual_email_environment(approval_environment)
+    edited = await client.post(
+        f"/api/v1/actions/{prepared['id']}/edit",
+        json={
+            "to": "new-recipient@example.edu",
+            "subject": "Updated subject",
+            "body_text": "Updated exact body.",
+            "post_send_state": "unchanged",
+        },
+    )
+    assert edited.status_code == 200
+    current = edited.json()
+    decision_id = str(uuid4())
+    stale_payload = {
+        "request_id": decision_id,
+        "expected_payload_hash": prepared["payload_hash"],
+    }
+    path = f"/api/v1/actions/{prepared['id']}/approve"
+    denied = await client.post(path, json=stale_payload)
+    assert denied.status_code == 409
+    assert "review the current content" in denied.json()["detail"]
+    async with session_factory() as session:
+        approvals = list(
+            await session.scalars(
+                select(Approval)
+                .where(Approval.action_id == UUID(prepared["id"]))
+                .order_by(Approval.version)
+            )
+        )
+        assert [approval.status for approval in approvals] == ["superseded", "pending"]
+        assert all(approval.decision_request_id is None for approval in approvals)
+
+    exact_payload = {**stale_payload, "expected_payload_hash": current["payload_hash"]}
+    approved = await client.post(path, json=exact_payload)
+    assert approved.status_code == 200
+    assert approved.json()["approval"]["status"] == "approved"
+
+    # A previous decision ID and the already-approved shortcut both still need
+    # to respect the content the caller actually reviewed.
+    assert (await client.post(path, json=stale_payload)).status_code == 409
+    assert (
+        await client.post(path, json={**stale_payload, "request_id": str(uuid4())})
+    ).status_code == 409
+    assert (await client.post(path, json=exact_payload)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_manual_email_reprepare_cannot_use_previous_contents_approval_hash(
+    approval_environment,
+):
+    client, _, commitment, connection_id, prepared = await manual_email_environment(
+        approval_environment
+    )
+    next_prepare = await client.post(
+        f"/api/v1/commitments/{commitment['id']}/actions/gmail-send/prepare",
+        json={
+            "request_id": str(uuid4()),
+            "connection_id": str(connection_id),
+            "to": "advisor@example.edu",
+            "subject": "Different message",
+            "body_text": "This is a different email to review.",
+            "post_send_state": "waiting",
+        },
+    )
+    assert next_prepare.status_code == 202
+    current = next_prepare.json()
+    assert current["id"] != prepared["id"]
+    path = f"/api/v1/actions/{current['id']}/approve"
+    decision_id = str(uuid4())
+    assert (
+        await client.post(
+            path,
+            json={"request_id": decision_id, "expected_payload_hash": prepared["payload_hash"]},
+        )
+    ).status_code == 409
+    assert (
+        await client.post(
+            path,
+            json={"request_id": decision_id, "expected_payload_hash": current["payload_hash"]},
+        )
+    ).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_manual_email_approval_checks_actual_payload_against_reviewed_hash(
+    approval_environment,
+):
+    client, session_factory, _, _, prepared = await manual_email_environment(approval_environment)
+    async with session_factory() as session:
+        action = await session.get(Action, UUID(prepared["id"]))
+        action.payload = {**action.payload, "body_text": "Unexpected changed content"}
+        await session.commit()
+    response = await client.post(
+        f"/api/v1/actions/{prepared['id']}/approve",
+        json={"request_id": str(uuid4()), "expected_payload_hash": prepared["payload_hash"]},
+    )
+    assert response.status_code == 409
+    async with session_factory() as session:
+        approval = await session.scalar(
+            select(Approval).where(Approval.action_id == UUID(prepared["id"]))
+        )
+        assert approval.status == "pending"
+        assert approval.decision_request_id is None
+
+
+@pytest.mark.asyncio
+async def test_expected_email_hash_does_not_bypass_subscription_confirmation(
+    approval_environment,
+):
+    client, session_factory, _, _, prepared = await manual_email_environment(approval_environment)
+    async with session_factory() as session:
+        action = await session.get(Action, UUID(prepared["id"]))
+        action.action_type = "subscription.cancel"
+        await session.commit()
+    response = await client.post(
+        f"/api/v1/actions/{prepared['id']}/approve",
+        json={"request_id": str(uuid4()), "expected_payload_hash": "0" * 64},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Subscription cancellation requires its exact R4 preview confirmation"
+    )
+
+
 @pytest.mark.asyncio
 async def test_action_routes_are_tenant_scoped(
     approval_environment: tuple[AsyncClient, async_sessionmaker[AsyncSession], Settings],

@@ -1,6 +1,21 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type EmailConnection,
+  type EmailReplySource,
+  eligibleReplyCommitment,
+  emailSendOutcome,
+  manualEmailApprovalPayload,
+  manualEmailReviewMatches,
+  mayStartAnotherEmail,
+  replyPreparationPayload,
+  replyRecipient,
+  replySubject,
+  selectReplyConnection,
+  selectReplySource,
+} from "../lib/email-workflow";
+import workflowStyles from "./communication-drafts.module.css";
 import styles from "./today-workspace.module.css";
 
 const api =
@@ -15,7 +30,7 @@ type Version = {
 };
 type Draft = {
   id: string;
-  commitment_id: string;
+  commitment_id: string | null;
   source_id: string;
   current_version: number;
   status: string;
@@ -25,14 +40,16 @@ type Draft = {
 type SendAction = {
   id: string;
   status: string;
+  commitment_id?: string | null;
+  verified_at?: string | null;
   payload_hash: string;
   payload: {
     sender: string;
     to: string;
     subject: string;
     body_text: string;
-    draft_id: string;
-    draft_version: number;
+    draft_id?: string;
+    draft_version?: number;
   };
   result: { message_id?: string };
 };
@@ -45,6 +62,7 @@ async function request<T>(
   const response = await fetch(`${api}${path}`, {
     method,
     credentials: "include",
+    signal: AbortSignal.timeout(method === "POST" ? 65_000 : 10_000),
     headers: { "Content-Type": "application/json" },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
@@ -53,7 +71,9 @@ async function request<T>(
     throw new Error(
       typeof data?.detail === "string"
         ? data.detail
-        : "NavoX could not complete this request.",
+        : typeof data?.detail?.message === "string"
+          ? data.detail.message
+          : "NavoX could not complete this request.",
     );
   return data as T;
 }
@@ -62,7 +82,7 @@ export function draftApprovalPayload(action: SendAction) {
   if (
     !/^[a-f0-9]{64}$/.test(action.payload_hash) ||
     !Number.isInteger(action.payload.draft_version) ||
-    action.payload.draft_version < 1 ||
+    (action.payload.draft_version ?? 0) < 1 ||
     !action.payload.draft_id
   ) {
     throw new Error("Reload the current draft before approving.");
@@ -97,22 +117,25 @@ export function CommunicationDrafts({
   connections,
   paused,
   onStateChanged,
+  selectedCommitmentId,
+  selectionKey,
 }: {
-  commitments: { id: string; title: string }[];
-  connections: {
-    id: string;
-    status: string;
-    granted_scopes: string[];
-    external_email?: string | null;
-  }[];
+  commitments: { id: string; title: string; description?: string | null }[];
+  connections: EmailConnection[];
   paused: boolean;
   onStateChanged: () => Promise<void>;
+  selectedCommitmentId?: string | null;
+  selectionKey?: string | number;
 }) {
-  const [commitmentId, setCommitmentId] = useState("");
+  const [commitmentId, setCommitmentId] = useState(
+    eligibleReplyCommitment(commitments, selectedCommitmentId)?.id ??
+      (!selectedCommitmentId && commitments.length === 1
+        ? commitments[0].id
+        : ""),
+  );
   const [saved, setSaved] = useState<Draft[]>([]);
-  const [sources, setSources] = useState<
-    { id: string; external_id: string; provider: string }[]
-  >([]);
+  const [sources, setSources] = useState<EmailReplySource[]>([]);
+  const [sourcesLoading, setSourcesLoading] = useState(false);
   const [sourceId, setSourceId] = useState("");
   const [connectionId, setConnectionId] = useState("");
   const [recipient, setRecipient] = useState("");
@@ -124,7 +147,12 @@ export function CommunicationDrafts({
   const [approved, setApproved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [manual, setManual] = useState(false);
+  const [pendingSelection, setPendingSelection] = useState("");
+  const sourceContextId = useRef("");
+  const handledSelection = useRef("");
   const prepareRequest = useRef<{ key: string; id: string } | null>(null);
+  const notifiedCompletion = useRef("");
   const available = connections.filter(
     (c) =>
       c.status === "active" &&
@@ -137,7 +165,70 @@ export function CommunicationDrafts({
       current.body !== body.trim() ||
       current.to[0] !== recipient.trim());
 
-  const selectedCommitment = commitmentId || commitments[0]?.id || "";
+  const selectedCommitment = draft
+    ? (draft.commitment_id ?? "")
+    : (eligibleReplyCommitment(commitments, commitmentId)?.id ?? "");
+  const requestContext = eligibleReplyCommitment(
+    commitments,
+    selectedCommitment,
+  );
+  const selectedSourceContext = selectReplySource(
+    sources,
+    draft?.source_id ?? sourceId,
+  );
+  const selectedSource = selectedSourceContext?.id ?? "";
+  const selectedConnection =
+    selectReplyConnection(
+      connections,
+      manual ? undefined : selectedSourceContext,
+      connectionId,
+    )?.id ?? "";
+
+  const clearDraftForRequest = useCallback((id: string) => {
+    setCommitmentId(id);
+    setDraft(null);
+    setAction(null);
+    setApproved(false);
+    setRecipient("");
+    setSubject("");
+    setBody("");
+    setInstructions("");
+    setConnectionId("");
+    setManual(false);
+    setPendingSelection("");
+    setError("");
+    sourceContextId.current = "";
+  }, []);
+
+  useEffect(() => {
+    const signature = JSON.stringify([selectedCommitmentId, selectionKey]);
+    if (handledSelection.current === signature) return;
+    const requested = eligibleReplyCommitment(
+      commitments,
+      selectedCommitmentId,
+    );
+    if (!requested) return;
+    handledSelection.current = signature;
+    if (requested.id === selectedCommitment) return;
+    if (draft || action || recipient || instructions || body) {
+      setPendingSelection(requested.id);
+      return;
+    }
+    clearDraftForRequest(requested.id);
+    // A new selection is explicit intent to open a request, never to generate.
+    // Keep unsaved edits until the user chooses to switch.
+  }, [
+    selectedCommitmentId,
+    selectionKey,
+    commitments,
+    selectedCommitment,
+    draft,
+    action,
+    recipient,
+    instructions,
+    body,
+    clearDraftForRequest,
+  ]);
   useEffect(() => {
     let disposed = false;
     void request<Draft[]>("/communication-drafts")
@@ -155,6 +246,7 @@ export function CommunicationDrafts({
     let disposed = false;
     setSources([]);
     setSourceId("");
+    setSourcesLoading(!!selectedCommitment);
     if (selectedCommitment)
       void request<typeof sources>(
         `/communication-drafts/sources/${selectedCommitment}`,
@@ -164,11 +256,24 @@ export function CommunicationDrafts({
         })
         .catch(() => {
           if (!disposed) setError("The email sources could not be loaded.");
+        })
+        .finally(() => {
+          if (!disposed) setSourcesLoading(false);
         });
     return () => {
       disposed = true;
     };
   }, [selectedCommitment]);
+
+  useEffect(() => {
+    if (!selectedSourceContext || draft || action || manual) return;
+    if (sourceContextId.current === selectedSourceContext.id) return;
+    sourceContextId.current = selectedSourceContext.id;
+    setRecipient((value) => value || replyRecipient(selectedSourceContext));
+    setSubject((value) => value || replySubject(selectedSourceContext));
+    setConnectionId("");
+    setApproved(false);
+  }, [selectedSourceContext, draft, action, manual]);
 
   useEffect(() => {
     if (!action || !["approved", "executing"].includes(action.status)) return;
@@ -178,7 +283,6 @@ export function CommunicationDrafts({
         const result = await request<SendAction>(`/actions/${action.id}`);
         if (!disposed) {
           setAction(result);
-          if (result.status === "completed") await onStateChanged();
         }
       } catch {
         if (!disposed)
@@ -191,12 +295,31 @@ export function CommunicationDrafts({
       disposed = true;
       clearTimeout(timer);
     };
+  }, [action]);
+
+  useEffect(() => {
+    if (
+      action?.status !== "completed" ||
+      !action.verified_at ||
+      notifiedCompletion.current === action.id
+    )
+      return;
+    notifiedCompletion.current = action.id;
+    void onStateChanged().catch(() =>
+      setError(
+        "The email was verified, but your daily view could not refresh. Refresh the page to update it.",
+      ),
+    );
   }, [action, onStateChanged]);
 
   function show(next: Draft) {
     const version = next.versions.at(-1);
     setDraft(next);
-    setCommitmentId(next.commitment_id);
+    setCommitmentId(next.commitment_id ?? "");
+    setSourceId(next.source_id);
+    setConnectionId("");
+    sourceContextId.current = "";
+    setManual(false);
     setAction(null);
     setApproved(false);
     setSaved((rows) => [next, ...rows.filter((row) => row.id !== next.id)]);
@@ -217,15 +340,17 @@ export function CommunicationDrafts({
       setBusy(false);
     }
   }
-  const selectedSource = sourceId || sources[0]?.id || "";
-  const selectedConnection = connectionId || available[0]?.id || "";
-  const reviewMatches = draftReviewMatches(
-    draft,
-    action,
-    recipient,
-    subject,
-    body,
-  );
+  const reviewMatches = manual
+    ? manualEmailReviewMatches(
+        action,
+        selectedCommitment,
+        recipient,
+        subject,
+        body,
+      )
+    : draftReviewMatches(draft, action, recipient, subject, body);
+  const outcome = emailSendOutcome(action);
+  const mayStartAnother = mayStartAnotherEmail(action);
 
   async function review() {
     if (!draft) return;
@@ -240,32 +365,94 @@ export function CommunicationDrafts({
     const next = await request<SendAction>(
       `/communication-drafts/${draft.id}/prepare`,
       "POST",
-      {
-        expected_version: draft.current_version,
-        connection_id: selectedConnection,
-        request_id: prepareRequest.current.id,
-      },
+      replyPreparationPayload(
+        draft,
+        selectedConnection,
+        prepareRequest.current.id,
+      ),
     );
     setAction(next);
     setDraft({ ...draft, action_id: next.id });
+  }
+
+  async function reviewManualEmail() {
+    if (action) {
+      setAction(
+        await request<SendAction>(`/actions/${action.id}/edit`, "POST", {
+          to: recipient.trim(),
+          subject: subject.trim(),
+          body_text: body.trim(),
+          post_send_state: "waiting",
+        }),
+      );
+      setApproved(false);
+      return;
+    }
+    const key = JSON.stringify([
+      selectedCommitment,
+      selectedConnection,
+      recipient.trim(),
+      subject.trim(),
+      body.trim(),
+    ]);
+    if (prepareRequest.current?.key !== key)
+      prepareRequest.current = { key, id: crypto.randomUUID() };
+    setAction(
+      await request<SendAction>(
+        `/commitments/${selectedCommitment}/actions/gmail-send/prepare`,
+        "POST",
+        {
+          request_id: prepareRequest.current.id,
+          connection_id: selectedConnection,
+          to: recipient.trim(),
+          subject: subject.trim(),
+          body_text: body.trim(),
+          post_send_state: "waiting",
+        },
+      ),
+    );
+    setApproved(false);
   }
 
   return (
     <section className={styles.controlCard}>
       <h2>Draft a reply</h2>
       <p>
-        Tell NavoX what you want to say, then edit the draft and approve the
-        exact email before it is sent.
+        Start with a request, tell NavoX what you want to say, and review the
+        exact message before sending.
       </p>
+      {requestContext && (
+        <div className={workflowStyles.requestContext}>
+          <span>Replying to your saved request</span>
+          <strong>{requestContext.title}</strong>
+          {requestContext.description && <p>{requestContext.description}</p>}
+        </div>
+      )}
+      {pendingSelection && (
+        <div className={workflowStyles.notice}>
+          <p>Another request is selected. Your current email is still here.</p>
+          <button
+            type="button"
+            disabled={busy || !mayStartAnother}
+            onClick={() => clearDraftForRequest(pendingSelection)}
+          >
+            Discard edits and open selected request
+          </button>
+          {action && <p>Check the current send outcome before switching.</p>}
+        </div>
+      )}
       {error && (
         <p role="alert" className={styles.inlineError}>
           {error}
         </p>
       )}
-      <p>
-        This first version supports one recipient and plain text. It does not
-        add attachments, CC, or BCC.
-      </p>
+      <p>Send a plain text email to one recipient.</p>
+      {commitmentId && !selectedCommitment && !draft && (
+        <p role="alert">
+          This request is no longer available. Your text is still here. Choose
+          another request before preparing an email.
+        </p>
+      )}
       {saved.length > 0 && (
         <details>
           <summary>Saved drafts</summary>
@@ -273,7 +460,7 @@ export function CommunicationDrafts({
             <button
               type="button"
               key={item.id}
-              disabled={busy || dirty}
+              disabled={busy || dirty || !mayStartAnother}
               onClick={() =>
                 void perform(async () => {
                   const next = await request<Draft>(
@@ -293,19 +480,11 @@ export function CommunicationDrafts({
           ))}
         </details>
       )}
-      {draft && (
+      {(draft || manual) && (
         <button
           type="button"
-          disabled={busy || dirty}
-          onClick={() => {
-            setDraft(null);
-            setAction(null);
-            setApproved(false);
-            setRecipient("");
-            setSubject("");
-            setBody("");
-            setInstructions("");
-          }}
+          disabled={busy || dirty || !mayStartAnother}
+          onClick={() => clearDraftForRequest(selectedCommitment)}
         >
           New draft
         </button>
@@ -313,11 +492,21 @@ export function CommunicationDrafts({
       <div className={styles.approvalForm}>
         {!draft && (
           <label>
-            Commitment
+            Request
             <select
               value={selectedCommitment}
-              onChange={(event) => setCommitmentId(event.target.value)}
+              disabled={busy || !!action}
+              onChange={(event) => {
+                const next = event.target.value;
+                if (next === selectedCommitment) return;
+                if (recipient || subject || instructions || body)
+                  setPendingSelection(next);
+                else clearDraftForRequest(next);
+              }}
             >
+              <option value="" disabled>
+                Choose the request to answer
+              </option>
               {commitments.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.title}
@@ -326,103 +515,137 @@ export function CommunicationDrafts({
             </select>
           </label>
         )}
-        {!draft && (
+        {!draft && !manual && (
           <label>
             Email source
             <select
               value={selectedSource}
-              onChange={(event) => setSourceId(event.target.value)}
+              disabled={busy || !!action || sourcesLoading}
+              onChange={(event) => {
+                setSourceId(event.target.value);
+                setRecipient("");
+                setSubject("");
+                setConnectionId("");
+                setApproved(false);
+              }}
             >
               <option value="" disabled>
                 Choose a Gmail source
               </option>
-              {sources.map((source, index) => (
+              {sources.map((source) => (
                 <option key={source.id} value={source.id}>
-                  {source.provider} source {index + 1} · {source.external_id}
+                  {source.subject || source.label || source.provider}
                 </option>
               ))}
             </select>
           </label>
         )}
-        {!draft && sources.length === 0 && (
+        {!manual && sourcesLoading && (
+          <p role="status">Finding this request’s email…</p>
+        )}
+        {!draft && !manual && !sourcesLoading && sources.length === 0 && (
           <p>
-            This commitment has no readable Gmail message available for
-            drafting.
+            This request has no readable Gmail message available for drafting.
+            You can write an email yourself below.
           </p>
+        )}
+        {!draft && !manual && sources.length > 1 && !selectedSource && (
+          <p>Choose the source message so NavoX uses the right conversation.</p>
+        )}
+        {!draft && !manual && selectedSource && !recipient && (
+          <p>Enter the recipient’s email address. NavoX will not guess it.</p>
         )}
         <label>
           Recipient
           <input
             type="email"
             value={recipient}
+            disabled={
+              busy || (!!action && action.status !== "awaiting_approval")
+            }
             onChange={(event) => {
               setRecipient(event.target.value);
               setApproved(false);
             }}
           />
         </label>
-        <label>
-          What should the reply say?
-          <textarea
-            maxLength={4000}
-            rows={3}
-            value={instructions}
-            onChange={(event) => setInstructions(event.target.value)}
-            placeholder="For example: Thank Maya and ask whether Friday afternoon works."
-          />
-        </label>
-        <button
-          type="button"
-          disabled={
-            busy ||
-            paused ||
-            !instructions.trim() ||
-            !recipient.trim() ||
-            !selectedCommitment ||
-            (!draft && !selectedSource) ||
-            dirty
-          }
-          onClick={() =>
-            void perform(async () => {
-              if (draft)
-                show(
-                  await request<Draft>(
-                    `/communication-drafts/${draft.id}/regenerate`,
-                    "POST",
-                    { expected_version: draft.current_version, instructions },
-                  ),
-                );
-              else
-                show(
-                  await request<Draft>("/communication-drafts", "POST", {
-                    commitment_id: selectedCommitment,
-                    source_id: selectedSource,
-                    recipient,
-                    instructions,
-                  }),
-                );
-            })
-          }
-        >
-          {busy
-            ? "Working…"
-            : draft
-              ? "Generate another version"
-              : "Generate draft"}
-        </button>
-        {draft && (
+        {!manual && (
+          <label>
+            What should the reply say?
+            <textarea
+              maxLength={4000}
+              rows={3}
+              value={instructions}
+              onChange={(event) => setInstructions(event.target.value)}
+              placeholder="For example: Thank Maya and ask whether Friday afternoon works."
+            />
+          </label>
+        )}
+        {!manual && (
+          <button
+            type="button"
+            disabled={
+              busy ||
+              paused ||
+              !instructions.trim() ||
+              !recipient.trim() ||
+              !selectedCommitment ||
+              (!draft && !selectedSource) ||
+              (!!action && action.status !== "awaiting_approval") ||
+              dirty
+            }
+            onClick={() =>
+              void perform(async () => {
+                if (draft)
+                  show(
+                    await request<Draft>(
+                      `/communication-drafts/${draft.id}/regenerate`,
+                      "POST",
+                      { expected_version: draft.current_version, instructions },
+                    ),
+                  );
+                else
+                  show(
+                    await request<Draft>("/communication-drafts", "POST", {
+                      commitment_id: selectedCommitment,
+                      source_id: selectedSource,
+                      recipient,
+                      instructions,
+                    }),
+                  );
+              })
+            }
+          >
+            {busy
+              ? "Working…"
+              : draft
+                ? "Generate another version"
+                : "Generate draft"}
+          </button>
+        )}
+        {!draft && !action && (
+          <button
+            type="button"
+            disabled={busy || paused}
+            onClick={() => setManual((value) => !value)}
+          >
+            {manual ? "Use NavoX to draft" : "Write email yourself"}
+          </button>
+        )}
+        {manual && (
           <>
             <p>
-              Version {draft.current_version} ·{" "}
-              {current?.created_by === "AI"
-                ? "Generated by NavoX"
-                : "Your revision"}
+              Your own email. It will be sent as a new message after exact
+              approval; it is not generated by NavoX.
             </p>
             <label>
               Subject
               <input
                 maxLength={256}
                 value={subject}
+                disabled={
+                  busy || (!!action && action.status !== "awaiting_approval")
+                }
                 onChange={(event) => {
                   setSubject(event.target.value);
                   setApproved(false);
@@ -435,6 +658,106 @@ export function CommunicationDrafts({
                 maxLength={50000}
                 rows={7}
                 value={body}
+                disabled={
+                  busy || (!!action && action.status !== "awaiting_approval")
+                }
+                onChange={(event) => {
+                  setBody(event.target.value);
+                  setApproved(false);
+                }}
+              />
+            </label>
+            {action?.status === "awaiting_approval" && (
+              <button
+                type="button"
+                disabled={
+                  busy ||
+                  paused ||
+                  reviewMatches ||
+                  !recipient.trim() ||
+                  !subject.trim() ||
+                  !body.trim()
+                }
+                onClick={() => void perform(reviewManualEmail)}
+              >
+                Save changes for approval
+              </button>
+            )}
+            {!action && (
+              <>
+                <label>
+                  Send from
+                  <select
+                    value={selectedConnection}
+                    disabled={busy}
+                    onChange={(event) => setConnectionId(event.target.value)}
+                  >
+                    <option value="" disabled>
+                      Choose your Gmail account
+                    </option>
+                    {available.map((connection) => (
+                      <option key={connection.id} value={connection.id}>
+                        {connection.external_email || "Google account"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  disabled={
+                    busy ||
+                    paused ||
+                    !selectedCommitment ||
+                    !selectedConnection ||
+                    !recipient.trim() ||
+                    !subject.trim() ||
+                    !body.trim()
+                  }
+                  onClick={() => void perform(reviewManualEmail)}
+                >
+                  Review exact email
+                </button>
+                {available.length === 0 && (
+                  <p>Enable Gmail sending in Connections to send this email.</p>
+                )}
+              </>
+            )}
+          </>
+        )}
+        {draft && (
+          <>
+            {!action && (
+              <p role="status">Draft ready · review your message below.</p>
+            )}
+            <p>
+              Version {draft.current_version} ·{" "}
+              {current?.created_by === "AI"
+                ? "Generated by NavoX"
+                : "Your revision"}
+            </p>
+            <label>
+              Subject
+              <input
+                maxLength={256}
+                value={subject}
+                disabled={
+                  busy || (!!action && action.status !== "awaiting_approval")
+                }
+                onChange={(event) => {
+                  setSubject(event.target.value);
+                  setApproved(false);
+                }}
+              />
+            </label>
+            <label>
+              Message
+              <textarea
+                maxLength={50000}
+                rows={7}
+                value={body}
+                disabled={
+                  busy || (!!action && action.status !== "awaiting_approval")
+                }
                 onChange={(event) => {
                   setBody(event.target.value);
                   setApproved(false);
@@ -444,7 +767,12 @@ export function CommunicationDrafts({
             <button
               type="button"
               disabled={
-                busy || paused || !dirty || !subject.trim() || !body.trim()
+                busy ||
+                paused ||
+                !dirty ||
+                !subject.trim() ||
+                !body.trim() ||
+                (!!action && action.status !== "awaiting_approval")
               }
               onClick={() =>
                 void perform(async () =>
@@ -492,11 +820,20 @@ export function CommunicationDrafts({
                     value={selectedConnection}
                     onChange={(event) => setConnectionId(event.target.value)}
                   >
-                    {available.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.external_email ?? "Google account"}
-                      </option>
-                    ))}
+                    <option value="" disabled>
+                      Choose your Gmail account
+                    </option>
+                    {available
+                      .filter(
+                        (connection) =>
+                          !selectedSourceContext?.connection_id ||
+                          connection.id === selectedSourceContext.connection_id,
+                      )
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.external_email ?? "Google account"}
+                        </option>
+                      ))}
                   </select>
                 </label>
                 <button
@@ -515,7 +852,14 @@ export function CommunicationDrafts({
         )}
         {action && (
           <div className={styles.approvalPanel}>
-            <strong>{action.status.replaceAll("_", " ")}</strong>
+            <div
+              role="status"
+              className={workflowStyles.outcome}
+              data-tone={outcome.tone}
+            >
+              <strong>{outcome.label}</strong>
+              <p>{outcome.detail}</p>
+            </div>
             <p>
               From: {action.payload.sender}
               <br />
@@ -543,9 +887,13 @@ export function CommunicationDrafts({
                     void perform(async () =>
                       setAction(
                         await request<SendAction>(
-                          `/communication-drafts/${draft?.id}/approve`,
+                          manual
+                            ? `/actions/${action.id}/approve`
+                            : `/communication-drafts/${draft?.id}/approve`,
                           "POST",
-                          draftApprovalPayload(action),
+                          manual
+                            ? manualEmailApprovalPayload(action)
+                            : draftApprovalPayload(action),
                         ),
                       ),
                     )
@@ -555,15 +903,11 @@ export function CommunicationDrafts({
                 </button>
               </>
             )}
-            {action.result.message_id && (
-              <p>Gmail confirmed the sent message.</p>
-            )}
-            {action.status === "uncertain" && (
-              <p>
-                The send could not be confirmed. Check Sent mail before trying
-                again.
-              </p>
-            )}
+            {action.status === "completed" &&
+              action.verified_at &&
+              action.result.message_id && (
+                <p>Gmail confirmed the sent message.</p>
+              )}
             <button
               type="button"
               disabled={busy}

@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { googleAuthorizationUrl } from "../lib/connection-management";
 import {
   isSyncTerminal,
   monitorSync,
@@ -56,7 +57,7 @@ interface Connection {
   granted_scopes: string[];
 }
 
-interface IntelligenceStatus {
+export interface IntelligenceStatus {
   observation_count: number;
   evidence_count: number;
   active_commitments: number;
@@ -71,6 +72,7 @@ export function SyncReadout({
   onCheck,
   onReconnect,
   reconnectDisabled,
+  simple = false,
 }: {
   source: SyncSource;
   progress: SyncProgress;
@@ -78,6 +80,7 @@ export function SyncReadout({
   onCheck: () => void;
   onReconnect: () => void;
   reconnectDisabled: boolean;
+  simple?: boolean;
 }) {
   const failed = ["failed", "cancelled", "timed_out"].includes(progress.status);
   const help = syncErrorHelp(
@@ -87,6 +90,16 @@ export function SyncReadout({
   );
   const showHelp =
     progress.status === "failed" || progress.status === "retrying";
+  const simpleMessages = {
+    queued: "Waiting to begin.",
+    running: "Reading your source and finding priorities.",
+    retrying: "Waiting before another attempt.",
+    completed: "Sync complete. Your day is refreshing.",
+    failed: "This sync did not finish.",
+    cancelled: "Sync cancelled. You can start it again.",
+    timed_out: "This sync took too long. Please try again.",
+    unavailable: "Status unavailable. This sync may still be running.",
+  };
   return (
     <div className={styles.syncReadout}>
       <p
@@ -94,14 +107,24 @@ export function SyncReadout({
         role={failed ? "alert" : "status"}
       >
         {source === "gmail" ? "Gmail" : "Calendar"} ·{" "}
-        {syncProgressMessage(progress)}
+        {simple
+          ? simpleMessages[progress.status]
+          : syncProgressMessage(progress)}
       </p>
-      {showHelp && <p className={styles.copy}>{help.message}</p>}
+      {showHelp && (
+        <p className={styles.copy}>
+          {simple
+            ? help.reconnect
+              ? "Update Google read access before trying again. Your saved items are still available."
+              : "NavoX could not finish reading this source. Try again later; your saved items are still available."
+            : help.message}
+        </p>
+      )}
       {pollingPaused && (
         <>
           <p className={styles.copy}>
-            Automatic status checks are paused. Check this job before starting
-            another sync.
+            Automatic status checks are paused. Check this sync before starting
+            another.
           </p>
           <button type="button" className={styles.secondary} onClick={onCheck}>
             Check sync status
@@ -129,6 +152,8 @@ function SourceSync({
   reconnectDisabled,
   onComplete,
   onReconnect,
+  onProgress,
+  guided = false,
 }: {
   connectionId: string;
   source: SyncSource;
@@ -136,6 +161,8 @@ function SourceSync({
   reconnectDisabled: boolean;
   onComplete: () => Promise<void>;
   onReconnect: () => void;
+  onProgress?: (progress: SyncProgress) => void;
+  guided?: boolean;
 }) {
   const [progress, setProgress] = useState<SyncProgress | null>(null);
   const [starting, setStarting] = useState(false);
@@ -148,6 +175,7 @@ function SourceSync({
   const startingRequest = useRef(false);
   const requestId = useRef<string | null>(null);
   const onCompleteRef = useRef(onComplete);
+  const onProgressRef = useRef(onProgress);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -157,6 +185,12 @@ function SourceSync({
   useEffect(() => {
     onCompleteRef.current = onComplete;
   }, [onComplete]);
+  useEffect(() => {
+    onProgressRef.current = onProgress;
+  }, [onProgress]);
+  useEffect(() => {
+    if (progress) onProgressRef.current?.(progress);
+  }, [progress]);
   useEffect(() => {
     if (!monitorRequest) return;
     setPollingPaused(false);
@@ -251,6 +285,7 @@ function SourceSync({
           progress={progress}
           pollingPaused={pollingPaused}
           reconnectDisabled={reconnectDisabled}
+          simple={guided}
           onCheck={() =>
             setMonitorRequest({ workflowId: progress.workflow_id })
           }
@@ -270,24 +305,51 @@ export function IntelligenceControls({
   connections,
   paused,
   onRefresh,
+  guided = false,
+  onStatusChange,
+  onStatusUnavailable,
+  onSyncProgress,
 }: {
   connections: Connection[];
   paused: boolean;
   onRefresh: () => Promise<void>;
+  guided?: boolean;
+  onStatusChange?: (status: IntelligenceStatus | null) => void;
+  onStatusUnavailable?: () => void;
+  onSyncProgress?: (
+    connectionId: string,
+    source: SyncSource,
+    progress: SyncProgress,
+  ) => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState<IntelligenceStatus | null>(null);
+  const onStatusUnavailableRef = useRef(onStatusUnavailable);
+  useEffect(() => {
+    onStatusUnavailableRef.current = onStatusUnavailable;
+  }, [onStatusUnavailable]);
   const refreshStatus = useCallback(async () => {
     try {
-      setStatus(await request<IntelligenceStatus>("/intelligence/status"));
+      setStatus(
+        await request<IntelligenceStatus>(
+          "/intelligence/status",
+          undefined,
+          AbortSignal.timeout(10_000),
+        ),
+      );
     } catch {
       /* Source controls remain usable when summary is unavailable. */
+      if (guided) setStatus(null);
+      onStatusUnavailableRef.current?.();
     }
-  }, []);
+  }, [guided]);
   useEffect(() => {
     void refreshStatus();
   }, [refreshStatus]);
+  useEffect(() => {
+    onStatusChange?.(status);
+  }, [status, onStatusChange]);
 
   async function enable(connectionId: string) {
     setBusy(connectionId);
@@ -297,16 +359,7 @@ export function IntelligenceControls({
         `/connections/google/${connectionId}/intelligence/start`,
         {},
       );
-      const target = new URL(result.authorization_url);
-      if (
-        target.protocol !== "https:" ||
-        target.hostname !== "accounts.google.com"
-      ) {
-        throw new Error(
-          "Google authorization could not be opened. Please try again.",
-        );
-      }
-      window.location.assign(target.href);
+      window.location.assign(googleAuthorizationUrl(result.authorization_url));
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -333,10 +386,16 @@ export function IntelligenceControls({
   return (
     <section className={styles.card} aria-labelledby="understanding-heading">
       <div className={styles.heading}>
-        <span>Connected understanding</span>
+        <span>
+          {guided ? "Choose what NavoX can read" : "Connected understanding"}
+        </span>
         <span className={styles.badge}>You control access</span>
       </div>
-      <h2 id="understanding-heading">Bring your work into focus</h2>
+      <h2 id="understanding-heading">
+        {guided
+          ? "Find what needs your attention"
+          : "Bring your work into focus"}
+      </h2>
       <p className={styles.copy}>
         Let NavoX find requests, deadlines, meetings, and follow-ups in the
         Google sources you authorize. Review the source behind every suggestion.
@@ -358,7 +417,9 @@ export function IntelligenceControls({
           );
           const canSync =
             connection.status === "active" &&
-            status?.processing_ready !== false;
+            (guided
+              ? status?.processing_ready === true
+              : status?.processing_ready !== false);
           return (
             <div className={styles.connection} key={connection.id}>
               <strong>{connection.external_email ?? "Google account"}</strong>
@@ -381,10 +442,9 @@ export function IntelligenceControls({
                 connection.status === "reauthorization_required") && (
                 <>
                   <p className={styles.copy}>
-                    This grants read access to email and calendar content for
-                    operational understanding. Relevant content is processed by
-                    your configured AI service. Email sending stays a separate
-                    permission.
+                    {guided
+                      ? "Choose read access in Google to find requests, deadlines, and meetings. Relevant text is processed by your AI service. Email sending stays a separate permission."
+                      : "This grants read access to email and calendar content for operational understanding. Relevant content is processed by your configured AI service. Email sending stays a separate permission."}
                   </p>
                   <button
                     type="button"
@@ -396,13 +456,16 @@ export function IntelligenceControls({
                       ? "Opening Google…"
                       : connection.status === "reauthorization_required"
                         ? "Reconnect read access"
-                        : "Enable Gmail & Calendar understanding"}
+                        : guided
+                          ? "Choose Gmail & Calendar read access"
+                          : "Enable Gmail & Calendar understanding"}
                   </button>
                 </>
               )}
               <div className={styles.syncSources}>
                 {gmail && (
                   <SourceSync
+                    guided={guided}
                     key={`${connection.id}:gmail`}
                     connectionId={connection.id}
                     source="gmail"
@@ -412,10 +475,17 @@ export function IntelligenceControls({
                       await Promise.all([refreshStatus(), onRefresh()]);
                     }}
                     onReconnect={() => void enable(connection.id)}
+                    onProgress={
+                      onSyncProgress
+                        ? (progress) =>
+                            onSyncProgress(connection.id, "gmail", progress)
+                        : undefined
+                    }
                   />
                 )}
                 {calendar && (
                   <SourceSync
+                    guided={guided}
                     key={`${connection.id}:calendar`}
                     connectionId={connection.id}
                     source="calendar"
@@ -425,10 +495,16 @@ export function IntelligenceControls({
                       await Promise.all([refreshStatus(), onRefresh()]);
                     }}
                     onReconnect={() => void enable(connection.id)}
+                    onProgress={
+                      onSyncProgress
+                        ? (progress) =>
+                            onSyncProgress(connection.id, "calendar", progress)
+                        : undefined
+                    }
                   />
                 )}
               </div>
-              {gmail && (
+              {gmail && !guided && (
                 <GmailRecheck
                   connectionId={connection.id}
                   disabled={busy !== null || paused || !canSync}
@@ -447,7 +523,7 @@ export function IntelligenceControls({
           sources.
         </p>
       )}
-      {status && (
+      {status && !guided && (
         <p className={styles.stats}>
           {status.active_commitments} active commitments ·{" "}
           {status.evidence_count} evidence references
@@ -455,8 +531,11 @@ export function IntelligenceControls({
       )}
       {status?.processing_ready === false && (
         <p className={styles.copy}>
-          {status.readiness_message ??
-            "Source processing is not configured yet. Your saved commitments remain available."}
+          {guided
+            ? (status.readiness_message ??
+              "Reading connected sources is temporarily unavailable. You can still add tasks and use your saved items.")
+            : (status.readiness_message ??
+              "Source processing is not configured yet. Your saved commitments remain available.")}
         </p>
       )}
       <button
