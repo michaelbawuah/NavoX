@@ -58,6 +58,7 @@ import {
   createBrowserWakeWordAdapter,
 } from "../lib/assistant-wake";
 import { safeSourceUrl } from "../lib/search";
+import { createStudentPushToTalk } from "../lib/student-voice";
 import {
   AssistantEmailActions,
   activeDraftSpeechKey,
@@ -1204,6 +1205,43 @@ export function NavoXAssistant() {
     voiceSession().stop();
   }, [voiceSession]);
 
+  useEffect(() => {
+    const keys = createStudentPushToTalk({
+      canStart: () =>
+        !document.querySelector("dialog[open]") &&
+        !connecting &&
+        !!sessionId &&
+        !busy &&
+        !handsFreeEnabledRef.current &&
+        voiceSession().current().microphoneSupported &&
+        !["LISTENING", "TRANSCRIBING", "THINKING"].includes(
+          voiceSession().current().state,
+        ),
+      start: () => voiceSession().listen(),
+      finish: () => {
+        voiceSession().toggleListening();
+        // Key release also cancels a microphone permission request still pending.
+        if (voiceSession().current().state === "LISTENING")
+          voiceSession().stop();
+      },
+      cancel: () => voiceSession().stop(),
+    });
+    const hidden = () => {
+      if (document.hidden) keys.cancel();
+    };
+    window.addEventListener("keydown", keys.keyDown);
+    window.addEventListener("keyup", keys.keyUp);
+    window.addEventListener("blur", keys.cancel);
+    document.addEventListener("visibilitychange", hidden);
+    return () => {
+      keys.cancel();
+      window.removeEventListener("keydown", keys.keyDown);
+      window.removeEventListener("keyup", keys.keyUp);
+      window.removeEventListener("blur", keys.cancel);
+      document.removeEventListener("visibilitychange", hidden);
+    };
+  }, [busy, connecting, sessionId, voiceSession]);
+
   const clearConversation = useCallback(async () => {
     const current = sessionId;
     // Abandon in-flight work and audio before the session identity changes.
@@ -1543,6 +1581,7 @@ export function NavoXAssistant() {
                   </p>
                   <p className={styles.permissionHint}>
                     To talk, allow microphone access when your browser asks.
+                    Hold Space away from text fields to talk; release to ask.
                     Turn on Hey NavoX to start hands-free while this page is
                     open.
                   </p>
@@ -1551,9 +1590,9 @@ export function NavoXAssistant() {
               <details className={styles.privacy}>
                 <summary>Privacy &amp; your chat</summary>
                 <p>
-                  Clear chat removes this conversation. Questions and answers
-                  expire after 30 days of session access and are then removed on
-                  a scheduled cleanup.
+                  This is a saved conversation. Clear chat removes it. Questions
+                  and answers expire after 30 days of session access and are
+                  then removed on a scheduled cleanup.
                 </p>
                 <p>
                   The microphone records after you press Talk or enable Hey

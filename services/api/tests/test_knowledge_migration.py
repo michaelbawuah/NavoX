@@ -246,7 +246,7 @@ def test_migration_is_the_single_head_after_the_m1_foundation() -> None:
     config = Config(str(API_ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(API_ROOT / "migrations"))
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == ["0038_owner_memory"]
+    assert script.get_heads() == ["0040_student_alerts"]
     images = script.get_revision("0035_news_article_images")
     assert images is not None and images.down_revision == "0034_knowledge_email_drafts"
     importance = script.get_revision("0032_news_importance")

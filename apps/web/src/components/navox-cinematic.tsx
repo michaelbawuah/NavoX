@@ -259,9 +259,9 @@ export function NavoXCinematic({ children }: { children: ReactNode }) {
                         <em>Reimagined.</em>
                       </h2>
                       <p className={styles.body}>
-                        Messages, meetings, and commitments.
+                        Classes, shifts, and deadlines.
                         <br />
-                        One place to see your next move.
+                        One place to find your next move.
                       </p>
                       <button
                         type="button"
@@ -280,19 +280,19 @@ export function NavoXCinematic({ children }: { children: ReactNode }) {
                         <em>Connected.</em>
                       </h2>
                       <p className={styles.body}>
-                        The message. The meeting. The promise.
+                        Your classes. Your work. Your plans.
                         <br />
                         See how they fit together.
                       </p>
                       <div className={styles.contextList}>
                         <span>
-                          01 <b>Messages</b>
+                          01 <b>Classes</b>
                         </span>
                         <span>
-                          02 <b>Meetings</b>
+                          02 <b>Shifts</b>
                         </span>
                         <span>
-                          03 <b>Commitments</b>
+                          03 <b>Deadlines</b>
                         </span>
                       </div>
                       <button
@@ -542,7 +542,7 @@ export function NavoXCinematic({ children }: { children: ReactNode }) {
                 {[
                   [
                     "What is NavoX?",
-                    "NavoX brings messages, meetings, and commitments into a personal operations workspace, so you can see what matters and decide what to do next.",
+                    "NavoX keeps your college classes, shifts, deadlines, and messages in one personal workspace, so you can see your day and choose what to do next.",
                   ],
                   [
                     "How do suggested actions work?",

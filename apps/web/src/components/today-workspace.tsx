@@ -30,6 +30,8 @@ import { PersonalMemoryPanel } from "./personal-memory";
 import { PersonalRoutines } from "./personal-routines";
 import { ProactivePanel } from "./proactive-panel";
 import { SourceReferences } from "./source-references";
+import { StudentDayPanel } from "./student-day-panel";
+import { StudentNotifications } from "./student-notifications";
 import { ThreadWatchPanel } from "./thread-watch-panel";
 import styles from "./today-workspace.module.css";
 import { WorkspaceShell } from "./workspace-shell";
@@ -1098,6 +1100,7 @@ export function TodayWorkspace({
   return (
     <WorkspaceShell
       current={page.current}
+      accountKey={`${account.workspace.id}:${account.id}`}
       accountName={account.display_name ?? account.email}
       onSignOut={onSignOut}
     >
@@ -1162,17 +1165,23 @@ export function TodayWorkspace({
         {view === "today" && (
           <div className={styles.focusLayout}>
             <div className={styles.focusColumn}>
+              <StudentDayPanel
+                accountId={`${account.workspace.id}:${account.id}`}
+              />
               {!connectionsUnavailable &&
                 (needsReadSetup || today?.total === 0) && (
-                  <GuidedSetup
-                    key={`${account.id}:${account.workspace.id}`}
-                    connections={connections}
-                    paused={agentPaused}
-                    itemCount={today?.total ?? 0}
-                    loading={loadingToday || !!todayError}
-                    onConnectionsChanged={onConnectionsChanged}
-                    onRefresh={refreshToday}
-                  />
+                  <details className={styles.toolDisclosure}>
+                    <summary>Connect email or Calendar (optional)</summary>
+                    <GuidedSetup
+                      key={`${account.id}:${account.workspace.id}`}
+                      connections={connections}
+                      paused={agentPaused}
+                      itemCount={today?.total ?? 0}
+                      loading={loadingToday || !!todayError}
+                      onConnectionsChanged={onConnectionsChanged}
+                      onRefresh={refreshToday}
+                    />
+                  </details>
                 )}
               <div id="daily-briefing">
                 <DailyFocus
@@ -1513,6 +1522,9 @@ export function TodayWorkspace({
               </section>
               <PersonalMemoryPanel
                 key={`${account.id}:${account.workspace.id}`}
+              />
+              <StudentNotifications
+                accountId={`${account.workspace.id}:${account.id}`}
               />
               <AISettings />
             </div>

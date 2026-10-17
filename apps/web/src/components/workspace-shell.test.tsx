@@ -3,6 +3,19 @@ import { describe, expect, it, vi } from "vitest";
 import { drawerFocusControls, WorkspaceShell } from "./workspace-shell";
 
 describe("workspace navigation", () => {
+  it("puts classes in student navigation and keeps optional products hidden", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceShell current="Classes">Timetable</WorkspaceShell>,
+    );
+    expect(html).toContain('href="/classes"');
+    expect(
+      html.match(
+        /<a(?=[^>]*href="\/classes")(?=[^>]*aria-current="page")[^>]*>/g,
+      ),
+    ).toHaveLength(2);
+    expect(html).not.toContain('href="/news"');
+    expect(html).not.toContain('href="/subscriptions"');
+  });
   it("marks only the current destination in the main navigation", () => {
     const html = renderToStaticMarkup(
       <WorkspaceShell current="Inbox">Messages</WorkspaceShell>,

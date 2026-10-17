@@ -76,7 +76,8 @@ const definitions = [
     mode: "read_only",
     requires_approval: false,
     delegate_target: "knowledge.class-sources",
-    description: "Read permission-fenced Canvas and Calendar class meetings.",
+    description:
+      "Read the owner's student timetable and permission-fenced connected class meetings.",
   },
   {
     id: "time.now",

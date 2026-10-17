@@ -16,7 +16,9 @@ import {
   restoreAccountAccess,
 } from "../lib/account-access";
 import { NavoXCinematic } from "./navox-cinematic";
+import { StudentClassesWorkspace } from "./student-classes";
 import { TodayWorkspace, type TodayWorkspaceView } from "./today-workspace";
+import { WorkspaceShell } from "./workspace-shell";
 
 type AuthMode = "register" | "login";
 
@@ -84,7 +86,7 @@ function notifyAccountSessionChanged() {
 export function AccountWorkspace({
   view = "today",
 }: {
-  view?: TodayWorkspaceView;
+  view?: TodayWorkspaceView | "classes";
 }) {
   const [mode, setMode] = useState<AuthMode>("register");
   const [account, setAccount] = useState<Account | null>(null);
@@ -273,16 +275,32 @@ export function AccountWorkspace({
           </main>
         )}
         <div hidden={!sessionRestored}>
-          <TodayWorkspace
-            key={`${account.id}:${account.workspace.id}`}
-            view={view}
-            account={account}
-            connections={connections}
-            connectionsUnavailable={connectionsUnavailable}
-            message={message}
-            onConnectionsChanged={refreshConnections}
-            onSignOut={signOut}
-          />
+          {view === "classes" ? (
+            <WorkspaceShell
+              current="Classes"
+              accountKey={`${account.workspace.id}:${account.id}`}
+              accountName={account.display_name ?? account.email}
+              onSignOut={signOut}
+            >
+              <StudentClassesWorkspace
+                key={`${account.id}:${account.workspace.id}`}
+                accountId={`${account.workspace.id}:${account.id}`}
+                displayName={account.display_name}
+                timezone={account.timezone}
+              />
+            </WorkspaceShell>
+          ) : (
+            <TodayWorkspace
+              key={`${account.id}:${account.workspace.id}`}
+              view={view}
+              account={account}
+              connections={connections}
+              connectionsUnavailable={connectionsUnavailable}
+              message={message}
+              onConnectionsChanged={refreshConnections}
+              onSignOut={signOut}
+            />
+          )}
         </div>
       </>
     );

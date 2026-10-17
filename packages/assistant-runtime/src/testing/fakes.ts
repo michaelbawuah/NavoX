@@ -501,6 +501,10 @@ export interface FakeUpstream extends NavoxUpstream {
     newsSummary: { cookie: string; id: string }[];
     weather: string[];
     classSources: string[];
+    studentLookup: {
+      cookie: string;
+      input: Parameters<NavoxUpstream["getStudentLookup"]>[1];
+    }[];
     actions: { cookie: string; limit: number }[];
     meeting: string[];
   };
@@ -531,6 +535,8 @@ export interface FakeUpstream extends NavoxUpstream {
   weatherError: AssistantError | null;
   classSources: unknown | (() => Promise<unknown>);
   classSourcesError: AssistantError | null;
+  studentLookup: unknown;
+  studentLookupError: AssistantError | null;
   actions: unknown | (() => Promise<unknown>);
   actionsError: AssistantError | null;
   meeting: Awaited<ReturnType<NavoxUpstream["getMeetingPrep"]>>;
@@ -712,6 +718,7 @@ export function createFakeUpstream(
       newsSummary: [],
       weather: [],
       classSources: [],
+      studentLookup: [],
       actions: [],
       meeting: [],
     },
@@ -755,6 +762,18 @@ export function createFakeUpstream(
     weatherError: null,
     classSources: { complete: true, courses: [], events: [] },
     classSourcesError: null,
+    studentLookup: {
+      mode: "next",
+      server_now: "2026-09-30T12:00:00.000Z",
+      timezone: "UTC",
+      date: "2026-09-30",
+      at: "2026-09-30T12:00:00.000Z",
+      occurrences: [],
+      next_upcoming: null,
+      reason: "no_classes",
+      conflicts: [],
+    },
+    studentLookupError: null,
     actions: [],
     actionsError: null,
     meeting: null,
@@ -867,6 +886,11 @@ export function createFakeUpstream(
       if (upstream.weatherError) throw upstream.weatherError;
       const result = upstream.weather;
       return typeof result === "function" ? await result() : result;
+    },
+    async getStudentLookup(cookie, input) {
+      upstream.calls.studentLookup.push({ cookie, input });
+      if (upstream.studentLookupError) throw upstream.studentLookupError;
+      return upstream.studentLookup;
     },
     async getClassSources(cookie) {
       upstream.calls.classSources.push(cookie);

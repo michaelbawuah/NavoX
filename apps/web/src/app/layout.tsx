@@ -1,18 +1,30 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { StudentAppRegistration } from "../components/student-notifications";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "NavoX — Your day. In perspective.",
+  title: "NavoX — Your student day, in perspective.",
   description:
-    "Your personal assistant for a clearer day. Keep up with tasks, classes, messages and news.",
+    "Your personal assistant for college. Keep classes, shifts, deadlines, and messages in one place.",
+  appleWebApp: {
+    capable: true,
+    title: "NavoX",
+    statusBarStyle: "default",
+  },
+  icons: { apple: "/icons/apple-touch-icon.png" },
 };
+
+export const viewport: Viewport = { themeColor: "#122124" };
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <StudentAppRegistration />
+        {children}
+      </body>
     </html>
   );
 }

@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     google_oauth_redirect_uri: str = "http://localhost:8000/api/v1/connections/google/callback"
     google_token_encryption_key: SecretStr | None = None
     connector_secret_encryption_key: SecretStr | None = None
+    # Web push is deployment-configured and separately opted into on each device.
+    student_push_enabled: bool = False
+    student_push_vapid_public_key: str = ""
+    student_push_vapid_private_key: SecretStr | None = None
+    student_push_vapid_subject: str = ""
     # Deployment-operator reviewed configurations. Users cannot supply network targets.
     generic_rest_connectors: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=20)
     mcp_servers: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=20)

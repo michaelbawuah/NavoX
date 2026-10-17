@@ -33,6 +33,9 @@ from navox.api.news_following import router as news_following_router
 from navox.api.news_stories import router as news_stories_router
 from navox.api.proactive import router as proactive_router
 from navox.api.routines import router as routines_router
+from navox.api.student import router as student_router
+from navox.api.student_alerts import router as student_alerts_router
+from navox.api.student_screenshot import router as student_screenshot_router
 from navox.api.subscriptions import router as subscriptions_router
 from navox.api.thread_watches import router as thread_watches_router
 from navox.api.today import router as today_router
@@ -85,6 +88,9 @@ def create_app() -> FastAPI:
     app.include_router(thread_watches_router, prefix="/api/v1")
     app.include_router(routines_router, prefix="/api/v1")
     app.include_router(memory_router, prefix="/api/v1")
+    app.include_router(student_router, prefix="/api/v1")
+    app.include_router(student_alerts_router, prefix="/api/v1")
+    app.include_router(student_screenshot_router, prefix="/api/v1")
     app.include_router(ai_operations_router, prefix="/api/v1")
     app.include_router(commitment_actions_router, prefix="/api/v1")
     app.include_router(today_router, prefix="/api/v1")

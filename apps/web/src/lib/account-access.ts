@@ -2,6 +2,7 @@ export interface Account {
   id: string;
   email: string;
   display_name: string | null;
+  timezone?: string;
   workspace: {
     id: string;
     name: string;

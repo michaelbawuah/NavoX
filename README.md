@@ -40,6 +40,20 @@ speech features require configured provider routes; hands-free recognition also
 depends on browser support. The [public news catalog](config/news/README.md)
 includes USGS, NASA, NOAA, and BEA feeds with source-specific content permissions.
 
+## For students
+
+The next product focus is a personal assistant for students at any college:
+know which class is now or next, keep a confirmed timetable, and build a day
+around classes, shifts, and deadlines. This work is in progress. The first
+release focuses on timetable setup, reliable class answers, quick voice asks,
+and class alerts; adaptive planning, course workspaces, recovery, and coaching
+follow measured student gates.
+
+The [student roadmap](docs/product/student-roadmap.md) maps the full product plan
+to acceptance criteria and distinguishes implementation, automated verification,
+and real student validation. It also records how existing capabilities support
+the student product and which additions are still planned.
+
 ## Design decisions
 
 - **Keep the source attached.** Commitments and answers retain source references

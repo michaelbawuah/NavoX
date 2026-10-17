@@ -96,6 +96,12 @@ import {
   toTurnView,
 } from "./store";
 import {
+  answerStudentLookup,
+  parseStudentLookup,
+  studentLookupPlan,
+  studentLookupRequest,
+} from "./student-voice";
+import {
   answerSubscription,
   answerUpcomingSubscriptions,
   clarifySubscriptions,
@@ -909,6 +915,21 @@ export function createAssistantRuntime(
     blocks: AssistantBlock[];
   }> {
     const pinned = planTurn({ text: input.request.text });
+    const studentRequest = studentLookupRequest(input.request.text);
+    if (studentRequest) {
+      const plan = studentLookupPlan(input.request.text);
+      try {
+        const snapshot = parseStudentLookup(
+          await deps.upstream.getStudentLookup(input.cookie, studentRequest),
+          studentRequest,
+        );
+        return { plan, ...answerStudentLookup(snapshot) };
+      } catch (error) {
+        if (isAssistantError(error) && error.code === "unauthorized")
+          throw error;
+        return { plan, ...planFailure(error, "class") };
+      }
+    }
     // The planner accepts shorter references than this runtime accepts turns.
     // Omit overlong questions rather than truncating their meaning, then bind
     // returned ordinals against this exact same list. Ordinary conversation

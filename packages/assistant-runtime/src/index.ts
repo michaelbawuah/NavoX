@@ -19,6 +19,7 @@ export * from "./presentation";
 export * from "./purge";
 export * from "./runtime";
 export * from "./store";
+export * from "./student-voice";
 export * from "./subscriptions";
 export * from "./time";
 export * from "./today";
