@@ -1,13 +1,13 @@
 # NavoX
 
-**A personal AI assistant for the work scattered across your inbox, calendar, classes, and subscriptions.**
+**A personal AI assistant for your inbox, calendar, classes, and subscriptions.**
 
-[Open NavoX](https://navox.net) · [Architecture](#architecture) · [Run locally](#run-locally) · [Verification](#verification)
+[Open NavoX](https://navox.net) · [Architecture](#architecture) · [Run locally](#run-locally) · [Development](#development)
 
-NavoX brings connected information into a daily view and a persistent conversation.
-Ask what needs your attention, find a source, prepare for a meeting, or draft a reply.
-When a request changes something outside NavoX, the application separates preparation,
-approval, execution, and verification.
+NavoX brings scattered work into one daily view. See what needs attention, ask a
+question about connected information, prepare for a meeting, or draft a reply.
+Conversations keep their history, answers link back to sources, and external
+actions have a separate review and approval step.
 
 ## See it in action
 
@@ -17,43 +17,40 @@ approval, execution, and verification.
 
 **[Watch the walkthrough](docs/media/navox-walkthrough.mp4)**
 
-The guided video uses real captures of the public interactive example workspace:
-Today, Upcoming, Waiting, source details, and task search. Its data is authored for
-the example. It does not demonstrate authenticated account retrieval or sending.
+The screenshot and walkthrough show the public example workspace with sample
+data: Today, Upcoming, Waiting, source details, and task search.
 
 ## What it does
 
-| Area | Implemented behavior |
+| Area | What you can do |
 | --- | --- |
-| Daily priorities | Evidence-backed commitments, upcoming meetings, follow-ups, and user-controlled attention preferences. |
-| Connected accounts | Explicitly authorized Gmail, Google Calendar, and institution-configured Canvas connections. |
-| Conversations and search | Saved sessions, bounded multi-intent planning, source-linked retrieval, and clarification when evidence is ambiguous. |
-| Voice | Recorded microphone input, gateway-routed speech-to-text and text-to-speech, read-aloud controls, and text/voice delivery preferences. |
-| Subscriptions | Recurring costs, renewals, trials, and price changes; amounts remain separate by currency. |
-| News | Source-backed stories, questions, and follow-up research, with source rights and freshness checks. |
-| Chrome side panel | The same API, priorities, plan status, and exact-action review, plus explicitly initiated page-note capture. |
+| Daily priorities | Review commitments, meetings, and follow-ups; adjust attention preferences and quiet hours. |
+| Connected accounts | Connect Gmail, Google Calendar, and institution-configured Canvas accounts with explicit permissions. |
+| Conversations and search | Resume saved chats, ask about connected sources, and handle requests with multiple intents. |
+| Voice | Record a question, hear a response, and choose text or voice delivery. |
+| Subscriptions | Track recurring costs, renewals, trials, and price changes, grouped by currency. |
+| News | Read source-linked stories, save items, and ask follow-up questions. |
+| Chrome side panel | Check priorities, review proposed actions, and capture page notes from the browser. |
 
-The repository contains these implementations; connector access and live AI availability
-depend on the deployed workspace, OAuth configuration, and approved provider routes.
-Hands-free recognition is browser-dependent. A test suite passing does not establish
-live voice quality or complete end-to-end acceptance of every integration.
+Connected features require their own OAuth configuration and permissions. AI and
+speech features require configured provider routes; hands-free recognition also
+depends on browser support. The [public news catalog](config/news/README.md)
+includes USGS, NASA, NOAA, and BEA feeds with source-specific content permissions.
 
-## Engineering decisions
+## Design decisions
 
-- **One provider boundary.** Python HTTP adapters support OpenAI, Anthropic Claude,
-  and Google Gemini behind a versioned gateway. Exact model/task/prompt/schema
-  qualification, sensitivity grants, token/cost limits, and circuit breakers govern
-  serving. Adapter support does not automatically enable a model or a fallback.
-- **Approval binds the action.** Email review displays the exact recipient, subject,
-  and body. Material edits invalidate prior approval. The worker rechecks ownership,
-  permissions, version, and payload hash before execution. Ambiguous send failures
-  enter manual review instead of being blindly retried.
-- **Durability without hidden authority.** Temporal coordinates source processing,
-  attention timers, and bounded workflows. The assistant goal worker receives an
-  opaque goal ID and rechecks saved state; it cannot approve or execute an action.
-- **Scoped state and evidence.** PostgreSQL stores owned sessions, source references,
-  plans, approval versions, and audit events. Retrieval and action boundaries
-  revalidate workspace/account access rather than trusting a client-supplied ID.
+- **Keep the source attached.** Commitments and answers retain source references
+  so a user can inspect the context behind a priority or response.
+- **Review the exact action.** Email approval covers the recipient, subject, and
+  body. Editing the draft invalidates that approval. The worker checks the saved
+  version and payload hash before sending; an ambiguous send result goes to
+  manual review instead of an automatic retry.
+- **Separate conversation from authority.** The TypeScript runtime coordinates
+  sessions and plans. The Python API checks connector permissions and external
+  actions. Workspace ownership is checked at retrieval and execution boundaries.
+- **Make background work durable.** Temporal handles source processing, timers,
+  and bounded workflows. PostgreSQL stores operational state, approval versions,
+  and audit events so work can resume across process restarts.
 
 ## Architecture
 
@@ -72,9 +69,16 @@ flowchart TD
     Connectors --> Sources["Gmail · Calendar · Canvas"]
 ```
 
-The TypeScript runtime owns conversation orchestration and its session schema.
-The Python API owns connector permissions, provider routing, operational state,
-and consequential action policy. They share contracts without duplicating authority.
+The AI gateway has adapters for OpenAI, Anthropic Claude, and Google Gemini.
+Model selection, task qualification, sensitivity permissions, cost limits, and
+circuit breakers are enforced before a provider request. Configuring an adapter
+does not enable its models or fallback routes automatically.
+
+Read the [assistant runtime](docs/architecture/assistant-runtime.md) and
+[connected retrieval](docs/architecture/connected-retrieval.md) guides for the
+request lifecycle, ownership checks, failure handling, and implementation bounds.
+The [documentation index](docs/README.md) connects these guides to the rest of
+the system.
 
 | Path | Responsibility |
 | --- | --- |
@@ -85,12 +89,13 @@ and consequential action policy. They share contracts without duplicating author
 | `services/api/navox` | FastAPI services, connectors, retrieval, gateway, and policy |
 | `services/api/migrations` | Python-owned PostgreSQL migrations |
 | `evals` | Synthetic evaluation cases and reference baselines |
-| `docs/architecture` | Design decisions, operational procedures, and acceptance boundaries |
+| `docs/adr` | Architecture decision records |
+| `docs/architecture` | Detailed system design and operational procedures |
 
 ## Run locally
 
-The container path requires Git and Docker Engine/Desktop with Compose v2.
-Images pin Python 3.12, Node 24, PostgreSQL 17, and Temporal.
+Install Git and Docker Engine or Docker Desktop with Compose v2. The containers
+use Python 3.12, Node 24, PostgreSQL 17, and Temporal.
 
 ```bash
 git clone https://github.com/michaelbawuah/NavoX.git
@@ -104,15 +109,15 @@ or [Temporal UI](http://localhost:8080). Register a local account to explore the
 The stack applies the Python and TypeScript migrations before the web service starts.
 First startup can take several minutes while dependencies and images build.
 
-The example environment starts with AI providers disabled and blank OAuth credentials.
-It does not connect to an inbox or start paid model requests. Configure your own
-credentials outside version control, then follow the [gateway setup](docs/architecture/spec-005-gateway.md)
-and [connector operations](docs/architecture/spec-002-operations.md) procedures.
-Google sign-in alone does not grant Gmail read/send access.
+The example environment starts with AI disabled and empty OAuth credentials.
+To use connected features, configure your own credentials in `.env`, then follow
+the [gateway setup](docs/architecture/spec-005-gateway.md) and
+[connector setup](docs/architecture/spec-002-operations.md) guides.
+Google sign-in and Gmail read/send permissions are separate grants.
 
-For host development, use Node 24, npm 11, Python 3.12, and `uv`.
-The [reference guide](docs/reference-guide.md#first-time-setup) contains terminal-by-terminal
-setup, and the [deployment guide](deploy/README.md) covers the production overlay.
+Keep `.env` and provider credentials outside version control. The
+[deployment guide](deploy/README.md) covers HTTPS, secret configuration, and the
+production Compose overlay.
 
 ### Chrome extension
 
@@ -126,17 +131,12 @@ In `chrome://extensions`, enable Developer mode, select **Load unpacked**, and c
 origins and the permission boundary are documented in the
 [extension guide](docs/architecture/milestone-8-chrome-extension.md).
 
-## Verification
+## Development
 
-The [reviewed hosted CI checkpoint](https://github.com/michaelbawuah/NavoX/actions/runs/37160769439),
-`df9397d`, recorded **2,820 API tests**, **437 web tests with 14 skipped**, and
-**8 extension tests**. These are regression results for that source checkpoint,
-not a production accuracy or availability claim. The assistant runtime has a
-separate suite with database/Temporal-dependent cases.
-
-The [CI workflow](.github/workflows/ci.yml) checks lint, types, builds, migrations,
-dependency security, deterministic release evaluation, and Compose integration.
-Evaluation fixtures are synthetic; live provider qualification is separate.
+For development outside the containers, use Node 24, npm 11, Python 3.12, and
+[`uv`](https://docs.astral.sh/uv/). The [local development guide](docs/reference-guide.md)
+covers environment loading, migrations, and separate application processes.
+Run the repository checks with:
 
 ```bash
 npm ci
@@ -147,16 +147,17 @@ npm run build
 bash scripts/check-api.sh
 ```
 
-The API gate uses the committed `uv.lock` and requires disposable PostgreSQL/Temporal
-services for the complete infrastructure-dependent suite. Missing infrastructure or
-skipped cases must be reported; they are not a substitute for a passing full gate.
-See [development quality checks](docs/development/api-quality.md) for the exact
-publication requirements.
+The full suite requires disposable PostgreSQL and Temporal services. The
+[API quality guide](docs/development/api-quality.md) describes the test environment.
 
-Further reading: [approval and verified execution](docs/architecture/milestone-6-approval-execution.md),
-[retrieval and connected intelligence](docs/agent-work/spec-006-007/SEARCH-REPORT.md),
-[gateway qualification](docs/architecture/spec-005-live-acceptance.md), and
-[bounded goal workflows](docs/agent-work/spec-008/M14B-BOUNDED-WORKFLOWS-WORKER-REPORT.md).
+The [CI workflow](.github/workflows/ci.yml) runs web, API, extension, dependency
+security, evaluation, and Compose integration checks. Evaluation fixtures are
+synthetic; provider qualification uses a separate process.
+
+Further reading: [storage](docs/adr/ADR-001-postgresql-operational-system-of-record.md),
+[durable workflows](docs/adr/ADR-002-temporal-durable-workflows.md),
+[action approval](docs/adr/ADR-006-human-approval-consequential-actions.md), and
+[workspace isolation](docs/adr/ADR-007-workspace-tenant-isolation.md).
 
 ## License
 

@@ -105,8 +105,8 @@ recording demonstration D.
 `examples/connectors/navox-github-issues.json` is a ready-to-review configuration
 for the actual `michaelbawuah/NavoX` repository. It maps GitHub's `id`, `title`,
 `body`, `updated_at`, `html_url` and `state` fields through the existing generic
-adapter. There is no GitHub-specific intelligence or new core adapter. The repo
-is private, so this example requires an owner-provided token. Do not paste it
+adapter. There is no GitHub-specific intelligence or new core adapter. For a
+private repository, use an owner-provided token. Do not paste it
 into JSON, `.env`, reports, a terminal command or chat; enter it in Connected Apps.
 
 The [GitHub repository issues documentation](https://docs.github.com/en/rest/issues/issues#list-repository-issues)
@@ -114,11 +114,10 @@ requires repository **Issues: read** permission for a fine-grained token. Scope 
 to this repository. The endpoint also returns pull requests; this example reads
 only the ten most recently updated open records and does not follow GitHub's Link
 pagination headers. It is a bounded interoperability demonstration, not a complete
-repository mirror. The owner supplied a passing deployed-worker report for this
-service on 2026-09-25, recorded below.
+repository mirror. The recorded September 25, 2026 deployment check below covers
+this bounded service configuration.
 
-1. Check out `spec-003-universal-connectors` in your local NavoX checkout and pull
-   its latest revision. Preserve any local changes before switching branches.
+1. Use a reviewed NavoX checkout and preserve any unrelated local changes.
 2. Print the configuration as an environment value:
 
    ```bash
