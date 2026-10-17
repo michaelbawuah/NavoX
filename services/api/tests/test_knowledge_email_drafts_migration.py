@@ -72,13 +72,17 @@ def render(direction: str) -> str:
     return " ".join(buffer.getvalue().split())
 
 
-def test_migration_precedes_the_additive_news_images_head() -> None:
+def test_migration_precedes_additive_news_images_on_the_single_chain() -> None:
     module = migration_module()
     assert module.revision == REVISION
     assert module.down_revision == DOWN_REVISION
     assert len(module.revision) <= 32
     script = ScriptDirectory.from_config(Config(str(API_ROOT / "alembic.ini")))
-    assert script.get_heads() == ["0043_student_coursework"]
+    # Later additive migrations may extend this chain without changing its ancestry.
+    heads = script.get_heads()
+    assert len(heads) == 1
+    ancestry = {revision.revision for revision in script.walk_revisions(base="base", head=heads[0])}
+    assert {REVISION, "0035_news_article_images"} <= ancestry
     assert script.get_revision("0035_news_article_images").down_revision == REVISION
 
 
