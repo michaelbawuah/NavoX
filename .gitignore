@@ -24,7 +24,8 @@ __pycache__/
 .idea/
 .vscode/*.local.json
 
-# Local coding-assistant instructions and session handoffs
+# Local development instructions and session notes
 AGENTS.md
 CLAUDE.md
 CODEX-HANDOFF-*.md
+/docs/agent-work/
