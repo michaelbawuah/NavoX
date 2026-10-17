@@ -43,7 +43,8 @@ async def test_registration_creates_a_personal_workspace_and_session(client: Asy
 
     assert response.status_code == 201
     body = response.json()
-    assert set(body) == {"id", "email", "display_name", "workspace"}
+    assert set(body) == {"id", "email", "display_name", "timezone", "workspace"}
+    assert body["timezone"] == "UTC"
     assert body["email"] == "owner@example.com"
     assert body["display_name"] == "Owner"
     assert body["workspace"]["name"] == "Owner's workspace"
@@ -56,6 +57,13 @@ async def test_registration_creates_a_personal_workspace_and_session(client: Asy
 
     assert current_account.status_code == 200
     assert current_account.json()["workspace"]["id"] == body["workspace"]["id"]
+
+    saved_zone = await client.post(
+        "/api/v1/workspace/preferences", json={"timezone": "America/New_York"}
+    )
+    assert saved_zone.status_code == 200
+    restored = await client.get("/api/v1/auth/me")
+    assert restored.json()["timezone"] == "America/New_York"
 
 
 @pytest.mark.asyncio

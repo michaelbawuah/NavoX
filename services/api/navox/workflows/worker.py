@@ -57,6 +57,7 @@ from navox.routines.activities import (
     routine_tick_activity,
 )
 from navox.routines.dispatcher import RECONCILIATION_WORKFLOW_ID as ROUTINE_RECONCILIATION_ID
+from navox.student_alerts.activities import reconcile_student_alerts_activity
 from navox.subscriptions.activities import (
     cancellation_state_activity,
     execute_cancellation_activity,
@@ -114,6 +115,7 @@ from navox.workflows.proactive import (
     MeetingPreparationWorkflow,
 )
 from navox.workflows.routines import PersonalRoutineReconciliationWorkflow, PersonalRoutineWorkflow
+from navox.workflows.student_alerts import StudentAlertReconciliationWorkflow
 from navox.workflows.subscriptions import (
     CancellationContradictionWorkflow,
     CancelSubscriptionWorkflow,
@@ -138,6 +140,7 @@ async def main() -> None:
             ThreadWatchReconciliationWorkflow,
             PersonalRoutineWorkflow,
             PersonalRoutineReconciliationWorkflow,
+            StudentAlertReconciliationWorkflow,
             KnowledgeResourceIngestWorkflow,
             KnowledgeResourceUpdateWorkflow,
             KnowledgeResourceDeleteWorkflow,
@@ -184,6 +187,7 @@ async def main() -> None:
             routine_tick_activity,
             routine_failure_activity,
             reconcile_routines_activity,
+            reconcile_student_alerts_activity,
             knowledge_delete_activity,
             knowledge_embedding_activity,
             knowledge_reindex_activity,
@@ -268,6 +272,15 @@ async def main() -> None:
             await client.start_workflow(
                 PersonalRoutineReconciliationWorkflow.run,
                 id=ROUTINE_RECONCILIATION_ID,
+                task_queue=settings.temporal_task_queue,
+            )
+        except WorkflowAlreadyStartedError:
+            pass
+        # Device alerts use the saved timetable and remain independent of AI routes.
+        try:
+            await client.start_workflow(
+                StudentAlertReconciliationWorkflow.run,
+                id="navox-student-alert-reconciliation-v1",
                 task_queue=settings.temporal_task_queue,
             )
         except WorkflowAlreadyStartedError:

@@ -16,6 +16,10 @@ dependencies = [
   "sqlalchemy[asyncio]>=2.0.54,<2.1",
   "temporalio>=1.16,<2",
   "jsonschema>=4.25,<5",
+  "icalendar>=7.3,<8",
+  "pywebpush>=2.0,<3",
+  "pillow>=12.3.0,<14",
+  "recurring-ical-events>=3.8.2,<4",
 ]
 
 [dependency-groups]

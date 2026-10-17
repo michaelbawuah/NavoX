@@ -4,6 +4,11 @@ FROM python:3.12-slim
 COPY --from=uv /uv /uvx /bin/
 WORKDIR /app
 
+# Timetable screenshots are read locally; no image is uploaded to an AI provider.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 

@@ -7,6 +7,7 @@ import {
 import { AssistantError, isAssistantError, toAssistantError } from "./errors";
 import { LIMITS } from "./limits";
 import { parseMeetingPrep } from "./meeting";
+import type { StudentLookupRequest } from "./student-voice";
 import { parseTodayQueryResult, type TodayQueryResult } from "./today";
 import { assertUuid, isRecord } from "./validate";
 
@@ -82,6 +83,10 @@ export interface NavoxUpstream {
   getNewsSummary(cookie: string, id: string): Promise<unknown>;
   getWeather(cookie: string): Promise<unknown>;
   getClassSources(cookie: string): Promise<unknown>;
+  getStudentLookup(
+    cookie: string,
+    input: StudentLookupRequest,
+  ): Promise<unknown>;
   /**
    * Raw read-only list from the existing authenticated SPEC-001/003 action
    * ledger. The route is already scoped by workspace and user; this runtime
@@ -627,6 +632,25 @@ export function createNavoxUpstream(
         throw new AssistantError(
           "unavailable",
           "Weather returned an unreadable result.",
+        );
+      });
+    },
+
+    async getStudentLookup(cookie, input): Promise<unknown> {
+      const params = new URLSearchParams({ mode: input.mode });
+      if (input.date !== undefined) params.set("date", input.date);
+      if (input.time !== undefined) params.set("time", input.time);
+      if (input.day_offset !== undefined)
+        params.set("day_offset", String(input.day_offset));
+      if (input.weekday !== undefined)
+        params.set("weekday", String(input.weekday));
+      const path = `/student/lookup?${params.toString()}`;
+      const response = await send(path, { method: "GET", cookie });
+      if (!response.ok) throw statusError(response.status, "/student/lookup");
+      return response.json().catch(() => {
+        throw new AssistantError(
+          "unavailable",
+          "Your timetable did not return a readable result.",
         );
       });
     },

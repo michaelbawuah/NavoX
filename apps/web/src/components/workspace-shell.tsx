@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { productFeatures } from "../lib/product-features";
+import { StudentVoiceLauncher } from "./student-voice-launcher";
 import styles from "./workspace-shell.module.css";
 
 export type WorkspaceDestination =
   | "Today"
+  | "Classes"
   | "Assistant"
   | "Inbox"
   | "Planner"
@@ -17,11 +20,14 @@ export type WorkspaceDestination =
 
 const destinations: { label: WorkspaceDestination; href: string }[] = [
   { label: "Today", href: "/" },
+  { label: "Classes", href: "/classes" },
   { label: "Assistant", href: "/navox" },
   { label: "Inbox", href: "/inbox" },
   { label: "Planner", href: "/planner" },
-  { label: "News", href: "/news" },
-  { label: "Subscriptions", href: "/subscriptions" },
+  ...(productFeatures.news ? [{ label: "News" as const, href: "/news" }] : []),
+  ...(productFeatures.subscriptions
+    ? [{ label: "Subscriptions" as const, href: "/subscriptions" }]
+    : []),
 ];
 
 const iconPaths: Record<
@@ -29,6 +35,7 @@ const iconPaths: Record<
   string
 > = {
   Today: "M3 10l9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z",
+  Classes: "M3 5h7l2 2 2-2h7v15h-7l-2 2-2-2H3zM12 7v15M6 10h3M15 10h3",
   Assistant: "M20 11a8 8 0 0 1-8 8H5l-3 3V11a10 10 0 0 1 18 0M7 10h8M7 14h5",
   Inbox: "M4 4h16v16H4zM4 12h5l2 3h2l2-3h5",
   Planner: "M4 5h16v16H4zM8 3v4M16 3v4M4 10h16M8 14h3M8 17h6",
@@ -82,11 +89,13 @@ export function WorkspaceShell({
   current,
   children,
   accountName,
+  accountKey,
   onSignOut,
 }: {
   current: WorkspaceDestination;
   children: ReactNode;
   accountName?: string;
+  accountKey?: string;
   onSignOut?: () => Promise<void> | void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -170,7 +179,7 @@ export function WorkspaceShell({
     }
   }
 
-  const moreActive = !["Today", "Assistant", "Planner"].includes(current);
+  const moreActive = !["Today", "Classes", "Assistant"].includes(current);
 
   return (
     <div className={styles.shell}>
@@ -214,7 +223,7 @@ export function WorkspaceShell({
           </span>
           NavoX
         </Link>
-        <div className={styles.workspaceLabel}>Your personal workspace</div>
+        <div className={styles.workspaceLabel}>Your student workspace</div>
         <nav className={styles.navigation} aria-label="Main navigation">
           {destinations.map(({ label, href }) => (
             <Link
@@ -289,6 +298,7 @@ export function WorkspaceShell({
             <span>{current}</span>
           </div>
           <div className={styles.topbarActions}>
+            <StudentVoiceLauncher accountKey={accountKey} />
             <Link
               className={styles.search}
               href="/navox/search"
@@ -299,12 +309,6 @@ export function WorkspaceShell({
               <span>Search your workspace</span>
               <kbd>⌘ K</kbd>
             </Link>
-            {current !== "Assistant" && (
-              <Link className={styles.ask} href="/navox">
-                <Icon name="Assistant" />
-                <span>Ask NavoX</span>
-              </Link>
-            )}
           </div>
         </header>
         <main id="workspace-content" className={styles.content}>
@@ -318,7 +322,7 @@ export function WorkspaceShell({
       >
         {destinations
           .filter(({ label }) =>
-            ["Today", "Assistant", "Planner"].includes(label),
+            ["Today", "Classes", "Assistant"].includes(label),
           )
           .map(({ label, href }) => (
             <Link

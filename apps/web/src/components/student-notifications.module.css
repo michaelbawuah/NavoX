@@ -1,0 +1,95 @@
+.panel {
+  display: grid;
+  gap: 1rem;
+  padding: clamp(1rem, 3vw, 1.75rem);
+  border: 1px solid #cbd8d2;
+  border-radius: 1.25rem;
+  background: #fff;
+  color: #19352d;
+}
+.panel h2 {
+  margin: 0.2rem 0 0.55rem;
+  font-size: 1.55rem;
+  letter-spacing: -0.04em;
+}
+.panel p {
+  margin: 0;
+  line-height: 1.6;
+}
+.eyebrow {
+  color: #4a725e;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+.note {
+  color: #547064;
+  font-size: 0.84rem;
+}
+.error {
+  color: #9b2d35;
+}
+.deviceRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.9rem 0;
+  border-bottom: 1px solid #e4ebe7;
+}
+.panel button {
+  border: 1px solid #aac4b5;
+  border-radius: 0.6rem;
+  background: #eaf4ec;
+  color: #1f4f35;
+  padding: 0.65rem 0.85rem;
+  font: inherit;
+  cursor: pointer;
+}
+.panel button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.panel fieldset {
+  display: grid;
+  gap: 1rem;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.legend {
+  font-weight: 650;
+  margin-bottom: 0.8rem;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 0.9rem;
+}
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 1rem;
+}
+.fields label {
+  display: grid;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+}
+.fields input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #c0d0c5;
+  border-radius: 0.5rem;
+  padding: 0.6rem;
+  color: #19352d;
+  background: #fff;
+  font: inherit;
+}
+.panel summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+}

@@ -1034,7 +1034,7 @@ describe("current weather routing", () => {
 });
 
 describe("next class routing", () => {
-  it("uses the class projection and never invents a time from a Canvas course", async () => {
+  it("uses the student timetable and never invents a time from a Canvas course", async () => {
     const context = await withSession({
       planError: null,
       plan: intentEnvelope(
@@ -1067,16 +1067,20 @@ describe("next class routing", () => {
       session_id: context.sessionId,
       body: {
         request_id: REQUEST_ID,
-        text: "What class do I have next?",
+        text: "When is my next class?",
         modality: "TEXT",
       },
     });
-    expect(response.turn.state).toBe("CLARIFY");
+    expect(response.turn.state).toBe("READY");
     expect(response.turn.decision?.capability_id).toBe("class.next");
     expect(JSON.stringify(response.turn.presentation?.blocks)).toContain(
-      "can't determine",
+      "No classes are scheduled",
     );
-    expect(context.upstream.calls.classSources).toEqual([COOKIE]);
+    expect(context.upstream.calls.classSources).toEqual([]);
+    expect(context.upstream.calls.studentLookup).toEqual([
+      { cookie: COOKIE, input: { mode: "next" } },
+    ]);
+    expect(context.upstream.calls.plan).toEqual([]);
     expect(context.upstream.calls.today).toEqual([]);
   });
 });
