@@ -439,6 +439,9 @@ async def save_overview(
 async def clear_derived(
     database: AsyncSession, settings: Settings, material: CourseMaterial
 ) -> None:
+    from navox.student_recovery.service import invalidate_recovery_previews
+
+    await invalidate_recovery_previews(database, material.user_id, material.workspace_id)
     row = await state_row(database, material.user_id, material.workspace_id, material.course_id)
     if row is None:
         return
@@ -1154,6 +1157,9 @@ async def clear_coursework_data(
     database: AsyncSession, *, user_id: UUID, workspace_id: UUID, course_id: UUID | None = None
 ) -> None:
     """Caller holds the shared User lock. No decryption or providers are required."""
+    from navox.student_recovery.service import invalidate_recovery_previews
+
+    await invalidate_recovery_previews(database, user_id, workspace_id)
     for model in (CourseEmailLink, CourseMaterial, CourseWorkspaceState, CourseworkCommand):
         conditions = [model.user_id == user_id, model.workspace_id == workspace_id]
         if course_id is not None:

@@ -27,7 +27,9 @@ from navox.db import (
     routines,  # noqa: F401 - registers opt-in schedules and run history
     student,  # noqa: F401 - registers owner-managed classes and timetable
     student_alerts,  # noqa: F401 - registers opt-in device alerts and delivery history
+    student_email,  # noqa: F401 - registers expiring reviews and accepted email task provenance
     student_planning,  # noqa: F401 - registers owned study tasks and plans
+    student_recovery,  # noqa: F401 - registers expiring private recovery proposals
     thread_watches,  # noqa: F401 - registers verified-send follow-up watches
 )
 from navox.db.base import Base

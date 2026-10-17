@@ -623,6 +623,9 @@ async def erase_feed_data(
     )
     if feed is None:
         return
+    from navox.student_recovery.service import invalidate_recovery_previews
+
+    await invalidate_recovery_previews(database, user_id, workspace_id)
     sources = list(
         await database.scalars(select(LmsFeedSource).where(LmsFeedSource.feed_id == feed.id))
     )

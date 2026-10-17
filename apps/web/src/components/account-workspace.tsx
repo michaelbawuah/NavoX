@@ -22,6 +22,8 @@ import { StudentAssistantPanel } from "./student-assistant-panel";
 import { StudentClassesWorkspace } from "./student-classes";
 import { StudentCourseWorkspace } from "./student-course-workspace";
 import { StudentDailyPlan } from "./student-daily-plan";
+import { StudentEmailActions } from "./student-email-actions";
+import { StudentRecovery, StudentRecoveryCard } from "./student-recovery";
 import { TodayWorkspace, type TodayWorkspaceView } from "./today-workspace";
 import { WorkspaceShell } from "./workspace-shell";
 
@@ -92,7 +94,13 @@ export function AccountWorkspace({
   view = "today",
   courseId,
 }: {
-  view?: TodayWorkspaceView | "classes" | "course" | "student-assistant";
+  view?:
+    | TodayWorkspaceView
+    | "classes"
+    | "course"
+    | "student-assistant"
+    | "recovery"
+    | "student-email";
   courseId?: string;
 }) {
   const [mode, setMode] = useState<AuthMode>("register");
@@ -313,6 +321,39 @@ export function AccountWorkspace({
                 <p>This course could not be opened.</p>
               )}
             </WorkspaceShell>
+          ) : view === "student-email" ? (
+            <WorkspaceShell
+              current="Inbox"
+              accountKey={`${account.workspace.id}:${account.id}`}
+              accountName={account.display_name ?? account.email}
+              onSignOut={signOut}
+            >
+              {productFeatures.studentEmail ? (
+                <StudentEmailActions
+                  key={`${account.workspace.id}:${account.id}`}
+                  accountId={`${account.workspace.id}:${account.id}`}
+                  planningEnabled={productFeatures.studentPlanning}
+                />
+              ) : (
+                <p>Email actions are not available on this deployment.</p>
+              )}
+            </WorkspaceShell>
+          ) : view === "recovery" ? (
+            <WorkspaceShell
+              current="Planner"
+              accountKey={`${account.workspace.id}:${account.id}`}
+              accountName={account.display_name ?? account.email}
+              onSignOut={signOut}
+            >
+              {productFeatures.studentRecovery ? (
+                <StudentRecovery
+                  key={`${account.workspace.id}:${account.id}`}
+                  accountId={`${account.workspace.id}:${account.id}`}
+                />
+              ) : (
+                <p>Catch-up previews are not available on this deployment.</p>
+              )}
+            </WorkspaceShell>
           ) : view === "student-assistant" ? (
             <WorkspaceShell
               current="Assistant"
@@ -340,6 +381,7 @@ export function AccountWorkspace({
               accountName={account.display_name ?? account.email}
               onSignOut={signOut}
             >
+              {productFeatures.studentRecovery && <StudentRecoveryCard />}
               <StudentDailyPlan
                 key={`${account.workspace.id}:${account.id}`}
                 accountId={`${account.workspace.id}:${account.id}`}

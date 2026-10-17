@@ -922,7 +922,9 @@ async def reset_data(
         erase_all_owned_feeds,
         lock_all_feeds_for_reset,
     )
+    from navox.student_email.service import forget_email_data
     from navox.student_planning.service import forget_planning_data
+    from navox.student_recovery.service import forget_recovery_data
 
     # Feed workers use connector→membership→User. Lock their authorities before
     # the shared student writer lock, then forget everything in one transaction.
@@ -960,7 +962,9 @@ async def reset_data(
         raise StudentError(
             409, "The saved calendar connection needs review before resetting data"
         ) from None
+    await forget_email_data(database, user_id=user_id, workspace_id=workspace_id)
     await forget_planning_data(database, user_id, workspace_id)
+    await forget_recovery_data(database, user_id, workspace_id)
     await clear_coursework_data(database, user_id=user_id, workspace_id=workspace_id)
     from navox.student_alerts.service import clear_student_alert_data
 
