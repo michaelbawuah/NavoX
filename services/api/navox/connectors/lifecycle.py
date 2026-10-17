@@ -319,6 +319,19 @@ async def delete_learned_data(
     )
     if pending_connector is not None or pending_provider is not None:
         raise HTTPException(409, "Provider subscription cleanup is still pending")
+    # Calendar feeds have their own normalized source graph and copied study
+    # tasks. Forget those within this same connector→membership→user transaction.
+    from navox.lms_feeds.service import erase_feed_data
+
+    for row in rows:
+        if row.provider == "lms_feed":
+            await erase_feed_data(
+                database,
+                connection_id=row.id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                now=await database_now(database),
+            )
     credential_ids = {row.credential_reference for row in rows if row.credential_reference}
     if account and account.credential_reference:
         credential_ids.add(account.credential_reference)

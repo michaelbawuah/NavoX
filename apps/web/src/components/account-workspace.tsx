@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   type FormEvent,
   useCallback,
@@ -15,8 +16,12 @@ import {
   loadGoogleConnections,
   restoreAccountAccess,
 } from "../lib/account-access";
+import { productFeatures } from "../lib/product-features";
 import { NavoXCinematic } from "./navox-cinematic";
+import { StudentAssistantPanel } from "./student-assistant-panel";
 import { StudentClassesWorkspace } from "./student-classes";
+import { StudentCourseWorkspace } from "./student-course-workspace";
+import { StudentDailyPlan } from "./student-daily-plan";
 import { TodayWorkspace, type TodayWorkspaceView } from "./today-workspace";
 import { WorkspaceShell } from "./workspace-shell";
 
@@ -85,8 +90,10 @@ function notifyAccountSessionChanged() {
 
 export function AccountWorkspace({
   view = "today",
+  courseId,
 }: {
-  view?: TodayWorkspaceView | "classes";
+  view?: TodayWorkspaceView | "classes" | "course" | "student-assistant";
+  courseId?: string;
 }) {
   const [mode, setMode] = useState<AuthMode>("register");
   const [account, setAccount] = useState<Account | null>(null);
@@ -287,6 +294,55 @@ export function AccountWorkspace({
                 accountId={`${account.workspace.id}:${account.id}`}
                 displayName={account.display_name}
                 timezone={account.timezone}
+              />
+            </WorkspaceShell>
+          ) : view === "course" ? (
+            <WorkspaceShell
+              current="Classes"
+              accountKey={`${account.workspace.id}:${account.id}`}
+              accountName={account.display_name ?? account.email}
+              onSignOut={signOut}
+            >
+              {courseId ? (
+                <StudentCourseWorkspace
+                  key={`${account.workspace.id}:${account.id}:${courseId}`}
+                  accountId={`${account.workspace.id}:${account.id}`}
+                  courseId={courseId}
+                />
+              ) : (
+                <p>This course could not be opened.</p>
+              )}
+            </WorkspaceShell>
+          ) : view === "student-assistant" ? (
+            <WorkspaceShell
+              current="Assistant"
+              accountKey={`${account.workspace.id}:${account.id}`}
+              accountName={account.display_name ?? account.email}
+              onSignOut={signOut}
+            >
+              <StudentAssistantPanel
+                key={`${account.workspace.id}:${account.id}`}
+                accountId={`${account.workspace.id}:${account.id}`}
+                toolContextConsentAvailable={
+                  productFeatures.studentAgentToolContext
+                }
+              />
+              <p>
+                <Link href="/navox/actions">
+                  Email drafts and saved conversations
+                </Link>
+              </p>
+            </WorkspaceShell>
+          ) : view === "planner" && productFeatures.studentPlanning ? (
+            <WorkspaceShell
+              current="Planner"
+              accountKey={`${account.workspace.id}:${account.id}`}
+              accountName={account.display_name ?? account.email}
+              onSignOut={signOut}
+            >
+              <StudentDailyPlan
+                key={`${account.workspace.id}:${account.id}`}
+                accountId={`${account.workspace.id}:${account.id}`}
               />
             </WorkspaceShell>
           ) : (

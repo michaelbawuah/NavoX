@@ -239,6 +239,9 @@ async def connection_views(
     native_query = select(ConnectorConnection).where(
         ConnectorConnection.workspace_id == workspace_id,
         ConnectorConnection.user_id == user_id,
+        # Private feed URLs use the secret broker; their dedicated student card
+        # owns refresh and deletion instead of the generic connector runtime.
+        ConnectorConnection.provider != "lms_feed",
     )
     if connection_id:
         legacy_query = legacy_query.where(Connection.id == connection_id)

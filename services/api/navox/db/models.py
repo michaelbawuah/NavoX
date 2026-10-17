@@ -19,12 +19,15 @@ from sqlalchemy.orm import Mapped, mapped_column
 from navox.db import (
     ai_registry,  # noqa: F401 - registers AI registry metadata
     communications,  # noqa: F401
+    coursework,  # noqa: F401 - registers private course materials and source links
     knowledge,  # noqa: F401 - registers SPEC-007 knowledge foundation metadata
+    lms_feeds,  # noqa: F401 - registers reviewed student calendar feed data
     memory,  # noqa: F401 - registers owner-saved preferences
     news,  # noqa: F401
     routines,  # noqa: F401 - registers opt-in schedules and run history
     student,  # noqa: F401 - registers owner-managed classes and timetable
     student_alerts,  # noqa: F401 - registers opt-in device alerts and delivery history
+    student_planning,  # noqa: F401 - registers owned study tasks and plans
     thread_watches,  # noqa: F401 - registers verified-send follow-up watches
 )
 from navox.db.base import Base
