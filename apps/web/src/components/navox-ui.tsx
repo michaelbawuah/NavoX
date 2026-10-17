@@ -131,10 +131,12 @@ export function NavoXStatus({
   status: NewsVerification;
   explain?: boolean;
 }) {
+  if (status === "UNCONFIRMED" || !newsStatus[status]) return null;
+
   return (
     <span className={styles.statusBlock}>
       <span className={styles.status} data-state={status}>
-        {newsStatus[status] ?? "Not confirmed"}
+        {newsStatus[status]}
       </span>
       {explain && (
         <span className={styles.statusExplanation}>

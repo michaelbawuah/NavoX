@@ -60,7 +60,7 @@ describe("Article photo and publisher navigation", () => {
     expect(html).toContain(photo.credit);
     expect(html).toContain('href="/news/stories/story-one"');
     expect(html).toContain("Explore story");
-    expect(html).toContain("Not confirmed");
+    expect(html).not.toContain("Not confirmed");
     expect(html).not.toContain("via Perigon");
     expect(html.match(/<a /g)).toHaveLength(1);
     expect(html.match(/<button/g)).toHaveLength(1);

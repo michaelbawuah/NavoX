@@ -151,14 +151,14 @@ describe("Related stories", () => {
     expect(html).not.toContain("Related stories");
   });
 
-  it("links related stories with their verification status", () => {
+  it("links related stories without an unconfirmed badge", () => {
     const html = renderToStaticMarkup(
       createElement(RelatedStoryList, { stories: [story] }),
     );
     expect(html).toContain("Related stories");
     expect(html).toContain('href="/news/stories/story-one"');
     expect(html).toContain("A measured observation");
-    expect(html).toContain("Not confirmed");
+    expect(html).not.toContain("Not confirmed");
     expect(html).not.toContain("confidence");
   });
 });
