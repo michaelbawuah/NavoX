@@ -53,40 +53,39 @@ export function MessageDemo({
         <small>EXAMPLE</small>
       </div>
       <div className={styles.demoJourney} aria-hidden="true">
-        <span data-lit="true">Message</span>
+        <span data-lit="true">Question</span>
         <i />
-        <span data-lit={step !== "message"}>Context</span>
+        <span data-lit={step !== "message"}>Timetable</span>
         <i />
-        <span data-lit={step === "task"}>Task</span>
+        <span data-lit={step === "task"}>Next class</span>
       </div>
       <div className={styles.demoContent} aria-live="polite" aria-atomic="true">
         {step === "message" ? (
           <>
-            <span className={styles.demoMeta}>ALEX · PROJECT BRIEF</span>
+            <span className={styles.demoMeta}>SAMPLE MONDAY · 9:40 AM</span>
             <p>
-              “Could you send feedback on the project brief by{" "}
-              <mark>Oct 2, 3:00 PM EDT</mark>?”
+              “What’s my <mark>next class</mark>, and where do I go?”
             </p>
           </>
         ) : step === "connecting" ? (
           <>
-            <span className={styles.demoMeta}>CONNECTING THE DETAILS</span>
+            <span className={styles.demoMeta}>CONFIRMED SAMPLE TIMETABLE</span>
             <p>
-              The request. The deadline.
+              CS101 · Monday 10:00–10:50 AM
               <br />
-              The original conversation.
+              Science Hall 204
             </p>
           </>
         ) : (
           <>
-            <span className={styles.demoMeta}>YOUR NEXT MOVE</span>
-            <h3>Send feedback on the project brief</h3>
+            <span className={styles.demoMeta}>FROM THE SAMPLE TIMETABLE</span>
+            <h3>Next class: CS101 lecture</h3>
             <div className={styles.taskFacts}>
               <span>
-                Due <b>Oct 2 · 3:00 PM EDT</b>
+                Sample time <b>Monday · 10:00 AM</b>
               </span>
               <span>
-                Source <b>Alex · Project brief</b>
+                Room <b>Science Hall 204</b>
               </span>
             </div>
           </>
@@ -102,25 +101,25 @@ export function MessageDemo({
                 setStep("message");
               }}
             >
-              Read source
+              Ask again
             </button>
             <button type="button" onClick={onOpenTask}>
-              View task <span>↗</span>
+              View sample class <span>↗</span>
             </button>
           </>
         ) : (
           <>
             <span>
               {step === "connecting"
-                ? "Bringing it together…"
-                : "One message. A clear next step."}
+                ? "Reading the sample timetable…"
+                : "A question. A saved timetable."}
             </span>
             <button
               type="button"
               disabled={step === "connecting"}
               onClick={demonstrate}
             >
-              {step === "connecting" ? "Connecting…" : "See the task"}
+              {step === "connecting" ? "Reading…" : "See next class"}
               <span>{step === "connecting" ? "· · ·" : "↗"}</span>
             </button>
           </>

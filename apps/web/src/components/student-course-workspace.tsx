@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { productFeatures } from "../lib/product-features";
 import {
   type CourseAssignments,
   type CourseEmailCandidate,
@@ -39,6 +40,7 @@ import {
 } from "../lib/student-coursework";
 import { studentError, studentWriteUncertain } from "../lib/student-schedule";
 import styles from "./student-course-workspace.module.css";
+import { StudentWorkExportEntry } from "./student-work-export";
 
 type Tab =
   | "overview"
@@ -1012,7 +1014,13 @@ export function CourseEmailPicker({
   );
 }
 
-function CourseWorkspaceAccount({ courseId }: { courseId: string }) {
+function CourseWorkspaceAccount({
+  accountId,
+  courseId,
+}: {
+  accountId: string;
+  courseId: string;
+}) {
   const [overview, setOverview] = useState<CourseOverview | null>(null),
     [materials, setMaterials] = useState<CourseMaterial[]>([]),
     [assignments, setAssignments] = useState<CourseAssignments>({
@@ -1249,6 +1257,14 @@ function CourseWorkspaceAccount({ courseId }: { courseId: string }) {
           </p>
         )}
       </div>
+      {overview && (
+        <StudentWorkExportEntry
+          accountId={accountId}
+          courseId={courseId}
+          enabled={productFeatures.studentWorkExport}
+          archived={overview.archived}
+        />
+      )}
       <nav className={styles.tabs} aria-label="Course sections">
         {tabs.map(([key, label]) => (
           <button
@@ -1901,6 +1917,7 @@ export function StudentCourseWorkspace({
   return (
     <CourseWorkspaceAccount
       key={`${accountId}:${courseId}`}
+      accountId={accountId}
       courseId={courseId}
     />
   );
