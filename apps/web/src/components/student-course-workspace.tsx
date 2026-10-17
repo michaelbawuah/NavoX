@@ -3,12 +3,22 @@
 import Link from "next/link";
 import {
   type FormEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useId,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
+import { productFeatures } from "../lib/product-features";
+import {
+  CoursePrivacySession,
+  type CoursePrivacyState,
+  type CourseProof,
+  courseSearchCurrent,
+  observeCoursePrivacy,
+} from "../lib/student-course-privacy";
 import {
   type CourseAssignments,
   type CourseEmailCandidate,
@@ -28,10 +38,7 @@ import {
   courseRequest,
   readCourseAssignments,
   readCourseEmailCandidates,
-  readCourseEmails,
   readCourseMaterialDetail,
-  readCourseMaterials,
-  readCourseOverview,
   readCourseReceipt,
   readCourseSaveReceipt,
   readCourseSearch,
@@ -1012,20 +1019,27 @@ export function CourseEmailPicker({
   );
 }
 
-function CourseWorkspaceAccount({ courseId }: { courseId: string }) {
-  const [overview, setOverview] = useState<CourseOverview | null>(null),
-    [materials, setMaterials] = useState<CourseMaterial[]>([]),
-    [assignments, setAssignments] = useState<CourseAssignments>({
-      tasks: [],
-      feed_items: [],
-      next_offset: null,
-    }),
-    [emails, setEmails] = useState<CourseEmails>({
-      links: [],
-      unavailable_count: 0,
-    }),
+function CourseWorkspaceAccount({
+  courseId,
+  proof,
+  privacy,
+  readEpoch,
+}: {
+  courseId: string;
+  proof: CourseProof;
+  privacy: CoursePrivacySession;
+  readEpoch: number;
+}) {
+  const [overview, setOverview] = useState<CourseOverview | null>(
+      proof.overview,
+    ),
+    [materials, setMaterials] = useState<CourseMaterial[]>(proof.materials),
+    [assignments, setAssignments] = useState<CourseAssignments>(
+      proof.assignments,
+    ),
+    [emails, setEmails] = useState<CourseEmails>(proof.emails),
     [tab, setTab] = useState<Tab>("overview"),
-    [loading, setLoading] = useState(true),
+    [loading, setLoading] = useState(false),
     [busy, setBusy] = useState(false),
     [uncertain, setUncertain] = useState(false),
     [error, setError] = useState(""),
@@ -1044,71 +1058,52 @@ function CourseWorkspaceAccount({ courseId }: { courseId: string }) {
     [query, setQuery] = useState(""),
     [search, setSearch] = useState<CourseSearch | null>(null),
     [searching, setSearching] = useState(false),
-    [epoch, setEpoch] = useState(0);
+    [epoch] = useState(0);
   const generation = useRef(0),
     alive = useRef(true),
     operation = useRef(false),
     readerGeneration = useRef(0),
     searchGeneration = useRef(0);
+  const selectedReadEpoch = useRef(readEpoch),
+    resultReadEpoch = useRef(readEpoch);
   const load = useCallback(
-    async (reset = false) => {
-      const request = ++generation.current;
-      setLoading(true);
-      try {
-        const [nextOverview, nextMaterials, nextAssignments, nextEmails] =
-          await Promise.all([
-            courseRequest(courseId, "/overview", readCourseOverview),
-            courseRequest(courseId, "/materials", readCourseMaterials),
-            courseRequest(courseId, "/assignments", readCourseAssignments),
-            courseRequest(courseId, "/email-links", readCourseEmails),
-          ]);
-        if (request !== generation.current) return false;
-        if (nextOverview.course.id !== courseId)
-          throw new Error(
-            "This course could not be checked. Open it again from Classes.",
-          );
-        setOverview(nextOverview);
-        setMaterials(nextMaterials);
-        setAssignments(nextAssignments);
-        setEmails(nextEmails);
-        setError("");
-        if (reset) {
-          ++readerGeneration.current;
-          ++searchGeneration.current;
-          setReading(false);
-          setSearching(false);
-          setUncertain(false);
-          setEditor(null);
-          setReplacement(undefined);
-          setSelected(null);
-          setDeleting(null);
-          setSearch(null);
-          setQuery("");
-          setEpoch((current) => current + 1);
-          setNotice(
-            "Saved course details reloaded. Review them before making another change.",
-          );
-        }
-        return true;
-      } catch (cause) {
-        if (request === generation.current) setError(studentError(cause));
-        return false;
-      } finally {
-        if (request === generation.current) setLoading(false);
-      }
-    },
-    [courseId],
+    async (_reset = false) => privacy.refresh(),
+    [privacy],
   );
   useEffect(() => {
     alive.current = true;
-    void load();
     return () => {
       alive.current = false;
       ++generation.current;
       ++readerGeneration.current;
       ++searchGeneration.current;
     };
-  }, [load]);
+  }, []);
+  useEffect(() => {
+    setOverview(proof.overview);
+    setMaterials(proof.materials);
+    setAssignments(proof.assignments);
+    setEmails(proof.emails);
+    setLoading(false);
+    setError("");
+    setUncertain(false);
+  }, [proof]);
+  useEffect(() => {
+    ++readerGeneration.current;
+    ++searchGeneration.current;
+    if (selectedReadEpoch.current !== readEpoch) setSelected(null);
+    if (resultReadEpoch.current !== readEpoch) setSearch(null);
+    setReading(false);
+    setSearching(false);
+    setError("");
+  }, [readEpoch]);
+  const read = useCallback(
+    <T,>(path: string, parse: (value: unknown) => T) =>
+      privacy.read((signal) =>
+        courseRequest(courseId, path, parse, "GET", undefined, signal),
+      ),
+    [courseId, privacy],
+  );
   const locked = busy || loading || uncertain || !!overview?.archived;
   async function mutate(
     action: () => Promise<unknown>,
@@ -1120,7 +1115,7 @@ function CourseWorkspaceAccount({ courseId }: { courseId: string }) {
     setBusy(true);
     setError("");
     try {
-      await action();
+      await privacy.write(action);
       if (!alive.current) return false;
       ++readerGeneration.current;
       ++searchGeneration.current;
@@ -1143,13 +1138,19 @@ function CourseWorkspaceAccount({ courseId }: { courseId: string }) {
   }
   async function material(id: string) {
     try {
-      return await courseRequest(
-        courseId,
-        `/materials/${id}`,
-        readCourseMaterialDetail,
-      );
-    } catch (cause) {
-      if (alive.current) setError(studentError(cause));
+      const detail = await read(`/materials/${id}`, readCourseMaterialDetail);
+      const expected = proof.materials.find((row) => row.id === id);
+      if (
+        !expected ||
+        detail.id !== id ||
+        detail.revision !== expected.revision ||
+        detail.page_count !== expected.page_count
+      ) {
+        privacy.rejectSource();
+        return null;
+      }
+      return detail;
+    } catch {
       return null;
     }
   }
@@ -1161,13 +1162,17 @@ function CourseWorkspaceAccount({ courseId }: { courseId: string }) {
     if (!alive.current || request !== readerGeneration.current) return;
     setReading(false);
     if (!detail) return;
-    if (revision !== undefined && detail.revision !== revision) {
-      setError(
-        "This material changed since that citation was saved. Review the current version before using the quote.",
-      );
+    if (
+      (revision !== undefined && detail.revision !== revision) ||
+      nextPage < 1 ||
+      nextPage > detail.page_count
+    ) {
+      privacy.rejectSource();
+      return;
     }
+    selectedReadEpoch.current = readEpoch;
     setSelected(detail);
-    setPage(Math.min(nextPage, detail.page_count));
+    setPage(nextPage);
     setReplacement(undefined);
     setEditor(null);
     setTab(
@@ -1199,16 +1204,16 @@ function CourseWorkspaceAccount({ courseId }: { courseId: string }) {
     setSearch(null);
     setError("");
     try {
-      const result = await courseRequest(
-        courseId,
+      const result = await read(
         `/search?q=${encodeURIComponent(query.trim())}`,
         readCourseSearch,
       );
       if (!alive.current || request !== searchGeneration.current) return;
-      if (result.course_id !== courseId)
-        throw new Error(
-          "These results could not be checked for this course. Try again.",
-        );
+      if (!courseSearchCurrent(result, proof, courseId)) {
+        privacy.rejectSource();
+        return;
+      }
+      resultReadEpoch.current = readEpoch;
       setSearch(result);
     } catch (cause) {
       if (alive.current && request === searchGeneration.current)
@@ -1412,8 +1417,7 @@ function CourseWorkspaceAccount({ courseId }: { courseId: string }) {
                     operation.current = true;
                     setBusy(true);
                     try {
-                      const result = await courseRequest(
-                        courseId,
+                      const result = await read(
                         `/assignments?offset=${assignments.next_offset}`,
                         readCourseAssignments,
                       );
@@ -1657,6 +1661,7 @@ function CourseWorkspaceAccount({ courseId }: { courseId: string }) {
                 </div>
               )}
               {selected &&
+                selectedReadEpoch.current === readEpoch &&
                 selected.kind ===
                   (tab === "notes"
                     ? "note"
@@ -1720,12 +1725,11 @@ function CourseWorkspaceAccount({ courseId }: { courseId: string }) {
               </p>
               {!overview.archived && (
                 <CourseEmailPicker
-                  key={`emails-${epoch}`}
+                  key={`emails-${epoch}-${readEpoch}`}
                   courseName={overview.course.name}
                   disabled={locked}
                   onSearch={(query) =>
-                    courseRequest(
-                      courseId,
+                    read(
                       `/email-candidates?q=${encodeURIComponent(query)}`,
                       readCourseEmailCandidates,
                     )
@@ -1851,7 +1855,7 @@ function CourseWorkspaceAccount({ courseId }: { courseId: string }) {
                   {searching ? "Searching…" : "Search this course"}
                 </button>
               </form>
-              {search && (
+              {search && resultReadEpoch.current === readEpoch && (
                 <>
                   <p role="status">
                     {search.results.length
@@ -1891,17 +1895,153 @@ function CourseWorkspaceAccount({ courseId }: { courseId: string }) {
     </section>
   );
 }
+export function CoursePrivateSurface({
+  masked,
+  children,
+}: {
+  masked: boolean;
+  children?: ReactNode;
+}) {
+  return (
+    <div className={styles.privateSurface} hidden={masked} inert={masked}>
+      {children}
+    </div>
+  );
+}
 export function StudentCourseWorkspace({
+  accountId,
+  courseId,
+  enabled = productFeatures.studentCoursework,
+}: {
+  accountId: string;
+  courseId: string;
+  enabled?: boolean;
+}) {
+  return enabled ? (
+    <CourseWorkspaceSession
+      key={`${accountId}:${courseId}`}
+      accountId={accountId}
+      courseId={courseId}
+    />
+  ) : (
+    <p>Course workspaces are not available here yet.</p>
+  );
+}
+function CourseWorkspaceSession({
   accountId,
   courseId,
 }: {
   accountId: string;
   courseId: string;
 }) {
+  const [privacy] = useState(
+    () => new CoursePrivacySession(accountId, courseId),
+  );
+  const state = useSyncExternalStore(
+    privacy.subscribe,
+    privacy.getSnapshot,
+    privacy.getSnapshot,
+  );
+  useEffect(() => {
+    const cleanup = observeCoursePrivacy(
+      () => privacy.clear(),
+      privacy.suspend,
+      () => {
+        if (privacy.getSnapshot().masked) void privacy.refresh();
+      },
+      {
+        window,
+        document,
+        channel:
+          typeof BroadcastChannel === "undefined"
+            ? null
+            : new BroadcastChannel("navox-account-session"),
+      },
+    );
+    if (document.visibilityState === "visible" && document.hasFocus())
+      void privacy.refresh();
+    return cleanup;
+  }, [privacy]);
   return (
-    <CourseWorkspaceAccount
-      key={`${accountId}:${courseId}`}
-      courseId={courseId}
-    />
+    <CourseAccessView
+      state={state}
+      onClear={() => privacy.clear()}
+      onReload={() => void privacy.refresh()}
+    >
+      {state.proof && (
+        <CourseWorkspaceAccount
+          key={state.epoch}
+          courseId={courseId}
+          proof={state.proof}
+          privacy={privacy}
+          readEpoch={state.readEpoch}
+        />
+      )}
+    </CourseAccessView>
+  );
+}
+export function CourseAccessView({
+  state,
+  onClear,
+  onReload,
+  children,
+}: {
+  state: CoursePrivacyState;
+  onClear: () => void;
+  onReload: () => void;
+  children?: ReactNode;
+}) {
+  return (
+    <section aria-label="Private course access" aria-busy={state.checking}>
+      <div className={styles.accessControls}>
+        <p className={styles.hint}>
+          Keep a copy of unsaved edits elsewhere. Edits clear if saved sources
+          change, you leave this page, or you stay away from this window for 10
+          minutes.
+        </p>
+        <button type="button" onClick={onClear}>
+          Clear course view
+        </button>
+      </div>
+      {state.masked && (
+        <div className={styles.warning} role="status">
+          <p>
+            Your course is hidden while current access and saved sources are
+            checked.
+          </p>
+          {!state.checking && (
+            <button
+              type="button"
+              disabled={state.blocked || state.writePending}
+              onClick={onReload}
+            >
+              Check current course
+            </button>
+          )}
+        </div>
+      )}
+      {!state.proof && (
+        <div className={styles.warning}>
+          <p role="status">{state.notice}</p>
+          {state.error && <p role="alert">{state.error}</p>}
+          {state.uncertain && (
+            <p>
+              The last change may have saved. Reload the saved course before
+              making another change.
+            </p>
+          )}
+          <button
+            type="button"
+            disabled={state.checking || state.blocked || state.writePending}
+            onClick={onReload}
+          >
+            {state.checking ? "Checking saved course…" : "Reload saved course"}
+          </button>
+        </div>
+      )}
+      <CoursePrivateSurface masked={state.masked}>
+        {state.proof && children}
+      </CoursePrivateSurface>
+    </section>
   );
 }

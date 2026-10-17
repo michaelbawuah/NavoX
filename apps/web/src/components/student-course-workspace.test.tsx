@@ -6,6 +6,7 @@ import type {
   CourseOverview,
 } from "../lib/student-coursework";
 import {
+  CourseAccessView,
   CourseAssignmentList,
   CourseEmailPicker,
   CourseMaterialForm,
@@ -13,6 +14,7 @@ import {
   CourseOverviewForm,
   CoursePolicyForm,
   CoursePolicySummary,
+  CoursePrivateSurface,
   CourseSource,
   StudentCourseWorkspace,
 } from "./student-course-workspace";
@@ -83,10 +85,11 @@ describe("private course workspace", () => {
         createElement(StudentCourseWorkspace, {
           accountId: "workspace:user",
           courseId,
+          enabled: true,
         }),
       );
-      expect(html).toContain("Opening your course");
-      expect(html).toContain("Search");
+      expect(html).toContain("Reload saved course");
+      expect(html).not.toContain("Private material");
       expect(html).not.toContain("Ask AI");
       expect(html).not.toContain("Sample");
       expect(fetch).not.toHaveBeenCalled();
@@ -248,5 +251,114 @@ describe("private course workspace", () => {
     expect(html).toContain("Conflicting sources");
     expect(html).toContain("No deadline supplied");
     expect(html).not.toContain("Task created");
+  });
+});
+
+describe("course source access boundary", () => {
+  const proof = {
+    overview,
+    materials: [material],
+    assignments: { tasks: [], feed_items: [], next_offset: null },
+    emails: { links: [], unavailable_count: 0 },
+  };
+  const state = {
+    proof,
+    masked: false,
+    checking: false,
+    blocked: false,
+    uncertain: false,
+    writePending: false,
+    error: "",
+    notice: "",
+    epoch: 0,
+    readEpoch: 0,
+  };
+  it("removes previously rendered course text and snippets when source proof is cleared", () => {
+    const child = createElement(
+      "div",
+      null,
+      "Private extracted body and old search snippet",
+    );
+    const before = render(
+      createElement(
+        CourseAccessView,
+        { state, onClear: vi.fn(), onReload: vi.fn() },
+        child,
+      ),
+    );
+    expect(before).toContain("Private extracted body");
+    const after = render(
+      createElement(
+        CourseAccessView,
+        {
+          state: {
+            ...state,
+            proof: null,
+            error: "This saved source is no longer available.",
+          },
+          onClear: vi.fn(),
+          onReload: vi.fn(),
+        },
+        child,
+      ),
+    );
+    expect(after).not.toContain("Private extracted body");
+    expect(after).not.toContain("old search snippet");
+    expect(after).toContain("Reload saved course");
+  });
+  it("masks and inerts the same editable subtree for a file-picker-like blur", () => {
+    const child = createElement(CourseMaterialForm, {
+      kind: "material",
+      disabled: false,
+      onSave: vi.fn(),
+      onClose: vi.fn(),
+    });
+    const html = render(
+      createElement(
+        CourseAccessView,
+        {
+          state: { ...state, masked: true },
+          onClear: vi.fn(),
+          onReload: vi.fn(),
+        },
+        child,
+      ),
+    );
+    expect(html).toMatch(/<div[^>]*hidden=""[^>]*inert=""/);
+    expect(html).toContain('type="file"');
+    expect(html).toContain("Check current course");
+    const active = render(
+      createElement(CoursePrivateSurface, { masked: false }, child),
+    );
+    expect(active).not.toContain('hidden=""');
+    expect(active).toContain('type="file"');
+  });
+  it("cannot load private sources when the coursework feature is disabled", () => {
+    const fetch = vi.spyOn(globalThis, "fetch");
+    try {
+      const html = render(
+        createElement(StudentCourseWorkspace, {
+          accountId: "workspace:user",
+          courseId,
+          enabled: false,
+        }),
+      );
+      expect(html).toContain("not available here yet");
+      expect(html).not.toContain('type="file"');
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+  it("keeps uncertain writes explicit and disables reopening while a write is pending", () => {
+    const html = render(
+      createElement(CourseAccessView, {
+        state: { ...state, proof: null, uncertain: true, writePending: true },
+        onClear: vi.fn(),
+        onReload: vi.fn(),
+      }),
+    );
+    expect(html).toContain("may have saved");
+    expect(html).toMatch(/<button[^>]*disabled=""/);
   });
 });

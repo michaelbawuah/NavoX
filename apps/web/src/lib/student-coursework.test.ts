@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  COURSE_JSON_LIMIT_BYTES,
+  CourseRequestError,
   courseEmailUrl,
   courseMaterialUrl,
   courseOverviewDraft,
@@ -16,6 +18,7 @@ import {
   readCourseSearch,
   uploadCourseMaterial,
 } from "./student-coursework";
+import { StudentRequestError, studentWriteUncertain } from "./student-schedule";
 
 const courseId = "11111111-1111-4111-8111-111111111111",
   materialId = "22222222-2222-4222-8222-222222222222",
@@ -66,7 +69,10 @@ const receipt = {
   reused: false,
   available: true,
 };
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 describe("private course contracts", () => {
   it("accepts truthful empty course collections without inferring a policy", () => {
     expect(readCourseOverview(overview).ai_policy).toBeNull();
@@ -269,6 +275,7 @@ describe("explicit course requests", () => {
         method: "GET",
         credentials: "include",
         cache: "no-store",
+        redirect: "error",
       }),
     );
     expect(fetch).toHaveBeenCalledTimes(1);
@@ -292,6 +299,8 @@ describe("explicit course requests", () => {
         method: "POST",
         body,
         credentials: "include",
+        cache: "no-store",
+        redirect: "error",
         headers: {
           "Content-Type": "text/plain",
           "X-Material-Title": encodeURIComponent("Week 1 · notes"),
@@ -349,25 +358,460 @@ describe("explicit course requests", () => {
       }),
     ).rejects.toMatchObject({ uncertain: true });
   });
-  it("shows image-only PDF errors as a known failed write", async () => {
+  it("keeps rejected PDFs known without echoing server extraction text", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json(
         { detail: "This PDF has no extractable text. Upload a text version." },
         { status: 422 },
       ),
     );
-    await expect(
-      uploadCourseMaterial(courseId, {
-        title: "Scan",
-        kind: "syllabus",
-        revision: 0,
-        request_id: requestId,
-        content: new Blob(["PDF"]),
-        media_type: "application/pdf",
-      }),
-    ).rejects.toMatchObject({
+    const error = await uploadCourseMaterial(courseId, {
+      title: "Scan",
+      kind: "syllabus",
+      revision: 0,
+      request_id: requestId,
+      content: new Blob(["PDF"]),
+      media_type: "application/pdf",
+    }).catch((error: unknown) => error);
+    expect(error).toMatchObject({
+      status: 422,
       uncertain: false,
-      message: expect.stringContaining("text version"),
     });
+    expect(String(error)).not.toContain("This PDF has no extractable text");
+  });
+});
+
+const privateText = "Private syllabus or email text: never echo this";
+const materialUpload = () => ({
+  title: "Private note",
+  kind: "note" as const,
+  revision: 0,
+  request_id: requestId,
+  content: new Blob(["Private text"]),
+  media_type: "text/plain",
+});
+
+function abortableFetch() {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(
+    async (_url, options) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = options?.signal;
+        const abort = () => reject(new DOMException(privateText, "AbortError"));
+        if (!signal || signal.aborted) abort();
+        else signal.addEventListener("abort", abort, { once: true });
+      }),
+  );
+}
+
+describe("status-bearing private course transport", () => {
+  it("preserves a safe 404 status without exposing body text or retrying", async () => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        Response.json(
+          { detail: privateText, course: "Another owner's course" },
+          { status: 404 },
+        ),
+      );
+    const error = await courseRequest(
+      courseId,
+      "/overview",
+      readCourseOverview,
+    ).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(CourseRequestError);
+    expect(error).toBeInstanceOf(StudentRequestError);
+    expect(error).toMatchObject({ status: 404, uncertain: false });
+    expect(String(error)).not.toContain(privateText);
+    expect(String(error)).not.toContain("Another owner's course");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a known 404 even when its unread response stream already failed", async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new TypeError(privateText));
+      },
+    });
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(body, { status: 404 }));
+    const error = await courseRequest(
+      courseId,
+      "/overview",
+      readCourseOverview,
+    ).catch((error: unknown) => error);
+    expect(error).toMatchObject({ status: 404, uncertain: false });
+    expect(String(error)).not.toContain(privateText);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([401, 403])(
+    "retains authorization status %s with fixed private copy",
+    async (status) => {
+      const fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(Response.json({ detail: privateText }, { status }));
+      const error = await courseRequest(
+        courseId,
+        "/materials",
+        readCourseMaterialDetail,
+      ).catch((error: unknown) => error);
+      expect(error).toMatchObject({ status, uncertain: false });
+      expect(error).toBeInstanceOf(CourseRequestError);
+      expect(String(error)).not.toContain(privateText);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([401, 403, 404, 409, 422])(
+    "keeps rejected status %s writes known and never echoes validation details",
+    async (status) => {
+      const fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(Response.json({ detail: privateText }, { status }));
+      const error = await courseRequest(
+        courseId,
+        "/overview",
+        readCourseSaveReceipt,
+        "PUT",
+        { revision: 1, request_id: requestId },
+      ).catch((error: unknown) => error);
+      expect(error).toMatchObject({ status, uncertain: false });
+      expect(studentWriteUncertain(error)).toBe(false);
+      expect(String(error)).not.toContain(privateText);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("writes the exact explicit JSON once with uncached credentialed redirect-blocking transport", async () => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(Response.json(receipt));
+    const body = { revision: 1, request_id: requestId, staff: [] };
+    expect(
+      await courseRequest(
+        courseId,
+        "/overview",
+        readCourseSaveReceipt,
+        "PUT",
+        body,
+      ),
+    ).toEqual(receipt);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toContain(
+      `/student/courses/${courseId}/workspace/overview`,
+    );
+    expect(fetch.mock.calls[0][1]).toMatchObject({
+      method: "PUT",
+      credentials: "include",
+      cache: "no-store",
+      redirect: "error",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(fetch.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it.each(["GET", "PUT"])(
+    "supports an external abort for %s and keeps uncertainty appropriate to the method",
+    async (method) => {
+      const fetch = abortableFetch();
+      const controller = new AbortController();
+      const operation = courseRequest(
+        courseId,
+        "/overview",
+        readCourseOverview,
+        method,
+        method === "PUT" ? { request_id: requestId } : undefined,
+        controller.signal,
+      ).catch((error: unknown) => error);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      const requestSignal = fetch.mock.calls[0][1]?.signal;
+      expect(requestSignal?.aborted).toBe(false);
+      controller.abort();
+      const error = await operation;
+      expect(requestSignal?.aborted).toBe(true);
+      expect(error).toMatchObject({
+        status: null,
+        uncertain: method !== "GET",
+      });
+      expect(error).toBeInstanceOf(CourseRequestError);
+      expect(String(error)).not.toContain(privateText);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("keeps a lost write response uncertain without retrying or leaking exception text", async () => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new TypeError(privateText));
+    const error = await courseRequest(
+      courseId,
+      "/overview",
+      readCourseSaveReceipt,
+      "PUT",
+      { revision: 1, request_id: requestId },
+    ).catch((error: unknown) => error);
+    expect(error).toMatchObject({ status: null, uncertain: true });
+    expect(studentWriteUncertain(error)).toBe(true);
+    expect(String(error)).not.toContain(privateText);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([500, 503])(
+    "treats status %s writes as uncertain but does not expose their body",
+    async (status) => {
+      const fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(Response.json({ detail: privateText }, { status }));
+      const error = await courseRequest(
+        courseId,
+        "/materials",
+        readCourseSaveReceipt,
+        "POST",
+        { request_id: requestId },
+      ).catch((error: unknown) => error);
+      expect(error).toMatchObject({ status, uncertain: true });
+      expect(studentWriteUncertain(error)).toBe(true);
+      expect(String(error)).not.toContain(privateText);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(["GET", "PUT"])(
+    "sanitizes successful %s parser failures and never presents unchecked content",
+    async (method) => {
+      const fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(Response.json({ raw_private_body: privateText }));
+      const parser = vi.fn(() => {
+        throw new Error(privateText);
+      });
+      const error = await courseRequest(
+        courseId,
+        "/overview",
+        parser,
+        method,
+        method === "PUT" ? { request_id: requestId } : undefined,
+      ).catch((error: unknown) => error);
+      expect(parser).toHaveBeenCalledTimes(1);
+      expect(error).toMatchObject({
+        status: null,
+        uncertain: method !== "GET",
+      });
+      expect(String(error)).not.toContain(privateText);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each(["GET", "PUT"])(
+    "rejects unreadable successful %s JSON without echoing raw text",
+    async (method) => {
+      const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(privateText, {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      const error = await courseRequest(
+        courseId,
+        "/overview",
+        readCourseOverview,
+        method,
+        method === "PUT" ? { request_id: requestId } : undefined,
+      ).catch((error: unknown) => error);
+      expect(error).toMatchObject({
+        status: null,
+        uncertain: method !== "GET",
+      });
+      expect(String(error)).not.toContain(privateText);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("treats a read-side network failure as known without reflecting the exception", async () => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new TypeError(privateText));
+    const error = await courseRequest(
+      courseId,
+      "/overview",
+      readCourseOverview,
+    ).catch((error: unknown) => error);
+    expect(error).toMatchObject({ status: null, uncertain: false });
+    expect(String(error)).not.toContain(privateText);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["declared", "streamed"])(
+    "bounds %s JSON before any private parser runs",
+    async (kind) => {
+      const cancel = vi.fn();
+      const response =
+        kind === "declared"
+          ? new Response("{}", {
+              headers: {
+                "Content-Length": String(COURSE_JSON_LIMIT_BYTES + 1),
+              },
+            })
+          : new Response(
+              new ReadableStream<Uint8Array>({
+                start(controller) {
+                  controller.enqueue(new Uint8Array(COURSE_JSON_LIMIT_BYTES));
+                  controller.enqueue(new Uint8Array([1]));
+                },
+                cancel,
+              }),
+            );
+      const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
+      const parser = vi.fn();
+      const error = await courseRequest(courseId, "/overview", parser).catch(
+        (error: unknown) => error,
+      );
+      expect(error).toMatchObject({ status: null, uncertain: false });
+      expect(parser).not.toHaveBeenCalled();
+      if (kind === "streamed") expect(cancel).toHaveBeenCalledTimes(1);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("rejects invalid UTF-8 JSON as an unchecked write rather than replacing private bytes", async () => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(new Uint8Array([0xc3, 0x28])));
+    const parser = vi.fn();
+    const error = await courseRequest(courseId, "/overview", parser, "PUT", {
+      request_id: requestId,
+    }).catch((error: unknown) => error);
+    expect(error).toMatchObject({ status: null, uncertain: true });
+    expect(parser).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["GET", "PUT"])(
+    "bounds an unanswered %s request to 12 seconds without retrying",
+    async (method) => {
+      vi.useFakeTimers();
+      const fetch = abortableFetch();
+      const operation = courseRequest(
+        courseId,
+        "/overview",
+        readCourseOverview,
+        method,
+      ).catch((error: unknown) => error);
+      const signal = fetch.mock.calls[0][1]?.signal;
+      await vi.advanceTimersByTimeAsync(11_999);
+      expect(signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(signal?.aborted).toBe(true);
+      expect(await operation).toMatchObject({
+        status: null,
+        uncertain: method !== "GET",
+      });
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+});
+
+describe("status-bearing private course uploads", () => {
+  it.each([401, 403, 404, 409, 422])(
+    "retains known status %s and uses safe upload failure copy",
+    async (status) => {
+      const fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(Response.json({ detail: privateText }, { status }));
+      const error = await uploadCourseMaterial(
+        courseId,
+        materialUpload(),
+      ).catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(CourseRequestError);
+      expect(error).toBeInstanceOf(StudentRequestError);
+      expect(error).toMatchObject({ status, uncertain: false });
+      expect(String(error)).not.toContain(privateText);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("aborts an in-flight upload using the caller's signal and does not retry it", async () => {
+    const fetch = abortableFetch();
+    const controller = new AbortController();
+    const operation = uploadCourseMaterial(courseId, {
+      ...materialUpload(),
+      signal: controller.signal,
+    }).catch((error: unknown) => error);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const requestSignal = fetch.mock.calls[0][1]?.signal;
+    controller.abort();
+    const error = await operation;
+    expect(requestSignal?.aborted).toBe(true);
+    expect(error).toMatchObject({ status: null, uncertain: true });
+    expect(String(error)).not.toContain(privateText);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([500, 503])(
+    "does not retry an uncertain status %s upload",
+    async (status) => {
+      const fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(Response.json({ detail: privateText }, { status }));
+      const error = await uploadCourseMaterial(
+        courseId,
+        materialUpload(),
+      ).catch((error: unknown) => error);
+      expect(error).toMatchObject({ status, uncertain: true });
+      expect(studentWriteUncertain(error)).toBe(true);
+      expect(String(error)).not.toContain(privateText);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("does not retry an uncertain network upload or expose its exception", async () => {
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new TypeError(privateText));
+    const error = await uploadCourseMaterial(courseId, materialUpload()).catch(
+      (error: unknown) => error,
+    );
+    expect(error).toMatchObject({ status: null, uncertain: true });
+    expect(String(error)).not.toContain(privateText);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["malformed", "forgotten", "unparseable"])(
+    "keeps a successful upload with a %s receipt uncertain",
+    async (kind) => {
+      const response =
+        kind === "unparseable"
+          ? new Response(privateText, { status: 200 })
+          : Response.json(
+              kind === "forgotten"
+                ? { ...receipt, reused: true, available: false }
+                : { raw_body: privateText },
+            );
+      const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
+      const error = await uploadCourseMaterial(
+        courseId,
+        materialUpload(),
+      ).catch((error: unknown) => error);
+      expect(error).toMatchObject({ status: null, uncertain: true });
+      expect(String(error)).not.toContain(privateText);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("bounds an unanswered upload to 40 seconds and retains its uncertain result", async () => {
+    vi.useFakeTimers();
+    const fetch = abortableFetch();
+    const operation = uploadCourseMaterial(courseId, materialUpload()).catch(
+      (error: unknown) => error,
+    );
+    const signal = fetch.mock.calls[0][1]?.signal;
+    await vi.advanceTimersByTimeAsync(39_999);
+    expect(signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(signal?.aborted).toBe(true);
+    expect(await operation).toMatchObject({ status: null, uncertain: true });
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
