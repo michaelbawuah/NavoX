@@ -923,6 +923,7 @@ async def reset_data(
         lock_all_feeds_for_reset,
     )
     from navox.student_email.service import forget_email_data
+    from navox.student_goals.service import forget_goals_data
     from navox.student_planning.service import forget_planning_data
     from navox.student_recovery.service import forget_recovery_data
 
@@ -965,6 +966,7 @@ async def reset_data(
     await forget_email_data(database, user_id=user_id, workspace_id=workspace_id)
     await forget_planning_data(database, user_id, workspace_id)
     await forget_recovery_data(database, user_id, workspace_id)
+    await forget_goals_data(database, user_id, workspace_id)
     await clear_coursework_data(database, user_id=user_id, workspace_id=workspace_id)
     from navox.student_alerts.service import clear_student_alert_data
 

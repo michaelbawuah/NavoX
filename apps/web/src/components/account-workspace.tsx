@@ -23,6 +23,7 @@ import { StudentClassesWorkspace } from "./student-classes";
 import { StudentCourseWorkspace } from "./student-course-workspace";
 import { StudentDailyPlan } from "./student-daily-plan";
 import { StudentEmailActions } from "./student-email-actions";
+import { StudentGoals, StudentGoalsCard } from "./student-goals";
 import { StudentRecovery, StudentRecoveryCard } from "./student-recovery";
 import { TodayWorkspace, type TodayWorkspaceView } from "./today-workspace";
 import { WorkspaceShell } from "./workspace-shell";
@@ -100,7 +101,8 @@ export function AccountWorkspace({
     | "course"
     | "student-assistant"
     | "recovery"
-    | "student-email";
+    | "student-email"
+    | "goals";
   courseId?: string;
 }) {
   const [mode, setMode] = useState<AuthMode>("register");
@@ -321,6 +323,22 @@ export function AccountWorkspace({
                 <p>This course could not be opened.</p>
               )}
             </WorkspaceShell>
+          ) : view === "goals" ? (
+            <WorkspaceShell
+              current="Planner"
+              accountKey={`${account.workspace.id}:${account.id}`}
+              accountName={account.display_name ?? account.email}
+              onSignOut={signOut}
+            >
+              {productFeatures.studentGoals ? (
+                <StudentGoals
+                  key={`${account.workspace.id}:${account.id}`}
+                  accountId={`${account.workspace.id}:${account.id}`}
+                />
+              ) : (
+                <p>Goals are not available on this deployment.</p>
+              )}
+            </WorkspaceShell>
           ) : view === "student-email" ? (
             <WorkspaceShell
               current="Inbox"
@@ -382,6 +400,7 @@ export function AccountWorkspace({
               onSignOut={signOut}
             >
               {productFeatures.studentRecovery && <StudentRecoveryCard />}
+              {productFeatures.studentGoals && <StudentGoalsCard />}
               <StudentDailyPlan
                 key={`${account.workspace.id}:${account.id}`}
                 accountId={`${account.workspace.id}:${account.id}`}

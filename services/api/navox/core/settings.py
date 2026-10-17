@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     student_coursework_enabled: bool = False
     student_recovery_enabled: bool = False
     student_email_enabled: bool = False
+    student_goals_enabled: bool = False
     student_agent_enabled: bool = False
     student_agent_model_enabled: bool = False
     # Deployment-operator reviewed configurations. Users cannot supply network targets.

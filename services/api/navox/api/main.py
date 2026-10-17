@@ -39,6 +39,7 @@ from navox.api.student import router as student_router
 from navox.api.student_agent import router as student_agent_router
 from navox.api.student_alerts import router as student_alerts_router
 from navox.api.student_email import router as student_email_router
+from navox.api.student_goals import router as student_goals_router
 from navox.api.student_planning import router as student_planning_router
 from navox.api.student_recovery import router as student_recovery_router
 from navox.api.student_screenshot import router as student_screenshot_router
@@ -100,6 +101,7 @@ def create_app() -> FastAPI:
     app.include_router(student_planning_router, prefix="/api/v1")
     app.include_router(student_recovery_router, prefix="/api/v1")
     app.include_router(student_email_router, prefix="/api/v1")
+    app.include_router(student_goals_router, prefix="/api/v1")
     app.include_router(lms_feed_router, prefix="/api/v1")
     app.include_router(student_agent_router, prefix="/api/v1")
     app.include_router(coursework_router, prefix="/api/v1")
