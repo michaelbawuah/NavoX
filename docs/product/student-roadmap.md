@@ -27,10 +27,28 @@ Passing tests does not create student-validation evidence. A partially reusable
 feature does not make a new student requirement implemented. Update the stage
 only with a source revision, relevant check results, and any remaining limits.
 
-The tables below record the student requirements as **Planned**, with active
-Phase 1 work identified separately. Later engineering can be prepared behind
-disabled flags; a launch phase advances only after its preceding student gate.
-No student gate has been claimed as met.
+The tables below retain the plan's acceptance criteria. Implementation and
+verification are tracked separately from student validation. Later engineering
+is prepared behind disabled flags; a launch phase advances only after its
+preceding student gate. No student gate has been claimed as met.
+
+## Current engineering
+
+| Increment | Source behavior | Remaining evidence |
+| --- | --- | --- |
+| Know the day | Any-school timetable setup; manual, calendar and reviewed local screenshot imports; clock-based class answers; private quick asks; opt-in class alerts; installable web app. First release is under verification in [PR 33](https://github.com/michaelbawuah/NavoX/pull/33). | Final isolated PostgreSQL, browser and production checks; actual device delivery and the real-student accuracy gate. |
+| Plan the day | Adjustable study blocks with real capacity and buffer; source-change review; private calendar feeds; course materials, syllabus quotations and scoped search; a shared student tool core and private text panel. Integration verification is in progress. | PostgreSQL concurrency and migration checks, complete browser flows, qualified model tool selection, streaming voice measurements and student usage evidence. All later feature flags remain off. |
+
+Private files and feed links are not sent to a model by these features. Course
+search runs locally over the selected course's authorized text. The private
+assistant's ordinary conversation sends only the current question, with no saved
+history. Model selection over student tool results has a separate, unpublished
+sensitive-data contract and requires its own qualification, grants and explicit
+one-question consent before activation.
+
+Disabling a feature does not authorize deletion. Explicit owner deletion and the
+student-data reset remain available; reset also removes feed credentials and
+derived study plans so a delayed refresh cannot recreate forgotten content.
 
 ## Delivery order
 

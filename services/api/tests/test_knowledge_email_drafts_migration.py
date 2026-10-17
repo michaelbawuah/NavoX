@@ -78,7 +78,7 @@ def test_migration_precedes_the_additive_news_images_head() -> None:
     assert module.down_revision == DOWN_REVISION
     assert len(module.revision) <= 32
     script = ScriptDirectory.from_config(Config(str(API_ROOT / "alembic.ini")))
-    assert script.get_heads() == ["0040_student_alerts"]
+    assert script.get_heads() == ["0043_student_coursework"]
     assert script.get_revision("0035_news_article_images").down_revision == REVISION
 
 

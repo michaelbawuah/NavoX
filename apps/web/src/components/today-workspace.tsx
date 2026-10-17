@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { productFeatures } from "../lib/product-features";
 import { hasGoogleReadAccess } from "../lib/setup-progress";
 import type { TodaySource } from "../lib/source-references";
 import { consumerTodaySections } from "../lib/today-sections";
@@ -31,6 +32,7 @@ import { PersonalRoutines } from "./personal-routines";
 import { ProactivePanel } from "./proactive-panel";
 import { SourceReferences } from "./source-references";
 import { StudentDayPanel } from "./student-day-panel";
+import { StudentLmsFeeds } from "./student-lms-feeds";
 import { StudentNotifications } from "./student-notifications";
 import { ThreadWatchPanel } from "./thread-watch-panel";
 import styles from "./today-workspace.module.css";
@@ -1484,17 +1486,26 @@ export function TodayWorkspace({
         )}
 
         {view === "connections" && (
-          <div className={styles.layout}>
-            <ConnectionsPanel
-              agentPaused={agentPaused}
-              onConnectionsChanged={onConnectionsChanged}
-            />
-            <IntelligenceControls
-              connections={connections}
-              paused={agentPaused}
-              onRefresh={refreshToday}
-            />
-          </div>
+          <>
+            {productFeatures.studentLmsFeeds && (
+              <StudentLmsFeeds
+                key={`${account.workspace.id}:${account.id}`}
+                accountId={`${account.workspace.id}:${account.id}`}
+                planningEnabled={productFeatures.studentPlanning}
+              />
+            )}
+            <div className={styles.layout}>
+              <ConnectionsPanel
+                agentPaused={agentPaused}
+                onConnectionsChanged={onConnectionsChanged}
+              />
+              <IntelligenceControls
+                connections={connections}
+                paused={agentPaused}
+                onRefresh={refreshToday}
+              />
+            </div>
+          </>
         )}
 
         {view === "settings" && (

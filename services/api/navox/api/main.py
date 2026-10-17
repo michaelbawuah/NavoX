@@ -13,6 +13,7 @@ from navox.api.communication import router as communication_router
 from navox.api.connections import router as connections_router
 from navox.api.connector_events import router as connector_events_router
 from navox.api.connector_management import router as connector_management_router
+from navox.api.coursework import router as coursework_router
 from navox.api.events import router as events_router
 from navox.api.generic_rest import router as generic_rest_router
 from navox.api.gmail_recheck import router as gmail_recheck_router
@@ -24,6 +25,7 @@ from navox.api.intelligence_sync import router as intelligence_sync_router
 from navox.api.knowledge import router as knowledge_router
 from navox.api.knowledge_graph import router as knowledge_graph_router
 from navox.api.knowledge_lifecycle import router as knowledge_lifecycle_router
+from navox.api.lms_feed import router as lms_feed_router
 from navox.api.mcp import router as mcp_router
 from navox.api.memory import router as memory_router
 from navox.api.middleware import RequestHardeningMiddleware
@@ -34,7 +36,9 @@ from navox.api.news_stories import router as news_stories_router
 from navox.api.proactive import router as proactive_router
 from navox.api.routines import router as routines_router
 from navox.api.student import router as student_router
+from navox.api.student_agent import router as student_agent_router
 from navox.api.student_alerts import router as student_alerts_router
+from navox.api.student_planning import router as student_planning_router
 from navox.api.student_screenshot import router as student_screenshot_router
 from navox.api.subscriptions import router as subscriptions_router
 from navox.api.thread_watches import router as thread_watches_router
@@ -55,7 +59,7 @@ def create_app() -> FastAPI:
         allow_origins=[settings.web_origin],
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Material-Title"],
         expose_headers=["Server-Timing", "X-Request-ID"],
         max_age=600,
     )
@@ -91,6 +95,10 @@ def create_app() -> FastAPI:
     app.include_router(student_router, prefix="/api/v1")
     app.include_router(student_alerts_router, prefix="/api/v1")
     app.include_router(student_screenshot_router, prefix="/api/v1")
+    app.include_router(student_planning_router, prefix="/api/v1")
+    app.include_router(lms_feed_router, prefix="/api/v1")
+    app.include_router(student_agent_router, prefix="/api/v1")
+    app.include_router(coursework_router, prefix="/api/v1")
     app.include_router(ai_operations_router, prefix="/api/v1")
     app.include_router(commitment_actions_router, prefix="/api/v1")
     app.include_router(today_router, prefix="/api/v1")

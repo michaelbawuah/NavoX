@@ -1,9 +1,9 @@
 # NavoX public VPS deployment
 
 The production overlay keeps PostgreSQL and Temporal private, binds application
-HTTP only to loopback, and runs Caddy as the host HTTPS service. The assistant
-and student-voice routes stay in Next.js; other /api/v1 routes go to the Python API.
-Keep both Next.js handlers ahead of the general API handler. After changing the
+HTTP only to loopback, and runs Caddy as the host HTTPS service. The assistant,
+student-voice and student-agent routes stay in Next.js; other /api/v1 routes go to the Python API.
+Keep the Next.js handlers ahead of the general API handler. After changing the
 proxy, verify unauthenticated `GET /api/v1/student-voice/account` and
 `POST /api/v1/student-voice/session` return an authentication error, not a missing
 Python route.

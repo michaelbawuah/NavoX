@@ -384,7 +384,11 @@ async def post_reset(
     require_origin(request, settings.web_origin)
     reused = await result(
         service.reset_data(
-            database, *scope(account), revision=payload.revision, request_id=payload.request_id
+            database,
+            *scope(account),
+            revision=payload.revision,
+            request_id=payload.request_id,
+            settings=settings,
         )
     )
     return {"cleared": True, "reused": reused}
