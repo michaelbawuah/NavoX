@@ -45,3 +45,27 @@ describe("selected email release gate", () => {
     expect(productFeatures.studentRecovery).toBe(false);
   });
 });
+
+describe("self-reported goals release gate", () => {
+  it.each([undefined, "false", "1", "TRUE"])(
+    "keeps goals off without exact true (%s)",
+    async (value) => {
+      vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_GOALS_ENABLED", value);
+      vi.resetModules();
+      const { productFeatures } = await import("./product-features");
+      expect(productFeatures.studentGoals).toBe(false);
+    },
+  );
+  it("enables goals independently of planning, recovery and email review", async () => {
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_GOALS_ENABLED", "true");
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_PLANNING_ENABLED", "false");
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_RECOVERY_ENABLED", "false");
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_EMAIL_ENABLED", "false");
+    vi.resetModules();
+    const { productFeatures } = await import("./product-features");
+    expect(productFeatures.studentGoals).toBe(true);
+    expect(productFeatures.studentPlanning).toBe(false);
+    expect(productFeatures.studentRecovery).toBe(false);
+    expect(productFeatures.studentEmail).toBe(false);
+  });
+});

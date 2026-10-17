@@ -28,6 +28,7 @@ from navox.db import (
     student,  # noqa: F401 - registers owner-managed classes and timetable
     student_alerts,  # noqa: F401 - registers opt-in device alerts and delivery history
     student_email,  # noqa: F401 - registers expiring reviews and accepted email task provenance
+    student_goals,  # noqa: F401 - registers encrypted explicit goals and self-reported check-ins
     student_planning,  # noqa: F401 - registers owned study tasks and plans
     student_recovery,  # noqa: F401 - registers expiring private recovery proposals
     thread_watches,  # noqa: F401 - registers verified-send follow-up watches

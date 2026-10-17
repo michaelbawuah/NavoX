@@ -33,6 +33,7 @@ import { ProactivePanel } from "./proactive-panel";
 import { SourceReferences } from "./source-references";
 import { StudentDayPanel } from "./student-day-panel";
 import { StudentEmailCard } from "./student-email-actions";
+import { StudentGoalsCard } from "./student-goals";
 import { StudentLmsFeeds } from "./student-lms-feeds";
 import { StudentNotifications } from "./student-notifications";
 import { StudentRecoveryCard } from "./student-recovery";
@@ -1249,6 +1250,15 @@ export function TodayWorkspace({
                     <span aria-hidden="true">→</span>
                   </span>
                 </Link>
+                {productFeatures.studentGoals && (
+                  <Link href="/goals">
+                    <strong>Your goals, at your pace</strong>
+                    <span>
+                      Review your own check-ins{" "}
+                      <span aria-hidden="true">→</span>
+                    </span>
+                  </Link>
+                )}
                 {productFeatures.studentEmail && (
                   <Link href="/email-actions">
                     <strong>One email, one next step</strong>
@@ -1443,6 +1453,7 @@ export function TodayWorkspace({
           <div className={styles.focusLayout}>
             <div className={styles.focusColumn}>
               {productFeatures.studentRecovery && <StudentRecoveryCard />}
+              {productFeatures.studentGoals && <StudentGoalsCard />}
               {renderSection(
                 "Tasks & events",
                 plannerItems.filter(
