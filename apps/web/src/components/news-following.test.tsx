@@ -67,9 +67,9 @@ describe("Explicit followed-story updates", () => {
       acknowledgeableVersion({ ...entry, through_version: 1.5 }),
     ).toBeNull();
   });
-  it("preserves uncertainty and discloses incomplete history", () => {
+  it("omits the unconfirmed badge and discloses incomplete history", () => {
     const html = render(page);
-    expect(html).toContain("Not confirmed");
+    expect(html).not.toContain("Not confirmed");
     expect(html).toContain("partial history");
     expect(html).toContain("Mark shown updates seen");
     expect(html).not.toContain("Verified");

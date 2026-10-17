@@ -48,11 +48,11 @@ const story: NewsStory = {
 };
 
 describe("News evidence display", () => {
-  it("preserves uncertainty and keeps a card to two prominent actions", () => {
+  it("omits the unconfirmed badge and keeps a card to two prominent actions", () => {
     const html = renderToStaticMarkup(
       createElement(NewsStoryCard, { story, onSave: vi.fn() }),
     );
-    expect(html).toContain("Not confirmed");
+    expect(html).not.toContain("Not confirmed");
     expect(html).toContain("Science Source");
     expect(html.match(/<button/g)).toHaveLength(1);
     expect(html.match(/<a /g)).toHaveLength(1);
@@ -85,7 +85,12 @@ describe("News evidence display", () => {
     );
   });
   it("states retraction and disagreement in words, not only color", () => {
-    for (const state of ["RETRACTED", "DISPUTED", "ATTRIBUTED"] as const) {
+    for (const state of [
+      "RETRACTED",
+      "DISPUTED",
+      "CONTRADICTED",
+      "ATTRIBUTED",
+    ] as const) {
       const html = renderToStaticMarkup(
         createElement(NavoXStatus, { status: state, explain: true }),
       );
@@ -250,7 +255,7 @@ describe("News conversational and research UI", () => {
     );
     expect(html).toContain("NavoX summary");
     expect(html).toContain("What is still unclear");
-    expect(html).toContain("Not confirmed");
+    expect(html).not.toContain("Not confirmed");
     expect(html).toContain("Science Source");
     expect(html).not.toContain("confidence");
   });
