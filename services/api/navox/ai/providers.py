@@ -220,6 +220,9 @@ class HTTPAdapter:
 
 class OpenAIAdapter(HTTPAdapter):
     provider = Provider.OPENAI
+    # The strict structured-output transport can propose host tools. Model
+    # metadata and exact task qualification still opt in independently.
+    supported_capabilities = HTTPAdapter.supported_capabilities | {Capability.TOOL_PROPOSALS}
     endpoint = "https://api.openai.com/v1/responses"
     models_endpoint = "https://api.openai.com/v1/models"
     embedding_endpoint: str | None = "https://api.openai.com/v1/embeddings"
@@ -308,6 +311,8 @@ class OpenAIAdapter(HTTPAdapter):
 
 class GrokAdapter(OpenAIAdapter):
     provider = Provider.XAI
+    # Protocol inheritance does not qualify host proposals for another provider.
+    supported_capabilities = HTTPAdapter.supported_capabilities
     endpoint = "https://api.x.ai/v1/responses"
     models_endpoint = "https://api.x.ai/v1/models"
     embedding_endpoint = None

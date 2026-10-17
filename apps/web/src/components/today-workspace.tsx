@@ -32,6 +32,7 @@ import { PersonalRoutines } from "./personal-routines";
 import { ProactivePanel } from "./proactive-panel";
 import { SourceReferences } from "./source-references";
 import { StudentDayPanel } from "./student-day-panel";
+import { StudentDayReviewEntry } from "./student-day-review-entry";
 import { StudentEmailCard } from "./student-email-actions";
 import { StudentGoalsCard } from "./student-goals";
 import { StudentLmsFeeds } from "./student-lms-feeds";
@@ -1250,6 +1251,7 @@ export function TodayWorkspace({
                     <span aria-hidden="true">→</span>
                   </span>
                 </Link>
+                <StudentDayReviewEntry enabled={productFeatures.studentCoach} />
                 {productFeatures.studentGoals && (
                   <Link href="/goals">
                     <strong>Your goals, at your pace</strong>

@@ -93,3 +93,27 @@ describe("own-work export release gate", () => {
     expect(productFeatures.studentAgent).toBe(false);
   });
 });
+
+describe("manual day-review release gate", () => {
+  it.each([undefined, "false", "1", "TRUE"])(
+    "keeps day reviews off without explicit true (%s)",
+    async (value) => {
+      vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_COACH_ENABLED", value);
+      vi.resetModules();
+      const { productFeatures } = await import("./product-features");
+      expect(productFeatures.studentCoach).toBe(false);
+    },
+  );
+  it("enables only manual reviews without enabling planning, goals or models", async () => {
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_COACH_ENABLED", "true");
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_PLANNING_ENABLED", "false");
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_GOALS_ENABLED", "false");
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_AGENT_ENABLED", "false");
+    vi.resetModules();
+    const { productFeatures } = await import("./product-features");
+    expect(productFeatures.studentCoach).toBe(true);
+    expect(productFeatures.studentPlanning).toBe(false);
+    expect(productFeatures.studentGoals).toBe(false);
+    expect(productFeatures.studentAgent).toBe(false);
+  });
+});

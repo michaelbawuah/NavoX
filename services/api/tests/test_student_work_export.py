@@ -13,7 +13,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from pydantic import ValidationError
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 
 from navox.api.main import create_app
 from navox.core.settings import Settings, get_settings
@@ -24,6 +24,7 @@ from navox.db.session import get_database_session
 from navox.db.student import StudentCourse
 from navox.db.student_goals import StudentGoalState
 from navox.student import service as schedule
+from navox.student.schemas import CourseUpdate
 from navox.student_work_export import render, service
 from navox.student_work_export.schemas import MAX_PDF_BYTES, ExportInput
 
@@ -537,3 +538,122 @@ async def test_concurrency_is_bounded_and_slots_release(monkeypatch):
                 pytest.fail("A third renderer must not enter")
         assert failure.value.status_code == 429
     assert service.SLOTS._value == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["reset", "course_archive", "course_revision"])
+async def test_postgres_publication_waits_for_owner_and_rechecks_committed_changes(
+    export_env, monkeypatch, request, change
+):
+    env = export_env
+    if env.factory.kw["bind"].dialect.name != "postgresql":
+        pytest.skip("Requires actual PostgreSQL User row locks and pg_blocking_pids")
+    request.node.user_properties.append(("navox_actual_postgres_fixture", True))
+    renderer_entered, release_renderer, final_owner_entered = (
+        asyncio.Event(),
+        asyncio.Event(),
+        asyncio.Event(),
+    )
+    original_owner = schedule.owner
+    publication_pid = None
+    writer = None
+
+    async def delayed(_payload):
+        renderer_entered.set()
+        await release_renderer.wait()
+        return b"%PDF-synthetic-must-not-be-published"
+
+    async def observed_owner(database, user_id, workspace_id, *, lock=False):
+        nonlocal publication_pid
+        if lock and database is not writer and renderer_entered.is_set():
+            publication_pid = await database.scalar(text("SELECT pg_backend_pid()"))
+            final_owner_entered.set()
+        return await original_owner(database, user_id, workspace_id, lock=lock)
+
+    monkeypatch.setattr(service, "run_worker", delayed)
+    monkeypatch.setattr(schedule, "owner", observed_owner)
+    pending = asyncio.create_task(env.client.post(env.url + "/pdf", json=body()))
+    try:
+        await asyncio.wait_for(renderer_entered.wait(), 5)
+        async with env.factory() as writer:
+            # The valid initial export snapshot has released its lock. Own the
+            # shared writer lock before permitting the final publication read.
+            await original_owner(writer, env.user_id, env.workspace_id, lock=True)
+            writer_pid = await writer.scalar(text("SELECT pg_backend_pid()"))
+            release_renderer.set()
+            await asyncio.wait_for(final_owner_entered.wait(), 5)
+            assert publication_pid is not None and publication_pid != writer_pid
+            deadline = asyncio.get_running_loop().time() + 5
+            while True:
+                blockers = await writer.scalar(
+                    text("SELECT pg_blocking_pids(:pid)"), {"pid": publication_pid}
+                )
+                if writer_pid in blockers:
+                    break
+                assert asyncio.get_running_loop().time() < deadline, (
+                    "Final PDF publication never waited for the owner's writer lock"
+                )
+                await asyncio.sleep(0.02)
+            assert not pending.done()
+            request.node.user_properties.append(("navox_owner_row_lock_wait_proven", True))
+            if change == "reset":
+                original_commit = writer.commit
+
+                async def commit_reset_with_same_course_metadata():
+                    # Recreate identical synthetic metadata in the reset's own
+                    # transaction. After the wait, only the durable generation
+                    # fence distinguishes this from the valid initial snapshot.
+                    writer.add(
+                        StudentCourse(
+                            id=env.course_id,
+                            user_id=env.user_id,
+                            workspace_id=env.workspace_id,
+                            code="ENG101",
+                            name="Writing",
+                            revision=1,
+                            term_start=datetime(2026, 9, 1).date(),
+                            term_end=datetime(2026, 12, 31).date(),
+                        )
+                    )
+                    await original_commit()
+
+                monkeypatch.setattr(writer, "commit", commit_reset_with_same_course_metadata)
+                await schedule.reset_data(
+                    writer,
+                    env.user_id,
+                    env.workspace_id,
+                    revision=0,
+                    request_id=uuid4(),
+                    settings=env.settings,
+                )
+            else:
+                await schedule.save_course(
+                    writer,
+                    env.user_id,
+                    env.workspace_id,
+                    CourseUpdate(
+                        code="ENG101",
+                        name="Writing",
+                        term_start=datetime(2026, 9, 1).date(),
+                        term_end=datetime(2026, 12, 31).date(),
+                        revision=1,
+                        archived=change == "course_archive",
+                    ),
+                    env.course_id,
+                )
+        response = await asyncio.wait_for(pending, 5)
+    finally:
+        release_renderer.set()
+        if not pending.done():
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": "Restore this course before formatting your work"
+        if change == "course_archive"
+        else "Your course or student data changed while formatting. Review a fresh export"
+    }
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert not response.content.startswith(b"%PDF-")
+    assert PRIVATE_TEXT not in response.text

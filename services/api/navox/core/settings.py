@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     student_recovery_enabled: bool = False
     student_email_enabled: bool = False
     student_goals_enabled: bool = False
+    student_coach_enabled: bool = False
     student_work_export_enabled: bool = False
     student_agent_enabled: bool = False
     student_agent_model_enabled: bool = False

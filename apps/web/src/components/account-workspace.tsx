@@ -22,6 +22,7 @@ import { StudentAssistantPanel } from "./student-assistant-panel";
 import { StudentClassesWorkspace } from "./student-classes";
 import { StudentCourseWorkspace } from "./student-course-workspace";
 import { StudentDailyPlan } from "./student-daily-plan";
+import { StudentDayReview } from "./student-day-review";
 import { StudentEmailActions } from "./student-email-actions";
 import { StudentGoals, StudentGoalsCard } from "./student-goals";
 import { StudentRecovery, StudentRecoveryCard } from "./student-recovery";
@@ -102,7 +103,8 @@ export function AccountWorkspace({
     | "student-assistant"
     | "recovery"
     | "student-email"
-    | "goals";
+    | "goals"
+    | "day-review";
   courseId?: string;
 }) {
   const [mode, setMode] = useState<AuthMode>("register");
@@ -321,6 +323,22 @@ export function AccountWorkspace({
                 />
               ) : (
                 <p>This course could not be opened.</p>
+              )}
+            </WorkspaceShell>
+          ) : view === "day-review" ? (
+            <WorkspaceShell
+              current="Today"
+              accountKey={`${account.workspace.id}:${account.id}`}
+              accountName={account.display_name ?? account.email}
+              onSignOut={signOut}
+            >
+              {productFeatures.studentCoach ? (
+                <StudentDayReview
+                  key={`${account.workspace.id}:${account.id}`}
+                  accountId={`${account.workspace.id}:${account.id}`}
+                />
+              ) : (
+                <p>Day reviews are not available here yet.</p>
               )}
             </WorkspaceShell>
           ) : view === "goals" ? (
