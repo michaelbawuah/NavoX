@@ -3,7 +3,6 @@ import {
   readStudentCourse,
   type StudentCourse,
   StudentRequestError,
-  studentRequest,
 } from "./student-schedule";
 
 export type CourseMaterialKind = "note" | "material" | "syllabus";
@@ -430,23 +429,129 @@ export function courseOverviewDraft(value: CourseOverview) {
     ai_policy: value.ai_policy ? { ...value.ai_policy } : null,
   };
 }
+export class CourseRequestError extends StudentRequestError {
+  constructor(
+    message: string,
+    readonly status: number | null = null,
+    uncertain = false,
+  ) {
+    super(message, uncertain);
+    this.name = "CourseRequestError";
+  }
+}
+const apiBaseUrl =
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+export const COURSE_JSON_LIMIT_BYTES = 2 * 1024 * 1024;
+function courseFailure(status: number | null): string {
+  if (status === 401 || status === 403)
+    return "Your access to this private course could not be checked. Sign in again.";
+  if (status === 404)
+    return "This course or saved source is no longer available. Its previous details were cleared.";
+  if (status === 409)
+    return "This course or saved source changed. Reload its current details before editing.";
+  if (status === 413)
+    return "This file or request is too large. Choose a file no larger than 5 MiB.";
+  if (status === 415 || status === 422)
+    return "This course change could not be accepted. Review the fields or choose a text PDF, UTF-8 text or Markdown file.";
+  if (status === 429)
+    return "This course is busy. Wait a moment, then reload its saved details.";
+  return "The course response could not be checked. Reload saved details before continuing.";
+}
+async function courseJson(response: Response): Promise<unknown> {
+  if (response.status === 204) return null;
+  if (Number(response.headers.get("content-length")) > COURSE_JSON_LIMIT_BYTES)
+    throw new Error("Invalid course response");
+  if (!response.body) throw new Error("Invalid course response");
+  const reader = response.body.getReader();
+  let size = 0;
+  const chunks: Uint8Array[] = [];
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > COURSE_JSON_LIMIT_BYTES) {
+        await reader.cancel();
+        throw new Error("Invalid course response");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+}
+async function courseTransport<T>(
+  url: string,
+  parse: (value: unknown) => T,
+  options: RequestInit,
+  signal: AbortSignal | undefined,
+  timeout: number,
+): Promise<T> {
+  const controller = new AbortController(),
+    timer = setTimeout(() => controller.abort(), timeout),
+    write = options.method !== "GET";
+  try {
+    const response = await fetch(url, {
+      ...options,
+      credentials: "include",
+      cache: "no-store",
+      redirect: "error",
+      signal: signal
+        ? AbortSignal.any([controller.signal, signal])
+        : controller.signal,
+    });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw new CourseRequestError(
+        courseFailure(response.status),
+        response.status,
+        write && response.status >= 500,
+      );
+    }
+    try {
+      return parse(await courseJson(response));
+    } catch {
+      throw new CourseRequestError(courseFailure(null), null, write);
+    }
+  } catch (cause) {
+    if (cause instanceof CourseRequestError) throw cause;
+    throw new CourseRequestError(courseFailure(null), null, write);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 export function courseRequest<T>(
   courseId: string,
   path: string,
   parse: (value: unknown) => T,
   method = "GET",
   body?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   id(courseId);
-  return studentRequest(
-    `/courses/${courseId}/workspace${path}`,
+  return courseTransport(
+    `${apiBaseUrl}/student/courses/${courseId}/workspace${path}`,
     parse,
-    method,
-    body,
+    {
+      method,
+      ...(body === undefined
+        ? {}
+        : {
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+    },
+    signal,
+    12_000,
   );
 }
-const apiBaseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 export function courseMaterialUrl(
   courseId: string,
   materialId: string,
@@ -480,6 +585,7 @@ export async function uploadCourseMaterial(
     content: Blob | Uint8Array<ArrayBuffer>;
     media_type: string;
     material_id?: string;
+    signal?: AbortSignal;
   },
 ): Promise<CourseReceipt> {
   id(courseId);
@@ -499,56 +605,21 @@ export async function uploadCourseMaterial(
       : input.content.byteLength;
   if (size === 0 || size > 5 * 1024 * 1024)
     throw new Error("Choose a nonempty file no larger than 5 MiB.");
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 40_000);
-  try {
-    const response = await fetch(
-      `${apiBaseUrl}/student/courses/${courseId}/workspace/materials${input.material_id ? `/${input.material_id}` : ""}?kind=${input.kind}&revision=${input.revision}`,
-      {
-        method: input.material_id ? "PUT" : "POST",
-        credentials: "include",
-        cache: "no-store",
-        headers: {
-          "Content-Type": input.media_type,
-          "X-Material-Title": encodeURIComponent(input.title.trim()),
-          "X-Request-ID": input.request_id,
-        },
-        body: input.content,
-        signal: controller.signal,
+  return courseTransport(
+    `${apiBaseUrl}/student/courses/${courseId}/workspace/materials${input.material_id ? `/${input.material_id}` : ""}?kind=${input.kind}&revision=${input.revision}`,
+    readCourseSaveReceipt,
+    {
+      method: input.material_id ? "PUT" : "POST",
+      headers: {
+        "Content-Type": input.media_type,
+        "X-Material-Title": encodeURIComponent(input.title.trim()),
+        "X-Request-ID": input.request_id,
       },
-    );
-    const payload: unknown = await response.json().catch(() => null);
-    if (!response.ok) {
-      const detail =
-        payload &&
-        typeof payload === "object" &&
-        "detail" in payload &&
-        typeof payload.detail === "string"
-          ? payload.detail
-          : null;
-      throw new StudentRequestError(
-        detail ??
-          "This material could not be saved. Try a smaller PDF or UTF-8 text.",
-        response.status >= 500,
-      );
-    }
-    try {
-      return readCourseSaveReceipt(payload);
-    } catch {
-      throw new StudentRequestError(
-        "The saved material could not be checked. Reload the course before trying again.",
-        true,
-      );
-    }
-  } catch (cause) {
-    if (cause instanceof StudentRequestError) throw cause;
-    throw new StudentRequestError(
-      "The upload result could not be checked. Reload saved course materials before trying again.",
-      true,
-    );
-  } finally {
-    clearTimeout(timer);
-  }
+      body: input.content,
+    },
+    input.signal,
+    40_000,
+  );
 }
 export function coursePercentHundredths(value: string): number | null {
   if (!/^\d{1,3}(?:\.\d{1,2})?$/.test(value)) return null;
