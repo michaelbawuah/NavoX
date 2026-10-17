@@ -105,6 +105,10 @@ jobs:
         working-directory: services/api
       - run: uv run mypy navox
         working-directory: services/api
+      - name: Install local timetable OCR dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng
       - run: uv run pytest --junitxml=/tmp/navox-api-tests.xml
         env:
           NAVOX_CONNECTOR_TEST_DSN: postgresql+asyncpg://navox:navox@localhost:5432/navox_recovery
