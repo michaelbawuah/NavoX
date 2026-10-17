@@ -142,7 +142,7 @@ export function ownWorkExportInput(
   context: WorkExportContext,
   draft: WorkExportDraft,
 ): WorkExportInput {
-  if (!draft.confirmed_own_work || !draft.confirmed_metadata)
+  if (draft.confirmed_own_work !== true || draft.confirmed_metadata !== true)
     throw new WorkExportError(
       "Confirm your own work and the displayed metadata before downloading.",
     );

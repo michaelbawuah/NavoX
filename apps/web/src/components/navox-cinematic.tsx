@@ -15,48 +15,49 @@ const tasks = {
   Today: [
     {
       icon: "↗",
-      title: "Send feedback on the project brief",
-      meta: "Due Oct 2, 3:00 PM EDT · Alex · Email",
+      title: "Next class: CS101 lecture",
+      meta: "Sample Monday · 10:00–10:50 AM · Science Hall 204",
       detail:
-        "Alex asked: “Could you send feedback on the project brief by Oct 2, 3:00 PM EDT?” The task keeps that exact deadline and the original conversation attached. Review the brief and decide what to send.",
+        "Example: the student confirmed a Monday CS101 lecture, 10:00–10:50 AM, in Science Hall 204. At the sample question time of Monday 9:40 AM, this is the next saved class.",
     },
     {
       icon: "◷",
-      title: "Prepare for the design review",
-      meta: "Meeting · Calendar",
+      title: "Library shift",
+      meta: "Sample Monday · 2:00–5:00 PM · Campus library",
       detail:
-        "Review the agenda and gather your questions about the project brief. The related conversation and your notes stay together.",
+        "Example of a fixed block the student entered: a Monday library shift, 2:00–5:00 PM. It appears alongside confirmed classes so the student can review the day.",
     },
     {
       icon: "✓",
-      title: "Finish the presentation outline",
-      meta: "Your commitment · Task",
+      title: "Review CS101 problem set",
+      meta: "Reviewed study task · 30 minutes · CS101",
       detail:
-        "Turn your project feedback into an outline. Keep the source context alongside your next step.",
+        "Example: the student reviewed this CS101 problem-set task and its 30-minute estimate. They decide when to study and update the task themselves.",
     },
   ],
   Upcoming: [
     {
       icon: "◷",
-      title: "Project check-in",
-      meta: "Tomorrow · Calendar",
+      title: "CS101 lab",
+      meta: "Sample Wednesday · 1:00–2:30 PM · Science Hall 210",
       detail:
-        "See what’s coming next, with time to prepare before the day begins.",
+        "Example from the confirmed timetable: a Wednesday CS101 lab in Science Hall 210. Review the saved room and time before heading to class.",
     },
     {
       icon: "✓",
-      title: "Share the updated presentation",
-      meta: "Friday · Your commitment",
-      detail: "Keep the deadline and the promise that created it in one place.",
+      title: "Wednesday library shift",
+      meta: "Sample Wednesday · 3:00–6:00 PM · Campus library",
+      detail:
+        "Example of another fixed block the student entered. Classes and shifts stay visible together when the student chooses a study time.",
     },
   ],
   Waiting: [
     {
       icon: "↻",
-      title: "Feedback on the revised outline",
-      meta: "Waiting on a reply · Email",
+      title: "CS101 study-group room",
+      meta: "Waiting for the group · Example",
       detail:
-        "Keep track of the conversation. Review the original thread before following up.",
+        "Example: the study group has not confirmed a room. The location is still unknown; check with the group before making plans.",
     },
   ],
 };
@@ -440,7 +441,9 @@ export function NavoXCinematic({ children }: { children: ReactNode }) {
             <>
               <p className={styles.eyebrow}>EXAMPLE WORKSPACE</p>
               <h2 id="panel-title">Your next move.</h2>
-              <p className={styles.panelIntro}>A little clarity for today.</p>
+              <p className={styles.panelIntro}>
+                Sample local times, ready for you to explore.
+              </p>
               <fieldset className={styles.tabs} aria-label="Task view">
                 {(Object.keys(tasks) as View[]).map((tab) => (
                   <button
@@ -497,7 +500,7 @@ export function NavoXCinematic({ children }: { children: ReactNode }) {
                   ref={input}
                   type="search"
                   value={query}
-                  placeholder="Search messages, meetings, tasks…"
+                  placeholder="Search classes, shifts, study tasks…"
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && results.length) {
@@ -526,7 +529,7 @@ export function NavoXCinematic({ children }: { children: ReactNode }) {
                     </button>
                   ))
                 ) : (
-                  <p>No matching examples. Try “feedback” or “review”.</p>
+                  <p>No matching examples. Try “CS101” or “library”.</p>
                 )}
               </div>
             </>
@@ -545,12 +548,12 @@ export function NavoXCinematic({ children }: { children: ReactNode }) {
                     "NavoX keeps your college classes, shifts, deadlines, and messages in one personal workspace, so you can see your day and choose what to do next.",
                   ],
                   [
-                    "How do suggested actions work?",
-                    "Review the context, edit the details, and approve the exact final action. An edited email draft needs fresh approval before it can be sent.",
+                    "Can I change the details?",
+                    "Review your class times, rooms, and fixed blocks before confirming your timetable. You choose which study tasks to add or change.",
                   ],
                   [
                     "Where do I start?",
-                    "Explore the example workspace to see how your conversations and commitments come together.",
+                    "Explore the example workspace to see confirmed classes, library shifts, and reviewed study tasks together.",
                   ],
                 ].map(([q, a]) => (
                   <details key={q}>

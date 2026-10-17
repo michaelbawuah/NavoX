@@ -145,7 +145,8 @@ export function WorkExportFields({
                 onConfirm("confirmed_metadata", event.target.checked)
               }
             />
-            I approve the title and optional attribution shown in the preview.
+            I approve the title and any author or course label shown in the
+            preview.
           </label>
         </div>
         <button
@@ -176,6 +177,36 @@ export function WorkExportPrivateSurface({
     <div className={styles.privateSurface} hidden={masked} inert={masked}>
       {children}
     </div>
+  );
+}
+/** The editor mounts only after this explicit course-scoped action. */
+export function StudentWorkExportEntry({
+  accountId,
+  courseId,
+  enabled = false,
+  archived = false,
+}: {
+  accountId: string;
+  courseId: string;
+  enabled?: boolean;
+  archived?: boolean;
+}) {
+  const [opened, setOpened] = useState(false);
+  if (!enabled || archived) return null;
+  return opened ? (
+    <StudentWorkExport
+      accountId={accountId}
+      courseId={courseId}
+      onClose={() => setOpened(false)}
+    />
+  ) : (
+    <section className={`${styles.panel} ${styles.card}`}>
+      <h3>Put your own work into a PDF</h3>
+      <p>Start with a blank editor, review your text, and download it.</p>
+      <button type="button" onClick={() => setOpened(true)}>
+        Format my own work
+      </button>
+    </section>
   );
 }
 export function StudentWorkExport({

@@ -1,5 +1,7 @@
 /** Student launch keeps optional products available only by deployment choice. */
 export const productFeatures = {
+  studentWorkExport:
+    process.env.NEXT_PUBLIC_NAVOX_STUDENT_WORK_EXPORT_ENABLED === "true",
   studentGoals: process.env.NEXT_PUBLIC_NAVOX_STUDENT_GOALS_ENABLED === "true",
   studentEmail: process.env.NEXT_PUBLIC_NAVOX_STUDENT_EMAIL_ENABLED === "true",
   studentAgent: process.env.NEXT_PUBLIC_NAVOX_STUDENT_AGENT_ENABLED === "true",

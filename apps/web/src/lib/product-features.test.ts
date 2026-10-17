@@ -69,3 +69,27 @@ describe("self-reported goals release gate", () => {
     expect(productFeatures.studentEmail).toBe(false);
   });
 });
+
+describe("own-work export release gate", () => {
+  it.each([undefined, "false", "1", "TRUE"])(
+    "keeps own-work export off without exact true (%s)",
+    async (value) => {
+      vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_WORK_EXPORT_ENABLED", value);
+      vi.resetModules();
+      const { productFeatures } = await import("./product-features");
+      expect(productFeatures.studentWorkExport).toBe(false);
+    },
+  );
+  it("does not enable coursework, goals or model features implicitly", async () => {
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_WORK_EXPORT_ENABLED", "true");
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_COURSEWORK_ENABLED", "false");
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_GOALS_ENABLED", "false");
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_AGENT_ENABLED", "false");
+    vi.resetModules();
+    const { productFeatures } = await import("./product-features");
+    expect(productFeatures.studentWorkExport).toBe(true);
+    expect(productFeatures.studentCoursework).toBe(false);
+    expect(productFeatures.studentGoals).toBe(false);
+    expect(productFeatures.studentAgent).toBe(false);
+  });
+});
