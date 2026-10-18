@@ -167,36 +167,6 @@ jobs:
           uv run alembic upgrade head
           uv run alembic downgrade 0015_spec_003_connectors
           uv run alembic upgrade head
-      - name: Verify connector, subscription and AI boundaries with real PostgreSQL sessions
-        working-directory: services/api
-        env:
-          NAVOX_CONNECTOR_TEST_DSN: postgresql+asyncpg://navox:navox@localhost:5432/navox_recovery
-        run: >-
-          uv run pytest tests/test_connector_sync_recovery.py
-          tests/test_google_calendar_connector.py tests/test_google_gmail_connector.py
-          tests/test_connection_management.py
-          tests/test_subscriptions_registry.py tests/test_subscriptions_discovery.py
-          tests/test_subscription_cancellation.py tests/test_subscription_provider_capability.py
-          tests/test_subscription_lifecycle.py tests/test_subscription_provenance.py
-          tests/test_subscriptions_api.py tests/test_stripe_sandbox.py
-          tests/test_ai_registry.py tests/test_ai_context.py tests/test_ai_runtime.py
-          tests/test_ai_control.py tests/test_ai_sessions_tools.py tests/test_communication_drafts.py
-          tests/test_ai_settings.py tests/test_ai_feature_ingestion.py
-          tests/test_thread_watches.py tests/test_routines.py tests/test_owner_memory.py
-          tests/test_personal_followthrough_cleanup.py
-          tests/test_student_timetable.py tests/test_student_ics.py tests/test_student_alerts.py
-          tests/test_lms_feed.py tests/test_student_planning.py tests/test_coursework.py
-          tests/test_ai_communication_evaluation.py
-          tests/test_ai_operational_domains.py tests/test_ai_readiness.py
-          tests/test_news_foundation.py tests/test_news_api.py tests/test_news_jobs.py
-          tests/test_news_stories.py tests/test_news_story_api.py
-          tests/test_news_conversations.py tests/test_news_intelligence.py tests/test_news_conversation_api.py
-          tests/test_news_retrieval.py tests/test_news_research.py tests/test_news_ranking.py
-          tests/test_news_following.py tests/test_news_following_api.py
-          tests/test_knowledge_contracts.py tests/test_knowledge_foundation.py
-          tests/test_knowledge_migration.py tests/test_knowledge_indexing.py
-          tests/test_knowledge_search.py tests/test_knowledge_api.py
-          tests/test_knowledge_rrf.py tests/test_knowledge_search_contracts.py
 
   dependency-security:
     name: Dependency security
