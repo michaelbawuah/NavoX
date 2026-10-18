@@ -116,13 +116,16 @@ async def test_research_cannot_read_another_workspace(ai_database, reader):
 async def test_research_endpoints_flags_bounds_and_unknown_stories(subscription_env, monkeypatch):
     from datetime import datetime
 
-    from navox.api import news_stories
+    from navox.api import news, news_stories
 
     class Clock(datetime):
         @classmethod
         def now(cls, tz=None):
             return NOW if tz else NOW.replace(tzinfo=None)
 
+    # setup_story activates through the source API before these research reads.
+    # Both API clocks must use the fixed rights-review window.
+    monkeypatch.setattr(news, "datetime", Clock)
     monkeypatch.setattr(news_stories, "datetime", Clock)
     env = subscription_env
     story, _ = await setup_story(env)
