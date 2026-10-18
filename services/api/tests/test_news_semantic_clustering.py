@@ -11,7 +11,7 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -1507,30 +1507,18 @@ async def test_postgres_lock_order_is_user_before_source(ai_database, monkeypatc
 
     from navox.news import activities
 
-    # The activity uses the real clock, so this fixture's policy and reviews are
-    # anchored at the real current time rather than at the fixed test instant.
-    moment = datetime.now(UTC)
-    env = await build_env(ai_database, retention_days=30)
-    report = reviewed_report()
-    policy = deployment_policy(
-        report,
-        source_keys=tuple(env["definitions"]),
-        registry_revision="2",
-        reviewed_at=moment - timedelta(hours=1),
-        expires_at=moment + timedelta(days=2),
-    )
-    env["policy"] = policy
-    env["settings"] = settings_for(env["definitions"], policy=policy, report=report)
-    gateway = StubGateway(namespace=policy.namespace)
+    # Keep source rights, retention, reviewed features and activity reads inside
+    # the same authored window; wall-clock expiry must not mask the lock checks.
+    monkeypatch.setattr(activities, "datetime", FixtureActivityClock)
+    env = await build_env(ai_database)
+    gateway = StubGateway(namespace=env["policy"].namespace)
     clusterer = clusterer_for(env, gateway=gateway, factory=ai_database)
-    clusterer.clock = lambda: moment
     async with ai_database() as database:
         for row in env["rows"]:
             await add_feature(
                 database,
                 row,
                 env,
-                now=moment,
                 event_identity=f"event-{row.external_id}",
             )
         await database.commit()
