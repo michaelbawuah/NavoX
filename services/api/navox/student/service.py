@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.agent.audit import add_audit_event
 from navox.connectors.sync_state import database_now, utc
+from navox.core.settings import Settings
 from navox.db.models import AuditEvent, User, Workspace, WorkspaceMembership
 from navox.db.student import (
     StudentClassMeeting,
@@ -906,8 +907,34 @@ async def confirm_import(
 
 
 async def reset_data(
-    database: AsyncSession, user_id: UUID, workspace_id: UUID, *, revision: int, request_id: UUID
+    database: AsyncSession,
+    user_id: UUID,
+    workspace_id: UUID,
+    *,
+    revision: int,
+    request_id: UUID,
+    settings: Settings,
 ) -> bool:
+    from navox.connectors.secrets import SecretBrokerError
+    from navox.coursework.service import clear_coursework_data
+    from navox.lms_feeds.service import (
+        FeedAccessError,
+        erase_all_owned_feeds,
+        lock_all_feeds_for_reset,
+    )
+    from navox.student_email.service import forget_email_data
+    from navox.student_goals.service import forget_goals_data
+    from navox.student_planning.service import forget_planning_data
+    from navox.student_recovery.service import forget_recovery_data
+
+    # Feed workers use connector→membership→User. Lock their authorities before
+    # the shared student writer lock, then forget everything in one transaction.
+    try:
+        feed_connections = await lock_all_feeds_for_reset(
+            database, user_id=user_id, workspace_id=workspace_id
+        )
+    except FeedAccessError as error:
+        raise StudentError(error.status, str(error)) from None
     await owner(database, user_id, workspace_id, lock=True)
     previous = await database.scalar(
         select(AuditEvent.id).where(
@@ -921,6 +948,26 @@ async def reset_data(
         return True
     current = await profile(database, user_id, workspace_id)
     check_revision(current.revision, revision)
+    try:
+        await erase_all_owned_feeds(
+            database,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            settings=settings,
+            connection_ids=feed_connections,
+            now=await database_now(database),
+        )
+    except FeedAccessError as error:
+        raise StudentError(error.status, str(error)) from None
+    except SecretBrokerError:
+        raise StudentError(
+            409, "The saved calendar connection needs review before resetting data"
+        ) from None
+    await forget_email_data(database, user_id=user_id, workspace_id=workspace_id)
+    await forget_planning_data(database, user_id, workspace_id)
+    await forget_recovery_data(database, user_id, workspace_id)
+    await forget_goals_data(database, user_id, workspace_id)
+    await clear_coursework_data(database, user_id=user_id, workspace_id=workspace_id)
     from navox.student_alerts.service import clear_student_alert_data
 
     await clear_student_alert_data(database, user_id=user_id, workspace_id=workspace_id)

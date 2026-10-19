@@ -1,0 +1,360 @@
+.panel {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  color: #edf4f7;
+}
+.card {
+  background: #142630;
+  border: 1px solid #36515e;
+  border-radius: 1rem;
+  padding: clamp(1rem, 2.5vw, 1.7rem);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.hero {
+  background:
+    radial-gradient(ellipse at top right, #2d5044, transparent 75%), #152b32;
+}
+.entryCard {
+  margin-bottom: 1rem;
+}
+.entryCard a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.6rem;
+}
+.panel h2 {
+  font-size: clamp(1.45rem, 3vw, 1.9rem);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  margin: 0.25rem 0 0.7rem;
+}
+.panel h3 {
+  font-size: 1.04rem;
+  font-weight: 600;
+  margin: 0.4rem 0 0.7rem;
+}
+.panel p,
+.panel li {
+  line-height: 1.7;
+}
+.panel a {
+  color: #c3ead7;
+  text-underline-offset: 0.2em;
+}
+.heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.eyebrow {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #b0e1ca;
+  margin: 0 0 0.45rem;
+}
+.muted,
+.hint {
+  color: #b4c8d2;
+  line-height: 1.65;
+  margin: 0.45rem 0;
+  font-size: 0.88rem;
+}
+.hint {
+  font-size: 0.77rem;
+}
+.panel button,
+.panel input,
+.panel textarea,
+.panel select {
+  font: inherit;
+}
+.panel button {
+  color: #e7f1f4;
+  background: #213a45;
+  border: 1px solid #476572;
+  border-radius: 0.55rem;
+  min-height: 2.6rem;
+  padding: 0.5rem 0.8rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.panel button:hover:enabled {
+  background: #2b4b54;
+  border-color: #80b0b2;
+}
+.panel button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.panel .primary {
+  background: #b8e7cc;
+  border-color: #b8e7cc;
+  color: #132b22;
+  font-weight: 600;
+}
+.panel .primary:hover:enabled {
+  background: #d2f1df;
+}
+.panel .danger {
+  color: #ffc4c4;
+  border-color: #88545c;
+}
+.panel :is(input, textarea, select) {
+  width: 100%;
+  max-width: 100%;
+  min-height: 2.6rem;
+  padding: 0.65rem 0.7rem;
+  background: #10212b;
+  color: #eef5f8;
+  border: 1px solid #4b6571;
+  border-radius: 0.5rem;
+}
+.panel input[type="checkbox"] {
+  width: 1.1rem;
+  min-height: 1.1rem;
+  accent-color: #b8e7cc;
+  vertical-align: middle;
+  margin-right: 0.45rem;
+}
+.panel label {
+  display: grid;
+  gap: 0.4rem;
+  color: #cadbe2;
+  font-size: 0.8rem;
+  line-height: 1.65;
+}
+.panel label:has(input[type="checkbox"]) {
+  display: block;
+}
+.panel :is(button, a, input, textarea, select, summary):focus-visible {
+  outline: 2px solid #d5f5e1;
+  outline-offset: 3px;
+}
+.panel fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: grid;
+  gap: 1rem;
+}
+.panel legend {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 1.2rem;
+}
+.stack {
+  display: grid;
+  gap: 1rem;
+}
+.fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.panel .courseChoices {
+  border: 1px solid #405c65;
+  border-radius: 0.7rem;
+  padding: 1rem;
+  gap: 0.7rem;
+}
+.courseChoices legend {
+  font-size: 0.85rem;
+  margin: 0;
+  padding: 0 0.4rem;
+}
+.form {
+  display: grid;
+  gap: 1rem;
+  margin: 1rem 0;
+  border: 1px solid #405d67;
+  border-radius: 0.8rem;
+  background: #10232d;
+  padding: 1rem;
+}
+.form > .primary,
+.stack > .primary {
+  justify-self: start;
+}
+.notice,
+.warning,
+.error {
+  border: 1px solid #436860;
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background: #19352f;
+  color: #d1e9db;
+  font-size: 0.86rem;
+  margin: 0.6rem 0;
+}
+.warning {
+  border-color: #806a43;
+  background: #352d21;
+  color: #f3dfba;
+}
+.error {
+  border-color: #88535e;
+  background: #39242b;
+  color: #ffd2d6;
+}
+.workCard {
+  background: #10232d;
+  border: 1px solid #3c5b65;
+  border-radius: 0.8rem;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+.workCard p {
+  font-size: 0.86rem;
+}
+.workCard .hint {
+  font-size: 0.77rem;
+}
+.deadlines {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+.deadlines > div {
+  border-left: 2px solid #6a8d81;
+  padding: 0.2rem 1rem;
+}
+.deadlines strong {
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+.late,
+.badge {
+  display: inline-block;
+  border: 1px solid #896754;
+  border-radius: 2rem;
+  background: #3c3026;
+  color: #ffe0bb;
+  padding: 0.4rem 0.7rem;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+.badge {
+  background: #23443d;
+  border-color: #466b5d;
+  color: #ccebdc;
+}
+.timeline {
+  list-style: none;
+  margin: 1rem 0;
+  padding: 0;
+  display: grid;
+  gap: 0.7rem;
+}
+.timeline li {
+  border-left: 3px solid #98c8ad;
+  background: #10232b;
+  border-radius: 0 0.6rem 0.6rem 0;
+  padding: 0.8rem 1rem;
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(9rem, 2fr) auto;
+  gap: 0.8rem;
+  align-items: center;
+  font-size: 0.84rem;
+}
+.timeline time {
+  color: #c3d7dd;
+  font-size: 0.77rem;
+}
+.timeline span {
+  color: #a6ccba;
+  font-size: 0.8rem;
+}
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0;
+}
+.list li,
+.item {
+  border-bottom: 1px solid #36515e;
+  padding: 0.8rem 0;
+  font-size: 0.86rem;
+}
+.empty {
+  border: 1px dashed #46606b;
+  border-radius: 0.7rem;
+  background: #10232b;
+  color: #b8ccd4;
+  padding: 1rem;
+  font-size: 0.86rem;
+}
+.panel blockquote {
+  margin: 0.8rem 0;
+  border-left: 3px solid #9dcab2;
+  padding: 0.2rem 1rem;
+  white-space: pre-wrap;
+  line-height: 1.8;
+  font-size: 0.85rem;
+}
+.sourceText {
+  font:
+    0.82rem / 1.8 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+  max-height: 28rem;
+  overscroll-behavior: contain;
+  background: #091923;
+  color: #dce6eb;
+  border: 1px solid #354b59;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  tab-size: 4;
+}
+.details {
+  border: 1px solid #3c5865;
+  border-radius: 0.7rem;
+  padding: 1rem;
+  margin: 0.9rem 0;
+  font-size: 0.85rem;
+}
+.details summary {
+  cursor: pointer;
+  color: #d0e8dd;
+  line-height: 1.7;
+}
+.details button {
+  margin: 0.5rem 0.5rem 0 0;
+}
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0.8rem 0;
+}
+.actions a {
+  font-size: 0.83rem;
+}
+@media (max-width: 700px) {
+  .fields,
+  .deadlines {
+    grid-template-columns: 1fr;
+  }
+  .timeline li {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+  .card {
+    padding: 1rem;
+  }
+  .sourceText {
+    font-size: 0.75rem;
+  }
+}

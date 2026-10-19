@@ -1,0 +1,340 @@
+.panel {
+  --goals-muted: #b8cbd1;
+  display: grid;
+  gap: 1rem;
+  color: #edf5f7;
+  min-width: 0;
+}
+.card,
+.entry {
+  border: 1px solid #35505b;
+  border-radius: 1.15rem;
+  padding: clamp(1rem, 2.2vw, 1.65rem);
+  background: #132631;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  background:
+    radial-gradient(ellipse at top right, #285044, transparent 75%), #172e36;
+}
+.hero h1 {
+  font-size: clamp(1.65rem, 3vw, 2.25rem);
+  max-width: 25ch;
+  letter-spacing: -0.04em;
+  line-height: 1.2;
+  margin: 0.3rem 0 0.7rem;
+}
+.panel h2,
+.entry h2 {
+  font-size: 1.25rem;
+  letter-spacing: -0.025em;
+  margin: 0 0 0.6rem;
+}
+.panel p,
+.entry p {
+  line-height: 1.65;
+  margin: 0.4rem 0 0.8rem;
+}
+.panel .eyebrow,
+.entry .eyebrow {
+  font-size: 0.68rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #b3e6ce;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+}
+.muted,
+.hint {
+  color: var(--goals-muted, #b8cbd1);
+  font-size: 0.88rem;
+}
+.hint {
+  font-size: 0.77rem;
+}
+.notice {
+  color: #c7e6de;
+  padding: 0 0.2rem;
+}
+.warning {
+  background: #3c3026;
+  border: 1px solid #977443;
+  border-radius: 0.7rem;
+  color: #ffe1a9;
+  padding: 0.85rem 1rem;
+  line-height: 1.65;
+}
+.heading,
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+.actions {
+  justify-content: flex-start;
+  margin: 0.8rem 0;
+}
+.fields {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  margin: 1rem 0 0;
+}
+.fields legend {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: #bfd9d3;
+  margin-bottom: 0.5rem;
+}
+.twoColumns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+.panel label {
+  display: grid;
+  gap: 0.45rem;
+  font-size: 0.86rem;
+  color: #d5e4e8;
+}
+.panel input,
+.panel select,
+.panel textarea {
+  font: inherit;
+  min-height: 2.8rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #52707c;
+  background: #0e202b;
+  color: #eff8fa;
+  border-radius: 0.6rem;
+  color-scheme: dark;
+}
+.panel textarea {
+  min-height: 6rem;
+  resize: vertical;
+}
+.panel input::placeholder {
+  color: #91a8b3;
+}
+.panel .check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  line-height: 1.6;
+  margin: 0.7rem 0;
+}
+.check input {
+  flex: none;
+  width: 1.05rem;
+  min-height: 1.05rem;
+  height: 1.05rem;
+  padding: 0;
+  margin: 0.25rem 0;
+  accent-color: #9ce5bf;
+}
+.panel button,
+.entry a {
+  font: inherit;
+  border: 1px solid #5d7c88;
+  border-radius: 0.65rem;
+  background: #203d49;
+  color: #eff9fc;
+  padding: 0.7rem 1rem;
+  min-height: 2.7rem;
+  cursor: pointer;
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+.panel button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.panel .primary {
+  background: #b0e7cd;
+  color: #102f28;
+  border-color: #b0e7cd;
+  font-weight: 700;
+  justify-self: start;
+}
+.panel :is(button, input, select, textarea, a, summary):focus-visible,
+.entry a:focus-visible {
+  outline: 3px solid #c0f3dc;
+  outline-offset: 4px;
+}
+.badge {
+  border: 1px solid #4a7469;
+  border-radius: 2rem;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.72rem;
+  color: #c9ebde;
+}
+.inset {
+  background: #0f222c;
+  border: 1px solid #324e5b;
+  border-radius: 0.8rem;
+  padding: 1rem;
+  margin: 0.8rem 0;
+}
+.panel summary {
+  cursor: pointer;
+  line-height: 1.6;
+  font-weight: 600;
+}
+.entry {
+  color: #edf5f7;
+  background:
+    radial-gradient(ellipse at top right, #285044, transparent 75%), #172e36;
+}
+.entry a {
+  display: inline-block;
+  text-decoration: none;
+  color: #b9e8d7;
+  margin: 0.5rem 0;
+}
+.goalGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+  gap: 1rem;
+  min-width: 0;
+}
+.progress {
+  border-block: 1px solid #34515c;
+  margin: 0.8rem 0;
+  padding: 0.8rem 0;
+}
+.stat {
+  font-size: 1.1rem;
+  color: #e5f5ec;
+}
+.stat strong {
+  font-size: 1.6rem;
+}
+.description {
+  white-space: pre-wrap;
+}
+.answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  border: 1px solid #46616c;
+  border-radius: 0.65rem;
+  padding: 1rem;
+}
+.answers label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.answers input {
+  width: 1rem;
+  min-height: 1rem;
+  height: 1rem;
+  accent-color: #9ce5bf;
+}
+.history,
+.privacy {
+  padding-top: 0.8rem;
+  border-top: 1px solid #34515c;
+  margin-top: 1rem;
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+.metrics > div {
+  border: 1px solid #34515c;
+  padding: 1rem;
+  border-radius: 0.7rem;
+}
+.metrics dt {
+  font-size: 0.78rem;
+  color: #b8cbd1;
+  line-height: 1.5;
+}
+.metrics dd {
+  font-size: 1.6rem;
+  font-weight: 600;
+  margin: 0.4rem 0 0;
+}
+.reports {
+  padding: 0;
+  list-style: none;
+}
+.reports li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid #34515c;
+}
+.reports li > div {
+  display: grid;
+  gap: 0.25rem;
+}
+.reports span {
+  font-size: 0.76rem;
+  color: #b8cbd1;
+}
+.dateReview {
+  display: flex;
+  align-items: end;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  margin: 1rem 0;
+}
+.dateReview label {
+  flex: 1;
+  min-width: min(100%, 15rem);
+}
+@media (max-width: 640px) {
+  .twoColumns,
+  .metrics {
+    grid-template-columns: 1fr;
+  }
+  .panel button {
+    width: 100%;
+  }
+  .hero > button {
+    width: auto;
+  }
+  .card {
+    border-radius: 0.85rem;
+  }
+  .heading {
+    align-items: flex-start;
+  }
+  .reports li {
+    flex-wrap: wrap;
+  }
+  .dateReview button {
+    width: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel * {
+    scroll-behavior: auto;
+  }
+}
+
+.privateSurface {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+.privateSurface[hidden] {
+  display: none;
+}

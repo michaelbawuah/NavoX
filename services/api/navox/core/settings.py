@@ -43,6 +43,17 @@ class Settings(BaseSettings):
     student_push_vapid_public_key: str = ""
     student_push_vapid_private_key: SecretStr | None = None
     student_push_vapid_subject: str = ""
+    # Later student increments remain opt-in until their release gates are met.
+    student_planning_enabled: bool = False
+    student_lms_feeds_enabled: bool = False
+    student_coursework_enabled: bool = False
+    student_recovery_enabled: bool = False
+    student_email_enabled: bool = False
+    student_goals_enabled: bool = False
+    student_coach_enabled: bool = False
+    student_work_export_enabled: bool = False
+    student_agent_enabled: bool = False
+    student_agent_model_enabled: bool = False
     # Deployment-operator reviewed configurations. Users cannot supply network targets.
     generic_rest_connectors: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=20)
     mcp_servers: list[dict[str, JsonValue]] = Field(default_factory=list, max_length=20)

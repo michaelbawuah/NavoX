@@ -233,7 +233,7 @@ def orm_indexes(table_name: str) -> set[tuple[str, str, tuple[str, ...]]]:
     }
 
 
-def test_migration_is_the_single_head_after_the_m1_foundation() -> None:
+def test_migration_extends_the_m1_foundation_on_the_single_chain() -> None:
     foundation = migration_module(M1_FILE)
     assert foundation.revision == M1_REVISION
     assert foundation.down_revision == NEWS_RETRIEVAL_REVISION
@@ -246,7 +246,11 @@ def test_migration_is_the_single_head_after_the_m1_foundation() -> None:
     config = Config(str(API_ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(API_ROOT / "migrations"))
     script = ScriptDirectory.from_config(config)
-    assert script.get_heads() == ["0040_student_alerts"]
+    # Later additive migrations may extend this chain without changing its ancestry.
+    heads = script.get_heads()
+    assert len(heads) == 1
+    ancestry = {revision.revision for revision in script.walk_revisions(base="base", head=heads[0])}
+    assert {REVISION, "0035_news_article_images"} <= ancestry
     images = script.get_revision("0035_news_article_images")
     assert images is not None and images.down_revision == "0034_knowledge_email_drafts"
     importance = script.get_revision("0032_news_importance")

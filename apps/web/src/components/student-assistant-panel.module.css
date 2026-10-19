@@ -1,0 +1,229 @@
+.panel {
+  margin: 0 0 28px;
+  padding: clamp(20px, 4vw, 34px);
+  border: 1px solid #dce5de;
+  border-radius: 22px;
+  color: #23372e;
+  background: linear-gradient(140deg, #fbfdf9, #f1f7f2);
+}
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.eyebrow {
+  color: #577465;
+  font-size: 11px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+.header h2 {
+  margin: 8px 0 0;
+  font-size: clamp(23px, 3vw, 31px);
+  font-weight: 550;
+  letter-spacing: -0.8px;
+  line-height: 1.2;
+}
+.private {
+  flex-shrink: 0;
+  margin-top: 4px;
+  border: 1px solid #d3e2d6;
+  border-radius: 100px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #4c6856;
+}
+.intro {
+  margin: 12px 0 22px;
+  color: #5d7063;
+  font-size: 14px;
+  line-height: 1.65;
+}
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 22px;
+}
+.panel button {
+  border: 1px solid #ccdacf;
+  border-radius: 9px;
+  background: #fff;
+  color: #355840;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.examples button {
+  padding: 7px 10px;
+  background: #ffffffa6;
+  font-size: 12px;
+}
+.panel button:hover {
+  background: #e6f0e7;
+}
+.panel button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.label {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.panel textarea {
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+  min-height: 94px;
+  border: 1px solid #c8d7cc;
+  border-radius: 12px;
+  background: #fff;
+  color: #23372e;
+  padding: 13px 14px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.65;
+}
+.below {
+  display: flex;
+  justify-content: space-between;
+  margin: 5px 1px 14px;
+  color: #718174;
+  font-size: 11px;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.actions .ask {
+  color: #fff;
+  background: #20573e;
+  border-color: #20573e;
+  padding-inline: 17px;
+}
+.actions .ask:hover {
+  background: #17462f;
+}
+.status {
+  color: #5e7665;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 14px 0 0;
+  min-height: 20px;
+}
+.privacy {
+  margin: 12px 0 0;
+  border-top: 1px solid #dfe8df;
+  padding-top: 13px;
+  color: #758276;
+  font-size: 11px;
+  line-height: 1.7;
+  max-width: 670px;
+}
+.consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 17px;
+  padding: 13px;
+  border: 1px solid #d8e2d9;
+  border-radius: 9px;
+  background: #f9fcf8;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.consent input {
+  margin: 3px 0 0;
+  accent-color: #20573e;
+}
+.consent small {
+  display: block;
+  margin-top: 5px;
+  color: #6f8072;
+  font-size: 11px;
+}
+.answer {
+  margin: 0 0 22px;
+  padding: 18px 20px;
+  border-left: 3px solid #719a7d;
+  border-radius: 3px 13px 13px 3px;
+  background: #fff;
+}
+.answerLabel {
+  color: #64816b;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+}
+.answer p {
+  color: #2e4738;
+  margin: 10px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+  line-height: 1.75;
+}
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 24px;
+  margin-top: 18px;
+}
+.links a {
+  color: #2b6844;
+  font-weight: 600;
+  text-underline-offset: 4px;
+  font-size: 13px;
+}
+.links span {
+  display: block;
+  margin-top: 6px;
+  color: #6a7c6e;
+  max-width: 300px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.links a span {
+  display: inline;
+}
+.answer .followup {
+  margin-top: 15px;
+  font-size: 12px;
+  color: #708073;
+}
+.error {
+  border: 1px solid #e6cfc0;
+  border-radius: 9px;
+  padding: 12px;
+  background: #fff6ef;
+  color: #8d4a2b;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.panel :focus-visible {
+  outline: 3px solid #88af94;
+  outline-offset: 3px;
+}
+@media (max-width: 550px) {
+  .header {
+    display: block;
+  }
+  .private {
+    display: inline-block;
+    margin-top: 13px;
+  }
+  .intro {
+    margin-top: 13px;
+  }
+  .examples {
+    gap: 6px;
+  }
+  .answer {
+    padding: 15px;
+  }
+}

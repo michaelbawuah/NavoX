@@ -12,6 +12,9 @@ navox.net {
   handle /api/v1/student-voice/* {
     reverse_proxy 127.0.0.1:3000
   }
+  handle /api/v1/student-agent/* {
+    reverse_proxy 127.0.0.1:3000
+  }
   handle /api/v1/* {
     reverse_proxy 127.0.0.1:8000
   }

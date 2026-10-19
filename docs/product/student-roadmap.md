@@ -27,10 +27,33 @@ Passing tests does not create student-validation evidence. A partially reusable
 feature does not make a new student requirement implemented. Update the stage
 only with a source revision, relevant check results, and any remaining limits.
 
-The tables below record the student requirements as **Planned**, with active
-Phase 1 work identified separately. Later engineering can be prepared behind
-disabled flags; a launch phase advances only after its preceding student gate.
-No student gate has been claimed as met.
+The tables below retain the plan's acceptance criteria. Implementation and
+verification are tracked separately from student validation. Later engineering
+is prepared behind disabled flags; a launch phase advances only after its
+preceding student gate. No student gate has been claimed as met.
+
+## Current engineering
+
+| Increment | Source behavior | Remaining evidence |
+| --- | --- | --- |
+| Know the day | Any-school timetable setup; manual, calendar and reviewed local screenshot imports; clock-based class answers; private quick asks; opt-in class alerts; installable web app. Isolated PostgreSQL, migration and synthetic browser checks passed, followed by all six protected CI checks and a production postcheck for [PR 33](https://github.com/michaelbawuah/NavoX/pull/33), deployed as `62981c2b`. | Actual microphone and notification delivery on supported devices; the real-student accuracy gate. |
+| Plan the day | Adjustable study blocks with real capacity and buffer; source-change review; private calendar feeds; course materials, syllabus quotations and scoped search; a shared student tool core and private text panel. The lazy-import planning checkpoint passed 191 isolated PostgreSQL checks without skips, including four concurrency/reset races and three cold-import guards. The disposable migration rehearsal passed 13-table parity and all 11 nonempty rollback guards; independent cleanup preserved the live release. A separate course-view fix clears stale private sources and preserves unchanged drafts after a file-picker blur; 125 focused checks pass. [Draft PR 34](https://github.com/michaelbawuah/NavoX/pull/34) remains under review. | Complete browser flows for the newer course-view fix, protected CI completion, qualified model tool selection, streaming voice measurements and student usage evidence. Database evidence remains bound to its earlier exact checkpoint; the frontend fix changes no API or runtime bytes. All later feature flags remain off. |
+| Reviewed actions and recovery | Explicit analysis of one selected email, evidence-backed rule classification, reviewed task creation or refresh, and the existing Inbox draft handoff; source-bound catch-up previews and editable extension text. Local API, web and production-build checks are recorded; shared integration verification continues behind disabled flags. | PostgreSQL concurrency, migration and browser verification, reviewed extension-action handoff, realtime voice, student memory and the draft usefulness gate. Corrections apply to the current email review; no learned filtering is claimed. |
+| Goals foundation | Up to three active goals with editable definitions and explicit daily yes/no or count reports; current-timezone progress and recorded planner outcomes. Unknown progress remains unknown. Full local API verification passed with 3,553 tests and 18 environment-dependent skips on the frozen goals checkpoint; web checks and production build also passed. Implementation stays behind disabled flags. | PostgreSQL and browser verification; complete coaching and the four-week student retention gate. This foundation does not infer attendance, sleep or grades. |
+| Own-work PDF | A blank course editor formats only the student’s entered text and confirmed metadata. Local formatting uses a verified font profile, preserves literal text, and refuses unsupported glyphs or oversized layouts. Backend privacy/renderer tests and client/UI checks passed; all 15 rendered sample pages were inspected, and the full web suite/build passed. | Actual PostgreSQL publication-lock races and browser-download verification. Supports a limited left-to-right text profile; this is not assignment generation. Both export flags remain off. |
+| Manual day review | Explicit morning, evening and week-so-far reviews show saved classes and deadlines, recorded study outcomes and self-reported goals. Source changes, clock gaps and disabled sections remain incomplete or unknown. The read-only backend passed 37 focused tests with one PostgreSQL-only skip; the guarded screen passed 130 focused checks. The assembled web suite, including the course-view privacy fix, passed 1,236 tests and a production build. | Actual PostgreSQL reset/read race, protected CI completion and browser verification. Default off; no automatic coaching, rescheduling, mood intake or stored review history. |
+| Model selector evaluation | The OpenAI structured-output adapter can propose only registered host tools when model metadata also permits it. A 24-case public synthetic corpus exercises real adapter wire handling through mock transport; 71 new and 160 compatibility tests pass, including exact task-scope denial. | Live synthetic evaluation, separately reviewed qualification import, exact sensitive-data grants and explicit one-question consent. Reports are review-only and cannot qualify traffic; no new provider route is activated. |
+
+Private files and feed links are not sent to a model by these features. Course
+search runs locally over the selected course's authorized text. The private
+assistant's ordinary conversation sends only the current question, with no saved
+history. Model selection over student tool results has a separate, unpublished
+sensitive-data contract and requires its own qualification, grants and explicit
+one-question consent before activation.
+
+Disabling a feature does not authorize deletion. Explicit owner deletion and the
+student-data reset remain available; reset also removes feed credentials and
+derived study plans so a delayed refresh cannot recreate forgotten content.
 
 ## Delivery order
 

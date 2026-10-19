@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { productFeatures } from "../lib/product-features";
 import { hasGoogleReadAccess } from "../lib/setup-progress";
 import type { TodaySource } from "../lib/source-references";
 import { consumerTodaySections } from "../lib/today-sections";
@@ -31,7 +32,12 @@ import { PersonalRoutines } from "./personal-routines";
 import { ProactivePanel } from "./proactive-panel";
 import { SourceReferences } from "./source-references";
 import { StudentDayPanel } from "./student-day-panel";
+import { StudentDayReviewEntry } from "./student-day-review-entry";
+import { StudentEmailCard } from "./student-email-actions";
+import { StudentGoalsCard } from "./student-goals";
+import { StudentLmsFeeds } from "./student-lms-feeds";
 import { StudentNotifications } from "./student-notifications";
+import { StudentRecoveryCard } from "./student-recovery";
 import { ThreadWatchPanel } from "./thread-watch-panel";
 import styles from "./today-workspace.module.css";
 import { WorkspaceShell } from "./workspace-shell";
@@ -1245,6 +1251,33 @@ export function TodayWorkspace({
                     <span aria-hidden="true">→</span>
                   </span>
                 </Link>
+                <StudentDayReviewEntry enabled={productFeatures.studentCoach} />
+                {productFeatures.studentGoals && (
+                  <Link href="/goals">
+                    <strong>Your goals, at your pace</strong>
+                    <span>
+                      Review your own check-ins{" "}
+                      <span aria-hidden="true">→</span>
+                    </span>
+                  </Link>
+                )}
+                {productFeatures.studentEmail && (
+                  <Link href="/email-actions">
+                    <strong>One email, one next step</strong>
+                    <span>
+                      Review an email action <span aria-hidden="true">→</span>
+                    </span>
+                  </Link>
+                )}
+                {productFeatures.studentRecovery && (
+                  <Link href="/recovery">
+                    <strong>Catch up at your pace</strong>
+                    <span>
+                      Review a proposal from your saved work{" "}
+                      <span aria-hidden="true">→</span>
+                    </span>
+                  </Link>
+                )}
               </section>
               {sections.Updates.length > 0 && (
                 <details className={styles.toolDisclosure}>
@@ -1309,6 +1342,7 @@ export function TodayWorkspace({
 
         {view === "inbox" && (
           <div className={styles.layout}>
+            {productFeatures.studentEmail && <StudentEmailCard />}
             <nav className={styles.viewTabs} aria-label="Inbox sections">
               <a href="#needs-reply">Needs reply</a>
               <a href="#drafts">Drafts</a>
@@ -1420,6 +1454,8 @@ export function TodayWorkspace({
         {view === "planner" && (
           <div className={styles.focusLayout}>
             <div className={styles.focusColumn}>
+              {productFeatures.studentRecovery && <StudentRecoveryCard />}
+              {productFeatures.studentGoals && <StudentGoalsCard />}
               {renderSection(
                 "Tasks & events",
                 plannerItems.filter(
@@ -1484,17 +1520,26 @@ export function TodayWorkspace({
         )}
 
         {view === "connections" && (
-          <div className={styles.layout}>
-            <ConnectionsPanel
-              agentPaused={agentPaused}
-              onConnectionsChanged={onConnectionsChanged}
-            />
-            <IntelligenceControls
-              connections={connections}
-              paused={agentPaused}
-              onRefresh={refreshToday}
-            />
-          </div>
+          <>
+            {productFeatures.studentLmsFeeds && (
+              <StudentLmsFeeds
+                key={`${account.workspace.id}:${account.id}`}
+                accountId={`${account.workspace.id}:${account.id}`}
+                planningEnabled={productFeatures.studentPlanning}
+              />
+            )}
+            <div className={styles.layout}>
+              <ConnectionsPanel
+                agentPaused={agentPaused}
+                onConnectionsChanged={onConnectionsChanged}
+              />
+              <IntelligenceControls
+                connections={connections}
+                paused={agentPaused}
+                onRefresh={refreshToday}
+              />
+            </div>
+          </>
         )}
 
         {view === "settings" && (
