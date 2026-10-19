@@ -58,7 +58,9 @@ distinguishes implementation, automated verification and real-student validation
 Vox, personal-calendar scheduling and conversation-derived memory remain planned.
 
 NavoX Board includes five authored practice lessons with step playback, quick
-checks, math and diagrams, pan/zoom and pen notes. Set
+checks, progressively drawn sketches, line-by-line text and equation reveals,
+pan/zoom and pen notes. Pause freezes the current reveal; reduced motion keeps
+the cue pacing and shows each element immediately. Set
 `NEXT_PUBLIC_NAVOX_STUDENT_WHITEBOARD_ENABLED=true` before building the web app
 to expose `/board` after sign-in; `/whiteboard` redirects to it.
 
@@ -68,7 +70,9 @@ can name a Board, optionally attach it to their own course, and return to saved
 answers, revisit markers and drawings with playback paused. Save updates use
 revisions; erasure and student-data reset invalidate old requests. Both flags
 default off while release and real-phone qualification remain open. Unsaved
-changes remain temporary. AI lesson generation, Vox voice sync and question
+changes remain temporary, and an unfinished lesson reveal starts again on
+reopening. Text uses the existing system font; glyph-path handwriting remains
+later work. AI lesson generation, Vox voice sync and question
 uploads are later roadmap stages.
 
 ## Design decisions

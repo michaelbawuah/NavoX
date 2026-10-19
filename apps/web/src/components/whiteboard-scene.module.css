@@ -31,6 +31,10 @@
   font-size: 22px;
 }
 
+.mathClipped {
+  overflow: hidden;
+}
+
 .math :global(.katex-display) {
   margin: 0;
   text-align: left;
@@ -51,11 +55,35 @@
   pointer-events: none;
 }
 
+.progressivePath,
+.progressiveFill,
+.revealClip {
+  transition: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .board *,
   .board *::before,
   .board *::after {
     animation: none;
     transition: none;
+  }
+
+  .progressivePath {
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
+    visibility: visible;
+  }
+
+  .progressiveFill {
+    opacity: 1;
+  }
+
+  .revealClip {
+    clip-path: none;
+  }
+
+  .mathWrapper {
+    overflow: auto;
   }
 }

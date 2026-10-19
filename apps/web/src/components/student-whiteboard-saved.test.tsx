@@ -188,6 +188,11 @@ function visibleText() {
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(prefers-reduced-motion: reduce)",
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
   vi.stubGlobal(
     "fetch",
     vi.fn(() => {
@@ -306,7 +311,7 @@ describe("saved authored Boards", () => {
       expect.any(AbortSignal),
     );
     expect(api.create).toHaveBeenCalledTimes(1);
-    expect(host.textContent).toContain("Later changes need another save.");
+    expect(host.textContent).toContain("later changes need another save.");
   });
 
   it("reopens saved progress paused and resets the same lesson when a different saved Board opens", async () => {

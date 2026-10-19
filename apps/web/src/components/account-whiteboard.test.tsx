@@ -209,6 +209,11 @@ function expectFreshBoard() {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(prefers-reduced-motion: reduce)",
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
   vi.stubGlobal("BroadcastChannel", SessionChannel);
   SessionChannel.open.clear();
   currentAccount = ownerA;

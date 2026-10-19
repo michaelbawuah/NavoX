@@ -1,7 +1,15 @@
 "use client";
 
 import katex from "katex";
-import { useId } from "react";
+import {
+  createContext,
+  memo,
+  type ReactNode,
+  type SVGProps,
+  useContext,
+  useId,
+  useMemo,
+} from "react";
 import rough from "roughjs";
 import type { Drawable, Options } from "roughjs/bin/core";
 import { type PlacedAction, wrapBoardText } from "../lib/whiteboard-tutor";
@@ -13,11 +21,99 @@ export type WhiteboardSceneProps = {
   stepIndex: number;
   /** When present, this is the accumulated set of revealed action IDs. */
   visibleActionIds?: ReadonlySet<string>;
+  /** A presentation-only fraction for the next action; committed actions stay complete. */
+  reveal?: { actionId: string; progress: number };
 };
 
 const ink = "#22374a";
 const sage = "#608774";
 const generator = rough.generator();
+const RevealProgress = createContext(1);
+type Interval = readonly [number, number];
+
+function boundedProgress(value: number) {
+  return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+}
+
+function intervalProgress(value: number, [start, end]: Interval) {
+  return boundedProgress((value - start) / (end - start));
+}
+
+/** Only these small presentation nodes consume frame updates. Geometry stays memoized. */
+function MotionPath({
+  interval = [0, 1],
+  ...props
+}: SVGProps<SVGPathElement> & { interval?: Interval }) {
+  const progress = intervalProgress(useContext(RevealProgress), interval);
+  return (
+    <path
+      {...props}
+      pathLength={1}
+      strokeDasharray={1}
+      strokeDashoffset={1 - progress}
+      visibility={progress === 0 ? "hidden" : "visible"}
+      data-motion-progress={progress}
+      className={styles.progressivePath}
+    />
+  );
+}
+
+function FadePart({
+  interval,
+  children,
+}: {
+  interval: Interval;
+  children: ReactNode;
+}) {
+  const progress = intervalProgress(useContext(RevealProgress), interval);
+  return (
+    <g
+      opacity={progress}
+      data-motion-progress={progress}
+      className={styles.progressiveFill}
+    >
+      {children}
+    </g>
+  );
+}
+
+function RevealRectangle({
+  x,
+  y,
+  width,
+  height,
+  interval = [0, 1],
+}: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  interval?: Interval;
+}) {
+  const progress = intervalProgress(useContext(RevealProgress), interval);
+  return (
+    <rect
+      x={x}
+      y={y}
+      width={width * progress}
+      height={height}
+      data-motion-progress={progress}
+    />
+  );
+}
+
+function RevealClip({ id, children }: { id: string; children: ReactNode }) {
+  const progress = useContext(RevealProgress);
+  return (
+    <g
+      clipPath={progress < 1 ? `url(#${id})` : undefined}
+      className={styles.revealClip}
+      data-reveal-clip={id}
+    >
+      {children}
+    </g>
+  );
+}
 
 function seedFor(id: string) {
   let value = 2166136261;
@@ -39,21 +135,47 @@ function roughOptions(id: string, extra: Options = {}): Options {
   };
 }
 
-function SketchPaths({ drawing }: { drawing: Drawable }) {
-  return generator
-    .toPaths(drawing)
-    .map((path) => (
-      <path
+function SketchPaths({
+  drawing,
+  interval = [0, 1],
+  fillInterval = [0, 1],
+}: {
+  drawing: Drawable;
+  interval?: Interval;
+  fillInterval?: Interval;
+}) {
+  const paths = generator.toPaths(drawing);
+  const strokes = paths.filter((path) => !path.fill || path.fill === "none");
+  return paths.map((path) => {
+    const props = {
+      d: path.d,
+      fill: path.fill || "none",
+      stroke: path.stroke,
+      strokeWidth: path.strokeWidth,
+      strokeLinecap: "round" as const,
+      strokeLinejoin: "round" as const,
+      vectorEffect: "non-scaling-stroke",
+    };
+    if (path.fill && path.fill !== "none") {
+      return (
+        <FadePart key={`${path.d}-${path.fill}`} interval={fillInterval}>
+          <path {...props} />
+        </FadePart>
+      );
+    }
+    const index = strokes.indexOf(path);
+    const span = (interval[1] - interval[0]) / strokes.length;
+    return (
+      <MotionPath
         key={`${path.d}-${path.fill}`}
-        d={path.d}
-        fill={path.fill || "none"}
-        stroke={path.stroke}
-        strokeWidth={path.strokeWidth}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        vectorEffect="non-scaling-stroke"
+        {...props}
+        interval={[
+          interval[0] + index * span,
+          interval[0] + (index + 1) * span,
+        ]}
       />
-    ));
+    );
+  });
 }
 
 function BoardText({
@@ -65,6 +187,7 @@ function BoardText({
   centered = false,
   fontSize = 23,
   maxCharacters,
+  interval = [0, 1],
 }: {
   text: string;
   x: number;
@@ -74,7 +197,9 @@ function BoardText({
   centered?: boolean;
   fontSize?: number;
   maxCharacters?: number;
+  interval?: Interval;
 }) {
+  const clipId = `${useId().replaceAll(":", "")}-writing-reveal`;
   const lines = wrapBoardText(
     text,
     maxCharacters ?? Math.max(4, Math.floor(width / (fontSize * 0.57))),
@@ -83,34 +208,69 @@ function BoardText({
   const firstBaseline = centered
     ? y + (height - lines.length * lineHeight) / 2 + fontSize
     : y + fontSize;
+  const rows = lines.map((line, index) => ({
+    text: line,
+    y: firstBaseline + index * lineHeight,
+  }));
   return (
-    <text
-      x={centered ? x + width / 2 : x}
-      y={firstBaseline}
-      fill={ink}
-      fontSize={fontSize}
-      textAnchor={centered ? "middle" : "start"}
-      className={styles.writing}
+    <>
+      <defs>
+        <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
+          {rows.map((line, index) => {
+            const span = (interval[1] - interval[0]) / lines.length;
+            return (
+              <RevealRectangle
+                key={`${line.y}-${line.text}`}
+                x={x - 3}
+                y={line.y - fontSize}
+                width={width + 6}
+                height={lineHeight}
+                interval={[
+                  interval[0] + index * span,
+                  interval[0] + (index + 1) * span,
+                ]}
+              />
+            );
+          })}
+        </clipPath>
+      </defs>
+      <RevealClip id={clipId}>
+        <text
+          x={centered ? x + width / 2 : x}
+          y={firstBaseline}
+          fill={ink}
+          fontSize={fontSize}
+          textAnchor={centered ? "middle" : "start"}
+          className={styles.writing}
+        >
+          {rows.map((line) => (
+            <tspan
+              key={`${line.y}-${line.text}`}
+              x={centered ? x + width / 2 : x}
+              y={line.y}
+            >
+              {line.text}
+            </tspan>
+          ))}
+        </text>
+      </RevealClip>
+    </>
+  );
+}
+
+function MathOverflow({ children }: { children: ReactNode }) {
+  const progress = useContext(RevealProgress);
+  return (
+    <div
+      className={`${styles.mathWrapper}${progress < 1 ? ` ${styles.mathClipped}` : ""}`}
     >
-      {lines
-        .map((line, index) => ({
-          text: line,
-          y: firstBaseline + index * lineHeight,
-        }))
-        .map((line) => (
-          <tspan
-            key={`${line.y}-${line.text}`}
-            x={centered ? x + width / 2 : x}
-            y={line.y}
-          >
-            {line.text}
-          </tspan>
-        ))}
-    </text>
+      {children}
+    </div>
   );
 }
 
 function MathNotation({ item }: { item: PlacedAction }) {
+  const clipId = `${useId().replaceAll(":", "")}-math-reveal`;
   if (item.action.type !== "math") return null;
   let generated: string;
   try {
@@ -137,20 +297,34 @@ function MathNotation({ item }: { item: PlacedAction }) {
     );
   }
   return (
-    <foreignObject
-      x={item.x}
-      y={item.y}
-      width={item.width}
-      height={item.height}
-    >
-      <div className={styles.mathWrapper}>
-        <div
-          className={styles.math}
-          // biome-ignore lint/security/noDangerouslySetInnerHtml: Only KaTeX-generated markup with trust disabled and bounded expansion enters this node.
-          dangerouslySetInnerHTML={{ __html: generated }}
-        />
-      </div>
-    </foreignObject>
+    <>
+      <defs>
+        <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
+          <RevealRectangle
+            x={item.x}
+            y={item.y}
+            width={item.width}
+            height={item.height}
+          />
+        </clipPath>
+      </defs>
+      <RevealClip id={clipId}>
+        <foreignObject
+          x={item.x}
+          y={item.y}
+          width={item.width}
+          height={item.height}
+        >
+          <MathOverflow>
+            <div
+              className={styles.math}
+              // biome-ignore lint/security/noDangerouslySetInnerHtml: Only KaTeX-generated markup with trust disabled and bounded expansion enters this node.
+              dangerouslySetInnerHTML={{ __html: generated }}
+            />
+          </MathOverflow>
+        </foreignObject>
+      </RevealClip>
+    </>
   );
 }
 
@@ -193,6 +367,7 @@ function Arrow({
   return (
     <>
       <SketchPaths
+        interval={[0, 0.7]}
         drawing={generator.line(
           start.x,
           start.y,
@@ -201,7 +376,8 @@ function Arrow({
           roughOptions(item.action.id, { stroke: sage }),
         )}
       />
-      <path
+      <MotionPath
+        interval={[0.7, 0.85]}
         d={path}
         stroke={sage}
         strokeWidth="1.8"
@@ -219,6 +395,7 @@ function Arrow({
           height={28}
           fontSize={16}
           centered
+          interval={[0.85, 1]}
         />
       )}
     </>
@@ -226,20 +403,30 @@ function Arrow({
 }
 
 function Highlight({ item }: { item: PlacedAction }) {
+  const clipId = `${useId().replaceAll(":", "")}-wash-reveal`;
   if (item.action.type !== "highlight") return null;
   const { x, y, width, height } = item;
   if (item.action.style === "wash") {
     return (
-      <rect
-        x={x}
-        y={y}
-        width={width}
-        height={height}
-        rx="10"
-        fill="#dce8bf"
-        fillOpacity="0.45"
-        className={styles.highlight}
-      />
+      <>
+        <defs>
+          <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
+            <RevealRectangle x={x} y={y} width={width} height={height} />
+          </clipPath>
+        </defs>
+        <RevealClip id={clipId}>
+          <rect
+            x={x}
+            y={y}
+            width={width}
+            height={height}
+            rx="10"
+            fill="#dce8bf"
+            fillOpacity="0.45"
+            className={styles.highlight}
+          />
+        </RevealClip>
+      </>
     );
   }
   const options = roughOptions(item.action.id, {
@@ -303,18 +490,21 @@ function Plot({ item, clipId }: { item: PlacedAction; clipId: string }) {
           <rect x={x} y={y} width={width} height={height} />
         </clipPath>
       </defs>
-      <rect
-        x={x}
-        y={y}
-        width={width}
-        height={height}
-        fill="#f4f5ee"
-        stroke="#dce3d9"
-        rx="3"
-      />
-      {[0.25, 0.5, 0.75].map((fraction) => (
-        <path
+      <FadePart interval={[0, 0.1]}>
+        <rect
+          x={x}
+          y={y}
+          width={width}
+          height={height}
+          fill="#f4f5ee"
+          stroke="#dce3d9"
+          rx="3"
+        />
+      </FadePart>
+      {[0.25, 0.5, 0.75].map((fraction, index) => (
+        <MotionPath
           key={fraction}
+          interval={[0.1 + index * 0.05, 0.15 + index * 0.05]}
           d={`M ${x + width * fraction} ${y} V ${y + height} M ${x} ${y + height * fraction} H ${x + width}`}
           fill="none"
           stroke="#dce3d9"
@@ -322,14 +512,16 @@ function Plot({ item, clipId }: { item: PlacedAction; clipId: string }) {
           vectorEffect="non-scaling-stroke"
         />
       ))}
-      <path
+      <MotionPath
+        interval={[0.25, 0.4]}
         d={`M ${x} ${axisY} H ${x + width} M ${axisX} ${y} V ${y + height}`}
         fill="none"
         stroke={ink}
         strokeWidth="1.2"
         vectorEffect="non-scaling-stroke"
       />
-      <path
+      <MotionPath
+        interval={[0.4, 0.85]}
         data-plot-kind={kind}
         d={points}
         clipPath={`url(#${clipId})`}
@@ -339,28 +531,30 @@ function Plot({ item, clipId }: { item: PlacedAction; clipId: string }) {
         strokeLinecap="round"
         vectorEffect="non-scaling-stroke"
       />
-      <text x={x} y={y + height + 20} className={styles.axisLabel}>
-        {domain[0]}
-      </text>
-      <text
-        x={x + width}
-        y={y + height + 20}
-        textAnchor="end"
-        className={styles.axisLabel}
-      >
-        {domain[1]}
-      </text>
-      <text x={x - 9} y={y + 6} textAnchor="end" className={styles.axisLabel}>
-        {range[1]}
-      </text>
-      <text
-        x={x - 9}
-        y={y + height}
-        textAnchor="end"
-        className={styles.axisLabel}
-      >
-        {range[0]}
-      </text>
+      <FadePart interval={[0.85, 1]}>
+        <text x={x} y={y + height + 20} className={styles.axisLabel}>
+          {domain[0]}
+        </text>
+        <text
+          x={x + width}
+          y={y + height + 20}
+          textAnchor="end"
+          className={styles.axisLabel}
+        >
+          {domain[1]}
+        </text>
+        <text x={x - 9} y={y + 6} textAnchor="end" className={styles.axisLabel}>
+          {range[1]}
+        </text>
+        <text
+          x={x - 9}
+          y={y + height}
+          textAnchor="end"
+          className={styles.axisLabel}
+        >
+          {range[0]}
+        </text>
+      </FadePart>
       <BoardText
         text={label}
         x={item.x}
@@ -369,6 +563,7 @@ function Plot({ item, clipId }: { item: PlacedAction; clipId: string }) {
         height={25}
         fontSize={17}
         centered
+        interval={[0.85, 1]}
       />
     </>
   );
@@ -392,7 +587,7 @@ function description(item: PlacedAction) {
   }
 }
 
-function ActionContent({
+const ActionContent = memo(function ActionContent({
   item,
   items,
   clipId,
@@ -423,6 +618,8 @@ function ActionContent({
       return (
         <>
           <SketchPaths
+            interval={[0, 0.72]}
+            fillInterval={[0.72, 0.85]}
             drawing={
               action.shape === "box"
                 ? generator.rectangle(
@@ -450,6 +647,7 @@ function ActionContent({
             centered
             fontSize={21}
             maxCharacters={22}
+            interval={[0.85, 1]}
           />
         </>
       );
@@ -461,21 +659,40 @@ function ActionContent({
     case "plot":
       return <Plot item={item} clipId={clipId} />;
   }
-}
+});
 
 /** A deterministic SVG scene; no model calls, DOM drawing, or arbitrary code. */
 export function WhiteboardScene({
   scene,
   stepIndex,
   visibleActionIds,
+  reveal,
 }: WhiteboardSceneProps) {
   const id = useId().replaceAll(":", "");
   const titleId = `${id}-board-title`;
   const descriptionId = `${id}-board-description`;
+  // The complete map is stable across presentation frames. Reference visibility is
+  // checked separately, so a partially revealed action cannot expose hidden content.
+  const items = useMemo(
+    () => new Map(scene.items.map((item) => [item.action.id, item])),
+    [scene.items],
+  );
+  const next = visibleActionIds
+    ? scene.items.find(
+        (item) =>
+          item.stepIndex <= stepIndex && !visibleActionIds.has(item.action.id),
+      )
+    : undefined;
+  const revealId =
+    reveal && (!visibleActionIds || next?.action.id === reveal.actionId)
+      ? reveal.actionId
+      : undefined;
   const candidates = scene.items.filter(
     (item) =>
       item.stepIndex <= stepIndex &&
-      (!visibleActionIds || visibleActionIds.has(item.action.id)),
+      (!visibleActionIds ||
+        visibleActionIds.has(item.action.id) ||
+        item.action.id === revealId),
   );
   const visibleIds = new Set(candidates.map((item) => item.action.id));
   const visible = candidates.filter((item) => {
@@ -486,7 +703,6 @@ export function WhiteboardScene({
     if (action.type === "highlight") return visibleIds.has(action.target);
     return true;
   });
-  const items = new Map(visible.map((item) => [item.action.id, item]));
   return (
     <svg
       role="img"
@@ -510,14 +726,27 @@ export function WhiteboardScene({
           data-action-id={item.action.id}
           data-action-type={item.action.type}
           data-active-step={item.stepIndex === stepIndex ? "true" : undefined}
+          data-reveal-progress={
+            item.action.id === revealId && reveal
+              ? boundedProgress(reveal.progress)
+              : undefined
+          }
           className={styles.action}
         >
           <title>{description(item)}</title>
-          <ActionContent
-            item={item}
-            items={items}
-            clipId={`${id}-${item.action.id}-clip`}
-          />
+          <RevealProgress.Provider
+            value={
+              item.action.id === revealId && reveal
+                ? boundedProgress(reveal.progress)
+                : 1
+            }
+          >
+            <ActionContent
+              item={item}
+              items={items}
+              clipId={`${id}-${item.action.id}-clip`}
+            />
+          </RevealProgress.Provider>
         </g>
       ))}
     </svg>

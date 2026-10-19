@@ -112,6 +112,11 @@ function prepareInk() {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query === "(prefers-reduced-motion: reduce)",
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }));
   fetchCalls = vi.fn(() => {
     throw new Error(
       "Guided whiteboard lessons must not request a network resource",

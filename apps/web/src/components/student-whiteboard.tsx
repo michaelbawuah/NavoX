@@ -21,12 +21,12 @@ import {
   snapshotForLesson,
 } from "../lib/saved-boards";
 import type { StudentCourse } from "../lib/student-schedule";
+import { useWhiteboardMotion } from "../lib/use-whiteboard-motion";
 import { whiteboardLessons } from "../lib/whiteboard-lessons";
 import {
   advancePlayback,
   initialPlayback,
   needsAnswer,
-  playbackDelay,
   visibleBoardActions,
 } from "../lib/whiteboard-playback";
 import { type Lesson, layoutLesson, stripCues } from "../lib/whiteboard-tutor";
@@ -386,7 +386,7 @@ function StudentWhiteboardSession({
               : previous,
           );
           setNotice(
-            "Board saved. Playback, answers, revisit marks and drawings are kept at this point. Later changes need another save.",
+            "Board saved. Your completed place, answers, revisit marks and drawings are kept. Unfinished lesson writing restarts when reopened; later changes need another save.",
           );
         } else if (command.type === "erase") {
           setCollection(
@@ -727,6 +727,16 @@ function LessonPlayer({
     (saved) => (saved ? restoredBoardPlayback(saved) : initialPlayback()),
   );
   const [speed, setSpeed] = useState(1);
+  const [motionReset, setMotionReset] = useState(0);
+  const commitReveal = useCallback(() => dispatch({ type: "tick" }), []);
+  const { reveal, cancel: cancelReveal } = useWhiteboardMotion({
+    lesson,
+    playback,
+    speed,
+    suspended,
+    onTick: commitReveal,
+    resetKey: motionReset,
+  });
   const [zoom, setZoom] = useState(1);
   const [tool, setTool] = useState<"pan" | "pen">("pan");
   const [strokes, setStrokes] = useState<Stroke[]>(
@@ -761,15 +771,38 @@ function LessonPlayer({
   );
   const selectedAnswer = playback.answers[step.id];
   const isRunning = playback.playing && !waiting;
+  // Student ink stays unchanged while a lesson element reveals. Avoid rebuilding
+  // up to 20,000 annotation coordinates on each presentation frame.
+  const annotations = useMemo(
+    () =>
+      strokes.map((stroke) => (
+        <path
+          key={stroke.id}
+          d={stroke.points
+            .map(
+              (point, index) =>
+                `${index === 0 ? "M" : "L"}${point.x.toFixed(1)},${point.y.toFixed(1)}`,
+            )
+            .join(" ")}
+          fill="none"
+          stroke="#a35d24"
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      )),
+    [strokes],
+  );
   const board = useMemo(
     () => (
       <WhiteboardScene
         scene={scene}
         stepIndex={playback.stepIndex}
         visibleActionIds={visible}
+        reveal={reveal ?? undefined}
       />
     ),
-    [scene, playback.stepIndex, visible],
+    [scene, playback.stepIndex, visible, reveal],
   );
 
   useEffect(
@@ -791,15 +824,6 @@ function LessonPlayer({
   }, [suspended]);
 
   useEffect(() => {
-    if (!playback.playing || suspended) return;
-    const timer = window.setTimeout(
-      () => dispatch({ type: "tick" }),
-      playbackDelay(lesson, playback, speed),
-    );
-    return () => window.clearTimeout(timer);
-  }, [lesson, playback, speed, suspended]);
-
-  useEffect(() => {
     if (window.innerWidth < 580) setZoom(2.5);
   }, []);
 
@@ -817,7 +841,8 @@ function LessonPlayer({
     const active = scene.items
       .filter(
         (item) =>
-          item.stepIndex === playback.stepIndex && visible.has(item.action.id),
+          item.stepIndex === playback.stepIndex &&
+          (visible.has(item.action.id) || item.action.id === reveal?.actionId),
       )
       .at(-1);
     if (!panel || !sheet || !active || tool !== "pan") return;
@@ -830,10 +855,16 @@ function LessonPlayer({
       panel.scrollLeft = Math.max(0, left - 24);
     if (top < panel.scrollTop || bottom > panel.scrollTop + panel.clientHeight)
       panel.scrollTop = Math.max(0, top - 48);
-  }, [playback.stepIndex, scene, tool, visible]);
+  }, [playback.stepIndex, reveal?.actionId, scene, tool, visible]);
+
+  function resetMotion() {
+    cancelReveal();
+    setMotionReset((value) => value + 1);
+  }
 
   function changeStep(index: number) {
     drawing.current = null;
+    resetMotion();
     dispatch({ type: "jump", index });
   }
 
@@ -970,7 +1001,13 @@ function LessonPlayer({
                 ? "Lesson complete"
                 : "Play lesson"}
           </button>
-          <button type="button" onClick={() => dispatch({ type: "replay" })}>
+          <button
+            type="button"
+            onClick={() => {
+              resetMotion();
+              dispatch({ type: "replay" });
+            }}
+          >
             Replay step
           </button>
           <label className={styles.speed}>
@@ -1086,24 +1123,9 @@ function LessonPlayer({
               onLostPointerCapture={endStroke}
             >
               <title>Your drawings for this lesson</title>
-              {strokes.map((stroke) => (
-                <path
-                  key={stroke.id}
-                  d={stroke.points
-                    .map(
-                      (p, i) =>
-                        `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`,
-                    )
-                    .join(" ")}
-                  fill="none"
-                  stroke="#a35d24"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              ))}
+              {annotations}
             </svg>
-            {visible.size === 0 && (
+            {visible.size === 0 && reveal === null && (
               <div className={styles.emptyBoard}>
                 <span aria-hidden="true">✳</span>
                 <p>Room for the idea to unfold.</p>
@@ -1124,7 +1146,7 @@ function LessonPlayer({
               : strokes.at(-1)?.points.length === 1500
                 ? "This stroke reached its 1,500-point limit. Start another stroke, or undo it."
                 : storageEnabled
-                  ? "Save this Board to keep your drawings. Unsaved changes clear when you leave."
+                  ? "Save keeps your drawings and completed writing. Unfinished lesson writing restarts when reopened."
                   : "Drawings stay in this lesson and clear when you leave."}
           </p>
           <button
@@ -1256,6 +1278,7 @@ function LessonPlayer({
           className={styles.restart}
           onClick={() => {
             drawing.current = null;
+            resetMotion();
             dispatch({ type: "restart" });
             setStrokes([]);
             setMarked(new Set());
