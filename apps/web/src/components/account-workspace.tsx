@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   type FormEvent,
@@ -28,6 +29,12 @@ import { StudentGoals, StudentGoalsCard } from "./student-goals";
 import { StudentRecovery, StudentRecoveryCard } from "./student-recovery";
 import { TodayWorkspace, type TodayWorkspaceView } from "./today-workspace";
 import { WorkspaceShell } from "./workspace-shell";
+
+const StudentWhiteboard = dynamic(
+  () =>
+    import("./student-whiteboard").then((module) => module.StudentWhiteboard),
+  { loading: () => <p role="status">Opening whiteboard…</p> },
+);
 
 type AuthMode = "register" | "login";
 
@@ -104,7 +111,8 @@ export function AccountWorkspace({
     | "recovery"
     | "student-email"
     | "goals"
-    | "day-review";
+    | "day-review"
+    | "whiteboard";
   courseId?: string;
 }) {
   const [mode, setMode] = useState<AuthMode>("register");
@@ -294,7 +302,22 @@ export function AccountWorkspace({
           </main>
         )}
         <div hidden={!sessionRestored}>
-          {view === "classes" ? (
+          {view === "whiteboard" ? (
+            <WorkspaceShell
+              current="Whiteboard"
+              accountKey={`${account.workspace.id}:${account.id}`}
+              accountName={account.display_name ?? account.email}
+              onSignOut={signOut}
+            >
+              {productFeatures.studentWhiteboard && sessionRestored ? (
+                <StudentWhiteboard
+                  key={`${account.workspace.id}:${account.id}`}
+                />
+              ) : productFeatures.studentWhiteboard ? null : (
+                <p>Whiteboard lessons are not available on this deployment.</p>
+              )}
+            </WorkspaceShell>
+          ) : view === "classes" ? (
             <WorkspaceShell
               current="Classes"
               accountKey={`${account.workspace.id}:${account.id}`}

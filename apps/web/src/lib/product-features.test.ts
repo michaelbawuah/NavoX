@@ -4,6 +4,27 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.resetModules();
 });
+describe("authored whiteboard release gate", () => {
+  it.each([undefined, "false", "1", "TRUE"])(
+    "keeps the whiteboard off without exact true (%s)",
+    async (value) => {
+      vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_WHITEBOARD_ENABLED", value);
+      vi.resetModules();
+      const { productFeatures } = await import("./product-features");
+      expect(productFeatures.studentWhiteboard).toBe(false);
+    },
+  );
+  it("enables practice lessons independently of models and coursework", async () => {
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_WHITEBOARD_ENABLED", "true");
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_AGENT_ENABLED", "false");
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_COURSEWORK_ENABLED", "false");
+    vi.resetModules();
+    const { productFeatures } = await import("./product-features");
+    expect(productFeatures.studentWhiteboard).toBe(true);
+    expect(productFeatures.studentAgent).toBe(false);
+    expect(productFeatures.studentCoursework).toBe(false);
+  });
+});
 describe("recovery release gate", () => {
   it.each([undefined, "false", "1", "TRUE"])(
     "keeps recovery off without explicit true (%s)",

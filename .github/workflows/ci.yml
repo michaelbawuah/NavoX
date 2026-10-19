@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main, 'feat/student-own-work-verified-base']
+    branches: [main, 'feat/student-own-work-verified-base', 'feat/student-day-review-foundation']
 
 permissions:
   contents: read

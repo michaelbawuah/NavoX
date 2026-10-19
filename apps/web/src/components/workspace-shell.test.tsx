@@ -15,6 +15,29 @@ describe("workspace navigation", () => {
     ).toHaveLength(2);
     expect(html).not.toContain('href="/news"');
     expect(html).not.toContain('href="/subscriptions"');
+    expect(html).not.toContain('href="/whiteboard"');
+  });
+  it("exposes whiteboard navigation only under its own release flag", async () => {
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_WHITEBOARD_ENABLED", "true");
+    vi.resetModules();
+    try {
+      const { WorkspaceShell: EnabledShell } = await import(
+        "./workspace-shell"
+      );
+      const html = renderToStaticMarkup(
+        <EnabledShell current="Whiteboard">Practice lesson</EnabledShell>,
+      );
+      expect(html.match(/href="\/whiteboard"/g)).toHaveLength(1);
+      expect(
+        html.match(
+          /<a(?=[^>]*href="\/whiteboard")(?=[^>]*aria-current="page")[^>]*>/g,
+        ),
+      ).toHaveLength(1);
+      expect(html).not.toContain('href="/news"');
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
   it("marks only the current destination in the main navigation", () => {
     const html = renderToStaticMarkup(
