@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "lessons": [
+    {
+      "id": "ece-flip-flop",
+      "lesson_version": "824230ecec3338661047231fd76a153146d2bfc16c6ae9250dfd8d6052d44781",
+      "steps": [
+        {
+          "id": "ece-setup",
+          "actions": 3,
+          "choices": null
+        },
+        {
+          "id": "ece-edge",
+          "actions": 3,
+          "choices": 3
+        },
+        {
+          "id": "ece-example",
+          "actions": 1,
+          "choices": 3
+        }
+      ],
+      "width": 1120,
+      "height": 592
+    },
+    {
+      "id": "calculus-parts",
+      "lesson_version": "0acb238372aa182544f00637570ccf35ee800dbc5813cdd75a8c10cbbd31ab13",
+      "steps": [
+        {
+          "id": "parts-pick",
+          "actions": 1,
+          "choices": 2
+        },
+        {
+          "id": "parts-assign",
+          "actions": 2,
+          "choices": 3
+        },
+        {
+          "id": "parts-finish",
+          "actions": 3,
+          "choices": null
+        }
+      ],
+      "width": 1120,
+      "height": 848
+    },
+    {
+      "id": "physics-net-force",
+      "lesson_version": "44f0727f711efb05f731c5e668e4096699067cce220b2ed5ff4c61b3edca534f",
+      "steps": [
+        {
+          "id": "force-setup",
+          "actions": 2,
+          "choices": 3
+        },
+        {
+          "id": "force-calculate",
+          "actions": 2,
+          "choices": 3
+        },
+        {
+          "id": "force-graph",
+          "actions": 1,
+          "choices": null
+        }
+      ],
+      "width": 1120,
+      "height": 824
+    },
+    {
+      "id": "linear-algebra-dot-product",
+      "lesson_version": "32db1c1717e8774b73d81ddd0a37045dd5c9f059b4c5e79cbc18e6362832835f",
+      "steps": [
+        {
+          "id": "dot-vectors",
+          "actions": 2,
+          "choices": 3
+        },
+        {
+          "id": "dot-result",
+          "actions": 2,
+          "choices": null
+        },
+        {
+          "id": "dot-perpendicular",
+          "actions": 1,
+          "choices": 3
+        }
+      ],
+      "width": 1120,
+      "height": 808
+    },
+    {
+      "id": "statistics-mean-variance",
+      "lesson_version": "e7bc6bca43696a19648c2572ad074951cf731cabee51bee47e96fd103201120e",
+      "steps": [
+        {
+          "id": "stats-center",
+          "actions": 2,
+          "choices": 3
+        },
+        {
+          "id": "stats-spread",
+          "actions": 2,
+          "choices": 3
+        },
+        {
+          "id": "stats-units",
+          "actions": 1,
+          "choices": null
+        }
+      ],
+      "width": 1120,
+      "height": 648
+    }
+  ]
+}

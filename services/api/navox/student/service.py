@@ -915,6 +915,7 @@ async def reset_data(
     request_id: UUID,
     settings: Settings,
 ) -> bool:
+    from navox.board.service import forget_board_data
     from navox.connectors.secrets import SecretBrokerError
     from navox.coursework.service import clear_coursework_data
     from navox.lms_feeds.service import (
@@ -967,6 +968,7 @@ async def reset_data(
     await forget_planning_data(database, user_id, workspace_id)
     await forget_recovery_data(database, user_id, workspace_id)
     await forget_goals_data(database, user_id, workspace_id)
+    await forget_board_data(database, user_id, workspace_id)
     await clear_coursework_data(database, user_id=user_id, workspace_id=workspace_id)
     from navox.student_alerts.service import clear_student_alert_data
 

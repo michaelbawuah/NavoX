@@ -18,6 +18,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from navox.db import (
     ai_registry,  # noqa: F401 - registers AI registry metadata
+    board,  # noqa: F401 - registers encrypted authored Board saves and retry fences
     communications,  # noqa: F401
     coursework,  # noqa: F401 - registers private course materials and source links
     knowledge,  # noqa: F401 - registers SPEC-007 knowledge foundation metadata
