@@ -60,6 +60,10 @@ export interface VoxTransportRequest {
   mayPlayAudio(): boolean;
   /** Local detection only. Standby must never send audio to a speech provider. */
   mayListenForWake(): boolean;
+  /** Native metadata renewal only; independent of microphone, speaker and standby. */
+  mayRenewReservation?(): boolean;
+  /** Synchronous ownership/privacy notification, including while a join is pending. */
+  observeReservationAuthority?(listener: () => void): () => void;
   onWake(): void;
   onEvent(event: VoxTransportEvent): void;
 }
@@ -123,6 +127,7 @@ export class VoxCallController {
   private releases = new WeakMap<VoxConnection, Promise<boolean>>();
   private usedCallIds = new Set<string>();
   private listeners = new Set<(state: VoxCallState) => void>();
+  private reservationObservers = new Set<() => void>();
   private disposed = false;
   private lastActivityAt = 0;
   private lastNow = 0;
@@ -264,6 +269,12 @@ export class VoxCallController {
   }
 
   private syncControls(): boolean {
+    try {
+      for (const listener of this.reservationObservers) listener();
+    } catch {
+      void this.hangUp("connection-failed");
+      return false;
+    }
     const connection = this.connection;
     if (!connection) return true;
     try {
@@ -385,16 +396,26 @@ export class VoxCallController {
         this.state.phase === "standby" &&
         this.options.transport.localWakeAvailable &&
         !this.state.microphoneMuted,
+      mayRenewReservation: () =>
+        this.bound(epoch, scope, callId) && this.ongoing(),
+      observeReservationAuthority: (listener) => {
+        this.reservationObservers.add(listener);
+        return () => this.reservationObservers.delete(listener);
+      },
       onWake: () => {
         if (request.mayListenForWake()) this.resume();
       },
       onEvent: (event) => {
-        if (!this.attached(epoch, scope, callId) || !this.joined()) return;
+        if (!this.attached(epoch, scope, callId) || !this.ongoing()) return;
+        if (event.type === "ended") {
+          void this.hangUp("transport-ended");
+          return;
+        }
+        if (!this.joined()) return;
         if (event.type === "disconnected") {
           if (this.state.ownerVerified) void this.reconnect();
           else this.reconnectAfterCheck = true;
-        } else if (event.type === "ended") void this.hangUp("transport-ended");
-        else if (
+        } else if (
           event.type === "playback-blocked" ||
           event.type === "playback-ready"
         ) {
@@ -665,5 +686,6 @@ export class VoxCallController {
     this.state.ownerVerified = false;
     await this.hangUp("disposed");
     this.listeners.clear();
+    this.reservationObservers.clear();
   }
 }
