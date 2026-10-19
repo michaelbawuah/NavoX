@@ -15,7 +15,7 @@ describe("workspace navigation", () => {
     ).toHaveLength(2);
     expect(html).not.toContain('href="/news"');
     expect(html).not.toContain('href="/subscriptions"');
-    expect(html).not.toContain('href="/whiteboard"');
+    expect(html).not.toContain('href="/board"');
   });
   it("exposes whiteboard navigation only under its own release flag", async () => {
     vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_WHITEBOARD_ENABLED", "true");
@@ -25,12 +25,12 @@ describe("workspace navigation", () => {
         "./workspace-shell"
       );
       const html = renderToStaticMarkup(
-        <EnabledShell current="Whiteboard">Practice lesson</EnabledShell>,
+        <EnabledShell current="Board">Practice lesson</EnabledShell>,
       );
-      expect(html.match(/href="\/whiteboard"/g)).toHaveLength(1);
+      expect(html.match(/href="\/board"/g)).toHaveLength(1);
       expect(
         html.match(
-          /<a(?=[^>]*href="\/whiteboard")(?=[^>]*aria-current="page")[^>]*>/g,
+          /<a(?=[^>]*href="\/board")(?=[^>]*aria-current="page")[^>]*>/g,
         ),
       ).toHaveLength(1);
       expect(html).not.toContain('href="/news"');

@@ -29,11 +29,11 @@ export function StudentWhiteboard() {
   const lesson = whiteboardLessons.find((item) => item.id === lessonId);
   if (!lesson) return <p>This lesson could not be opened.</p>;
   return (
-    <section className={styles.workspace} aria-label="Whiteboard tutor">
+    <section className={styles.workspace} aria-label="NavoX Board">
       <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}>A little clearer, one step at a time</p>
-          <h1>Your whiteboard.</h1>
+          <h1>NavoX Board.</h1>
           <p>See the idea take shape. Pause, try a step, and make it yours.</p>
         </div>
         <span className={styles.badge}>Guided lessons</span>
@@ -51,7 +51,7 @@ export function StudentWhiteboard() {
             </option>
           ))}
         </select>
-        <p>Five practice walkthroughs. No microphone or uploads needed.</p>
+        <p>Five short practice walkthroughs, ready to explore.</p>
       </div>
       <LessonPlayer key={lesson.id} lesson={lesson} />
     </section>
@@ -371,7 +371,7 @@ function LessonPlayer({ lesson }: { lesson: Lesson }) {
           onLostPointerCapture={panEnd}
           // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users need to focus and scroll the board.
           tabIndex={0}
-          aria-label="Whiteboard. Scroll to pan; use zoom controls to enlarge."
+          aria-label="Board. Scroll to pan; use zoom controls to enlarge."
         >
           <div
             ref={paper}

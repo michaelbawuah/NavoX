@@ -12,7 +12,7 @@ export type WorkspaceDestination =
   | "Assistant"
   | "Inbox"
   | "Planner"
-  | "Whiteboard"
+  | "Board"
   | "News"
   | "Subscriptions"
   | "Search"
@@ -26,7 +26,7 @@ const destinations: { label: WorkspaceDestination; href: string }[] = [
   { label: "Inbox", href: "/inbox" },
   { label: "Planner", href: "/planner" },
   ...(productFeatures.studentWhiteboard
-    ? [{ label: "Whiteboard" as const, href: "/whiteboard" }]
+    ? [{ label: "Board" as const, href: "/board" }]
     : []),
   ...(productFeatures.news ? [{ label: "News" as const, href: "/news" }] : []),
   ...(productFeatures.subscriptions
@@ -43,7 +43,7 @@ const iconPaths: Record<
   Assistant: "M20 11a8 8 0 0 1-8 8H5l-3 3V11a10 10 0 0 1 18 0M7 10h8M7 14h5",
   Inbox: "M4 4h16v16H4zM4 12h5l2 3h2l2-3h5",
   Planner: "M4 5h16v16H4zM8 3v4M16 3v4M4 10h16M8 14h3M8 17h6",
-  Whiteboard: "M3 4h18v13H3zM8 21l4-4 4 4M7 9h5M7 12h9",
+  Board: "M3 4h18v13H3zM8 21l4-4 4 4M7 9h5M7 12h9",
   News: "M4 4h13v16H4zM17 8h3v12H4M7 8h7M7 12h3M7 16h7",
   Subscriptions: "M4 6h16v13H4zM4 10h16M7 15h4",
   Search: "M20 20l-5-5M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0",

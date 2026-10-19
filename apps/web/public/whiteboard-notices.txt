@@ -1,4 +1,4 @@
-NavoX Whiteboard Tutor — third-party notices
+NavoX Board — third-party notices
 
 KaTeX 0.19.0 (equations, styles and bundled fonts)
 

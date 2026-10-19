@@ -52,15 +52,15 @@ scheduling and disclosed text-based memory join the build priorities. Adaptive
 planning, course workspaces, recovery and coaching follow measured student gates.
 
 The [student roadmap](docs/product/student-roadmap.md) is the canonical build
-specification for the full product plan, **Plan Update 1 and the Whiteboard Tutor guide**.
+specification for the full product plan, **Plan Update 1, the Whiteboard Tutor guide and Whiteboard Update 1 — Builder Spec**.
 The updates win within their respective scope. The roadmap maps requirements to acceptance criteria and
 distinguishes implementation, automated verification and real-student validation;
 Vox, personal-calendar scheduling and conversation-derived memory remain planned.
 
-The first Whiteboard Tutor increment adds five authored practice lessons with
+The first NavoX Board increment adds five authored practice lessons with
 step playback, quick checks, math and diagrams, pan/zoom and temporary pen notes.
 Set `NEXT_PUBLIC_NAVOX_STUDENT_WHITEBOARD_ENABLED=true` before building the web
-app to expose `/whiteboard` after sign-in. The flag defaults off while browser
+app to expose `/board` after sign-in; `/whiteboard` redirects to it. The flag defaults off while browser
 and phone qualification remains open. Drawings and answers stay in the current
 view; they are not saved. AI lesson generation, Vox voice sync, question uploads
 and course-linked lesson saving are subsequent roadmap stages.

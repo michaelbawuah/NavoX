@@ -77,7 +77,7 @@ describe("whiteboard SVG scene", () => {
       const titleId = svg?.getAttribute("aria-labelledby");
       const descriptionId = svg?.getAttribute("aria-describedby");
       expect(document.getElementById(titleId || "")?.textContent).toBe(
-        "Lesson whiteboard",
+        "Lesson board",
       );
       expect(
         document.getElementById(descriptionId || "")?.textContent?.length,

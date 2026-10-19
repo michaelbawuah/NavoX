@@ -1,16 +1,13 @@
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const flags = vi.hoisted(() => ({ studentWhiteboard: false }));
 vi.mock("../../lib/product-features", () => ({ productFeatures: flags }));
-vi.mock("../../components/account-workspace", () => ({
-  AccountWorkspace: ({ view }: { view: string }) =>
-    createElement("main", null, view),
-}));
 vi.mock("next/navigation", () => ({
   notFound: () => {
     throw new Error("NOT_FOUND");
+  },
+  redirect: (path: string) => {
+    throw new Error(`REDIRECT:${path}`);
   },
 }));
 
@@ -25,10 +22,8 @@ describe("optional whiteboard route", () => {
     expect(() => WhiteboardPage()).toThrow("NOT_FOUND");
   });
 
-  it("opens the account-scoped whiteboard view only when explicitly enabled", () => {
+  it("redirects old links to the canonical Board route when enabled", () => {
     flags.studentWhiteboard = true;
-    expect(renderToStaticMarkup(createElement(WhiteboardPage))).toBe(
-      "<main>whiteboard</main>",
-    );
+    expect(() => WhiteboardPage()).toThrow("REDIRECT:/board");
   });
 });

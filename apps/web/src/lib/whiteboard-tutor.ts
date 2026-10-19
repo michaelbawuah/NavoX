@@ -1,61 +1,20 @@
+import type {
+  BoardAction,
+  BoardLesson as Lesson,
+  BoardLessonStep as LessonStep,
+  BoardPlace as Place,
+} from "@navox/contracts";
 import { renderToString } from "katex";
 
-export type Place =
-  | "top-left"
-  | "next-row"
-  | `below:${string}`
-  | `right-of:${string}`;
-
-export type BoardAction =
-  | { id: string; type: "write"; text: string; place: Place }
-  | { id: string; type: "math"; latex: string; place: Place }
-  | {
-      id: string;
-      type: "shape";
-      shape: "box" | "ellipse";
-      label: string;
-      place: Place;
-    }
-  | { id: string; type: "arrow"; from: string; to: string; label?: string }
-  | {
-      id: string;
-      type: "highlight";
-      target: string;
-      style: "circle" | "underline" | "wash";
-    }
-  | {
-      id: string;
-      type: "plot";
-      kind: "linear" | "quadratic" | "sine";
-      domain: [number, number];
-      range: [number, number];
-      label: string;
-      place: Place;
-    };
-
-export type LessonStep = {
-  id: string;
-  title: string;
-  say: string;
-  actions: BoardAction[];
-  check?: {
-    question: string;
-    choices: string[];
-    answer: number;
-    explanation: string;
-  };
-};
-
-export type Lesson = {
-  version: 1;
-  id: string;
-  title: string;
-  subject: string;
-  topic: string;
-  minutes: number;
-  description: string;
-  steps: LessonStep[];
-};
+export type {
+  BoardAction,
+  BoardLesson,
+  BoardLesson as Lesson,
+  BoardLessonStep,
+  BoardLessonStep as LessonStep,
+  BoardPlace,
+  BoardPlace as Place,
+} from "@navox/contracts";
 
 export type PlacedAction = {
   action: BoardAction;

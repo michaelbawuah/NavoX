@@ -247,9 +247,7 @@ describe("interactive guided whiteboard", () => {
     expect(button("Zoom in").disabled).toBe(true);
     click(button("Zoom out"));
     expect(zoom()).toBe("225%");
-    const viewport = host.querySelector<HTMLElement>(
-      '[aria-label^="Whiteboard."]',
-    );
+    const viewport = host.querySelector<HTMLElement>('[aria-label^="Board."]');
     if (!viewport) throw new Error("Missing viewport");
     viewport.scrollLeft = 80;
     viewport.scrollTop = 120;
@@ -372,9 +370,7 @@ describe("interactive guided whiteboard", () => {
   });
 
   it("pauses playback for wheel, manual pan and keyboard scrolling without fighting navigation", () => {
-    const viewport = host.querySelector<HTMLElement>(
-      '[aria-label^="Whiteboard."]',
-    );
+    const viewport = host.querySelector<HTMLElement>('[aria-label^="Board."]');
     if (!viewport) throw new Error("Missing viewport");
     Object.defineProperty(viewport, "setPointerCapture", {
       configurable: true,
@@ -441,9 +437,7 @@ describe("interactive guided whiteboard", () => {
   });
 
   it("follows a newly revealed right-hand action at enlarged zoom, then yields to manual navigation", () => {
-    const viewport = host.querySelector<HTMLElement>(
-      '[aria-label^="Whiteboard."]',
-    );
+    const viewport = host.querySelector<HTMLElement>('[aria-label^="Board."]');
     const paper = viewport?.firstElementChild;
     if (!viewport || !paper) throw new Error("Missing board viewport or paper");
     Object.defineProperties(viewport, {
@@ -497,9 +491,7 @@ describe("interactive guided whiteboard", () => {
   });
 
   it("pans the scrollable board only for an active drag and leaves annotations untouched", () => {
-    const viewport = host.querySelector<HTMLElement>(
-      '[aria-label^="Whiteboard."]',
-    );
+    const viewport = host.querySelector<HTMLElement>('[aria-label^="Board."]');
     if (!viewport) throw new Error("Missing viewport");
     Object.defineProperty(viewport, "setPointerCapture", {
       configurable: true,

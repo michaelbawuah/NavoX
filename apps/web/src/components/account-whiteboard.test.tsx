@@ -120,7 +120,7 @@ function click(element: HTMLElement) {
 }
 
 function board() {
-  return host.querySelector('[aria-label="Whiteboard tutor"]');
+  return host.querySelector('[aria-label="NavoX Board"]');
 }
 
 function chooseCalculus() {
@@ -223,9 +223,7 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  act(() =>
-    root.render(createElement(AccountWorkspace, { view: "whiteboard" })),
-  );
+  act(() => root.render(createElement(AccountWorkspace, { view: "board" })));
 });
 
 afterEach(() => {

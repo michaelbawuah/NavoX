@@ -9,18 +9,24 @@ their school to approve an integration.
 This is the canonical build specification for the **NavoX for Students — Product
 Plan, October 17, 2026** (38 pages), amended by **NavoX Plan Update 1 — Builder
 Changes, October 17, 2026** (13 pages), and extended by **NavoX Whiteboard Tutor —
-Research & Build Guide, October 17, 2026** (14 pages), supplied on October 18,
-2026. **Update 1 wins wherever the original plan conflicts with it.** The tutor
-guide adds the learning experience specified below; it does not replace Update
-1's Vox, permission or memory requirements. References labeled `Update` point to
-the amendment, `Tutor` to the tutor guide, and other page references to the
-original plan. Requirements and priorities describe the intended product, not a
-claim that it has shipped.
+Research & Build Guide, October 17, 2026** (14 pages) and **NavoX Whiteboard Update
+1 — Builder Spec, October 18, 2026** (22 pages). **Plan Update 1 wins over the
+original plan; the Board builder spec wins over the tutor guide where they
+conflict.** Board additions preserve Plan Update 1's Vox, privacy, memory and
+exact-action approvals. References labeled `Update` point to the plan amendment,
+`Tutor` to the 14-page guide, `Board` to the 22-page builder spec, and other page
+references to the original plan. Requirements and priorities describe the
+intended product, not a claim that it has shipped.
 
 The supplied amendment is `NavoX-Plan-Update-1.pdf`, SHA-256
 `76f742d76c022dd80125889e88cdd4aaceacf85988d34ea7b9bf269209c9cca8`.
 The supplied tutor guide is `NavoX-Whiteboard-Tutor-Guide.pdf`, SHA-256
 `ecf28e86306ec7353a4a29a663f157a83f55458e21346c6ecb2f0cdc92cfa17c`.
+The supplied Board builder spec is `NavoX-Board-Builder-Spec.pdf`, SHA-256
+`7acaf3e6d46a100def09fa7426d1154206126afde0678abd736b4e886dd59174`.
+The optional six-page `NavoX-Builder-Resource-Pack.pdf` (October 18, 2026), SHA-256
+`24d09bef071daf94b33ddc30f89d7fafc26ced94865c3d092f2d7f5e8de5b359`,
+is a reference catalog, not a requirements amendment or a change in precedence.
 The source PDFs are retained separately; this specification records their
 builder requirements without placing private conversations or test operations
 in git.
@@ -79,7 +85,8 @@ calendar write or conversation retention for an existing account.
 | Manual day review | Explicit morning, evening and week-so-far reviews use saved schedules, recorded outcomes and self-reported goals. The assembled web suite/build passed; required PostgreSQL boundary cases and all protected PR 35 CI checks later passed. | Browser verification and complete coaching. Default off; no automatic coaching, rescheduling, mood intake or stored review history. |
 | Model selector evaluation | The OpenAI structured-output adapter can propose only registered host tools when model metadata also permits it. A 24-case public synthetic corpus exercises real adapter wire handling through mock transport; 71 new and 160 compatibility tests pass, including exact task-scope denial. | Live synthetic evaluation, separately reviewed qualification import, exact sensitive-data grants and explicit one-question consent. Reports are review-only and cannot qualify traffic; no new provider route is activated. |
 | Update 1 foundation | The shared top-bar one-off voice launcher, page-owned hands-free/VAD primitives, read-only primary Google Calendar connector, generic reviewed-action machinery and explicit saved memory can be reused. | Vox/LiveKit call lifecycle, standby/reconnect, multi-calendar busy reads and writes, Outlook/iCloud support, combined availability, conversation-derived memory and behavior analytics are new work. Existing quick asks and saved preferences do not satisfy these requirements. |
-| Whiteboard tutor | **First renderer increment implemented and automatically checked:** a custom SVG board with validated hand-authored scripts, five practice lessons, the initial six action types, reading-paced play/pause, step replay, timeline, pan/zoom, temporary pen notes and two quick checks per lesson. | Source: `whiteboard-tutor.ts`, `whiteboard-lessons.ts`, `whiteboard-playback.ts`, `whiteboard-scene.tsx` and `student-whiteboard.tsx` in apps/web, with schema, renderer, reducer, DOM-interaction, account-lifecycle and route tests. The `/whiteboard` route and navigation require `NEXT_PUBLIC_NAVOX_STUDENT_WHITEBOARD_ENABLED=true`; it defaults off. It does not yet provide generated lessons, actual OCR, live Vox/narration sync, animated handwriting paths, course saving, board PDF export, flashcards or automatic topic/memory updates. Smooth playback on real phones is a separate acceptance gate; desktop or simulated tests cannot satisfy it. |
+| NavoX Board foundation | **Only the authored renderer increment is implemented and automatically checked:** a custom SVG board with validated hand-authored scripts, five practice lessons, the initial six action types, reading-paced play/pause, step replay, timeline, pan/zoom, temporary pen notes and two quick checks per lesson. The public name is NavoX Board; `/board` is canonical and `/whiteboard` is a flag-protected redirect. Authored-lesson v1 types now live in `packages/contracts/src/board.ts`, exported by `@navox/contracts`; this does not add new runtime actions or generated lessons. | Source: `whiteboard-tutor.ts`, `whiteboard-lessons.ts`, `whiteboard-playback.ts`, `whiteboard-scene.tsx` and `student-whiteboard.tsx` in apps/web, with schema, renderer, reducer, DOM-interaction, account-lifecycle and route tests. Deployment requires `NEXT_PUBLIC_NAVOX_STUDENT_WHITEBOARD_ENABLED=true`, default off; the existing internal component/flag names remain. Name clearance is pending. Home suggestions, arbitrary question generation, document/page processing, numbered verified step cards, illustration/update actions, exam prep, saved/recent boards, topic memory, actual OCR, live Vox/narration sync, animated handwriting, board export and flashcards remain planned. Real-phone playback and the new acceptance corpora are not qualified by desktop or simulated tests. |
+| Board test-corpus foundation | `evals/board/lesson-questions.json` contains 100 synthetic questions, 20 each in calculus, physics, ECE, chemistry and statistics, spanning 25 question families. `evals/board/student-profiles.json` contains ten synthetic student profiles. The question-pack targeted run passed 102 integrity checks and typecheck; an independent audit of all 100 answer keys found zero discrepancies. The profile-pack run passed 43 targeted checks and typecheck. | Subject-specialist review remains pending. These are fixture/integrity/answer-key results, not live lesson-writer correctness, home-API ranking/latency, model, phone or student qualification. The thirty-document and forty human-work-photo sets still require authorized curation; no handwriting-photo evidence is fabricated. |
 
 Private files and feed links are not sent to a model by these features. Course
 search runs locally over the selected course's authorized text. The private
@@ -103,7 +110,7 @@ derived study plans so a delayed refresh cannot recreate forgotten content.
 | 1 — Know the day | Any-school onboarding; timetable imports and reliable class lookup; alerts; installable web app. Update 1 makes the Vox call foundation the highest-priority voice work; a small chat mic remains secondary. **In progress.** | At least 99% correct class answers with 20 real test students. Recruit 20–30 students across several colleges. |
 | 2 — Plan the day | Shared tool core, daily blocks and replanning, coursework feeds/workspaces, personal-calendar connections and combined availability. | At least 60% of plan blocks marked Done. |
 | 3 — Act for you | Reviewed email-to-action, recovery and extension drafts; approved personal-calendar scheduling; complete Vox conversation and interruptions. Text history and memory are a high-priority cross-phase dependency, not postponed until this phase launches. | At least 70% of email drafts approved with light edits. |
-| 4 — Coach | Semester goals; morning, evening, and weekly check-ins; assignment-help tools and PDF export; whiteboard tutoring under TUT-01–20; course AI policies; opt-in attendance; study, practice, and wind-down voice modes. | At least 50% of students retained after four weeks. Tutor capabilities also need their own staged checks and real-device evidence below. |
+| 4 — Coach | Semester goals; morning, evening, and weekly check-ins; assignment-help tools and PDF export; NavoX Board under TUT-01–32; course AI policies; opt-in attendance; study, practice, and wind-down voice modes. | At least 50% of students retained after four weeks. Board capabilities also need their own acceptance checks and real-device evidence below. |
 | 5 — Grow | Degree consequences, campus guide, more school profiles, native mobile app, verified public Gmail access, and school-approved learning-system APIs. | Expand only with the preceding gates and the permissions each integration requires. |
 
 The source plan labels these roughly weeks 1–2, 3–5, 6–8, 9–11, and week 12
@@ -123,8 +130,8 @@ onward. These are planning estimates, not promised dates or substitutes for gate
 4. Instrument the specified behavior metrics as calls become available, with no
    in-app naturalness survey. Verify privacy, provider behavior, cost and real
    device results before enabling a wider rollout.
-5. Build the whiteboard renderer in parallel from hand-authored practice scripts,
-   following the tutor phases below. Add generation and Vox integration only
+5. Extend the authored renderer into NavoX Board in parallel, following the
+   eight-sprint builder plan below. Add generation and Vox integration only
    through the same qualified provider/session boundaries; a local board is not
    evidence that a live tutor call is ready.
 
@@ -165,7 +172,7 @@ table does not mark unfinished work as verified.
 | STU-28 | **When am I free?** Answer today/week availability using waking hours, calendar events, classes, shifts, commitments, travel and meeting buffers. Treat study blocks as movable; omit sub-30-minute gaps unless short slots or a shorter meeting are requested/confirmed. | High priority / Update 6–8; AVL-01–02 |
 | STU-29 | **Find and schedule a meeting.** Suggest two suitable options with reasons, ask before adding, accept a contextual natural yes, verify creation and offer Undo and a useful next step. Other people's availability or agreement must not be invented. | High priority / Update 7–8; AVL-03–04 |
 | STU-30 | **Get to know the student.** Disclosed ordinary call/chat text becomes encrypted history, summaries, facts and open threads. Memory is useful, correctable and forgettable; off-the-record conversations are neither saved nor learned from. | High priority / Update 8–10; MEM-01–06 |
-| STU-31 | **Show it on a whiteboard.** Explain aloud while writing and drawing step by step on one board; allow interruptions answered in place, student contributions and course-aware practice. Deliver Explain, Solve with me, Check my work and Recap under TUT-01–20 and the existing academic-integrity boundary. | Renderer first; full learning flow in 4 / Tutor 2–14 |
+| STU-31 | **NavoX Board.** Explain aloud while writing and drawing step by step on one board; allow interruptions answered in place, student contributions and course-aware practice. Deliver Explain, Solve with me, Check my work, Recap and college Exam prep through the Board home, source pages and reviewed learning flow under TUT-01–32 and the existing academic-integrity boundary. | Authored renderer foundation; full learning flow in 4 / Tutor 2–14; Board 1–22 |
 
 ## Voice requirements
 
@@ -271,12 +278,13 @@ Vox's persistent session must not disable existing account/course privacy
 clearing when routes, source revisions or owners change. Preserve call continuity
 through a scoped session boundary rather than keeping stale course UI alive.
 
-## Whiteboard tutor
+## NavoX Board
 
 NavoX teaches on one persistent, editable board: narration and drawing progress
 together, and the student's question is answered beside the current explanation
 rather than buried in a separate chat thread. This is NavoX's own implementation
-from the supplied guide. Competitor descriptions in the guide are research
+from the supplied guide and builder update. The app calls this **NavoX Board**;
+whiteboard tutor is internal descriptive language. Competitor descriptions are research
 references, not verified claims about their private implementation.
 
 The first renderer increment is **implemented and automatically checked**, limited to validated
@@ -284,14 +292,17 @@ hand-authored practice lessons and the six initial actions. Scripts use narratio
 cues for reading-paced reveals, not speech. Pen notes, check answers and review
 markers stay in RAM and clear on lesson change, navigation, restart or account
 session revalidation; they are not course history or saved learning progress. All complete tutor
-requirements below remain **Planned** until their full behavior and error paths
+requirements below, including every addition in the 22-page builder spec, remain
+**Planned** until their full behavior and error paths
 are implemented and verified. Selecting a mode or displaying a sample script
 does not establish generated tutoring, grading, voice, OCR or personalization.
+In this requirements table, unprefixed page numbers refer to the Tutor guide;
+`Board` identifies the newer builder spec and `Update` the plan amendment.
 
-| ID | Requirement and acceptance criteria | Tutor pages |
+| ID | Requirement and acceptance criteria | Tutor / Board pages |
 | --- | --- | --- |
 | TUT-01 | **Open in context.** Open from Vox with Can you show me? / Draw it out without ending the call; from a problem photo; from Explain this on an authorized course slide, prompt or note; from a reviewed missed-lecture recap; and from Show me why that's wrong after a quiz mistake. Preserve selected course/source provenance and disclose unavailable entry paths. These entry points do not grant microphone, photo, model or course access by themselves. | 2–3 |
-| TUT-02 | **Four distinct modes.** Explain teaches a concept step by step with a final check. Solve with me asks for the student's next step and offers hints before revealing it. Check my work reproduces confirmed student work and identifies the exact erroneous line with feedback. Recap builds a short lesson from the selected course's actual slides/notes. Do not present generic practice samples as source-grounded Recap or completed Check my work. | 3–4 |
+| TUT-02 | **Four baseline modes plus exam prep.** Explain teaches a concept step by step with a final check. Solve with me asks for the student's next step and offers hints before revealing it. Check my work reproduces confirmed student work and identifies the exact erroneous line with feedback. Recap builds a short lesson from the selected course's actual slides/notes. College Exam prep composes these activities under TUT-27. Do not present generic practice samples as source-grounded Recap or completed Check my work. | Tutor 3–4; Board 7–8, 11, 13–14 |
 | TUT-03 | **One navigable board.** Keep prior steps visible on a board that grows downward. Support play/pause, replay current step, timeline jumps, zoom and pan; offer Slower, Explain it differently, Give me an example and Skip ahead by buttons and, when Vox is qualified, voice. The alternate explanation changes approach rather than repeating the same wording. Controls must remain usable with touch and keyboard; preserve access to the explanation text. | 2–5, 8 |
 | TUT-04 | **Student contributions and useful outputs.** Allow finger, stylus or mouse drawing and typed/written next steps, with Is this right? feedback. Offer explicit Save to course workspace, board-to-PDF export and flashcard creation, each preserving source and owner scope. Reuse the existing approval, publication, retention and deletion boundaries; generated teaching material must not be mislabeled as the student's own-work submission export. None of these outputs is included in the first renderer increment. | 4, 12–14 |
 | TUT-05 | **Graded-work policy.** Use Solve with me or Check my work for graded assignments: hints and feedback, not finished submission answers. Full worked explanations are appropriate for practice and concepts. Apply the course's sourced syllabus AI policy when unclear, ask when needed, and preserve STU-17's disclosed timed-exam restriction. A mode switch or uploaded prompt is not permission for graded ghostwriting. | 4, 13–14 |
@@ -304,12 +315,108 @@ does not establish generated tutoring, grading, voice, OCR or personalization.
 | TUT-12 | **Interrupt and resume in place.** On student speech, stop voice and pause at the current action using Vox's barge-in boundary. Send only the authorized question and current step IDs/content to the model. Return a short spoken answer or insert new validated steps directly below the current step. Continue/Okay resumes from the interruption point without duplicating completed actions. Test interruption during drawing, speech, generated insertion, reconnection and account/source changes; a stale reply must not restore cleared content. | 6, 9, 13–14 |
 | TUT-13 | **Read work, then confirm.** Photo/handwriting extraction returns text/LaTeX plus each line's image location. Show the extracted work and let the student correct misreads before checking it or circling an error. Evaluate a dedicated math-OCR service only if needed and authorized. Uploads require size/type limits, private source access and explicit provider scope; no OCR or vision service is activated by the renderer increment. | 3–4, 9, 11, 13 |
 | TUT-14 | **Course-aware context.** Use the selected course, level and authorized materials, with the professor's notation/examples and links to the actual source slide or note. Retrieve known prerequisites, learning preferences and confirmed mistakes only from permitted owner/course history. Fit lesson length to available time and deadlines read through existing calendar/plan permissions; do not invent missed attendance, mastery, urgency or source material. | 2, 4–6 |
-| TUT-15 | **Per-course topic map.** Show a readable topic list with labeled/color-coded not started, shaky, getting it and mastered states. Under a disclosed learning-data contract, update from actual lessons, quick-check/quiz results and Check-my-work evidence, preserving event provenance, uncertainty and course scope. Let the student correct the map or say I already know this to skip; finishing a lesson alone must not falsely establish mastery. Known mistakes and preferences are visible, editable and forgettable under MEM-01–06 before any durable learning-profile or memory writes begin. | 4–6 |
+| TUT-15 | **Per-course topic map.** Show labeled/color-coded not started, shaky, getting it and mastered states. Under a disclosed learning-data contract, preserve actual check evidence, first-try status, provenance, uncertainty and course scope, using the Board transition rules below. Let the student correct the map; I already know this explicitly marks mastered as a student assertion, distinguishable from observed check evidence. Completing a lesson alone does not establish mastery. Known mistakes and preferences remain visible, editable and forgettable under MEM-01–06 before durable learning-profile or memory writes begin. | Tutor 4–6; Board 12–13 |
 | TUT-16 | **Learning loop.** End every lesson with 1–3 spoken or tapped quick questions and explanatory feedback. Solve with me waits for the next student step before showing it. Offer short spaced reviews of shaky topics over subsequent days and exam-mode lessons from shaky prerequisites/topics. Proposed review sessions, daily-plan changes and calendar events go through the existing reviewed write boundary; a quiz result is not approval to schedule. | 3, 5–6, 13 |
 | TUT-17 | **Supportive adaptation.** Prefer the student's current self-report and available time when offering shorter, gentler lessons late at night or before an exam. Any voice-tone-based adaptation needs explicit consent, clear controls and qualified evidence; keep it transient and non-diagnostic, without inferring mental-health conditions or building a sensitive voice profile. Durable sensitive facts/check-ins require MEM-05 agreement. Do not treat time of day or a hesitant answer as proof of mood, ability or mastery. | 5; STU-23, VOI-06, MEM-05 |
 | TUT-18 | **Private lesson lifecycle.** Define owned lesson/script revisions, source references, learner contributions, checks, topic-state events and saved outputs before persistence. Apply MEM-01–06 disclosure, off-the-record and forgetting rules to conversational/derived learning context; do not silently expand today's one-question provider grant. Account change, logout, reset, source deletion/revocation and course changes clear unauthorized board/draft/context state and invalidate in-flight publications. Recheck ownership and source freshness at every read/write; course materials, voice or scripts never grant action authority. Keep student photos, work, narration and topic histories out of logs, analytics payloads and repository fixtures. | 4–6, 9, 11; existing ARC-01–06, MEM-01–06 |
 | TUT-19 | **Open building blocks and original design.** Prefer custom SVG; evaluate rough.js for shapes/arrows, KaTeX for equations, perfect-freehand for pen strokes, opentype.js plus an appropriately licensed handwriting font for animated text paths, Mafs/function-plot for plots, WaveDrom for timing, SmilesDrawer/RDKit.js for chemistry, and SymPy for math checks. Verify actual dependency and font licenses before shipment; candidate names are not permission or a required installation. Excalidraw is an optional canvas reference; tldraw public deployment needs its applicable license. Use only authorized public/open references and NavoX's own builds for analysis; do not extract proprietary code/prompts/assets or bypass private APIs, logins, paywalls or limits. | 1–2, 10–12, 14 |
 | TUT-20 | **Behavior evidence and safe review.** Measure first stroke, completion, check outcomes, topic transitions, repeat use and sampled error rate using the defined denominators below; never ask for a tutor/naturalness rating. Record source revision, device/browser, failures and the observation window. Step mistake reports are explicit issue reports, not rating prompts; private lesson review needs separate permission and redaction. Synthetic checks and five sample lessons are engineering evidence, not student learning outcomes. | 12–14; Update 10–11 |
+| TUT-21 | **Board home and naming — High.** Use NavoX Board, Open the Board and Show me on the Board, with an original NavoX layout and a name-availability check before launch. `/board` is the home and `/board/[boardId]` an owned saved board. Greet by the confirmed name and local time of day. One question/topic input starts on Enter or Start. Upload accepts supported documents/images into the page flow; Snap opens a permitted camera into Solve with me or Check my work; Talk starts the qualified Vox call with the Board open, rather than a mic per card. Keep typed/accessibility alternatives and honest unsupported states; do not display nonworking generation, upload or voice controls as ready. | Board 1–3, 9, 20–22 |
+| TUT-22 | **Suggestions and recent boards — High.** Show four useful cards, ordered by exam within seven days, missed class, shaky topic, then assignment due within three days. Each identifies an actual course and a specific outcome/duration and opens its exact mode. Use authorized calendar/deadline/recovery/topic evidence; fill missing context with appropriate starters rather than inventing an exam or weakness. A new student sees Upload your slides, Snap a problem, Explain a concept and Quiz me. Dismissal suppresses that card for the rest of the student's local day. List saved recent boards grouped by course and reopen at the saved position; neither sample lesson selection nor a temporary marker is recent-board persistence. | Board 1–3, 10, 19–21 |
+| TUT-23 | **Page-based document processing — High.** Upload from Board home, an owned course workspace or supported phone file-sharing. Target PDF, PowerPoint, Word and images, up to 200 pages and 50 MB per file. Convert PowerPoint/Word to PDF with bounded headless LibreOffice; split page images/text with PDF.js or PyMuPDF, extract text/headings/LaTeX/images and use an authorized vision route for scans/diagrams. Index each page with its document/course/page identity and pgvector embedding, using Temporal for slow work. Show Reading your file… and processing progress; page 1 can be queried while later pages process. Confirm the matching course before course saving. Encrypt originals and derived content and allow deletion at any time. This new Board pipeline does not silently raise limits on existing course-upload endpoints. | Board 3–4, 9–12, 20–22 |
+| TUT-24 | **Find and teach on any page — High.** Resolve explicit slide/page numbers directly; answer descriptive requests through the authorized document's per-page semantic index, returning up to three candidates. When the best two are close, show both thumbnails for the student's choice. Explain missing/out-of-range or not-yet-processed pages instead of silently substituting an unrelated page. Place the chosen page as a source-linked image action and draw highlights, circles and arrows over it; tapping/circling a region scopes the question. Retain document ID, page number and revision in citations; a chapter recap identifies its actual processed source coverage. | Board 3–4, 10–11, 13, 16–17, 19 |
+| TUT-25 | **Numbered step cards — High.** Add `step_card` with stable ID, number, short verb name, work items, highlighted result, status and relative placement. Show pending as a dot, correct as a green check and review as an amber circle plus note, with text equivalents and an animated status change. One idea per card; split work longer than about three lines. The final card is Check the answer, including units/sign/plausibility. Explain checks mean the narrated step finished; they must not imply independent math verification. Solve with me initially shows the step name, waits for the student's work and checks only after verification; offer a hint on request or after one wrong try, without writing the next answer. Check my work copies confirmed student lines, checks correct ones and marks the first wrong one review with feedback. Unknown checks stay explicitly unverified. | Board 5–6, 13–15, 19–22 |
+| TUT-26 | **Original picture metaphors — Medium.** Add validated `illustration` and `update` actions. Each of the 12 starter SVGs below has named parts, bounded typed parameters and original artwork in a consistent rough.js/small-palette style. Models choose and label an existing illustration; they never generate or replace its pixels/code. A later update targets an existing compatible illustration and animates only allowed parameter changes; mathematical labels render through safe KaTeX. Add 3–5 original illustrations per later subject pack after review. | Board 6–7, 15–16, 19–22 |
+| TUT-27 | **College exam prep — Medium.** Offer prep when an actual exam is sourced from the calendar/syllabus, by voice or from its home card. Build scope from the syllabus, slides since the previous exam and permitted professor emails/announcements; the student confirms/edits it first. Run an approximately ten-minute diagnostic with 1–2 questions per topic. Propose 15–25-minute sessions on shaky topics in available waking time before the exam, harder topics earlier, plus adaptive Solve-with-me practice and authorized uploaded past exams. Propose a 20-minute review of the hardest topics the night before. Encouragement supports rest without promising an exam outcome. Read back and approve exact plan/calendar changes under STU-14 / CAL-04 / AVL-04 before writing, then verify; automatic discovery is an offer, not automatic scheduling. MCAT/GRE/LSAT packs remain later and out of launch. | Board 7–8, 10–12, 19–22 |
+| TUT-28 | **Shared contracts and streamed lessons.** Extend the shared TypeScript lesson/action types in `packages/contracts/src/board.ts` with matching Python Pydantic validation. Only the six-action authored v1 types are currently implemented; the extended writer contract remains planned. The writer receives only permitted name/course/level, topic evidence, known mistakes/preferences, available minutes and retrieved source pages. Use 1–3 short plain spoken sentences per step, exact action cues, relative placement, page citations and a 1-line wrap-up after 1–3 checks. Stream one validated step record per JSON Line with no prose outside JSON; expose checked records over the owned SSE stream with stable board/step IDs and revision ordering. The planned writer allow-list is write, math, shape, arrow, line, highlight, circle, underline, erase, step_card, plot, timing, table, image, illustration and update; later subject actions require a versioned extension. Mid-lesson answers use 1–2 spoken sentences and at most three validated inserted steps, then ask how to continue. | Board 9–14 |
+| TUT-29 | **Checked steps and quality.** Adapt the guide's checker sketches with explicit mathematical domains/variables/assumptions and bounded SymPy work; equation solution-set checks and expression equivalence do not prove every word problem, proof or units argument. Parsing/verification uncertainty returns unknown. An authorized model fallback is recorded as checked by AI in review metadata, distinct from CAS verification. Operational logs carry only checking method, status and scoped IDs; never equations, prompts or student work. Meet the new separate 95% valid-script, 95% correct-final-answer and 100% KaTeX-rendering targets; these supersede the older 90% writer gate. | Board 13–15, 17–20 |
+| TUT-30 | **Owned persistence, APIs and deletion.** Add the six PostgreSQL/Alembic domains and signed-in API surface below. Every table, including steps/pages, carries user_id; enforce user/workspace/course ownership on every read, stream, search, check and write. Source files marked private go only to controlled encrypted storage and the explicitly authorized processing AI provider, never unrelated third parties; a private label is not provider consent. Delete board/document content, derived steps/pages/images/embeddings, references and affected caches, and make deletion win over queued processing, streams and topic extraction. Apply TUT-18 and MEM-01–06 to retained learning context. New endpoints/storage are planned; the authored renderer remains RAM-only. | Board 4, 10–12, 19–22 |
+| TUT-31 | **Acceptance corpora first.** Create all four fixed corpora below before qualifying generation, uploads, work checking or personalized cards. Record revision, configuration, denominators, failed cases, method and real-device coverage for every acceptance target. Synthetic profiles, fixture photos and successful local rendering do not establish real student benefit, privacy compliance or phone qualification. | Board 17–20 |
+| TUT-32 | **Eight sprints and original delivery.** Follow the eight-sprint plan and its explicit cut order below, retaining the existing privacy/approval/student gates. End each sprint with a two-minute real-phone screen video of the new feature shared with Michael before the next sprint; no simulated browser capture substitutes for it. Use NavoX's own wording, layout, icons, card/illustration art and any future character. Design review may compare supplied competitor references, but never trace/reuse their screens, code, prompts, assets, product names or marketing art. | Board 8–9, 19–22 |
+
+### Board illustrations and topic evidence
+
+All illustration components and durable topic rules are **Planned**. The twelve
+starter illustrations and parameter contracts are (Board 6–7):
+
+| Original SVG | Teaches | Validated parameters |
+| --- | --- | --- |
+| Balance scale | Equivalent operations on equations | Left/right items; tilt |
+| Number line | Integers, intervals, inequalities | Range; points; shaded regions |
+| Container / tank | Rates, concentration, capacitors | Fill level; inflow/outflow |
+| Gears | Ratios, mechanical advantage | Teeth counts; rotation direction |
+| Pipes and water | Current/voltage/resistance analogy | Pressure; pipe width; flow |
+| Spring and mass | Oscillation, forces, energy | Stretch; mass; motion |
+| Ramp and block | Inclines, friction, forces | Angle; mass; force arrows |
+| Cell | Structures and mitosis | Stage; labels |
+| Magnet and field lines | Magnetism and fields | Pole positions; line density |
+| Stacked blocks | Place value, factoring, area | Rows; columns; labels |
+| Timeline | History, processes, algorithms | Events; positions |
+| Funnel / sieve | Filtering, sorting, probability | Inputs; items passing through |
+
+Use the explicit initial topic transitions from Board 12, preserving whether a
+state came from a check, correction or self-report. A state is a planning signal,
+not an inferred grade or diagnosis; wrong answers and absence are not moral
+judgments. Student correction/forgetting controls remain available.
+
+| Evidence event | Topic update |
+| --- | --- |
+| Correct quick check on the first try | not_started → getting_it; shaky → getting_it; getting_it → mastered; mastered stays mastered |
+| Wrong quick check or a verified step marked review | One level down, with shaky as the floor: mastered → getting_it; getting_it → shaky; shaky stays shaky; not_started becomes shaky |
+| Student explicitly says I already know this | mastered, labeled student-reported rather than independently demonstrated |
+| No evidence seen for 21 days and topic is not mastered | shaky, with a spaced-review proposal; this does not authorize a plan/calendar write |
+
+### Board data and API contract
+
+The new table names are domain requirements, not permission to duplicate an
+existing document store. Reuse compatible owned storage with explicit migrations
+and provenance; do not relabel today's unpersisted scripts as these saved rows.
+Every row below requires user_id, including child rows, plus enforcement of its
+parent's owner/course/workspace (Board 11–12).
+
+| PostgreSQL domain | Required fields and behavior |
+| --- | --- |
+| boards | id, user_id, course_id, title, mode (explain/solve/check/recap/exam), source (text/photo/document_page/card/vox), created_at, last_opened_at; saved playback position/revision for safe continue |
+| board_steps | id, user_id, board_id, position, script JSON, status (pending/correct/review), student_work JSON, inserted_from_question; preserve insertion order/revisions |
+| documents | id, user_id, course_id, filename, kind (pdf/pptx/docx/image), page_count, status (uploading/processing/ready/failed), storage_key; encrypted original in private object storage |
+| document_pages | id, user_id, document_id, page_number, image_key, text, headings, latex, pgvector embedding; stable page identity and revision |
+| topics | id, user_id, course_id, name, status (not_started/shaky/getting_it/mastered), last_seen_at, evidence JSON with check provenance |
+| exam_preps | id, user_id, course_id, exam_at, confirmed scope topic IDs, plan JSON sessions, per-topic readiness; exact created calendar-event references for verification/Undo |
+
+The planned route surface from Board 10–11 is:
+
+| Method | Route | Contract |
+| --- | --- | --- |
+| GET | `/api/v1/board/home` | Owner greeting, four ordered cards and course-grouped recent boards |
+| POST | `/api/v1/board/lessons` | Start from text/photo/page/card, return board ID and start checked-step streaming |
+| GET | `/api/v1/board/lessons/{id}/stream` | Owned SSE delivery of individually written/validated steps |
+| POST | `/api/v1/board/lessons/{id}/ask` | Scoped interruption; insert validated steps after the current step |
+| POST | `/api/v1/board/lessons/{id}/steps/{step}/check` | Student work → correct/review or explicit unknown, with verification method/note |
+| POST | `/api/v1/board/documents` | Bounded upload → document ID and processing job |
+| GET | `/api/v1/board/documents/{id}` | Processing status, available pages and failures |
+| POST | `/api/v1/board/documents/{id}/find` | Explicit number or description → authorized page candidates |
+| POST | `/api/v1/board/exam-prep` | Confirmed scope/readiness and a reviewed proposed prep plan; no unapproved scheduling |
+| GET | `/api/v1/board/topics/{courseId}` | Owner's course topic map and evidence |
+| DELETE | `/api/v1/board/{boardId}` | Delete the exact owned board and derived data |
+
+Board 19 also requires deleting a document, although its endpoint table omits
+that route. Add an owned document-delete contract, such as
+`DELETE /api/v1/board/documents/{id}`, and prove derivative erasure before enabling
+uploads. Define owner/day-scoped card dismissal and board-position saving in the
+same versioned API contract. These are required completion details, not claims
+that an endpoint already exists.
+
+Use `apps/web/src/app/board`, reusable `components/board` canvas/player/layout,
+typed action and illustration components, BoardHome/SuggestionCards/RecentBoards,
+and a student-pen component. Put API routes, lesson writer, schema/checks,
+documents/page finder, suggestions, exam prep and topic map under
+`services/api/navox/board`; slow processing belongs in
+`services/api/navox/temporal/board_workflows.py`. Match the shared contracts to
+Python validation (Board 9–10), retaining the existing gateway and ownership
+boundaries rather than creating a separate unrestricted tutor service.
+Verify licenses and bounded conversion, parsing, embedding and storage budgets
+before adding LibreOffice, PDF.js/PyMuPDF, pgvector or any external processor;
+listing a building block here does not install it or authorize private data use.
 
 ### Public study-tool reference
 
@@ -330,21 +437,79 @@ demo has no verified official provenance.
 | One source supports several study activities | Plan a course-source → whiteboard lesson → quiz / flashcards / recap flow under TUT-04 / TUT-14 / TUT-16. Keep actual source citations and revisions; no placeholder upload or generation controls in the authored renderer. |
 | Review what needs another look | The first renderer has temporary step markers visible on its timeline. Durable topic history and review scheduling remain TUT-15 / TUT-16, with disclosed learning-data controls and reviewed calendar writes. |
 
-### Tutor delivery phases
+### Board acceptance and delivery
 
-These are the guide's seven engineering phases, separate from the student
-product's five launch phases. Its durations are estimates, not dates or evidence.
-Adding a sample renderer does not enable a model route or advance a student gate.
+The builder update replaces the tutor guide's seven-phase engineering sequence
+with eight one-week sprints, estimated for one full-time builder. This is separate
+from the student product's five launch phases; the authored renderer does not
+complete sprint 1's persistence, corpus or real-phone requirements. No new model
+route, document processor, persistent learner history or calendar writer is
+enabled by adding this specification.
 
-| Tutor phase | Scope and estimate | Completion evidence |
+Build all four fixed, appropriately authorized test corpora first (Board 17).
+The 100-question and ten-profile fixture files are present with targeted
+integrity checks as recorded above. Subject-specialist review and all actual
+lesson-writer/home-API qualification remain pending. The thirty documents and
+forty varied-handwriting work photos still require authorized curation and
+human/consented provenance; synthetic font images are not real handwriting
+evidence. Keep real private student files and work out of repository fixtures,
+using permitted redacted/public test sources and separately protected curated
+evidence as needed.
+
+| Corpus | Required coverage |
+| --- | --- |
+| 100 questions | Calculus, physics, ECE, chemistry and statistics; each has reviewed correct final-answer ground truth |
+| 30 uploaded files | Lecture PDFs, PowerPoints and Word handouts, including five scanned PDFs; three explicit-number/description page questions each, totaling 90 |
+| 40 student-work photos | Twenty fully correct and twenty with one known wrong step, across different handwriting |
+| 10 fake student profiles | Owned calendars, courses, topic maps and exams for suggestion ordering, no-data starters and prep plans |
+
+All gates below remain **unmet for the new behavior** until recorded evidence
+exists. Report script validity and final-answer correctness separately over the
+full 100-question set, and all attempted LaTeX rendering; do not improve a rate
+by omitting invalid scripts or failed questions. The 95% / 95% / 100% criteria
+supersede the older combined 90% lesson-writer target (Board 19). These engineering
+corpora do not replace the separate student-use/error metrics below.
+
+| Feature | Required acceptance evidence | Target / Board pages |
 | --- | --- | --- |
-| 1 — Renderer | Custom SVG, hand-authored scripts, six initial actions, layout, play/pause, step replay, timeline and pan/zoom; 1–2 weeks. **First increment implemented and automatically checked**, with five practice lessons, two quick checks per lesson and temporary pen notes. Real-device qualification and animated handwriting remain open. | Five hand-authored lessons play smoothly on actual phones, with recorded device/browser and failures. Automated schema/layout/playback checks are necessary engineering evidence but do not replace this device gate. |
-| 2 — Lesson writer | Question/photo to structured script through the Python gateway; schema, KaTeX and applicable SymPy checks; 1–2 weeks. Photo extraction also needs its confirmed-work boundary. | At least 90% of scripts in a predefined 100-question corpus render without errors and have correct math. Record every failed case, denominators and reviewer/check method; no live student data is implied by a synthetic corpus. |
-| 3 — Voice sync | Timestamped TTS and cue-driven actions in Vox; about one week. | Drawing/word timing error within 150 ms on supported real devices, with the measurement method and coverage recorded; retain Vox's own latency/privacy gates. |
-| 4 — Interruptions / Solve with me | Barge-in, in-place inserted answers, student typed/spoken/drawn next steps and feedback; 1–2 weeks. | Pause/resume preserves the exact current action; answers stay in place; hints wait for student participation. Verify all input forms actually supported, stale-result clearing and native call/device interruptions. |
-| 5 — Check my work | Confirmed photo/pen-to-LaTeX transcription and exact error marking; about one week. | Student-correctable extraction, line-location correspondence and sampled mathematical-feedback correctness; never declare OCR accurate from an unconfirmed sample. |
-| 6 — Personalization | Authorized materials, per-course topic map, known mistakes, spaced-review proposals and exam mode; about two weeks. | Provenance, student correction/forgetting and approved scheduling pass with account/course isolation. Real learning outcomes remain a separate observation gate. |
-| 7 — Subject packs | ECE timing/circuits, chemistry structures, physics diagrams and statistics plots; ongoing. | Each pack validates its structured actions and has reviewed subject examples, accessible controls and device/rendering evidence before being advertised. |
+| Board home | All ten fake profiles produce four cards matching priority, source and dismissal rules; no-data profile has all four starters | Load under 1 second / 19 |
+| Lesson writer | Full 100-question set, reviewed final answers and every LaTeX item | At least 95% valid scripts; at least 95% correct final answers; 100% LaTeX renders in KaTeX / 19–20 |
+| First step | Request-to-first checked step displayed, including failures; separate cached/authored/generated paths | Under 2 seconds median / 19 |
+| Step cards / checker | Twenty algebra problems with correct and wrong student lines, result method and explanatory notes | At least 95% correct check/review decisions / 19–20 |
+| Check my work | All forty photos with confirmed transcription and known wrong-line ground truth | Find the wrong step in at least 85% of the twenty wrong examples; no false alarm in at least 90% of the twenty correct examples / 19 |
+| Upload processing | All thirty files, including scanned/office formats, partial-page availability and failure paths | Fifty-page files ready under 60 seconds; first page askable under 10 seconds / 19 |
+| Page finder | All ninety number/description page questions, retaining ambiguous and failed matches | Explicit slide/page number correct first 100%; descriptive page in top three at least 90% / 17, 19 |
+| Illustrations | All twelve original SVGs with sample parameters and at least one update on an actual phone | No overlap; smooth update animation / 19 |
+| Exam prep | Each exam-bearing fake profile with an exam seven days away; exact confirmed scope and approved publication checked | Only free time, no sessions after bedtime, harder topics first, final review the night before; no write before approval / 19 |
+| Interruptions | Questions at ten random points in five lessons; record the exact selection/count and device coverage | Board pauses; answer inserts below the current step; resume at the same place; drawing/word sync within 150 ms / 19–20 |
+| Privacy | Delete an owned board and document, including deletion during processing/streaming | All affected steps, pages, images and embeddings removed; no delayed recreation, cross-owner read or stale cache / 19 |
+| Originality | Review NavoX against authorized competitor references without importing their assets into the product | No matching layout, icons, art, product names or text / 19 |
+
+| Sprint | Scope and student outcome | Completion gate / Board pages |
+| --- | --- | --- |
+| 1 | Test corpora, owned board tables/migrations, shared lesson types, renderer and layout. Student can watch five hand-authored lessons. Existing authored renderer is reusable; remaining work is still required. | Five lessons on an actual phone without overlaps; corpus and persistence checks / 20 |
+| 2 | Streamed lesson-writer endpoint with schema/KaTeX checks and Board home starter cards. Student types a question and receives a lesson. | 100-question writer acceptance targets and first-step latency; starter-card/home tests / 19–20 |
+| 3 | step_card, bounded SymPy checker and Solve with me. Student contributes each next step. | Step-check tests pass, including unknown/incorrect lines and explanation of verification method / 20 |
+| 4 | Cue-based voice sync, Talk → Vox with Board, and mid-lesson questions. Student talks and interrupts in place. | Interruption tests; drawings within 150 ms of corresponding words on supported devices / 20 |
+| 5 | Document upload/conversion/page split/extraction/indexing as a Temporal job, page finding and page overlays. Student asks about slides/readings. | Upload and page-finder gates, owned publication and usable deletion / 20 |
+| 6 | Snap, confirmed vision-to-LaTeX work checking and the first six original illustrations. Student identifies a wrong line. | Work-photo acceptance and first-six illustration rendering/update checks / 20 |
+| 7 | Topic updates, personalized home cards and the remaining six illustrations. Student sees suggestions from their actual authorized week. | Home-card gates for all ten profiles, topic evidence/privacy controls and full illustration checks / 20 |
+| 8 | Confirmed exam scope, diagnostic, reviewed scheduling and night-before review; complete deletion verification, originality review and polish. Student can approve and verify a full prelim prep plan. | All acceptance tests pass; exact approved calendar results verified / 21 |
+
+Privacy, owner checks, disclosure and deletion apply from the first persistence
+or upload; sprint 8 completes end-to-end verification rather than postponing
+those boundaries. Before each next sprint, record a two-minute video of the new
+feature on a real phone and share it with Michael (Board 21). Missing phone/demo
+evidence stays explicit; automated desktop tests cannot be relabeled as that demo.
+
+If time is short, cut in the specified order: illustrations 7–12 first; exam-prep
+scheduling second while keeping the readiness check; Word support third while
+keeping PDF and PowerPoint. Mark each cut unavailable and adjust its claimed
+scope and acceptance report. Never cut privacy, mathematical honesty or exact
+approval to satisfy a date. Later subject packs retain the tutor guide's timing,
+circuit, molecule, physics and statistics work, plus 3–5 new original illustrations
+per pack; they are not implicitly supported by the initial writer allow-list
+(Board 7, 21; Tutor 13).
 
 ## Architecture and data boundaries
 
@@ -369,6 +534,27 @@ coursework-feed paths. Its preview/digest pattern does not prove STU-05 or LMS-0
 and no `.ics` import proves personal-calendar write support.
 Likewise, proactive signals and briefing snapshots are not proof of delivered
 web push, and a native alarm cannot be simulated by a browser timer.
+
+### Optional builder resources
+
+The six-page resource pack is implementation advice, not another feature plan.
+Keep the existing custom SVG renderer, KaTeX and rough.js; the latter two have
+verified MIT licenses. No resource-pack dependency or provider is installed or
+enabled by this update. Use primary documentation to assess the relevant
+increment rather than replacing the established architecture (Resource Pack 1–6).
+
+| Area | Focused adoption notes |
+| --- | --- |
+| Vox and wake detection | Use LiveKit's [frontend](https://docs.livekit.io/agents/start/frontend) and [turn/interruptions](https://docs.livekit.io/agents/build/turns) references for the planned Vox session. Alternative speech/TTS frameworks remain options, not new routes. For [openWakeWord](https://github.com/dscripka/openWakeWord#license), Apache 2.0 code and included CC BY-NC-SA 4.0 models have separate rights; review the actual model before commercial use. |
+| Board and document processing | Keep canvas starters as references: [tldraw production use requires an active license](https://tldraw.dev/community/license), so a starter does not make it the chosen renderer. [PyMuPDF requires an AGPL/commercial-license decision](https://pymupdf.readthedocs.io/en/latest/about.html#license-and-copyright) before adoption. SymPy, OCR, pen/plot/timing libraries, Temporal and pgvector remain candidates for their already-specified work, subject to bounds, privacy and license review. |
+| Calendar availability | [Google freebusy](https://developers.google.com/workspace/calendar/api/v3/reference/freebusy/query) can return per-calendar errors; those calendars remain unknown, never free. Microsoft [getSchedule](https://learn.microsoft.com/en-us/graph/api/calendar-getschedule?view=graph-rest-1.0) does not support personal Microsoft accounts. [calendarView](https://learn.microsoft.com/en-us/graph/api/calendar-list-calendarview?view=graph-rest-1.0) supports delegated personal-account event reads, but deriving authorized busy intervals from it needs separate qualification. Neither reference proves the personal-calendar feature is ready. |
+| Feeds and native delivery | Feed-copy/recurrence references can inform reviewed onboarding and fixtures without granting full learning-system access. Expo Audio and Apple AlarmKit guidance belongs to the later native implementation; verify platform permissions, entitlements and real-device behavior before promising background calls or alarms. A browser timer is still not a native alarm. |
+
+The referenced [arXiv paper 2512.01234](https://arxiv.org/abs/2512.01234) explores
+proactive agentic whiteboards; it does not establish classroom learning efficacy
+or validate NavoX's renderer. Public product/blog examples are behavioral
+references, not evidence of private internals or permission to reuse assets.
+These notes record engineering adoption constraints, not legal clearance.
 
 ## Beta evidence
 

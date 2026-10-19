@@ -33,7 +33,7 @@ import { WorkspaceShell } from "./workspace-shell";
 const StudentWhiteboard = dynamic(
   () =>
     import("./student-whiteboard").then((module) => module.StudentWhiteboard),
-  { loading: () => <p role="status">Opening whiteboard…</p> },
+  { loading: () => <p role="status">Opening the Board…</p> },
 );
 
 type AuthMode = "register" | "login";
@@ -112,7 +112,7 @@ export function AccountWorkspace({
     | "student-email"
     | "goals"
     | "day-review"
-    | "whiteboard";
+    | "board";
   courseId?: string;
 }) {
   const [mode, setMode] = useState<AuthMode>("register");
@@ -302,9 +302,9 @@ export function AccountWorkspace({
           </main>
         )}
         <div hidden={!sessionRestored}>
-          {view === "whiteboard" ? (
+          {view === "board" ? (
             <WorkspaceShell
-              current="Whiteboard"
+              current="Board"
               accountKey={`${account.workspace.id}:${account.id}`}
               accountName={account.display_name ?? account.email}
               onSignOut={signOut}
@@ -314,7 +314,7 @@ export function AccountWorkspace({
                   key={`${account.workspace.id}:${account.id}`}
                 />
               ) : productFeatures.studentWhiteboard ? null : (
-                <p>Whiteboard lessons are not available on this deployment.</p>
+                <p>Board lessons are not available on this deployment.</p>
               )}
             </WorkspaceShell>
           ) : view === "classes" ? (

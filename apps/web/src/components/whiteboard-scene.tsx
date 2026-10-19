@@ -497,7 +497,7 @@ export function WhiteboardScene({
       xmlns="http://www.w3.org/2000/svg"
       data-step-index={stepIndex}
     >
-      <title id={titleId}>Lesson whiteboard</title>
+      <title id={titleId}>Lesson board</title>
       <desc id={descriptionId}>
         {visible.length
           ? visible.map(description).join(". ")

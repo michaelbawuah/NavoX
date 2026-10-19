@@ -1,0 +1,889 @@
+{
+  "version": 1,
+  "purpose": "Synthetic acceptance inputs and manually specified expected results; no production home API, model, topic updater or scheduler is evaluated here.",
+  "synthetic": true,
+  "coursePolicy": "Generic public subject names with invented course codes; not real students, enrollments or institution catalog claims.",
+  "fixturePolicy": {
+    "priority": ["exam", "missed", "topic", "assignment"],
+    "examWindowHours": 168,
+    "deadlineWindowHours": 72,
+    "inclusiveWindows": true,
+    "windowBasis": "Elapsed time from each fixed now; this boundary convention is a fixture policy, not a claim the guide resolves calendar-day semantics.",
+    "dismissalBasis": "IANA time zone local date, not UTC date.",
+    "tieBreak": "Event time ascending within exam, missed and assignment; topic name ascending then id; stable id as final tie-break.",
+    "fallback": "Fill fewer than four eligible personal cards with ordered starter cards; this edge-case policy is explicit and is not specified by the guide.",
+    "starterModes": "Upload uses explain; Snap uses check; concept uses explain; Quiz uses solve. These are fixture defaults for future flows.",
+    "calendar": "Expected proposals are partial candidate sessions in free waking time, require reviewed approval, and have not been written to any calendar.",
+    "evidence": "First-attempt checks, edited answers and self-reported mastery stay distinguishable; these fixtures do not establish real mastery."
+  },
+  "courses": [
+    {
+      "id": "calculus",
+      "code": "MATH 101",
+      "name": "Calculus I"
+    },
+    {
+      "id": "physics",
+      "code": "PHYS 201",
+      "name": "University Physics"
+    },
+    {
+      "id": "ece",
+      "code": "ECE 210",
+      "name": "Digital Logic"
+    },
+    {
+      "id": "chemistry",
+      "code": "CHEM 101",
+      "name": "General Chemistry"
+    },
+    {
+      "id": "statistics",
+      "code": "STAT 201",
+      "name": "Introductory Statistics"
+    }
+  ],
+  "starterCards": [
+    {
+      "id": "starter:upload",
+      "kind": "starter",
+      "mode": "explain",
+      "label": "Upload your slides"
+    },
+    {
+      "id": "starter:snap",
+      "kind": "starter",
+      "mode": "check",
+      "label": "Snap a problem"
+    },
+    {
+      "id": "starter:concept",
+      "kind": "starter",
+      "mode": "explain",
+      "label": "Explain a concept"
+    },
+    {
+      "id": "starter:quiz",
+      "kind": "starter",
+      "mode": "solve",
+      "label": "Quiz me"
+    }
+  ],
+  "profiles": [
+    {
+      "id": "empty-new-student",
+      "description": "No connected coursework: all four named starter cards.",
+      "studentName": "Student Example",
+      "now": "2026-10-19T14:00:00Z",
+      "timeZone": "America/New_York",
+      "wakingAt": "07:00",
+      "bedtime": "22:00",
+      "courseIds": [],
+      "busyIntervals": [],
+      "exams": [],
+      "deadlines": [],
+      "missedLectures": [],
+      "topics": [],
+      "dismissedCards": [],
+      "expected": {
+        "cards": [
+          {
+            "id": "starter:upload",
+            "kind": "starter",
+            "mode": "explain",
+            "label": "Upload your slides"
+          },
+          {
+            "id": "starter:snap",
+            "kind": "starter",
+            "mode": "check",
+            "label": "Snap a problem"
+          },
+          {
+            "id": "starter:concept",
+            "kind": "starter",
+            "mode": "explain",
+            "label": "Explain a concept"
+          },
+          {
+            "id": "starter:quiz",
+            "kind": "starter",
+            "mode": "solve",
+            "label": "Quiz me"
+          }
+        ],
+        "topicEvidenceLabels": {},
+        "calendarProposals": [],
+        "proposalReason": "Not an exam scheduling case."
+      }
+    },
+    {
+      "id": "all-four-priorities",
+      "description": "One eligible item in each priority; busy times constrain an example proposal.",
+      "studentName": "Student Example",
+      "now": "2026-10-19T14:00:00Z",
+      "timeZone": "America/New_York",
+      "wakingAt": "07:00",
+      "bedtime": "22:00",
+      "courseIds": ["calculus", "physics", "chemistry"],
+      "busyIntervals": [
+        {
+          "start": "2026-10-19T15:00:00Z",
+          "end": "2026-10-19T16:00:00Z"
+        },
+        {
+          "start": "2026-10-19T17:00:00Z",
+          "end": "2026-10-19T18:00:00Z"
+        }
+      ],
+      "exams": [
+        {
+          "id": "physics-midterm",
+          "courseId": "physics",
+          "title": "Practice midterm",
+          "at": "2026-10-23T18:00:00Z",
+          "scopeConfirmed": true,
+          "topicIds": ["capacitors"]
+        }
+      ],
+      "deadlines": [
+        {
+          "id": "chemistry-practice",
+          "courseId": "chemistry",
+          "title": "Practice assignment",
+          "at": "2026-10-21T16:00:00Z",
+          "graded": false
+        }
+      ],
+      "missedLectures": [
+        {
+          "id": "physics-lecture",
+          "courseId": "physics",
+          "title": "Practice lecture",
+          "at": "2026-10-18T14:00:00Z",
+          "confirmed": true,
+          "state": "open"
+        }
+      ],
+      "topics": [
+        {
+          "id": "integration-parts",
+          "courseId": "calculus",
+          "name": "Integration by parts",
+          "status": "shaky",
+          "evidence": [
+            {
+              "kind": "quick_check",
+              "at": "2026-10-18T15:00:00Z",
+              "correct": false,
+              "attempt": 1
+            }
+          ]
+        },
+        {
+          "id": "capacitors",
+          "courseId": "physics",
+          "name": "Capacitors",
+          "status": "getting_it",
+          "evidence": [
+            {
+              "kind": "quick_check",
+              "at": "2026-10-18T16:00:00Z",
+              "correct": true,
+              "attempt": 1
+            }
+          ]
+        }
+      ],
+      "dismissedCards": [],
+      "expected": {
+        "cards": [
+          {
+            "id": "exam:physics-midterm",
+            "kind": "exam",
+            "courseId": "physics",
+            "mode": "exam"
+          },
+          {
+            "id": "missed:physics-lecture",
+            "kind": "missed",
+            "courseId": "physics",
+            "mode": "recap"
+          },
+          {
+            "id": "topic:integration-parts",
+            "kind": "topic",
+            "courseId": "calculus",
+            "mode": "solve"
+          },
+          {
+            "id": "assignment:chemistry-practice",
+            "kind": "assignment",
+            "courseId": "chemistry",
+            "mode": "explain"
+          }
+        ],
+        "topicEvidenceLabels": {
+          "integration-parts": "First-attempt quick check: incorrect",
+          "capacitors": "First-attempt quick check: correct"
+        },
+        "calendarProposals": [
+          {
+            "examId": "physics-midterm",
+            "topicIds": ["capacitors"],
+            "kind": "practice",
+            "start": "2026-10-19T18:00:00Z",
+            "end": "2026-10-19T18:20:00Z",
+            "status": "proposed",
+            "requiresReview": true,
+            "calendarWritePerformed": false
+          }
+        ],
+        "proposalReason": "One available candidate session after a busy interval; not a complete prep plan."
+      }
+    },
+    {
+      "id": "inclusive-window-boundaries",
+      "description": "Exactly seven days for an exam and exactly three days for a deadline are eligible.",
+      "studentName": "Student Example",
+      "now": "2026-10-19T14:00:00Z",
+      "timeZone": "Etc/UTC",
+      "wakingAt": "07:00",
+      "bedtime": "22:00",
+      "courseIds": ["ece", "statistics"],
+      "busyIntervals": [],
+      "exams": [
+        {
+          "id": "ece-boundary",
+          "courseId": "ece",
+          "title": "Practice midterm",
+          "at": "2026-10-26T14:00:00Z",
+          "scopeConfirmed": true,
+          "topicIds": []
+        }
+      ],
+      "deadlines": [
+        {
+          "id": "statistics-boundary",
+          "courseId": "statistics",
+          "title": "Practice assignment",
+          "at": "2026-10-22T14:00:00Z",
+          "graded": false
+        }
+      ],
+      "missedLectures": [],
+      "topics": [],
+      "dismissedCards": [],
+      "expected": {
+        "cards": [
+          {
+            "id": "exam:ece-boundary",
+            "kind": "exam",
+            "courseId": "ece",
+            "mode": "exam"
+          },
+          {
+            "id": "assignment:statistics-boundary",
+            "kind": "assignment",
+            "courseId": "statistics",
+            "mode": "explain"
+          },
+          {
+            "id": "starter:upload",
+            "kind": "starter",
+            "mode": "explain",
+            "label": "Upload your slides"
+          },
+          {
+            "id": "starter:snap",
+            "kind": "starter",
+            "mode": "check",
+            "label": "Snap a problem"
+          }
+        ],
+        "topicEvidenceLabels": {},
+        "calendarProposals": [],
+        "proposalReason": "Not an exam scheduling case."
+      }
+    },
+    {
+      "id": "outside-and-expired-windows",
+      "description": "One millisecond past each outer limit and expired items cannot displace starters.",
+      "studentName": "Student Example",
+      "now": "2026-10-19T14:00:00Z",
+      "timeZone": "Etc/UTC",
+      "wakingAt": "07:00",
+      "bedtime": "22:00",
+      "courseIds": ["ece", "statistics"],
+      "busyIntervals": [],
+      "exams": [
+        {
+          "id": "ece-too-late",
+          "courseId": "ece",
+          "title": "Practice midterm",
+          "at": "2026-10-26T14:00:00.001Z",
+          "scopeConfirmed": true,
+          "topicIds": []
+        },
+        {
+          "id": "ece-expired",
+          "courseId": "ece",
+          "title": "Practice midterm",
+          "at": "2026-10-19T13:59:59.999Z",
+          "scopeConfirmed": true,
+          "topicIds": []
+        }
+      ],
+      "deadlines": [
+        {
+          "id": "statistics-too-late",
+          "courseId": "statistics",
+          "title": "Practice assignment",
+          "at": "2026-10-22T14:00:00.001Z",
+          "graded": false
+        },
+        {
+          "id": "statistics-expired",
+          "courseId": "statistics",
+          "title": "Practice assignment",
+          "at": "2026-10-19T13:59:59.999Z",
+          "graded": false
+        }
+      ],
+      "missedLectures": [],
+      "topics": [],
+      "dismissedCards": [],
+      "expected": {
+        "cards": [
+          {
+            "id": "starter:upload",
+            "kind": "starter",
+            "mode": "explain",
+            "label": "Upload your slides"
+          },
+          {
+            "id": "starter:snap",
+            "kind": "starter",
+            "mode": "check",
+            "label": "Snap a problem"
+          },
+          {
+            "id": "starter:concept",
+            "kind": "starter",
+            "mode": "explain",
+            "label": "Explain a concept"
+          },
+          {
+            "id": "starter:quiz",
+            "kind": "starter",
+            "mode": "solve",
+            "label": "Quiz me"
+          }
+        ],
+        "topicEvidenceLabels": {},
+        "calendarProposals": [],
+        "proposalReason": "Not an exam scheduling case."
+      }
+    },
+    {
+      "id": "dismissed-on-local-day",
+      "description": "UTC is October 20 but Los Angeles is October 19; same local-day exam dismissal holds.",
+      "studentName": "Student Example",
+      "now": "2026-10-20T02:00:00Z",
+      "timeZone": "America/Los_Angeles",
+      "wakingAt": "07:00",
+      "bedtime": "22:00",
+      "courseIds": ["physics", "calculus", "chemistry"],
+      "busyIntervals": [],
+      "exams": [
+        {
+          "id": "dismissed-physics",
+          "courseId": "physics",
+          "title": "Practice midterm",
+          "at": "2026-10-22T18:00:00Z",
+          "scopeConfirmed": true,
+          "topicIds": []
+        }
+      ],
+      "deadlines": [
+        {
+          "id": "chemistry-due",
+          "courseId": "chemistry",
+          "title": "Practice assignment",
+          "at": "2026-10-21T18:00:00Z",
+          "graded": false
+        }
+      ],
+      "missedLectures": [
+        {
+          "id": "missed-physics",
+          "courseId": "physics",
+          "title": "Practice lecture",
+          "at": "2026-10-19T18:00:00Z",
+          "confirmed": true,
+          "state": "open"
+        }
+      ],
+      "topics": [
+        {
+          "id": "limits",
+          "courseId": "calculus",
+          "name": "Limits",
+          "status": "shaky",
+          "evidence": [
+            {
+              "kind": "quick_check",
+              "at": "2026-10-19T17:00:00Z",
+              "correct": false,
+              "attempt": 1
+            }
+          ]
+        }
+      ],
+      "dismissedCards": [
+        {
+          "id": "exam:dismissed-physics",
+          "localDate": "2026-10-19"
+        }
+      ],
+      "expected": {
+        "cards": [
+          {
+            "id": "missed:missed-physics",
+            "kind": "missed",
+            "courseId": "physics",
+            "mode": "recap"
+          },
+          {
+            "id": "topic:limits",
+            "kind": "topic",
+            "courseId": "calculus",
+            "mode": "solve"
+          },
+          {
+            "id": "assignment:chemistry-due",
+            "kind": "assignment",
+            "courseId": "chemistry",
+            "mode": "explain"
+          },
+          {
+            "id": "starter:upload",
+            "kind": "starter",
+            "mode": "explain",
+            "label": "Upload your slides"
+          }
+        ],
+        "topicEvidenceLabels": {
+          "limits": "First-attempt quick check: incorrect"
+        },
+        "calendarProposals": [],
+        "proposalReason": "Not an exam scheduling case."
+      }
+    },
+    {
+      "id": "previous-local-day-dismissal",
+      "description": "Tokyo is already October 20; an October 19 dismissal has expired.",
+      "studentName": "Student Example",
+      "now": "2026-10-19T16:00:00Z",
+      "timeZone": "Asia/Tokyo",
+      "wakingAt": "07:00",
+      "bedtime": "22:00",
+      "courseIds": ["ece"],
+      "busyIntervals": [],
+      "exams": [
+        {
+          "id": "returning-ece",
+          "courseId": "ece",
+          "title": "Practice midterm",
+          "at": "2026-10-23T03:00:00Z",
+          "scopeConfirmed": true,
+          "topicIds": []
+        }
+      ],
+      "deadlines": [],
+      "missedLectures": [],
+      "topics": [],
+      "dismissedCards": [
+        {
+          "id": "exam:returning-ece",
+          "localDate": "2026-10-19"
+        }
+      ],
+      "expected": {
+        "cards": [
+          {
+            "id": "exam:returning-ece",
+            "kind": "exam",
+            "courseId": "ece",
+            "mode": "exam"
+          },
+          {
+            "id": "starter:upload",
+            "kind": "starter",
+            "mode": "explain",
+            "label": "Upload your slides"
+          },
+          {
+            "id": "starter:snap",
+            "kind": "starter",
+            "mode": "check",
+            "label": "Snap a problem"
+          },
+          {
+            "id": "starter:concept",
+            "kind": "starter",
+            "mode": "explain",
+            "label": "Explain a concept"
+          }
+        ],
+        "topicEvidenceLabels": {},
+        "calendarProposals": [],
+        "proposalReason": "Not an exam scheduling case."
+      }
+    },
+    {
+      "id": "graded-and-unconfirmed-work",
+      "description": "Graded work starts Solve with me; unconfirmed and resolved missed lectures produce no cards.",
+      "studentName": "Student Example",
+      "now": "2026-10-19T14:00:00Z",
+      "timeZone": "America/New_York",
+      "wakingAt": "07:00",
+      "bedtime": "22:00",
+      "courseIds": ["calculus"],
+      "busyIntervals": [],
+      "exams": [],
+      "deadlines": [
+        {
+          "id": "graded-calculus",
+          "courseId": "calculus",
+          "title": "Practice assignment",
+          "at": "2026-10-20T14:00:00Z",
+          "graded": true
+        }
+      ],
+      "missedLectures": [
+        {
+          "id": "unconfirmed-calculus",
+          "courseId": "calculus",
+          "title": "Practice lecture",
+          "at": "2026-10-18T14:00:00Z",
+          "confirmed": false,
+          "state": "open"
+        },
+        {
+          "id": "resolved-calculus",
+          "courseId": "calculus",
+          "title": "Practice lecture",
+          "at": "2026-10-17T14:00:00Z",
+          "confirmed": true,
+          "state": "resolved"
+        }
+      ],
+      "topics": [],
+      "dismissedCards": [],
+      "expected": {
+        "cards": [
+          {
+            "id": "assignment:graded-calculus",
+            "kind": "assignment",
+            "courseId": "calculus",
+            "mode": "solve"
+          },
+          {
+            "id": "starter:upload",
+            "kind": "starter",
+            "mode": "explain",
+            "label": "Upload your slides"
+          },
+          {
+            "id": "starter:snap",
+            "kind": "starter",
+            "mode": "check",
+            "label": "Snap a problem"
+          },
+          {
+            "id": "starter:concept",
+            "kind": "starter",
+            "mode": "explain",
+            "label": "Explain a concept"
+          }
+        ],
+        "topicEvidenceLabels": {},
+        "calendarProposals": [],
+        "proposalReason": "Not an exam scheduling case."
+      }
+    },
+    {
+      "id": "mixed-topic-evidence",
+      "description": "Edited answers and self-reports retain provenance; only current shaky topics generate cards.",
+      "studentName": "Student Example",
+      "now": "2026-10-19T14:00:00Z",
+      "timeZone": "America/New_York",
+      "wakingAt": "07:00",
+      "bedtime": "22:00",
+      "courseIds": ["calculus", "statistics"],
+      "busyIntervals": [],
+      "exams": [],
+      "deadlines": [],
+      "missedLectures": [],
+      "topics": [
+        {
+          "id": "algebra",
+          "courseId": "calculus",
+          "name": "Algebra",
+          "status": "shaky",
+          "evidence": [
+            {
+              "kind": "quick_check",
+              "at": "2026-10-18T15:00:00Z",
+              "correct": false,
+              "attempt": 1
+            },
+            {
+              "kind": "quick_check",
+              "at": "2026-10-18T15:01:00Z",
+              "correct": true,
+              "attempt": 2
+            }
+          ]
+        },
+        {
+          "id": "variance",
+          "courseId": "statistics",
+          "name": "Variance",
+          "status": "shaky",
+          "evidence": [
+            {
+              "kind": "quick_check",
+              "at": "2026-10-18T16:00:00Z",
+              "correct": false,
+              "attempt": 1
+            }
+          ]
+        },
+        {
+          "id": "means",
+          "courseId": "statistics",
+          "name": "Means",
+          "status": "getting_it",
+          "evidence": [
+            {
+              "kind": "quick_check",
+              "at": "2026-10-18T17:00:00Z",
+              "correct": true,
+              "attempt": 1
+            }
+          ]
+        },
+        {
+          "id": "derivatives",
+          "courseId": "calculus",
+          "name": "Derivatives",
+          "status": "mastered",
+          "evidence": [
+            {
+              "kind": "self_report",
+              "at": "2026-10-18T18:00:00Z",
+              "value": "already_know"
+            }
+          ]
+        },
+        {
+          "id": "integrals",
+          "courseId": "calculus",
+          "name": "Integrals",
+          "status": "not_started",
+          "evidence": []
+        }
+      ],
+      "dismissedCards": [],
+      "expected": {
+        "cards": [
+          {
+            "id": "topic:algebra",
+            "kind": "topic",
+            "courseId": "calculus",
+            "mode": "solve"
+          },
+          {
+            "id": "topic:variance",
+            "kind": "topic",
+            "courseId": "statistics",
+            "mode": "solve"
+          },
+          {
+            "id": "starter:upload",
+            "kind": "starter",
+            "mode": "explain",
+            "label": "Upload your slides"
+          },
+          {
+            "id": "starter:snap",
+            "kind": "starter",
+            "mode": "check",
+            "label": "Snap a problem"
+          }
+        ],
+        "topicEvidenceLabels": {
+          "algebra": "Edited answer: not first-attempt evidence",
+          "variance": "First-attempt quick check: incorrect",
+          "means": "First-attempt quick check: correct",
+          "derivatives": "Self-reported mastery",
+          "integrals": "No learning evidence"
+        },
+        "calendarProposals": [],
+        "proposalReason": "Not an exam scheduling case."
+      }
+    },
+    {
+      "id": "exam-with-no-free-time",
+      "description": "Exam is soon but every remaining pre-exam interval is busy; propose no calendar writes.",
+      "studentName": "Student Example",
+      "now": "2026-10-19T14:00:00Z",
+      "timeZone": "America/New_York",
+      "wakingAt": "07:00",
+      "bedtime": "22:00",
+      "courseIds": ["physics"],
+      "busyIntervals": [
+        {
+          "start": "2026-10-19T14:00:00Z",
+          "end": "2026-10-19T16:00:00Z"
+        }
+      ],
+      "exams": [
+        {
+          "id": "fully-busy-physics",
+          "courseId": "physics",
+          "title": "Practice midterm",
+          "at": "2026-10-19T16:00:00Z",
+          "scopeConfirmed": true,
+          "topicIds": []
+        }
+      ],
+      "deadlines": [],
+      "missedLectures": [],
+      "topics": [],
+      "dismissedCards": [],
+      "expected": {
+        "cards": [
+          {
+            "id": "exam:fully-busy-physics",
+            "kind": "exam",
+            "courseId": "physics",
+            "mode": "exam"
+          },
+          {
+            "id": "starter:upload",
+            "kind": "starter",
+            "mode": "explain",
+            "label": "Upload your slides"
+          },
+          {
+            "id": "starter:snap",
+            "kind": "starter",
+            "mode": "check",
+            "label": "Snap a problem"
+          },
+          {
+            "id": "starter:concept",
+            "kind": "starter",
+            "mode": "explain",
+            "label": "Explain a concept"
+          }
+        ],
+        "topicEvidenceLabels": {},
+        "calendarProposals": [],
+        "proposalReason": "No free interval before the exam; the readiness card does not promise a scheduled plan."
+      }
+    },
+    {
+      "id": "review-ends-at-bedtime",
+      "description": "A 20-minute final-review candidate fits before bedtime; it requires approval.",
+      "studentName": "Student Example",
+      "now": "2026-10-20T01:00:00Z",
+      "timeZone": "America/New_York",
+      "wakingAt": "07:00",
+      "bedtime": "21:30",
+      "courseIds": ["chemistry"],
+      "busyIntervals": [
+        {
+          "start": "2026-10-20T01:00:00Z",
+          "end": "2026-10-20T01:10:00Z"
+        }
+      ],
+      "exams": [
+        {
+          "id": "morning-chemistry",
+          "courseId": "chemistry",
+          "title": "Practice midterm",
+          "at": "2026-10-20T12:00:00Z",
+          "scopeConfirmed": true,
+          "topicIds": ["stoichiometry"]
+        }
+      ],
+      "deadlines": [],
+      "missedLectures": [],
+      "topics": [
+        {
+          "id": "stoichiometry",
+          "courseId": "chemistry",
+          "name": "Stoichiometry",
+          "status": "getting_it",
+          "evidence": [
+            {
+              "kind": "quick_check",
+              "at": "2026-10-19T18:00:00Z",
+              "correct": true,
+              "attempt": 1
+            }
+          ]
+        }
+      ],
+      "dismissedCards": [],
+      "expected": {
+        "cards": [
+          {
+            "id": "exam:morning-chemistry",
+            "kind": "exam",
+            "courseId": "chemistry",
+            "mode": "exam"
+          },
+          {
+            "id": "starter:upload",
+            "kind": "starter",
+            "mode": "explain",
+            "label": "Upload your slides"
+          },
+          {
+            "id": "starter:snap",
+            "kind": "starter",
+            "mode": "check",
+            "label": "Snap a problem"
+          },
+          {
+            "id": "starter:concept",
+            "kind": "starter",
+            "mode": "explain",
+            "label": "Explain a concept"
+          }
+        ],
+        "topicEvidenceLabels": {
+          "stoichiometry": "First-attempt quick check: correct"
+        },
+        "calendarProposals": [
+          {
+            "examId": "morning-chemistry",
+            "topicIds": ["stoichiometry"],
+            "kind": "final_review",
+            "start": "2026-10-20T01:10:00Z",
+            "end": "2026-10-20T01:30:00Z",
+            "status": "proposed",
+            "requiresReview": true,
+            "calendarWritePerformed": false
+          }
+        ],
+        "proposalReason": "A partial example only: local 21:10–21:30 on the night before the exam, ending at bedtime."
+      }
+    }
+  ]
+}

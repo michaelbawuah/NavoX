@@ -32,3 +32,4 @@ export type * from "./subscriptions";
 export type * from "./news";
 export type * from "./knowledge";
 export type * from "./assistant";
+export type * from "./board";
