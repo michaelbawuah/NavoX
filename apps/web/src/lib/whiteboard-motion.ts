@@ -5,8 +5,9 @@ export function whiteboardRevealDuration(action: BoardAction): number {
   let duration: number;
   switch (action.type) {
     case "write":
-      duration = 350 + action.text.length * 9;
-      break;
+      // Letter contours need more reading room than a whole-line wipe. Pace
+      // still scales the remainder, and even the longest writing stays bounded.
+      return Math.min(4800, Math.max(600, 300 + [...action.text].length * 32));
     case "math":
       duration = 500 + action.latex.length * 8;
       break;

@@ -1,0 +1,3 @@
+# Preserve upstream font-license text in the bundled legal notices.
+apps/web/src/assets/board-handwriting/OFL.txt whitespace=-blank-at-eol
+apps/web/public/whiteboard-notices.txt whitespace=-blank-at-eol

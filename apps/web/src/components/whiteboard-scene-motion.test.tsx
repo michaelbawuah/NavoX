@@ -184,15 +184,26 @@ describe("progressive SVG Board presentation", () => {
     },
   );
 
-  it("reveals writing one complete wrapped line at a time in nonoverlapping bands", () => {
+  it("keeps unsupported writing readable through the existing line reveal", () => {
+    const fallbackWriting: PlacedAction = {
+      ...writing,
+      action: {
+        ...writing.action,
+        type: "write",
+        text: "First β we collect the starting terms then compare both sides.",
+        place: "top-left",
+      },
+    };
     const lines = wrapBoardText(
-      writing.action.type === "write" ? writing.action.text : "",
+      fallbackWriting.action.type === "write"
+        ? fallbackWriting.action.text
+        : "",
       Math.floor(writing.width / (23 * 0.57)),
     );
     expect(lines.length).toBeGreaterThan(2);
     for (const fraction of [0, 1 / lines.length, 0.5, 1]) {
       const host = render(
-        [writing],
+        [fallbackWriting],
         { actionId: "writing", progress: fraction },
         new Set(),
       );
@@ -217,7 +228,9 @@ describe("progressive SVG Board presentation", () => {
         }
       }
       expect(action.querySelector("title")?.textContent).toBe(
-        writing.action.type === "write" ? writing.action.text : "",
+        fallbackWriting.action.type === "write"
+          ? fallbackWriting.action.text
+          : "",
       );
       expect(action.querySelectorAll("tspan")).toHaveLength(lines.length);
       expect(

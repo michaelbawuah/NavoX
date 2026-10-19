@@ -1,7 +1,12 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
   "files": {
-    "includes": ["**", "!**/node_modules", "!**/.next"]
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/.next",
+      "!src/assets/board-handwriting/glyphs.json"
+    ]
   },
   "formatter": {
     "enabled": true,

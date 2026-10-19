@@ -12,6 +12,11 @@ import {
 } from "react";
 import rough from "roughjs";
 import type { Drawable, Options } from "roughjs/bin/core";
+import {
+  completedHandwritingPath,
+  type PreparedBoardHandwriting,
+  prepareBoardHandwriting,
+} from "../lib/board-handwriting";
 import { type PlacedAction, wrapBoardText } from "../lib/whiteboard-tutor";
 import styles from "./whiteboard-scene.module.css";
 
@@ -111,6 +116,62 @@ function RevealClip({ id, children }: { id: string; children: ReactNode }) {
       data-reveal-clip={id}
     >
       {children}
+    </g>
+  );
+}
+
+/** Font contours are prepared once; a frame only selects the active glyph. */
+function Handwriting({ prepared }: { prepared: PreparedBoardHandwriting }) {
+  const progress = boundedProgress(useContext(RevealProgress));
+  let start = 0;
+  let end = prepared.glyphs.length;
+  while (start < end) {
+    const middle = Math.floor((start + end) / 2);
+    if (prepared.glyphs[middle].end <= progress) start = middle + 1;
+    else end = middle;
+  }
+  const completed = start;
+  const active = prepared.glyphs[completed];
+  const activeProgress = active
+    ? intervalProgress(progress, [active.start, active.end])
+    : 1;
+  const complete = progress === 1;
+  const prefix = complete ? "" : completedHandwritingPath(prepared, completed);
+  return (
+    <g data-handwriting="contours" data-completed-glyphs={completed}>
+      <path
+        d={prepared.fullPath}
+        fill={ink}
+        className={
+          complete ? styles.handwritingComplete : styles.handwritingReduced
+        }
+        data-handwriting-full="true"
+      />
+      {!complete && (
+        <g className={styles.handwritingPartial}>
+          {prefix && (
+            <path d={prefix} fill={ink} data-handwriting-prefix="true" />
+          )}
+          {active?.d && (
+            <path
+              d={active.d}
+              fill={ink}
+              fillOpacity={intervalProgress(activeProgress, [0.8, 1])}
+              stroke={ink}
+              strokeWidth={0.75}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              vectorEffect="non-scaling-stroke"
+              pathLength={1}
+              strokeDasharray={1}
+              strokeDashoffset={1 - activeProgress}
+              visibility={activeProgress === 0 ? "hidden" : "visible"}
+              data-handwriting-active={completed}
+              data-motion-progress={activeProgress}
+            />
+          )}
+        </g>
+      )}
     </g>
   );
 }
@@ -598,7 +659,16 @@ const ActionContent = memo(function ActionContent({
 }) {
   const action = item.action;
   switch (action.type) {
-    case "write":
+    case "write": {
+      const prepared = prepareBoardHandwriting({
+        text: action.text,
+        x: item.x,
+        y: item.y,
+        width: item.width,
+        height: item.height,
+        fontSize: 23,
+      });
+      if (prepared) return <Handwriting prepared={prepared} />;
       return (
         <BoardText
           text={action.text}
@@ -608,6 +678,7 @@ const ActionContent = memo(function ActionContent({
           height={item.height}
         />
       );
+    }
     case "math":
       return <MathNotation item={item} />;
     case "shape": {

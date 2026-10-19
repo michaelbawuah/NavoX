@@ -317,7 +317,7 @@ describe("whiteboard SVG scene", () => {
       });
       expect(document.querySelector("img,script,a,iframe,object")).toBeNull();
       expect(
-        document.querySelector('[data-action-id="literal-text"] text')
+        document.querySelector('[data-action-id="literal-text"] title')
           ?.textContent,
       ).toContain("onerror");
     }

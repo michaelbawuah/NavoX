@@ -61,6 +61,15 @@
   transition: none;
 }
 
+.handwritingReduced {
+  display: none;
+}
+
+.handwritingComplete,
+.handwritingPartial {
+  display: inline;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .board *,
   .board *::before,
@@ -81,6 +90,15 @@
 
   .revealClip {
     clip-path: none;
+  }
+
+  .handwritingReduced,
+  .handwritingComplete {
+    display: inline;
+  }
+
+  .handwritingPartial {
+    display: none;
   }
 
   .mathWrapper {
