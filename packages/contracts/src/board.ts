@@ -55,3 +55,53 @@ export type BoardLesson = {
   description: string;
   steps: BoardLessonStep[];
 };
+
+/** Private authored-lesson progress. This is not evidence of answer correctness. */
+export type SavedBoardSnapshot = {
+  version: 1;
+  lesson_id: string;
+  lesson_version: string;
+  title: string;
+  step_index: number;
+  revealed: number;
+  complete: boolean;
+  answers: Record<string, number>;
+  marked: string[];
+  strokes: { id: number; points: { x: number; y: number }[] }[];
+};
+
+export type SavedBoardSummary = {
+  id: string;
+  revision: number;
+  course_id: string | null;
+  created_at: string;
+  updated_at: string;
+  title: string;
+  lesson_id: string;
+  lesson_version: string;
+  step_index: number;
+  complete: boolean;
+};
+
+export type SavedBoard = SavedBoardSummary & { snapshot: SavedBoardSnapshot };
+
+export type SavedBoardsCollection = {
+  generation: number;
+  revision: number;
+  boards: SavedBoardSummary[];
+};
+
+export type SavedBoardCreate = {
+  request_id: string;
+  generation: number;
+  course_id: string | null;
+  snapshot: SavedBoardSnapshot;
+};
+
+export type SavedBoardUpdate = {
+  request_id: string;
+  revision: number;
+  snapshot: SavedBoardSnapshot;
+};
+
+export type SavedBoardErase = { request_id: string; revision: number };

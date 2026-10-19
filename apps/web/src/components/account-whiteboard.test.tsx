@@ -57,21 +57,24 @@ function deferred<T>() {
 }
 
 const ownerA: Account = {
-  id: "synthetic-owner-a",
+  id: "22222222-2222-4222-8222-222222222222",
   email: "owner-a@example.test",
   display_name: "Synthetic student A",
   workspace: {
-    id: "synthetic-workspace-a",
+    id: "11111111-1111-4111-8111-111111111111",
     name: "Practice workspace A",
     workspace_type: "personal",
   },
 };
 const ownerB: Account = {
   ...ownerA,
-  id: "synthetic-owner-b",
+  id: "44444444-4444-4444-8444-444444444444",
   email: "owner-b@example.test",
   display_name: "Synthetic student B",
-  workspace: { ...ownerA.workspace, id: "synthetic-workspace-b" },
+  workspace: {
+    ...ownerA.workspace,
+    id: "33333333-3333-4333-8333-333333333333",
+  },
 };
 
 const restored = (account: Account): AccountAccess => ({
@@ -106,6 +109,7 @@ let host: HTMLDivElement;
 let root: Root;
 let firstCheck: ReturnType<typeof deferred<AccountAccess>>;
 let fetchCalls: ReturnType<typeof vi.fn>;
+let currentAccount: Account;
 
 function button(name: string) {
   const result = Array.from(host.querySelectorAll("button")).find(
@@ -207,7 +211,22 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("BroadcastChannel", SessionChannel);
   SessionChannel.open.clear();
+  currentAccount = ownerA;
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
   fetchCalls = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/auth/me")) return Response.json(currentAccount);
+    if (url.endsWith("/board/saved") || url.endsWith("/student/courses")) {
+      expect(init?.credentials).toBe("include");
+      expect(init?.cache).toBe("no-store");
+      expect(new Headers(init?.headers).get("X-NavoX-Account")).toBe(
+        `${currentAccount.workspace.id}:${currentAccount.id}`,
+      );
+      return Response.json(
+        url.endsWith("/board/saved")
+          ? { generation: 0, revision: 0, boards: [] }
+          : { courses: [] },
+      );
+    }
     if (
       url.endsWith("/auth/logout") &&
       init?.method === "POST" &&
@@ -254,11 +273,16 @@ describe("account-owned whiteboard lifecycle", () => {
     expect(vi.getTimerCount()).toBe(0);
     act(() => vi.advanceTimersByTime(60_000));
     expect(board()).toBeNull();
+    currentAccount = ownerB;
     await act(async () => nextCheck.resolve(restored(ownerB)));
     expect(host.textContent).toContain("Synthetic student B");
     expect(host.textContent).not.toContain("Synthetic student A");
     expectFreshBoard();
-    expect(fetchCalls).not.toHaveBeenCalled();
+    expect(
+      fetchCalls.mock.calls.filter(
+        ([, init]) => init?.method && init.method !== "GET",
+      ),
+    ).toHaveLength(0);
   });
 
   it("removes the board and pending timer on sign-out without retaining work after a new session", async () => {
@@ -271,14 +295,18 @@ describe("account-owned whiteboard lifecycle", () => {
       host.querySelector('[aria-label="Your pen annotations"]'),
     ).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
-    expect(fetchCalls).toHaveBeenCalledTimes(1);
+    expect(
+      fetchCalls.mock.calls.filter(([url]) => url.endsWith("/auth/logout")),
+    ).toHaveLength(1);
     const newSession = deferred<AccountAccess>();
     access.restore.mockReturnValueOnce(newSession.promise);
     act(() => SessionChannel.changed());
     expect(board()).toBeNull();
     await act(async () => newSession.resolve(restored(ownerA)));
     expectFreshBoard();
-    expect(fetchCalls).toHaveBeenCalledTimes(1);
+    expect(
+      fetchCalls.mock.calls.filter(([url]) => url.endsWith("/auth/logout")),
+    ).toHaveLength(1);
   });
 
   it("keeps the board absent after a failed session recheck", async () => {
@@ -298,6 +326,10 @@ describe("account-owned whiteboard lifecycle", () => {
     act(() => vi.advanceTimersByTime(60_000));
     expect(board()).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
-    expect(fetchCalls).not.toHaveBeenCalled();
+    expect(
+      fetchCalls.mock.calls.filter(
+        ([, init]) => init?.method && init.method !== "GET",
+      ),
+    ).toHaveLength(0);
   });
 });

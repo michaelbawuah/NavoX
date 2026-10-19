@@ -57,13 +57,19 @@ The updates win within their respective scope. The roadmap maps requirements to 
 distinguishes implementation, automated verification and real-student validation;
 Vox, personal-calendar scheduling and conversation-derived memory remain planned.
 
-The first NavoX Board increment adds five authored practice lessons with
-step playback, quick checks, math and diagrams, pan/zoom and temporary pen notes.
-Set `NEXT_PUBLIC_NAVOX_STUDENT_WHITEBOARD_ENABLED=true` before building the web
-app to expose `/board` after sign-in; `/whiteboard` redirects to it. The flag defaults off while browser
-and phone qualification remains open. Drawings and answers stay in the current
-view; they are not saved. AI lesson generation, Vox voice sync, question uploads
-and course-linked lesson saving are subsequent roadmap stages.
+NavoX Board includes five authored practice lessons with step playback, quick
+checks, math and diagrams, pan/zoom and pen notes. Set
+`NEXT_PUBLIC_NAVOX_STUDENT_WHITEBOARD_ENABLED=true` before building the web app
+to expose `/board` after sign-in; `/whiteboard` redirects to it.
+
+Explicit encrypted saves additionally require `STUDENT_BOARD_ENABLED=true`, the
+configured connector encryption key, and migration `0047_saved_boards`. Students
+can name a Board, optionally attach it to their own course, and return to saved
+answers, revisit markers and drawings with playback paused. Save updates use
+revisions; erasure and student-data reset invalidate old requests. Both flags
+default off while release and real-phone qualification remain open. Unsaved
+changes remain temporary. AI lesson generation, Vox voice sync and question
+uploads are later roadmap stages.
 
 ## Design decisions
 

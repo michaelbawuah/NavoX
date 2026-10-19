@@ -312,6 +312,8 @@ export function AccountWorkspace({
               {productFeatures.studentWhiteboard && sessionRestored ? (
                 <StudentWhiteboard
                   key={`${account.workspace.id}:${account.id}`}
+                  storageEnabled
+                  accountKey={`${account.workspace.id}:${account.id}`}
                 />
               ) : productFeatures.studentWhiteboard ? null : (
                 <p>Board lessons are not available on this deployment.</p>
