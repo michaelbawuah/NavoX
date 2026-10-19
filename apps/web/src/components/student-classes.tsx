@@ -2374,8 +2374,8 @@ function StudentDataReset({
         This permanently forgets all your saved courses, class sections, one-day
         changes, shifts, breaks, student profile, notification devices and
         settings, calendar feeds and their private links, study tasks, plan
-        history, course notes, files, and import previews. To drop a single
-        course and keep its history, archive it instead.
+        history, course notes, files, saved Boards, and import previews. To drop
+        a single course and keep its history, archive it instead.
       </p>
       <label className={styles.check}>
         <input

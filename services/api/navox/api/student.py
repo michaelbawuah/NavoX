@@ -99,9 +99,21 @@ async def put_profile(
 
 @router.get("/courses")
 async def get_courses(
-    account: CurrentAccountDependency, database: DatabaseSession, archived: bool = False
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    archived: bool = False,
 ) -> dict[str, list[CourseView]]:
     user_id, workspace_id = scope(account)
+    # Board captures its account before loading course names. Honor that scope
+    # when present so a shared-cookie switch cannot disclose another account's list.
+    expected = request.headers.get("X-NavoX-Account")
+    if expected is not None and expected != f"{workspace_id}:{user_id}":
+        raise HTTPException(
+            409,
+            "The student account changed. Refresh and try again",
+            headers={"Cache-Control": "private, no-store"},
+        )
     await result(service.owner(database, user_id, workspace_id))
     return {
         "courses": await result(

@@ -1,0 +1,3058 @@
+{
+  "schemaVersion": 1,
+  "id": "navox-board-practice-v1",
+  "purpose": "Public synthetic practice questions for the Board Builder lesson-writer evaluation set.",
+  "provenance": {
+    "kind": "original-synthetic-practice",
+    "source": "Created for NavoX; no student work, private course material, or copied exam questions.",
+    "answerStatus": "Analytically calculated expected answers, independently recomputed by the corpus integrity tests; subject-matter review remains a release gate."
+  },
+  "qualification": {
+    "scope": "Corpus integrity only.",
+    "lessonWriterEvaluated": false,
+    "educationalEffectivenessEvaluated": false,
+    "note": "Passing these tests does not establish the 95% lesson-script or answer-correctness targets, timing, or learning outcomes. Run and score an actual lesson writer separately. Coverage is introductory: 25 numeric problem families with four variants each, not comprehensive coverage of any subject."
+  },
+  "questions": [
+    {
+      "id": "calc-001",
+      "subject": "calculus",
+      "topic": "Power rule",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: let f(x) = 2 x^3. What is the numerical value of f′(2)?",
+      "assumptions": [
+        "x and f are dimensionless real quantities; use the ordinary real derivative."
+      ],
+      "finalAnswer": {
+        "text": "24 (dimensionless)",
+        "latex": "24",
+        "numeric": 24,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "derivative-power",
+        "inputs": {
+          "coefficient": 2,
+          "power": 3,
+          "point": 2
+        },
+        "inputUnits": {
+          "coefficient": "1",
+          "power": "1",
+          "point": "1"
+        }
+      }
+    },
+    {
+      "id": "calc-002",
+      "subject": "calculus",
+      "topic": "Power rule",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: let f(x) = -3 x^4. What is the numerical value of f′(-1)?",
+      "assumptions": [
+        "x and f are dimensionless real quantities; use the ordinary real derivative."
+      ],
+      "finalAnswer": {
+        "text": "12 (dimensionless)",
+        "latex": "12",
+        "numeric": 12,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "derivative-power",
+        "inputs": {
+          "coefficient": -3,
+          "power": 4,
+          "point": -1
+        },
+        "inputUnits": {
+          "coefficient": "1",
+          "power": "1",
+          "point": "1"
+        }
+      }
+    },
+    {
+      "id": "calc-003",
+      "subject": "calculus",
+      "topic": "Power rule",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: let f(x) = 0.5 x^5. What is the numerical value of f′(2)?",
+      "assumptions": [
+        "x and f are dimensionless real quantities; use the ordinary real derivative."
+      ],
+      "finalAnswer": {
+        "text": "40 (dimensionless)",
+        "latex": "40",
+        "numeric": 40.0,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "derivative-power",
+        "inputs": {
+          "coefficient": 0.5,
+          "power": 5,
+          "point": 2
+        },
+        "inputUnits": {
+          "coefficient": "1",
+          "power": "1",
+          "point": "1"
+        }
+      }
+    },
+    {
+      "id": "calc-004",
+      "subject": "calculus",
+      "topic": "Power rule",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: let f(x) = 7 x^2. What is the numerical value of f′(-3)?",
+      "assumptions": [
+        "x and f are dimensionless real quantities; use the ordinary real derivative."
+      ],
+      "finalAnswer": {
+        "text": "-42 (dimensionless)",
+        "latex": "-42",
+        "numeric": -42,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "derivative-power",
+        "inputs": {
+          "coefficient": 7,
+          "power": 2,
+          "point": -3
+        },
+        "inputUnits": {
+          "coefficient": "1",
+          "power": "1",
+          "point": "1"
+        }
+      }
+    },
+    {
+      "id": "calc-005",
+      "subject": "calculus",
+      "topic": "Definite power integrals",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: evaluate the definite integral of 3 x^2 with respect to x from x = 0 to x = 2.",
+      "assumptions": [
+        "x and the integrand are dimensionless; use the stated bounds in their given order."
+      ],
+      "finalAnswer": {
+        "text": "8 (dimensionless)",
+        "latex": "8",
+        "numeric": 8.0,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "integral-power",
+        "inputs": {
+          "coefficient": 3,
+          "power": 2,
+          "lower": 0,
+          "upper": 2
+        },
+        "inputUnits": {
+          "coefficient": "1",
+          "power": "1",
+          "lower": "1",
+          "upper": "1"
+        }
+      }
+    },
+    {
+      "id": "calc-006",
+      "subject": "calculus",
+      "topic": "Definite power integrals",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: evaluate the definite integral of 2 x^3 with respect to x from x = 1 to x = 3.",
+      "assumptions": [
+        "x and the integrand are dimensionless; use the stated bounds in their given order."
+      ],
+      "finalAnswer": {
+        "text": "40 (dimensionless)",
+        "latex": "40",
+        "numeric": 40.0,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "integral-power",
+        "inputs": {
+          "coefficient": 2,
+          "power": 3,
+          "lower": 1,
+          "upper": 3
+        },
+        "inputUnits": {
+          "coefficient": "1",
+          "power": "1",
+          "lower": "1",
+          "upper": "1"
+        }
+      }
+    },
+    {
+      "id": "calc-007",
+      "subject": "calculus",
+      "topic": "Definite power integrals",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: evaluate the definite integral of 4 x^1 with respect to x from x = -1 to x = 2.",
+      "assumptions": [
+        "x and the integrand are dimensionless; use the stated bounds in their given order."
+      ],
+      "finalAnswer": {
+        "text": "6 (dimensionless)",
+        "latex": "6",
+        "numeric": 6.0,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "integral-power",
+        "inputs": {
+          "coefficient": 4,
+          "power": 1,
+          "lower": -1,
+          "upper": 2
+        },
+        "inputUnits": {
+          "coefficient": "1",
+          "power": "1",
+          "lower": "1",
+          "upper": "1"
+        }
+      }
+    },
+    {
+      "id": "calc-008",
+      "subject": "calculus",
+      "topic": "Definite power integrals",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: evaluate the definite integral of 5 x^0 with respect to x from x = 2 to x = 7.",
+      "assumptions": [
+        "x and the integrand are dimensionless; use the stated bounds in their given order."
+      ],
+      "finalAnswer": {
+        "text": "25 (dimensionless)",
+        "latex": "25",
+        "numeric": 25.0,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "integral-power",
+        "inputs": {
+          "coefficient": 5,
+          "power": 0,
+          "lower": 2,
+          "upper": 7
+        },
+        "inputUnits": {
+          "coefficient": "1",
+          "power": "1",
+          "lower": "1",
+          "upper": "1"
+        }
+      }
+    },
+    {
+      "id": "calc-009",
+      "subject": "calculus",
+      "topic": "Integration by parts",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: evaluate the definite integral of 1 x e^x with respect to x from 0 to 1. Give an exact expression or a decimal.",
+      "assumptions": [
+        "x is dimensionless and e is Euler’s number; the lower bound is 0."
+      ],
+      "finalAnswer": {
+        "text": "1 (dimensionless)",
+        "latex": "1",
+        "numeric": 1.0,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "integral-x-exponential",
+        "inputs": {
+          "coefficient": 1,
+          "upper": 1
+        },
+        "inputUnits": {
+          "coefficient": "1",
+          "upper": "1"
+        }
+      }
+    },
+    {
+      "id": "calc-010",
+      "subject": "calculus",
+      "topic": "Integration by parts",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: evaluate the definite integral of 2 x e^x with respect to x from 0 to 2. Give an exact expression or a decimal.",
+      "assumptions": [
+        "x is dimensionless and e is Euler’s number; the lower bound is 0."
+      ],
+      "finalAnswer": {
+        "text": "16.7781121979 (dimensionless)",
+        "latex": "2e^{2}+2",
+        "numeric": 16.7781121978613,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "integral-x-exponential",
+        "inputs": {
+          "coefficient": 2,
+          "upper": 2
+        },
+        "inputUnits": {
+          "coefficient": "1",
+          "upper": "1"
+        }
+      }
+    },
+    {
+      "id": "calc-011",
+      "subject": "calculus",
+      "topic": "Integration by parts",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: evaluate the definite integral of 1 x e^x with respect to x from 0 to 3. Give an exact expression or a decimal.",
+      "assumptions": [
+        "x is dimensionless and e is Euler’s number; the lower bound is 0."
+      ],
+      "finalAnswer": {
+        "text": "41.1710738464 (dimensionless)",
+        "latex": "2e^{3}+1",
+        "numeric": 41.171073846375336,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "integral-x-exponential",
+        "inputs": {
+          "coefficient": 1,
+          "upper": 3
+        },
+        "inputUnits": {
+          "coefficient": "1",
+          "upper": "1"
+        }
+      }
+    },
+    {
+      "id": "calc-012",
+      "subject": "calculus",
+      "topic": "Integration by parts",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: evaluate the definite integral of 3 x e^x with respect to x from 0 to 1. Give an exact expression or a decimal.",
+      "assumptions": [
+        "x is dimensionless and e is Euler’s number; the lower bound is 0."
+      ],
+      "finalAnswer": {
+        "text": "3 (dimensionless)",
+        "latex": "3",
+        "numeric": 3.0,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "integral-x-exponential",
+        "inputs": {
+          "coefficient": 3,
+          "upper": 1
+        },
+        "inputUnits": {
+          "coefficient": "1",
+          "upper": "1"
+        }
+      }
+    },
+    {
+      "id": "calc-013",
+      "subject": "calculus",
+      "topic": "Chain rule for logarithms",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: f(x) = ln(2 x + (1)). Find the numerical value of f′(2).",
+      "assumptions": [
+        "ln is the natural logarithm; x is dimensionless and the log argument is positive at the requested point."
+      ],
+      "finalAnswer": {
+        "text": "0.4 (dimensionless)",
+        "latex": "\\frac{2}{5}",
+        "numeric": 0.4,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "derivative-log-linear",
+        "inputs": {
+          "coefficient": 2,
+          "constant": 1,
+          "point": 2
+        },
+        "inputUnits": {
+          "coefficient": "1",
+          "constant": "1",
+          "point": "1"
+        }
+      }
+    },
+    {
+      "id": "calc-014",
+      "subject": "calculus",
+      "topic": "Chain rule for logarithms",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: f(x) = ln(3 x + (4)). Find the numerical value of f′(0).",
+      "assumptions": [
+        "ln is the natural logarithm; x is dimensionless and the log argument is positive at the requested point."
+      ],
+      "finalAnswer": {
+        "text": "0.75 (dimensionless)",
+        "latex": "\\frac{3}{4}",
+        "numeric": 0.75,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "derivative-log-linear",
+        "inputs": {
+          "coefficient": 3,
+          "constant": 4,
+          "point": 0
+        },
+        "inputUnits": {
+          "coefficient": "1",
+          "constant": "1",
+          "point": "1"
+        }
+      }
+    },
+    {
+      "id": "calc-015",
+      "subject": "calculus",
+      "topic": "Chain rule for logarithms",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: f(x) = ln(-2 x + (7)). Find the numerical value of f′(2).",
+      "assumptions": [
+        "ln is the natural logarithm; x is dimensionless and the log argument is positive at the requested point."
+      ],
+      "finalAnswer": {
+        "text": "-0.666666666667 (dimensionless)",
+        "latex": "-\\frac{2}{3}",
+        "numeric": -0.6666666666666666,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "derivative-log-linear",
+        "inputs": {
+          "coefficient": -2,
+          "constant": 7,
+          "point": 2
+        },
+        "inputUnits": {
+          "coefficient": "1",
+          "constant": "1",
+          "point": "1"
+        }
+      }
+    },
+    {
+      "id": "calc-016",
+      "subject": "calculus",
+      "topic": "Chain rule for logarithms",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: f(x) = ln(5 x + (-1)). Find the numerical value of f′(1).",
+      "assumptions": [
+        "ln is the natural logarithm; x is dimensionless and the log argument is positive at the requested point."
+      ],
+      "finalAnswer": {
+        "text": "1.25 (dimensionless)",
+        "latex": "\\frac{5}{4}",
+        "numeric": 1.25,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "derivative-log-linear",
+        "inputs": {
+          "coefficient": 5,
+          "constant": -1,
+          "point": 1
+        },
+        "inputUnits": {
+          "coefficient": "1",
+          "constant": "1",
+          "point": "1"
+        }
+      }
+    },
+    {
+      "id": "calc-017",
+      "subject": "calculus",
+      "topic": "Trigonometric chain rule",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: f(x) = sin(1 x), with angles in radians. Find the numerical value of f′(x) at x = 0.",
+      "assumptions": [
+        "The angle is in radians; x and f are dimensionless.",
+        "The numeric point in verification metadata is the floating-point value of the exact point stated in the prompt."
+      ],
+      "finalAnswer": {
+        "text": "1 (dimensionless)",
+        "latex": "1",
+        "numeric": 1.0,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "derivative-sine",
+        "inputs": {
+          "frequency": 1,
+          "pointRadians": 0
+        },
+        "inputUnits": {
+          "frequency": "1",
+          "pointRadians": "rad"
+        }
+      }
+    },
+    {
+      "id": "calc-018",
+      "subject": "calculus",
+      "topic": "Trigonometric chain rule",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: f(x) = sin(2 x), with angles in radians. Find the numerical value of f′(x) at x = pi/2.",
+      "assumptions": [
+        "The angle is in radians; x and f are dimensionless.",
+        "The numeric point in verification metadata is the floating-point value of the exact point stated in the prompt."
+      ],
+      "finalAnswer": {
+        "text": "-2 (dimensionless)",
+        "latex": "-2",
+        "numeric": -2.0,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "derivative-sine",
+        "inputs": {
+          "frequency": 2,
+          "pointRadians": 1.5707963267948966
+        },
+        "inputUnits": {
+          "frequency": "1",
+          "pointRadians": "rad"
+        }
+      }
+    },
+    {
+      "id": "calc-019",
+      "subject": "calculus",
+      "topic": "Trigonometric chain rule",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: f(x) = sin(3 x), with angles in radians. Find the numerical value of f′(x) at x = pi/3.",
+      "assumptions": [
+        "The angle is in radians; x and f are dimensionless.",
+        "The numeric point in verification metadata is the floating-point value of the exact point stated in the prompt."
+      ],
+      "finalAnswer": {
+        "text": "-3 (dimensionless)",
+        "latex": "-3",
+        "numeric": -3.0,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "derivative-sine",
+        "inputs": {
+          "frequency": 3,
+          "pointRadians": 1.0471975511965976
+        },
+        "inputUnits": {
+          "frequency": "1",
+          "pointRadians": "rad"
+        }
+      }
+    },
+    {
+      "id": "calc-020",
+      "subject": "calculus",
+      "topic": "Trigonometric chain rule",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: f(x) = sin(4 x), with angles in radians. Find the numerical value of f′(x) at x = pi/8.",
+      "assumptions": [
+        "The angle is in radians; x and f are dimensionless.",
+        "The numeric point in verification metadata is the floating-point value of the exact point stated in the prompt."
+      ],
+      "finalAnswer": {
+        "text": "0 (dimensionless)",
+        "latex": "0",
+        "numeric": 0,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "derivative-sine",
+        "inputs": {
+          "frequency": 4,
+          "pointRadians": 0.39269908169872414
+        },
+        "inputUnits": {
+          "frequency": "1",
+          "pointRadians": "rad"
+        }
+      }
+    },
+    {
+      "id": "phys-001",
+      "subject": "physics",
+      "topic": "Newton’s second law",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a 2 kg object has acceleration 3 m/s^2 along one axis. What is the signed net force along that axis?",
+      "assumptions": [
+        "Use an inertial frame and constant mass.",
+        "Acceleration sign defines the axis direction; report force in newtons."
+      ],
+      "finalAnswer": {
+        "text": "6 N",
+        "latex": "6",
+        "numeric": 6,
+        "unit": "N",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "net-force",
+        "inputs": {
+          "massKg": 2,
+          "accelerationMps2": 3
+        },
+        "inputUnits": {
+          "massKg": "kg",
+          "accelerationMps2": "m/s^2"
+        }
+      }
+    },
+    {
+      "id": "phys-002",
+      "subject": "physics",
+      "topic": "Newton’s second law",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a 5 kg object has acceleration -2 m/s^2 along one axis. What is the signed net force along that axis?",
+      "assumptions": [
+        "Use an inertial frame and constant mass.",
+        "Acceleration sign defines the axis direction; report force in newtons."
+      ],
+      "finalAnswer": {
+        "text": "-10 N",
+        "latex": "-10",
+        "numeric": -10,
+        "unit": "N",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "net-force",
+        "inputs": {
+          "massKg": 5,
+          "accelerationMps2": -2
+        },
+        "inputUnits": {
+          "massKg": "kg",
+          "accelerationMps2": "m/s^2"
+        }
+      }
+    },
+    {
+      "id": "phys-003",
+      "subject": "physics",
+      "topic": "Newton’s second law",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a 0.75 kg object has acceleration 8 m/s^2 along one axis. What is the signed net force along that axis?",
+      "assumptions": [
+        "Use an inertial frame and constant mass.",
+        "Acceleration sign defines the axis direction; report force in newtons."
+      ],
+      "finalAnswer": {
+        "text": "6 N",
+        "latex": "6",
+        "numeric": 6.0,
+        "unit": "N",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "net-force",
+        "inputs": {
+          "massKg": 0.75,
+          "accelerationMps2": 8
+        },
+        "inputUnits": {
+          "massKg": "kg",
+          "accelerationMps2": "m/s^2"
+        }
+      }
+    },
+    {
+      "id": "phys-004",
+      "subject": "physics",
+      "topic": "Newton’s second law",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a 12 kg object has acceleration 0.5 m/s^2 along one axis. What is the signed net force along that axis?",
+      "assumptions": [
+        "Use an inertial frame and constant mass.",
+        "Acceleration sign defines the axis direction; report force in newtons."
+      ],
+      "finalAnswer": {
+        "text": "6 N",
+        "latex": "6",
+        "numeric": 6.0,
+        "unit": "N",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "net-force",
+        "inputs": {
+          "massKg": 12,
+          "accelerationMps2": 0.5
+        },
+        "inputUnits": {
+          "massKg": "kg",
+          "accelerationMps2": "m/s^2"
+        }
+      }
+    },
+    {
+      "id": "phys-005",
+      "subject": "physics",
+      "topic": "Translational kinetic energy",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: an object of mass 2 kg moves at speed 3 m/s. Find its translational kinetic energy in joules.",
+      "assumptions": [
+        "Use nonrelativistic mechanics; exclude rotation and internal energy."
+      ],
+      "finalAnswer": {
+        "text": "9 J",
+        "latex": "9",
+        "numeric": 9.0,
+        "unit": "J",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "kinetic-energy",
+        "inputs": {
+          "massKg": 2,
+          "speedMps": 3
+        },
+        "inputUnits": {
+          "massKg": "kg",
+          "speedMps": "m/s"
+        }
+      }
+    },
+    {
+      "id": "phys-006",
+      "subject": "physics",
+      "topic": "Translational kinetic energy",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: an object of mass 0.5 kg moves at speed 10 m/s. Find its translational kinetic energy in joules.",
+      "assumptions": [
+        "Use nonrelativistic mechanics; exclude rotation and internal energy."
+      ],
+      "finalAnswer": {
+        "text": "25 J",
+        "latex": "25",
+        "numeric": 25.0,
+        "unit": "J",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "kinetic-energy",
+        "inputs": {
+          "massKg": 0.5,
+          "speedMps": 10
+        },
+        "inputUnits": {
+          "massKg": "kg",
+          "speedMps": "m/s"
+        }
+      }
+    },
+    {
+      "id": "phys-007",
+      "subject": "physics",
+      "topic": "Translational kinetic energy",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: an object of mass 4 kg moves at speed 5 m/s. Find its translational kinetic energy in joules.",
+      "assumptions": [
+        "Use nonrelativistic mechanics; exclude rotation and internal energy."
+      ],
+      "finalAnswer": {
+        "text": "50 J",
+        "latex": "50",
+        "numeric": 50.0,
+        "unit": "J",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "kinetic-energy",
+        "inputs": {
+          "massKg": 4,
+          "speedMps": 5
+        },
+        "inputUnits": {
+          "massKg": "kg",
+          "speedMps": "m/s"
+        }
+      }
+    },
+    {
+      "id": "phys-008",
+      "subject": "physics",
+      "topic": "Translational kinetic energy",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: an object of mass 1200 kg moves at speed 20 m/s. Find its translational kinetic energy in joules.",
+      "assumptions": [
+        "Use nonrelativistic mechanics; exclude rotation and internal energy."
+      ],
+      "finalAnswer": {
+        "text": "240000 J",
+        "latex": "240000",
+        "numeric": 240000.0,
+        "unit": "J",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "kinetic-energy",
+        "inputs": {
+          "massKg": 1200,
+          "speedMps": 20
+        },
+        "inputUnits": {
+          "massKg": "kg",
+          "speedMps": "m/s"
+        }
+      }
+    },
+    {
+      "id": "phys-009",
+      "subject": "physics",
+      "topic": "Constant-speed motion",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a walker or vehicle travels at a constant speed of 3 m/s for 40 s. What total distance does it travel?",
+      "assumptions": [
+        "Speed stays constant and nonnegative for the entire stated interval; report distance in metres."
+      ],
+      "finalAnswer": {
+        "text": "120 m",
+        "latex": "120",
+        "numeric": 120,
+        "unit": "m",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "constant-speed-distance",
+        "inputs": {
+          "speedMps": 3,
+          "timeS": 40
+        },
+        "inputUnits": {
+          "speedMps": "m/s",
+          "timeS": "s"
+        }
+      }
+    },
+    {
+      "id": "phys-010",
+      "subject": "physics",
+      "topic": "Constant-speed motion",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a walker or vehicle travels at a constant speed of 1.5 m/s for 120 s. What total distance does it travel?",
+      "assumptions": [
+        "Speed stays constant and nonnegative for the entire stated interval; report distance in metres."
+      ],
+      "finalAnswer": {
+        "text": "180 m",
+        "latex": "180",
+        "numeric": 180.0,
+        "unit": "m",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "constant-speed-distance",
+        "inputs": {
+          "speedMps": 1.5,
+          "timeS": 120
+        },
+        "inputUnits": {
+          "speedMps": "m/s",
+          "timeS": "s"
+        }
+      }
+    },
+    {
+      "id": "phys-011",
+      "subject": "physics",
+      "topic": "Constant-speed motion",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a walker or vehicle travels at a constant speed of 25 m/s for 8 s. What total distance does it travel?",
+      "assumptions": [
+        "Speed stays constant and nonnegative for the entire stated interval; report distance in metres."
+      ],
+      "finalAnswer": {
+        "text": "200 m",
+        "latex": "200",
+        "numeric": 200,
+        "unit": "m",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "constant-speed-distance",
+        "inputs": {
+          "speedMps": 25,
+          "timeS": 8
+        },
+        "inputUnits": {
+          "speedMps": "m/s",
+          "timeS": "s"
+        }
+      }
+    },
+    {
+      "id": "phys-012",
+      "subject": "physics",
+      "topic": "Constant-speed motion",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a walker or vehicle travels at a constant speed of 0.2 m/s for 15 s. What total distance does it travel?",
+      "assumptions": [
+        "Speed stays constant and nonnegative for the entire stated interval; report distance in metres."
+      ],
+      "finalAnswer": {
+        "text": "3 m",
+        "latex": "3",
+        "numeric": 3.0,
+        "unit": "m",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "constant-speed-distance",
+        "inputs": {
+          "speedMps": 0.2,
+          "timeS": 15
+        },
+        "inputUnits": {
+          "speedMps": "m/s",
+          "timeS": "s"
+        }
+      }
+    },
+    {
+      "id": "phys-013",
+      "subject": "physics",
+      "topic": "Gravitational potential energy",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: lift a 2 kg object vertically by 3 m in a uniform gravitational field with g = 9.81 m/s^2. Find the change in gravitational potential energy.",
+      "assumptions": [
+        "Use the stated constant g; upward height change is positive.",
+        "Only gravitational potential energy is requested, in joules."
+      ],
+      "finalAnswer": {
+        "text": "58.86 J",
+        "latex": "\\frac{2943}{50}",
+        "numeric": 58.86,
+        "unit": "J",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "gravitational-energy-change",
+        "inputs": {
+          "massKg": 2,
+          "gravityMps2": 9.81,
+          "heightChangeM": 3
+        },
+        "inputUnits": {
+          "massKg": "kg",
+          "gravityMps2": "m/s^2",
+          "heightChangeM": "m"
+        }
+      }
+    },
+    {
+      "id": "phys-014",
+      "subject": "physics",
+      "topic": "Gravitational potential energy",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: lift a 5 kg object vertically by 2 m in a uniform gravitational field with g = 9.8 m/s^2. Find the change in gravitational potential energy.",
+      "assumptions": [
+        "Use the stated constant g; upward height change is positive.",
+        "Only gravitational potential energy is requested, in joules."
+      ],
+      "finalAnswer": {
+        "text": "98 J",
+        "latex": "98",
+        "numeric": 98.0,
+        "unit": "J",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "gravitational-energy-change",
+        "inputs": {
+          "massKg": 5,
+          "gravityMps2": 9.8,
+          "heightChangeM": 2
+        },
+        "inputUnits": {
+          "massKg": "kg",
+          "gravityMps2": "m/s^2",
+          "heightChangeM": "m"
+        }
+      }
+    },
+    {
+      "id": "phys-015",
+      "subject": "physics",
+      "topic": "Gravitational potential energy",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: lift a 0.4 kg object vertically by 1.5 m in a uniform gravitational field with g = 10 m/s^2. Find the change in gravitational potential energy.",
+      "assumptions": [
+        "Use the stated constant g; upward height change is positive.",
+        "Only gravitational potential energy is requested, in joules."
+      ],
+      "finalAnswer": {
+        "text": "6 J",
+        "latex": "6",
+        "numeric": 6.0,
+        "unit": "J",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "gravitational-energy-change",
+        "inputs": {
+          "massKg": 0.4,
+          "gravityMps2": 10,
+          "heightChangeM": 1.5
+        },
+        "inputUnits": {
+          "massKg": "kg",
+          "gravityMps2": "m/s^2",
+          "heightChangeM": "m"
+        }
+      }
+    },
+    {
+      "id": "phys-016",
+      "subject": "physics",
+      "topic": "Gravitational potential energy",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: lift an 80 kg object vertically by 0.5 m in a uniform gravitational field with g = 9.81 m/s^2. Find the change in gravitational potential energy.",
+      "assumptions": [
+        "Use the stated constant g; upward height change is positive.",
+        "Only gravitational potential energy is requested, in joules."
+      ],
+      "finalAnswer": {
+        "text": "392.4 J",
+        "latex": "\\frac{1962}{5}",
+        "numeric": 392.40000000000003,
+        "unit": "J",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "gravitational-energy-change",
+        "inputs": {
+          "massKg": 80,
+          "gravityMps2": 9.81,
+          "heightChangeM": 0.5
+        },
+        "inputUnits": {
+          "massKg": "kg",
+          "gravityMps2": "m/s^2",
+          "heightChangeM": "m"
+        }
+      }
+    },
+    {
+      "id": "phys-017",
+      "subject": "physics",
+      "topic": "Linear momentum",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: an object has mass 2 kg and signed velocity 4 m/s on a chosen axis. Find its signed linear momentum.",
+      "assumptions": [
+        "Use nonrelativistic mechanics and constant mass; retain the velocity sign.",
+        "Report momentum in kg m/s."
+      ],
+      "finalAnswer": {
+        "text": "8 kg m/s",
+        "latex": "8",
+        "numeric": 8,
+        "unit": "kg m/s",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "linear-momentum",
+        "inputs": {
+          "massKg": 2,
+          "velocityMps": 4
+        },
+        "inputUnits": {
+          "massKg": "kg",
+          "velocityMps": "m/s"
+        }
+      }
+    },
+    {
+      "id": "phys-018",
+      "subject": "physics",
+      "topic": "Linear momentum",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: an object has mass 0.25 kg and signed velocity 12 m/s on a chosen axis. Find its signed linear momentum.",
+      "assumptions": [
+        "Use nonrelativistic mechanics and constant mass; retain the velocity sign.",
+        "Report momentum in kg m/s."
+      ],
+      "finalAnswer": {
+        "text": "3 kg m/s",
+        "latex": "3",
+        "numeric": 3.0,
+        "unit": "kg m/s",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "linear-momentum",
+        "inputs": {
+          "massKg": 0.25,
+          "velocityMps": 12
+        },
+        "inputUnits": {
+          "massKg": "kg",
+          "velocityMps": "m/s"
+        }
+      }
+    },
+    {
+      "id": "phys-019",
+      "subject": "physics",
+      "topic": "Linear momentum",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: an object has mass 1500 kg and signed velocity -6 m/s on a chosen axis. Find its signed linear momentum.",
+      "assumptions": [
+        "Use nonrelativistic mechanics and constant mass; retain the velocity sign.",
+        "Report momentum in kg m/s."
+      ],
+      "finalAnswer": {
+        "text": "-9000 kg m/s",
+        "latex": "-9000",
+        "numeric": -9000,
+        "unit": "kg m/s",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "linear-momentum",
+        "inputs": {
+          "massKg": 1500,
+          "velocityMps": -6
+        },
+        "inputUnits": {
+          "massKg": "kg",
+          "velocityMps": "m/s"
+        }
+      }
+    },
+    {
+      "id": "phys-020",
+      "subject": "physics",
+      "topic": "Linear momentum",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: an object has mass 3 kg and signed velocity 0.5 m/s on a chosen axis. Find its signed linear momentum.",
+      "assumptions": [
+        "Use nonrelativistic mechanics and constant mass; retain the velocity sign.",
+        "Report momentum in kg m/s."
+      ],
+      "finalAnswer": {
+        "text": "1.5 kg m/s",
+        "latex": "\\frac{3}{2}",
+        "numeric": 1.5,
+        "unit": "kg m/s",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "linear-momentum",
+        "inputs": {
+          "massKg": 3,
+          "velocityMps": 0.5
+        },
+        "inputUnits": {
+          "massKg": "kg",
+          "velocityMps": "m/s"
+        }
+      }
+    },
+    {
+      "id": "ece-001",
+      "subject": "ece",
+      "topic": "Ohm’s law",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a 6 ohm resistor has a DC voltage drop of 12 V measured in the passive sign convention. Find the current entering its positive-voltage terminal in amperes.",
+      "assumptions": [
+        "The resistor is ideal, linear and at constant resistance; ignore heating effects."
+      ],
+      "finalAnswer": {
+        "text": "2 A",
+        "latex": "2",
+        "numeric": 2.0,
+        "unit": "A",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "resistor-current",
+        "inputs": {
+          "voltageV": 12,
+          "resistanceOhm": 6
+        },
+        "inputUnits": {
+          "voltageV": "V",
+          "resistanceOhm": "ohm"
+        }
+      }
+    },
+    {
+      "id": "ece-002",
+      "subject": "ece",
+      "topic": "Ohm’s law",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a 1000 ohm resistor has a DC voltage drop of 5 V measured in the passive sign convention. Find the current entering its positive-voltage terminal in amperes.",
+      "assumptions": [
+        "The resistor is ideal, linear and at constant resistance; ignore heating effects."
+      ],
+      "finalAnswer": {
+        "text": "0.005 A",
+        "latex": "\\frac{1}{200}",
+        "numeric": 0.005,
+        "unit": "A",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "resistor-current",
+        "inputs": {
+          "voltageV": 5,
+          "resistanceOhm": 1000
+        },
+        "inputUnits": {
+          "voltageV": "V",
+          "resistanceOhm": "ohm"
+        }
+      }
+    },
+    {
+      "id": "ece-003",
+      "subject": "ece",
+      "topic": "Ohm’s law",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a 300 ohm resistor has a DC voltage drop of 9 V measured in the passive sign convention. Find the current entering its positive-voltage terminal in amperes.",
+      "assumptions": [
+        "The resistor is ideal, linear and at constant resistance; ignore heating effects."
+      ],
+      "finalAnswer": {
+        "text": "0.03 A",
+        "latex": "\\frac{3}{100}",
+        "numeric": 0.03,
+        "unit": "A",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "resistor-current",
+        "inputs": {
+          "voltageV": 9,
+          "resistanceOhm": 300
+        },
+        "inputUnits": {
+          "voltageV": "V",
+          "resistanceOhm": "ohm"
+        }
+      }
+    },
+    {
+      "id": "ece-004",
+      "subject": "ece",
+      "topic": "Ohm’s law",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a 220 ohm resistor has a DC voltage drop of 3.3 V measured in the passive sign convention. Find the current entering its positive-voltage terminal in amperes.",
+      "assumptions": [
+        "The resistor is ideal, linear and at constant resistance; ignore heating effects."
+      ],
+      "finalAnswer": {
+        "text": "0.015 A",
+        "latex": "\\frac{3}{200}",
+        "numeric": 0.015,
+        "unit": "A",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "resistor-current",
+        "inputs": {
+          "voltageV": 3.3,
+          "resistanceOhm": 220
+        },
+        "inputUnits": {
+          "voltageV": "V",
+          "resistanceOhm": "ohm"
+        }
+      }
+    },
+    {
+      "id": "ece-005",
+      "subject": "ece",
+      "topic": "Unloaded voltage dividers",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: connect R1 = 1000 ohm from a 12 V ideal source to Vout, and R2 = 2000 ohm from Vout to ground. With no load, what is Vout relative to ground?",
+      "assumptions": [
+        "Use ideal resistors and a zero-output-resistance DC source.",
+        "The output is open circuit apart from R2; there is no additional load."
+      ],
+      "finalAnswer": {
+        "text": "8 V",
+        "latex": "8",
+        "numeric": 8.0,
+        "unit": "V",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "voltage-divider",
+        "inputs": {
+          "inputV": 12,
+          "topResistanceOhm": 1000,
+          "bottomResistanceOhm": 2000
+        },
+        "inputUnits": {
+          "inputV": "V",
+          "topResistanceOhm": "ohm",
+          "bottomResistanceOhm": "ohm"
+        }
+      }
+    },
+    {
+      "id": "ece-006",
+      "subject": "ece",
+      "topic": "Unloaded voltage dividers",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: connect R1 = 1000 ohm from a 5 V ideal source to Vout, and R2 = 1000 ohm from Vout to ground. With no load, what is Vout relative to ground?",
+      "assumptions": [
+        "Use ideal resistors and a zero-output-resistance DC source.",
+        "The output is open circuit apart from R2; there is no additional load."
+      ],
+      "finalAnswer": {
+        "text": "2.5 V",
+        "latex": "\\frac{5}{2}",
+        "numeric": 2.5,
+        "unit": "V",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "voltage-divider",
+        "inputs": {
+          "inputV": 5,
+          "topResistanceOhm": 1000,
+          "bottomResistanceOhm": 1000
+        },
+        "inputUnits": {
+          "inputV": "V",
+          "topResistanceOhm": "ohm",
+          "bottomResistanceOhm": "ohm"
+        }
+      }
+    },
+    {
+      "id": "ece-007",
+      "subject": "ece",
+      "topic": "Unloaded voltage dividers",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: connect R1 = 2000 ohm from a 9 V ideal source to Vout, and R2 = 1000 ohm from Vout to ground. With no load, what is Vout relative to ground?",
+      "assumptions": [
+        "Use ideal resistors and a zero-output-resistance DC source.",
+        "The output is open circuit apart from R2; there is no additional load."
+      ],
+      "finalAnswer": {
+        "text": "3 V",
+        "latex": "3",
+        "numeric": 3.0,
+        "unit": "V",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "voltage-divider",
+        "inputs": {
+          "inputV": 9,
+          "topResistanceOhm": 2000,
+          "bottomResistanceOhm": 1000
+        },
+        "inputUnits": {
+          "inputV": "V",
+          "topResistanceOhm": "ohm",
+          "bottomResistanceOhm": "ohm"
+        }
+      }
+    },
+    {
+      "id": "ece-008",
+      "subject": "ece",
+      "topic": "Unloaded voltage dividers",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: connect R1 = 10000 ohm from a 3.3 V ideal source to Vout, and R2 = 20000 ohm from Vout to ground. With no load, what is Vout relative to ground?",
+      "assumptions": [
+        "Use ideal resistors and a zero-output-resistance DC source.",
+        "The output is open circuit apart from R2; there is no additional load."
+      ],
+      "finalAnswer": {
+        "text": "2.2 V",
+        "latex": "\\frac{11}{5}",
+        "numeric": 2.2,
+        "unit": "V",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "voltage-divider",
+        "inputs": {
+          "inputV": 3.3,
+          "topResistanceOhm": 10000,
+          "bottomResistanceOhm": 20000
+        },
+        "inputUnits": {
+          "inputV": "V",
+          "topResistanceOhm": "ohm",
+          "bottomResistanceOhm": "ohm"
+        }
+      }
+    },
+    {
+      "id": "ece-009",
+      "subject": "ece",
+      "topic": "First-order RC circuits",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: an ideal first-order RC charging circuit has R = 1000 ohm and C = 100 microfarads. Find its time constant tau in seconds.",
+      "assumptions": [
+        "The ideal source has zero resistance and R is the only resistance seen by the capacitor.",
+        "One microfarad equals 10^-6 F; the verification capacitance is expressed in farads."
+      ],
+      "finalAnswer": {
+        "text": "0.1 s",
+        "latex": "\\frac{1}{10}",
+        "numeric": 0.1,
+        "unit": "s",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "rc-time-constant",
+        "inputs": {
+          "resistanceOhm": 1000,
+          "capacitanceF": 0.0001
+        },
+        "inputUnits": {
+          "resistanceOhm": "ohm",
+          "capacitanceF": "F"
+        }
+      }
+    },
+    {
+      "id": "ece-010",
+      "subject": "ece",
+      "topic": "First-order RC circuits",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: an ideal first-order RC charging circuit has R = 4700 ohm and C = 10 microfarads. Find its time constant tau in seconds.",
+      "assumptions": [
+        "The ideal source has zero resistance and R is the only resistance seen by the capacitor.",
+        "One microfarad equals 10^-6 F; the verification capacitance is expressed in farads."
+      ],
+      "finalAnswer": {
+        "text": "0.047 s",
+        "latex": "\\frac{47}{1000}",
+        "numeric": 0.04700000000000001,
+        "unit": "s",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "rc-time-constant",
+        "inputs": {
+          "resistanceOhm": 4700,
+          "capacitanceF": 1e-5
+        },
+        "inputUnits": {
+          "resistanceOhm": "ohm",
+          "capacitanceF": "F"
+        }
+      }
+    },
+    {
+      "id": "ece-011",
+      "subject": "ece",
+      "topic": "First-order RC circuits",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: an ideal first-order RC charging circuit has R = 10000 ohm and C = 1 microfarad. Find its time constant tau in seconds.",
+      "assumptions": [
+        "The ideal source has zero resistance and R is the only resistance seen by the capacitor.",
+        "One microfarad equals 10^-6 F; the verification capacitance is expressed in farads."
+      ],
+      "finalAnswer": {
+        "text": "0.01 s",
+        "latex": "\\frac{1}{100}",
+        "numeric": 0.01,
+        "unit": "s",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "rc-time-constant",
+        "inputs": {
+          "resistanceOhm": 10000,
+          "capacitanceF": 1e-6
+        },
+        "inputUnits": {
+          "resistanceOhm": "ohm",
+          "capacitanceF": "F"
+        }
+      }
+    },
+    {
+      "id": "ece-012",
+      "subject": "ece",
+      "topic": "First-order RC circuits",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: an ideal first-order RC charging circuit has R = 220 ohm and C = 1000 microfarads. Find its time constant tau in seconds.",
+      "assumptions": [
+        "The ideal source has zero resistance and R is the only resistance seen by the capacitor.",
+        "One microfarad equals 10^-6 F; the verification capacitance is expressed in farads."
+      ],
+      "finalAnswer": {
+        "text": "0.22 s",
+        "latex": "\\frac{11}{50}",
+        "numeric": 0.22,
+        "unit": "s",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "rc-time-constant",
+        "inputs": {
+          "resistanceOhm": 220,
+          "capacitanceF": 0.001
+        },
+        "inputUnits": {
+          "resistanceOhm": "ohm",
+          "capacitanceF": "F"
+        }
+      }
+    },
+    {
+      "id": "ece-013",
+      "subject": "ece",
+      "topic": "Unsigned binary representation",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: convert the unsigned base-2 bit string 1010 to its base-10 integer value. The leftmost bit is most significant.",
+      "assumptions": [
+        "This is unsigned positional binary; there is no sign bit or two’s-complement interpretation.",
+        "Leading zeroes, if present, do not change the value."
+      ],
+      "finalAnswer": {
+        "text": "10 (dimensionless)",
+        "latex": "10",
+        "numeric": 10,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "unsigned-binary",
+        "inputs": {
+          "bits": [1, 0, 1, 0]
+        },
+        "inputUnits": {
+          "bits": "bit"
+        }
+      }
+    },
+    {
+      "id": "ece-014",
+      "subject": "ece",
+      "topic": "Unsigned binary representation",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: convert the unsigned base-2 bit string 1101 to its base-10 integer value. The leftmost bit is most significant.",
+      "assumptions": [
+        "This is unsigned positional binary; there is no sign bit or two’s-complement interpretation.",
+        "Leading zeroes, if present, do not change the value."
+      ],
+      "finalAnswer": {
+        "text": "13 (dimensionless)",
+        "latex": "13",
+        "numeric": 13,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "unsigned-binary",
+        "inputs": {
+          "bits": [1, 1, 0, 1]
+        },
+        "inputUnits": {
+          "bits": "bit"
+        }
+      }
+    },
+    {
+      "id": "ece-015",
+      "subject": "ece",
+      "topic": "Unsigned binary representation",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: convert the unsigned base-2 bit string 0011 to its base-10 integer value. The leftmost bit is most significant.",
+      "assumptions": [
+        "This is unsigned positional binary; there is no sign bit or two’s-complement interpretation.",
+        "Leading zeroes, if present, do not change the value."
+      ],
+      "finalAnswer": {
+        "text": "3 (dimensionless)",
+        "latex": "3",
+        "numeric": 3,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "unsigned-binary",
+        "inputs": {
+          "bits": [0, 0, 1, 1]
+        },
+        "inputUnits": {
+          "bits": "bit"
+        }
+      }
+    },
+    {
+      "id": "ece-016",
+      "subject": "ece",
+      "topic": "Unsigned binary representation",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: convert the unsigned base-2 bit string 111000 to its base-10 integer value. The leftmost bit is most significant.",
+      "assumptions": [
+        "This is unsigned positional binary; there is no sign bit or two’s-complement interpretation.",
+        "Leading zeroes, if present, do not change the value."
+      ],
+      "finalAnswer": {
+        "text": "56 (dimensionless)",
+        "latex": "56",
+        "numeric": 56,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "unsigned-binary",
+        "inputs": {
+          "bits": [1, 1, 1, 0, 0, 0]
+        },
+        "inputUnits": {
+          "bits": "bit"
+        }
+      }
+    },
+    {
+      "id": "ece-017",
+      "subject": "ece",
+      "topic": "Ideal inverting op-amp",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: an inverting op-amp has its noninverting input grounded, Rin = 2000 ohm, Rf = 10000 ohm, and Vin = 0.2 V through Rin. Find Vout.",
+      "assumptions": [
+        "Assume an ideal op-amp with negative feedback in linear operation and sufficient supply voltage to avoid clipping.",
+        "No input current enters the op-amp and the inverting node is at virtual ground."
+      ],
+      "finalAnswer": {
+        "text": "-1 V",
+        "latex": "-1",
+        "numeric": -1.0,
+        "unit": "V",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "inverting-amplifier",
+        "inputs": {
+          "feedbackResistanceOhm": 10000,
+          "inputResistanceOhm": 2000,
+          "inputV": 0.2
+        },
+        "inputUnits": {
+          "feedbackResistanceOhm": "ohm",
+          "inputResistanceOhm": "ohm",
+          "inputV": "V"
+        }
+      }
+    },
+    {
+      "id": "ece-018",
+      "subject": "ece",
+      "topic": "Ideal inverting op-amp",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: an inverting op-amp has its noninverting input grounded, Rin = 10000 ohm, Rf = 47000 ohm, and Vin = 0.1 V through Rin. Find Vout.",
+      "assumptions": [
+        "Assume an ideal op-amp with negative feedback in linear operation and sufficient supply voltage to avoid clipping.",
+        "No input current enters the op-amp and the inverting node is at virtual ground."
+      ],
+      "finalAnswer": {
+        "text": "-0.47 V",
+        "latex": "-\\frac{47}{100}",
+        "numeric": -0.47000000000000003,
+        "unit": "V",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "inverting-amplifier",
+        "inputs": {
+          "feedbackResistanceOhm": 47000,
+          "inputResistanceOhm": 10000,
+          "inputV": 0.1
+        },
+        "inputUnits": {
+          "feedbackResistanceOhm": "ohm",
+          "inputResistanceOhm": "ohm",
+          "inputV": "V"
+        }
+      }
+    },
+    {
+      "id": "ece-019",
+      "subject": "ece",
+      "topic": "Ideal inverting op-amp",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: an inverting op-amp has its noninverting input grounded, Rin = 11000 ohm, Rf = 22000 ohm, and Vin = -0.4 V through Rin. Find Vout.",
+      "assumptions": [
+        "Assume an ideal op-amp with negative feedback in linear operation and sufficient supply voltage to avoid clipping.",
+        "No input current enters the op-amp and the inverting node is at virtual ground."
+      ],
+      "finalAnswer": {
+        "text": "0.8 V",
+        "latex": "\\frac{4}{5}",
+        "numeric": 0.8,
+        "unit": "V",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "inverting-amplifier",
+        "inputs": {
+          "feedbackResistanceOhm": 22000,
+          "inputResistanceOhm": 11000,
+          "inputV": -0.4
+        },
+        "inputUnits": {
+          "feedbackResistanceOhm": "ohm",
+          "inputResistanceOhm": "ohm",
+          "inputV": "V"
+        }
+      }
+    },
+    {
+      "id": "ece-020",
+      "subject": "ece",
+      "topic": "Ideal inverting op-amp",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: an inverting op-amp has its noninverting input grounded, Rin = 10000 ohm, Rf = 100000 ohm, and Vin = 0.05 V through Rin. Find Vout.",
+      "assumptions": [
+        "Assume an ideal op-amp with negative feedback in linear operation and sufficient supply voltage to avoid clipping.",
+        "No input current enters the op-amp and the inverting node is at virtual ground."
+      ],
+      "finalAnswer": {
+        "text": "-0.5 V",
+        "latex": "-\\frac{1}{2}",
+        "numeric": -0.5,
+        "unit": "V",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "inverting-amplifier",
+        "inputs": {
+          "feedbackResistanceOhm": 100000,
+          "inputResistanceOhm": 10000,
+          "inputV": 0.05
+        },
+        "inputUnits": {
+          "feedbackResistanceOhm": "ohm",
+          "inputResistanceOhm": "ohm",
+          "inputV": "V"
+        }
+      }
+    },
+    {
+      "id": "chem-001",
+      "subject": "chemistry",
+      "topic": "Mass-to-moles conversion",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a pure sample of a synthetic solute has mass 10 g. Using the given molar mass 50 g/mol, how many moles are in the sample?",
+      "assumptions": [
+        "Use the supplied molar mass as exact for this exercise; assume a pure sample with no losses."
+      ],
+      "finalAnswer": {
+        "text": "0.2 mol",
+        "latex": "\\frac{1}{5}",
+        "numeric": 0.2,
+        "unit": "mol",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "mass-to-moles",
+        "inputs": {
+          "massG": 10,
+          "molarMassGPerMol": 50
+        },
+        "inputUnits": {
+          "massG": "g",
+          "molarMassGPerMol": "g/mol"
+        }
+      }
+    },
+    {
+      "id": "chem-002",
+      "subject": "chemistry",
+      "topic": "Mass-to-moles conversion",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a pure sample of water has mass 18.015 g. Using the given molar mass 18.015 g/mol, how many moles are in the sample?",
+      "assumptions": [
+        "Use the supplied molar mass as exact for this exercise; assume a pure sample with no losses."
+      ],
+      "finalAnswer": {
+        "text": "1 mol",
+        "latex": "1",
+        "numeric": 1.0,
+        "unit": "mol",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "mass-to-moles",
+        "inputs": {
+          "massG": 18.015,
+          "molarMassGPerMol": 18.015
+        },
+        "inputUnits": {
+          "massG": "g",
+          "molarMassGPerMol": "g/mol"
+        }
+      }
+    },
+    {
+      "id": "chem-003",
+      "subject": "chemistry",
+      "topic": "Mass-to-moles conversion",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a pure sample of sodium chloride has mass 58.44 g. Using the given molar mass 58.44 g/mol, how many moles are in the sample?",
+      "assumptions": [
+        "Use the supplied molar mass as exact for this exercise; assume a pure sample with no losses."
+      ],
+      "finalAnswer": {
+        "text": "1 mol",
+        "latex": "1",
+        "numeric": 1.0,
+        "unit": "mol",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "mass-to-moles",
+        "inputs": {
+          "massG": 58.44,
+          "molarMassGPerMol": 58.44
+        },
+        "inputUnits": {
+          "massG": "g",
+          "molarMassGPerMol": "g/mol"
+        }
+      }
+    },
+    {
+      "id": "chem-004",
+      "subject": "chemistry",
+      "topic": "Mass-to-moles conversion",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a pure sample of carbon dioxide has mass 4.4 g. Using the given molar mass 44 g/mol, how many moles are in the sample?",
+      "assumptions": [
+        "Use the supplied molar mass as exact for this exercise; assume a pure sample with no losses."
+      ],
+      "finalAnswer": {
+        "text": "0.1 mol",
+        "latex": "\\frac{1}{10}",
+        "numeric": 0.1,
+        "unit": "mol",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "mass-to-moles",
+        "inputs": {
+          "massG": 4.4,
+          "molarMassGPerMol": 44
+        },
+        "inputUnits": {
+          "massG": "g",
+          "molarMassGPerMol": "g/mol"
+        }
+      }
+    },
+    {
+      "id": "chem-005",
+      "subject": "chemistry",
+      "topic": "Ideal gas law",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: 0.5 mol of an ideal gas occupies 12.5 L at 300 K. Calculate its absolute pressure in kPa using R = 8.314462618 kPa L/(mol K).",
+      "assumptions": [
+        "Assume ideal-gas behaviour and thermal equilibrium.",
+        "Temperature is already absolute in kelvin; use the supplied R without a unit conversion."
+      ],
+      "finalAnswer": {
+        "text": "99.773551416 kPa",
+        "latex": "99.773551416",
+        "numeric": 99.773551416,
+        "unit": "kPa",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "ideal-gas-pressure",
+        "inputs": {
+          "amountMol": 0.5,
+          "temperatureK": 300,
+          "volumeL": 12.5,
+          "gasConstantKpaLPerMolK": 8.314462618
+        },
+        "inputUnits": {
+          "amountMol": "mol",
+          "temperatureK": "K",
+          "volumeL": "L",
+          "gasConstantKpaLPerMolK": "kPa L/(mol K)"
+        }
+      }
+    },
+    {
+      "id": "chem-006",
+      "subject": "chemistry",
+      "topic": "Ideal gas law",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: 1 mol of an ideal gas occupies 22.414 L at 273.15 K. Calculate its absolute pressure in kPa using R = 8.314462618 kPa L/(mol K).",
+      "assumptions": [
+        "Assume ideal-gas behaviour and thermal equilibrium.",
+        "Temperature is already absolute in kelvin; use the supplied R without a unit conversion."
+      ],
+      "finalAnswer": {
+        "text": "101.324862323 kPa",
+        "latex": "101.324862323",
+        "numeric": 101.3248623229544,
+        "unit": "kPa",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "ideal-gas-pressure",
+        "inputs": {
+          "amountMol": 1,
+          "temperatureK": 273.15,
+          "volumeL": 22.414,
+          "gasConstantKpaLPerMolK": 8.314462618
+        },
+        "inputUnits": {
+          "amountMol": "mol",
+          "temperatureK": "K",
+          "volumeL": "L",
+          "gasConstantKpaLPerMolK": "kPa L/(mol K)"
+        }
+      }
+    },
+    {
+      "id": "chem-007",
+      "subject": "chemistry",
+      "topic": "Ideal gas law",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: 0.2 mol of an ideal gas occupies 5 L at 298 K. Calculate its absolute pressure in kPa using R = 8.314462618 kPa L/(mol K).",
+      "assumptions": [
+        "Assume ideal-gas behaviour and thermal equilibrium.",
+        "Temperature is already absolute in kelvin; use the supplied R without a unit conversion."
+      ],
+      "finalAnswer": {
+        "text": "99.1083944066 kPa",
+        "latex": "99.1083944066",
+        "numeric": 99.10839440656,
+        "unit": "kPa",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "ideal-gas-pressure",
+        "inputs": {
+          "amountMol": 0.2,
+          "temperatureK": 298,
+          "volumeL": 5,
+          "gasConstantKpaLPerMolK": 8.314462618
+        },
+        "inputUnits": {
+          "amountMol": "mol",
+          "temperatureK": "K",
+          "volumeL": "L",
+          "gasConstantKpaLPerMolK": "kPa L/(mol K)"
+        }
+      }
+    },
+    {
+      "id": "chem-008",
+      "subject": "chemistry",
+      "topic": "Ideal gas law",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: 2 mol of an ideal gas occupies 50 L at 350 K. Calculate its absolute pressure in kPa using R = 8.314462618 kPa L/(mol K).",
+      "assumptions": [
+        "Assume ideal-gas behaviour and thermal equilibrium.",
+        "Temperature is already absolute in kelvin; use the supplied R without a unit conversion."
+      ],
+      "finalAnswer": {
+        "text": "116.402476652 kPa",
+        "latex": "116.402476652",
+        "numeric": 116.402476652,
+        "unit": "kPa",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "ideal-gas-pressure",
+        "inputs": {
+          "amountMol": 2,
+          "temperatureK": 350,
+          "volumeL": 50,
+          "gasConstantKpaLPerMolK": 8.314462618
+        },
+        "inputUnits": {
+          "amountMol": "mol",
+          "temperatureK": "K",
+          "volumeL": "L",
+          "gasConstantKpaLPerMolK": "kPa L/(mol K)"
+        }
+      }
+    },
+    {
+      "id": "chem-009",
+      "subject": "chemistry",
+      "topic": "Dilution",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: take 25 mL of a 0.2 mol/L stock solution and dilute it to a final total volume of 100 mL. What is the final solute concentration in mol/L?",
+      "assumptions": [
+        "No solute is lost or reacts; final volume is the stated total volume, not the volume of solvent added.",
+        "Both volume inputs use mL, so their ratio needs no unit conversion."
+      ],
+      "finalAnswer": {
+        "text": "0.05 mol/L",
+        "latex": "\\frac{1}{20}",
+        "numeric": 0.05,
+        "unit": "mol/L",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "dilution-concentration",
+        "inputs": {
+          "initialConcentrationMolPerL": 0.2,
+          "aliquotMl": 25,
+          "finalVolumeMl": 100
+        },
+        "inputUnits": {
+          "initialConcentrationMolPerL": "mol/L",
+          "aliquotMl": "mL",
+          "finalVolumeMl": "mL"
+        }
+      }
+    },
+    {
+      "id": "chem-010",
+      "subject": "chemistry",
+      "topic": "Dilution",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: take 10 mL of a 1.5 mol/L stock solution and dilute it to a final total volume of 250 mL. What is the final solute concentration in mol/L?",
+      "assumptions": [
+        "No solute is lost or reacts; final volume is the stated total volume, not the volume of solvent added.",
+        "Both volume inputs use mL, so their ratio needs no unit conversion."
+      ],
+      "finalAnswer": {
+        "text": "0.06 mol/L",
+        "latex": "\\frac{3}{50}",
+        "numeric": 0.06,
+        "unit": "mol/L",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "dilution-concentration",
+        "inputs": {
+          "initialConcentrationMolPerL": 1.5,
+          "aliquotMl": 10,
+          "finalVolumeMl": 250
+        },
+        "inputUnits": {
+          "initialConcentrationMolPerL": "mol/L",
+          "aliquotMl": "mL",
+          "finalVolumeMl": "mL"
+        }
+      }
+    },
+    {
+      "id": "chem-011",
+      "subject": "chemistry",
+      "topic": "Dilution",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: take 50 mL of a 0.1 mol/L stock solution and dilute it to a final total volume of 200 mL. What is the final solute concentration in mol/L?",
+      "assumptions": [
+        "No solute is lost or reacts; final volume is the stated total volume, not the volume of solvent added.",
+        "Both volume inputs use mL, so their ratio needs no unit conversion."
+      ],
+      "finalAnswer": {
+        "text": "0.025 mol/L",
+        "latex": "\\frac{1}{40}",
+        "numeric": 0.025,
+        "unit": "mol/L",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "dilution-concentration",
+        "inputs": {
+          "initialConcentrationMolPerL": 0.1,
+          "aliquotMl": 50,
+          "finalVolumeMl": 200
+        },
+        "inputUnits": {
+          "initialConcentrationMolPerL": "mol/L",
+          "aliquotMl": "mL",
+          "finalVolumeMl": "mL"
+        }
+      }
+    },
+    {
+      "id": "chem-012",
+      "subject": "chemistry",
+      "topic": "Dilution",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: take 5 mL of a 2 mol/L stock solution and dilute it to a final total volume of 100 mL. What is the final solute concentration in mol/L?",
+      "assumptions": [
+        "No solute is lost or reacts; final volume is the stated total volume, not the volume of solvent added.",
+        "Both volume inputs use mL, so their ratio needs no unit conversion."
+      ],
+      "finalAnswer": {
+        "text": "0.1 mol/L",
+        "latex": "\\frac{1}{10}",
+        "numeric": 0.1,
+        "unit": "mol/L",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "dilution-concentration",
+        "inputs": {
+          "initialConcentrationMolPerL": 2,
+          "aliquotMl": 5,
+          "finalVolumeMl": 100
+        },
+        "inputUnits": {
+          "initialConcentrationMolPerL": "mol/L",
+          "aliquotMl": "mL",
+          "finalVolumeMl": "mL"
+        }
+      }
+    },
+    {
+      "id": "chem-013",
+      "subject": "chemistry",
+      "topic": "Molar concentration",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a solution contains 0.25 mol of dissolved solute in a final solution volume of 0.5 L. Calculate its molar concentration in mol/L.",
+      "assumptions": [
+        "All stated solute is dissolved; use the final solution volume, with no reaction or solute loss."
+      ],
+      "finalAnswer": {
+        "text": "0.5 mol/L",
+        "latex": "\\frac{1}{2}",
+        "numeric": 0.5,
+        "unit": "mol/L",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "molarity",
+        "inputs": {
+          "amountMol": 0.25,
+          "solutionVolumeL": 0.5
+        },
+        "inputUnits": {
+          "amountMol": "mol",
+          "solutionVolumeL": "L"
+        }
+      }
+    },
+    {
+      "id": "chem-014",
+      "subject": "chemistry",
+      "topic": "Molar concentration",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a solution contains 0.1 mol of dissolved solute in a final solution volume of 0.25 L. Calculate its molar concentration in mol/L.",
+      "assumptions": [
+        "All stated solute is dissolved; use the final solution volume, with no reaction or solute loss."
+      ],
+      "finalAnswer": {
+        "text": "0.4 mol/L",
+        "latex": "\\frac{2}{5}",
+        "numeric": 0.4,
+        "unit": "mol/L",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "molarity",
+        "inputs": {
+          "amountMol": 0.1,
+          "solutionVolumeL": 0.25
+        },
+        "inputUnits": {
+          "amountMol": "mol",
+          "solutionVolumeL": "L"
+        }
+      }
+    },
+    {
+      "id": "chem-015",
+      "subject": "chemistry",
+      "topic": "Molar concentration",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a solution contains 0.002 mol of dissolved solute in a final solution volume of 0.1 L. Calculate its molar concentration in mol/L.",
+      "assumptions": [
+        "All stated solute is dissolved; use the final solution volume, with no reaction or solute loss."
+      ],
+      "finalAnswer": {
+        "text": "0.02 mol/L",
+        "latex": "\\frac{1}{50}",
+        "numeric": 0.02,
+        "unit": "mol/L",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "molarity",
+        "inputs": {
+          "amountMol": 0.002,
+          "solutionVolumeL": 0.1
+        },
+        "inputUnits": {
+          "amountMol": "mol",
+          "solutionVolumeL": "L"
+        }
+      }
+    },
+    {
+      "id": "chem-016",
+      "subject": "chemistry",
+      "topic": "Molar concentration",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a solution contains 1.2 mol of dissolved solute in a final solution volume of 2 L. Calculate its molar concentration in mol/L.",
+      "assumptions": [
+        "All stated solute is dissolved; use the final solution volume, with no reaction or solute loss."
+      ],
+      "finalAnswer": {
+        "text": "0.6 mol/L",
+        "latex": "\\frac{3}{5}",
+        "numeric": 0.6,
+        "unit": "mol/L",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "molarity",
+        "inputs": {
+          "amountMol": 1.2,
+          "solutionVolumeL": 2
+        },
+        "inputUnits": {
+          "amountMol": "mol",
+          "solutionVolumeL": "L"
+        }
+      }
+    },
+    {
+      "id": "chem-017",
+      "subject": "chemistry",
+      "topic": "Reaction stoichiometry",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: for the balanced reaction N2 + 3 H2 → 2 NH3, start with 0.5 mol of N2; H2 is in excess. What mass of NH3 is produced using its molar mass 17.031 g/mol?",
+      "assumptions": [
+        "Assume complete conversion, 100% yield, a pure reactant, and no competing reaction.",
+        "The balanced coefficients are 1 for N2 and 2 for NH3; use the supplied product molar mass."
+      ],
+      "finalAnswer": {
+        "text": "17.031 g",
+        "latex": "\\frac{17031}{1000}",
+        "numeric": 17.031,
+        "unit": "g",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "stoichiometric-product-mass",
+        "inputs": {
+          "reactantMol": 0.5,
+          "reactantCoefficient": 1,
+          "productCoefficient": 2,
+          "productMolarMassGPerMol": 17.031
+        },
+        "inputUnits": {
+          "reactantMol": "mol",
+          "reactantCoefficient": "1",
+          "productCoefficient": "1",
+          "productMolarMassGPerMol": "g/mol"
+        }
+      }
+    },
+    {
+      "id": "chem-018",
+      "subject": "chemistry",
+      "topic": "Reaction stoichiometry",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: for the balanced reaction 2 H2 + O2 → 2 H2O, start with 0.3 mol of H2; O2 is in excess. What mass of H2O is produced using its molar mass 18.015 g/mol?",
+      "assumptions": [
+        "Assume complete conversion, 100% yield, a pure reactant, and no competing reaction.",
+        "The balanced coefficients are 2 for H2 and 2 for H2O; use the supplied product molar mass."
+      ],
+      "finalAnswer": {
+        "text": "5.4045 g",
+        "latex": "\\frac{10809}{2000}",
+        "numeric": 5.4045,
+        "unit": "g",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "stoichiometric-product-mass",
+        "inputs": {
+          "reactantMol": 0.3,
+          "reactantCoefficient": 2,
+          "productCoefficient": 2,
+          "productMolarMassGPerMol": 18.015
+        },
+        "inputUnits": {
+          "reactantMol": "mol",
+          "reactantCoefficient": "1",
+          "productCoefficient": "1",
+          "productMolarMassGPerMol": "g/mol"
+        }
+      }
+    },
+    {
+      "id": "chem-019",
+      "subject": "chemistry",
+      "topic": "Reaction stoichiometry",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: for the balanced reaction CH4 + 2 O2 → CO2 + 2 H2O, start with 0.2 mol of CH4; O2 is in excess. What mass of CO2 is produced using its molar mass 44.01 g/mol?",
+      "assumptions": [
+        "Assume complete conversion, 100% yield, a pure reactant, and no competing reaction.",
+        "The balanced coefficients are 1 for CH4 and 1 for CO2; use the supplied product molar mass."
+      ],
+      "finalAnswer": {
+        "text": "8.802 g",
+        "latex": "\\frac{4401}{500}",
+        "numeric": 8.802,
+        "unit": "g",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "stoichiometric-product-mass",
+        "inputs": {
+          "reactantMol": 0.2,
+          "reactantCoefficient": 1,
+          "productCoefficient": 1,
+          "productMolarMassGPerMol": 44.01
+        },
+        "inputUnits": {
+          "reactantMol": "mol",
+          "reactantCoefficient": "1",
+          "productCoefficient": "1",
+          "productMolarMassGPerMol": "g/mol"
+        }
+      }
+    },
+    {
+      "id": "chem-020",
+      "subject": "chemistry",
+      "topic": "Reaction stoichiometry",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: for the balanced reaction CaCO3 → CaO + CO2, start with 0.1 mol of CaCO3; CaCO3 decomposes completely. What mass of CaO is produced using its molar mass 56.077 g/mol?",
+      "assumptions": [
+        "Assume complete conversion, 100% yield, a pure reactant, and no competing reaction.",
+        "The balanced coefficients are 1 for CaCO3 and 1 for CaO; use the supplied product molar mass."
+      ],
+      "finalAnswer": {
+        "text": "5.6077 g",
+        "latex": "\\frac{56077}{10000}",
+        "numeric": 5.6077,
+        "unit": "g",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "stoichiometric-product-mass",
+        "inputs": {
+          "reactantMol": 0.1,
+          "reactantCoefficient": 1,
+          "productCoefficient": 1,
+          "productMolarMassGPerMol": 56.077
+        },
+        "inputUnits": {
+          "reactantMol": "mol",
+          "reactantCoefficient": "1",
+          "productCoefficient": "1",
+          "productMolarMassGPerMol": "g/mol"
+        }
+      }
+    },
+    {
+      "id": "stat-001",
+      "subject": "statistics",
+      "topic": "Arithmetic mean",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: the equally weighted scores are 2, 4, 6 points. Calculate their arithmetic mean in points.",
+      "assumptions": [
+        "Use every listed observation once, with equal weight and no missing values."
+      ],
+      "finalAnswer": {
+        "text": "4 points",
+        "latex": "4",
+        "numeric": 4.0,
+        "unit": "points",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "arithmetic-mean",
+        "inputs": {
+          "values": [2, 4, 6]
+        },
+        "inputUnits": {
+          "values": "points"
+        }
+      }
+    },
+    {
+      "id": "stat-002",
+      "subject": "statistics",
+      "topic": "Arithmetic mean",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: the equally weighted scores are 3, 7, 8, 10 points. Calculate their arithmetic mean in points.",
+      "assumptions": [
+        "Use every listed observation once, with equal weight and no missing values."
+      ],
+      "finalAnswer": {
+        "text": "7 points",
+        "latex": "7",
+        "numeric": 7.0,
+        "unit": "points",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "arithmetic-mean",
+        "inputs": {
+          "values": [3, 7, 8, 10]
+        },
+        "inputUnits": {
+          "values": "points"
+        }
+      }
+    },
+    {
+      "id": "stat-003",
+      "subject": "statistics",
+      "topic": "Arithmetic mean",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: the equally weighted scores are 5, 5, 8, 10 points. Calculate their arithmetic mean in points.",
+      "assumptions": [
+        "Use every listed observation once, with equal weight and no missing values."
+      ],
+      "finalAnswer": {
+        "text": "7 points",
+        "latex": "7",
+        "numeric": 7.0,
+        "unit": "points",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "arithmetic-mean",
+        "inputs": {
+          "values": [5, 5, 8, 10]
+        },
+        "inputUnits": {
+          "values": "points"
+        }
+      }
+    },
+    {
+      "id": "stat-004",
+      "subject": "statistics",
+      "topic": "Arithmetic mean",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: the equally weighted scores are -4, -1, 2, 7 points. Calculate their arithmetic mean in points.",
+      "assumptions": [
+        "Use every listed observation once, with equal weight and no missing values."
+      ],
+      "finalAnswer": {
+        "text": "1 points",
+        "latex": "1",
+        "numeric": 1.0,
+        "unit": "points",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "arithmetic-mean",
+        "inputs": {
+          "values": [-4, -1, 2, 7]
+        },
+        "inputUnits": {
+          "values": "points"
+        }
+      }
+    },
+    {
+      "id": "stat-005",
+      "subject": "statistics",
+      "topic": "Population variance",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: treat the scores 1, 2, 3 points as the entire population. Calculate the population variance in points^2.",
+      "assumptions": [
+        "Use the population denominator N, not the sample denominator N-1.",
+        "Every listed observation has equal weight."
+      ],
+      "finalAnswer": {
+        "text": "0.666666666667 points^2",
+        "latex": "\\frac{2}{3}",
+        "numeric": 0.6666666666666666,
+        "unit": "points^2",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "population-variance",
+        "inputs": {
+          "values": [1, 2, 3]
+        },
+        "inputUnits": {
+          "values": "points"
+        }
+      }
+    },
+    {
+      "id": "stat-006",
+      "subject": "statistics",
+      "topic": "Population variance",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: treat the scores 2, 4, 6, 8 points as the entire population. Calculate the population variance in points^2.",
+      "assumptions": [
+        "Use the population denominator N, not the sample denominator N-1.",
+        "Every listed observation has equal weight."
+      ],
+      "finalAnswer": {
+        "text": "5 points^2",
+        "latex": "5",
+        "numeric": 5.0,
+        "unit": "points^2",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "population-variance",
+        "inputs": {
+          "values": [2, 4, 6, 8]
+        },
+        "inputUnits": {
+          "values": "points"
+        }
+      }
+    },
+    {
+      "id": "stat-007",
+      "subject": "statistics",
+      "topic": "Population variance",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: treat the scores 5, 5, 5 points as the entire population. Calculate the population variance in points^2.",
+      "assumptions": [
+        "Use the population denominator N, not the sample denominator N-1.",
+        "Every listed observation has equal weight."
+      ],
+      "finalAnswer": {
+        "text": "0 points^2",
+        "latex": "0",
+        "numeric": 0.0,
+        "unit": "points^2",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "population-variance",
+        "inputs": {
+          "values": [5, 5, 5]
+        },
+        "inputUnits": {
+          "values": "points"
+        }
+      }
+    },
+    {
+      "id": "stat-008",
+      "subject": "statistics",
+      "topic": "Population variance",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: treat the scores -2, 0, 2 points as the entire population. Calculate the population variance in points^2.",
+      "assumptions": [
+        "Use the population denominator N, not the sample denominator N-1.",
+        "Every listed observation has equal weight."
+      ],
+      "finalAnswer": {
+        "text": "2.66666666667 points^2",
+        "latex": "\\frac{8}{3}",
+        "numeric": 2.6666666666666665,
+        "unit": "points^2",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "population-variance",
+        "inputs": {
+          "values": [-2, 0, 2]
+        },
+        "inputUnits": {
+          "values": "points"
+        }
+      }
+    },
+    {
+      "id": "stat-009",
+      "subject": "statistics",
+      "topic": "Sample variance",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: the sample scores are 1, 2, 3 points. Calculate the unbiased sample variance in points^2.",
+      "assumptions": [
+        "Use Bessel’s correction: divide the sum of squared deviations by n-1.",
+        "Treat the listed observations as an equally weighted sample, not the whole population."
+      ],
+      "finalAnswer": {
+        "text": "1 points^2",
+        "latex": "1",
+        "numeric": 1.0,
+        "unit": "points^2",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "sample-variance",
+        "inputs": {
+          "values": [1, 2, 3]
+        },
+        "inputUnits": {
+          "values": "points"
+        }
+      }
+    },
+    {
+      "id": "stat-010",
+      "subject": "statistics",
+      "topic": "Sample variance",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: the sample scores are 2, 4, 6, 8 points. Calculate the unbiased sample variance in points^2.",
+      "assumptions": [
+        "Use Bessel’s correction: divide the sum of squared deviations by n-1.",
+        "Treat the listed observations as an equally weighted sample, not the whole population."
+      ],
+      "finalAnswer": {
+        "text": "6.66666666667 points^2",
+        "latex": "\\frac{20}{3}",
+        "numeric": 6.666666666666667,
+        "unit": "points^2",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "sample-variance",
+        "inputs": {
+          "values": [2, 4, 6, 8]
+        },
+        "inputUnits": {
+          "values": "points"
+        }
+      }
+    },
+    {
+      "id": "stat-011",
+      "subject": "statistics",
+      "topic": "Sample variance",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: the sample scores are 4, 4, 7, 9 points. Calculate the unbiased sample variance in points^2.",
+      "assumptions": [
+        "Use Bessel’s correction: divide the sum of squared deviations by n-1.",
+        "Treat the listed observations as an equally weighted sample, not the whole population."
+      ],
+      "finalAnswer": {
+        "text": "6 points^2",
+        "latex": "6",
+        "numeric": 6.0,
+        "unit": "points^2",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "sample-variance",
+        "inputs": {
+          "values": [4, 4, 7, 9]
+        },
+        "inputUnits": {
+          "values": "points"
+        }
+      }
+    },
+    {
+      "id": "stat-012",
+      "subject": "statistics",
+      "topic": "Sample variance",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: the sample scores are -3, 0, 3 points. Calculate the unbiased sample variance in points^2.",
+      "assumptions": [
+        "Use Bessel’s correction: divide the sum of squared deviations by n-1.",
+        "Treat the listed observations as an equally weighted sample, not the whole population."
+      ],
+      "finalAnswer": {
+        "text": "9 points^2",
+        "latex": "9",
+        "numeric": 9.0,
+        "unit": "points^2",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "sample-variance",
+        "inputs": {
+          "values": [-3, 0, 3]
+        },
+        "inputUnits": {
+          "values": "points"
+        }
+      }
+    },
+    {
+      "id": "stat-013",
+      "subject": "statistics",
+      "topic": "Binomial probability",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: run 5 independent Bernoulli trials, each with success probability 0.5. What is the probability of exactly 2 successes? Give a probability, not a percentage.",
+      "assumptions": [
+        "Trials are independent, have the same success probability, and have exactly two outcomes.",
+        "Use the binomial model; the answer is dimensionless."
+      ],
+      "finalAnswer": {
+        "text": "0.3125 (dimensionless)",
+        "latex": "\\frac{5}{16}",
+        "numeric": 0.3125,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "binomial-exact-probability",
+        "inputs": {
+          "trials": 5,
+          "successes": 2,
+          "successProbability": 0.5
+        },
+        "inputUnits": {
+          "trials": "1",
+          "successes": "1",
+          "successProbability": "1"
+        }
+      }
+    },
+    {
+      "id": "stat-014",
+      "subject": "statistics",
+      "topic": "Binomial probability",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: run 10 independent Bernoulli trials, each with success probability 0.1. What is the probability of exactly 0 successes? Give a probability, not a percentage.",
+      "assumptions": [
+        "Trials are independent, have the same success probability, and have exactly two outcomes.",
+        "Use the binomial model; the answer is dimensionless."
+      ],
+      "finalAnswer": {
+        "text": "0.3486784401 (dimensionless)",
+        "latex": "\\frac{3486784401}{10000000000}",
+        "numeric": 0.3486784401000001,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "binomial-exact-probability",
+        "inputs": {
+          "trials": 10,
+          "successes": 0,
+          "successProbability": 0.1
+        },
+        "inputUnits": {
+          "trials": "1",
+          "successes": "1",
+          "successProbability": "1"
+        }
+      }
+    },
+    {
+      "id": "stat-015",
+      "subject": "statistics",
+      "topic": "Binomial probability",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: run 4 independent Bernoulli trials, each with success probability 0.25. What is the probability of exactly 4 successes? Give a probability, not a percentage.",
+      "assumptions": [
+        "Trials are independent, have the same success probability, and have exactly two outcomes.",
+        "Use the binomial model; the answer is dimensionless."
+      ],
+      "finalAnswer": {
+        "text": "0.00390625 (dimensionless)",
+        "latex": "\\frac{1}{256}",
+        "numeric": 0.00390625,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "binomial-exact-probability",
+        "inputs": {
+          "trials": 4,
+          "successes": 4,
+          "successProbability": 0.25
+        },
+        "inputUnits": {
+          "trials": "1",
+          "successes": "1",
+          "successProbability": "1"
+        }
+      }
+    },
+    {
+      "id": "stat-016",
+      "subject": "statistics",
+      "topic": "Binomial probability",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: run 6 independent Bernoulli trials, each with success probability 0.2. What is the probability of exactly 1 success? Give a probability, not a percentage.",
+      "assumptions": [
+        "Trials are independent, have the same success probability, and have exactly two outcomes.",
+        "Use the binomial model; the answer is dimensionless."
+      ],
+      "finalAnswer": {
+        "text": "0.393216 (dimensionless)",
+        "latex": "\\frac{6144}{15625}",
+        "numeric": 0.3932160000000002,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "binomial-exact-probability",
+        "inputs": {
+          "trials": 6,
+          "successes": 1,
+          "successProbability": 0.2
+        },
+        "inputUnits": {
+          "trials": "1",
+          "successes": "1",
+          "successProbability": "1"
+        }
+      }
+    },
+    {
+      "id": "stat-017",
+      "subject": "statistics",
+      "topic": "Standard scores",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a score is 80 points in a population with mean 70 points and standard deviation 5 points. Calculate its z score.",
+      "assumptions": [
+        "Use the given positive population standard deviation.",
+        "A z score is dimensionless; no assumption of a normal distribution is needed for the arithmetic."
+      ],
+      "finalAnswer": {
+        "text": "2 (dimensionless)",
+        "latex": "2",
+        "numeric": 2.0,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "standard-score",
+        "inputs": {
+          "score": 80,
+          "mean": 70,
+          "standardDeviation": 5
+        },
+        "inputUnits": {
+          "score": "points",
+          "mean": "points",
+          "standardDeviation": "points"
+        }
+      }
+    },
+    {
+      "id": "stat-018",
+      "subject": "statistics",
+      "topic": "Standard scores",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a score is 58 points in a population with mean 70 points and standard deviation 6 points. Calculate its z score.",
+      "assumptions": [
+        "Use the given positive population standard deviation.",
+        "A z score is dimensionless; no assumption of a normal distribution is needed for the arithmetic."
+      ],
+      "finalAnswer": {
+        "text": "-2 (dimensionless)",
+        "latex": "-2",
+        "numeric": -2.0,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "standard-score",
+        "inputs": {
+          "score": 58,
+          "mean": 70,
+          "standardDeviation": 6
+        },
+        "inputUnits": {
+          "score": "points",
+          "mean": "points",
+          "standardDeviation": "points"
+        }
+      }
+    },
+    {
+      "id": "stat-019",
+      "subject": "statistics",
+      "topic": "Standard scores",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a score is 100 points in a population with mean 100 points and standard deviation 12 points. Calculate its z score.",
+      "assumptions": [
+        "Use the given positive population standard deviation.",
+        "A z score is dimensionless; no assumption of a normal distribution is needed for the arithmetic."
+      ],
+      "finalAnswer": {
+        "text": "0 (dimensionless)",
+        "latex": "0",
+        "numeric": 0.0,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "standard-score",
+        "inputs": {
+          "score": 100,
+          "mean": 100,
+          "standardDeviation": 12
+        },
+        "inputUnits": {
+          "score": "points",
+          "mean": "points",
+          "standardDeviation": "points"
+        }
+      }
+    },
+    {
+      "id": "stat-020",
+      "subject": "statistics",
+      "topic": "Standard scores",
+      "framing": "synthetic-practice",
+      "prompt": "Practice: a score is 42 points in a population with mean 40 points and standard deviation 4 points. Calculate its z score.",
+      "assumptions": [
+        "Use the given positive population standard deviation.",
+        "A z score is dimensionless; no assumption of a normal distribution is needed for the arithmetic."
+      ],
+      "finalAnswer": {
+        "text": "0.5 (dimensionless)",
+        "latex": "\\frac{1}{2}",
+        "numeric": 0.5,
+        "unit": "1",
+        "absoluteTolerance": 1e-9
+      },
+      "verification": {
+        "method": "closed-form-numeric",
+        "family": "standard-score",
+        "inputs": {
+          "score": 42,
+          "mean": 40,
+          "standardDeviation": 4
+        },
+        "inputUnits": {
+          "score": "points",
+          "mean": "points",
+          "standardDeviation": "points"
+        }
+      }
+    }
+  ]
+}

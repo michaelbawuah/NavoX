@@ -1,0 +1,107 @@
+.board {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  color: #22374a;
+  background: #fbfcf6;
+  border-radius: 18px;
+  isolation: isolate;
+}
+
+.writing {
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  font-weight: 500;
+  letter-spacing: 0.12px;
+}
+
+.mathWrapper {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  padding: 8px 2px;
+  box-sizing: border-box;
+  overflow: auto;
+  color: #22374a;
+}
+
+.math {
+  max-width: 100%;
+  font-size: 22px;
+}
+
+.mathClipped {
+  overflow: hidden;
+}
+
+.math :global(.katex-display) {
+  margin: 0;
+  text-align: left;
+}
+
+.axisLabel {
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  font-size: 14px;
+  fill: #526659;
+}
+
+.action {
+  scroll-margin: 2rem;
+}
+
+.highlight {
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+
+.progressivePath,
+.progressiveFill,
+.revealClip {
+  transition: none;
+}
+
+.handwritingReduced {
+  display: none;
+}
+
+.handwritingComplete,
+.handwritingPartial {
+  display: inline;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board *,
+  .board *::before,
+  .board *::after {
+    animation: none;
+    transition: none;
+  }
+
+  .progressivePath {
+    stroke-dasharray: none;
+    stroke-dashoffset: 0;
+    visibility: visible;
+  }
+
+  .progressiveFill {
+    opacity: 1;
+  }
+
+  .revealClip {
+    clip-path: none;
+  }
+
+  .handwritingReduced,
+  .handwritingComplete {
+    display: inline;
+  }
+
+  .handwritingPartial {
+    display: none;
+  }
+
+  .mathWrapper {
+    overflow: auto;
+  }
+}

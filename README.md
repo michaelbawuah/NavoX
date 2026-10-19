@@ -45,14 +45,36 @@ includes USGS, NASA, NOAA, and BEA feeds with source-specific content permission
 The next product focus is a personal assistant for students at any college:
 know which class is now or next, keep a confirmed timetable, and build a day
 around classes, shifts, and deadlines. This work is in progress. The first
-release focuses on timetable setup, reliable class answers, quick voice asks,
-and class alerts; adaptive planning, course workspaces, recovery, and coaching
-follow measured student gates.
+release focuses on timetable setup, reliable class answers and class alerts.
+Plan Update 1 makes **Vox**, a one-tap hands-free call, the primary voice target;
+the chat-box mic remains for single questions. Personal calendars, free-time
+scheduling and disclosed text-based memory join the build priorities. Adaptive
+planning, course workspaces, recovery and coaching follow measured student gates.
 
-The [student roadmap](docs/product/student-roadmap.md) maps the full product plan
-to acceptance criteria and distinguishes implementation, automated verification,
-and real student validation. It also records how existing capabilities support
-the student product and which additions are still planned.
+The [student roadmap](docs/product/student-roadmap.md) is the canonical build
+specification for the full product plan, **Plan Update 1, the Whiteboard Tutor guide and Whiteboard Update 1 — Builder Spec**.
+The updates win within their respective scope. The roadmap maps requirements to acceptance criteria and
+distinguishes implementation, automated verification and real-student validation;
+Vox, personal-calendar scheduling and conversation-derived memory remain planned.
+
+NavoX Board includes five authored practice lessons with step playback, quick
+checks, progressively drawn sketches, traced handwriting-shaped letter contours
+and equation reveals, pan/zoom and pen notes. Pause freezes the current reveal;
+reduced motion keeps the cue pacing and shows each element immediately. Set
+`NEXT_PUBLIC_NAVOX_STUDENT_WHITEBOARD_ENABLED=true` before building the web app
+to expose `/board` after sign-in; `/whiteboard` redirects to it.
+
+Explicit encrypted saves additionally require `STUDENT_BOARD_ENABLED=true`, the
+configured connector encryption key, and migration `0047_saved_boards`. Students
+can name a Board, optionally attach it to their own course, and return to saved
+answers, revisit markers and drawings with playback paused. Save updates use
+revisions; erasure and student-data reset invalidate old requests. Both flags
+default off while release and real-phone qualification remain open. Unsaved
+changes remain temporary, and an unfinished lesson reveal starts again on
+reopening. Writing uses a pinned, locally compiled OFL font subset, with accessible
+SVG text for unsupported scripts; these letter contours do not reproduce a
+person's pen-stroke order. AI lesson generation, Vox voice sync and question
+uploads are later roadmap stages.
 
 ## Design decisions
 

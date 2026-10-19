@@ -6,6 +6,7 @@ from navox.api.agent import router as agent_router
 from navox.api.ai import router as ai_router
 from navox.api.ai_operations import router as ai_operations_router
 from navox.api.auth import router as auth_router
+from navox.api.board import router as board_router
 from navox.api.canvas import router as canvas_router
 from navox.api.commitment_actions import router as commitment_actions_router
 from navox.api.commitments import router as commitments_router
@@ -64,7 +65,13 @@ def create_app() -> FastAPI:
         allow_origins=[settings.web_origin],
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Material-Title"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "X-Request-ID",
+            "X-Material-Title",
+            "X-NavoX-Account",
+        ],
         expose_headers=["Server-Timing", "X-Request-ID"],
         max_age=600,
     )
@@ -104,6 +111,7 @@ def create_app() -> FastAPI:
     app.include_router(student_recovery_router, prefix="/api/v1")
     app.include_router(student_email_router, prefix="/api/v1")
     app.include_router(student_goals_router, prefix="/api/v1")
+    app.include_router(board_router, prefix="/api/v1")
     app.include_router(student_coach_router, prefix="/api/v1")
     app.include_router(student_work_export_router, prefix="/api/v1")
     app.include_router(lms_feed_router, prefix="/api/v1")
