@@ -27,6 +27,8 @@ export type VoxEndReason =
 
 export interface VoxCallState {
   owner: VoxOwner | null;
+  /** False while the app verifies the current session; it is never a provider grant. */
+  ownerVerified: boolean;
   callId: string | null;
   phase: VoxCallPhase;
   activity: VoxActivity;
@@ -115,6 +117,8 @@ export class VoxCallController {
   private lastActivityAt = 0;
   private lastNow = 0;
   private resumeStandby = false;
+  private deferredJoin = false;
+  private reconnectAfterCheck = false;
 
   constructor(
     private readonly options: {
@@ -124,8 +128,10 @@ export class VoxCallController {
       now?: () => number;
     },
   ) {
+    const checkedOwner = owner(options.owner);
     this.state = {
-      owner: owner(options.owner),
+      owner: checkedOwner,
+      ownerVerified: checkedOwner !== null,
       callId: null,
       phase: "idle",
       activity: "quiet",
@@ -177,12 +183,16 @@ export class VoxCallController {
     );
   }
 
-  private bound(epoch: number, scope: VoxOwner, callId: string): boolean {
+  private attached(epoch: number, scope: VoxOwner, callId: string): boolean {
     return (
       this.live(epoch) &&
       sameOwner(scope, this.state.owner) &&
       callId === this.state.callId
     );
+  }
+
+  private bound(epoch: number, scope: VoxOwner, callId: string): boolean {
+    return this.state.ownerVerified && this.attached(epoch, scope, callId);
   }
 
   private joined(): boolean {
@@ -239,13 +249,18 @@ export class VoxCallController {
     if (!connection) return true;
     try {
       connection.setMicrophoneEnabled(
-        this.state.phase === "active" && !this.state.microphoneMuted,
+        this.state.ownerVerified &&
+          this.state.phase === "active" &&
+          !this.state.microphoneMuted,
       );
       connection.setSpeakerEnabled(
-        this.state.phase === "active" && this.state.speakerEnabled,
+        this.state.ownerVerified &&
+          this.state.phase === "active" &&
+          this.state.speakerEnabled,
       );
       connection.setWakeEnabled(
-        this.state.phase === "standby" &&
+        this.state.ownerVerified &&
+          this.state.phase === "standby" &&
           this.options.transport.localWakeAvailable &&
           !this.state.microphoneMuted,
       );
@@ -260,6 +275,7 @@ export class VoxCallController {
     if (
       this.disposed ||
       !this.state.owner ||
+      !this.state.ownerVerified ||
       !["idle", "ended", "unavailable"].includes(this.state.phase)
     )
       return;
@@ -284,11 +300,13 @@ export class VoxCallController {
       endReason: null,
     };
     this.resumeStandby = false;
+    this.deferredJoin = false;
+    this.reconnectAfterCheck = false;
     await this.join(false);
   }
 
   async reconnect(): Promise<void> {
-    if (this.disposed || !this.joined()) return;
+    if (this.disposed || !this.state.ownerVerified || !this.joined()) return;
     this.resumeStandby = this.state.phase === "standby";
     await this.join(true);
   }
@@ -297,6 +315,7 @@ export class VoxCallController {
     const scope = this.state.owner;
     const callId = this.state.callId;
     if (!scope || !callId) return;
+    this.deferredJoin = false;
     const epoch = ++this.epoch;
     const previousAbort = this.abort;
     const controller = new AbortController();
@@ -314,6 +333,10 @@ export class VoxCallController {
       return;
     }
     if (!this.live(epoch)) return;
+    if (!this.state.ownerVerified) {
+      this.deferredJoin = true;
+      return;
+    }
     const request: VoxTransportRequest = {
       owner: Object.freeze({ ...scope }),
       callId,
@@ -335,10 +358,12 @@ export class VoxCallController {
         if (request.mayListenForWake()) this.resume();
       },
       onEvent: (event) => {
-        if (!this.bound(epoch, scope, callId) || !this.joined()) return;
-        if (event.type === "disconnected") void this.reconnect();
-        else if (event.type === "ended") void this.hangUp("transport-ended");
-        else if (this.state.phase === "active") {
+        if (!this.attached(epoch, scope, callId) || !this.joined()) return;
+        if (event.type === "disconnected") {
+          if (this.state.ownerVerified) void this.reconnect();
+          else this.reconnectAfterCheck = true;
+        } else if (event.type === "ended") void this.hangUp("transport-ended");
+        else if (this.state.ownerVerified && this.state.phase === "active") {
           if (event.activity !== "quiet" || this.state.activity !== "quiet")
             this.lastActivityAt = this.moment();
           this.state.activity = event.activity;
@@ -420,6 +445,7 @@ export class VoxCallController {
     const now = this.moment();
     this.state.elapsedMs = Math.max(0, now - this.state.startedAt);
     if (
+      this.state.ownerVerified &&
       this.state.phase === "active" &&
       this.state.activity === "quiet" &&
       now - this.lastActivityAt >= VOX_STANDBY_AFTER_MS
@@ -438,11 +464,37 @@ export class VoxCallController {
 
   /** A screen tap works without a local wake engine; it never creates a new call. */
   resume(): void {
-    if (this.disposed || this.state.phase !== "standby") return;
+    if (
+      this.disposed ||
+      !this.state.ownerVerified ||
+      this.state.phase !== "standby"
+    )
+      return;
     this.state.phase = "active";
     this.state.activity = "quiet";
     this.lastActivityAt = this.moment();
     if (this.syncControls()) this.publish();
+  }
+
+  /**
+   * Revoke authority synchronously while retaining this call's identity and
+   * preferences. Only a fresh verified bindOwner result can lift this gate.
+   * The app must fence stale account-check results before calling bindOwner.
+   */
+  suspendForSessionCheck(): void {
+    if (this.disposed) return;
+    this.state.ownerVerified = false;
+    // Playback/capture is stopped; a suppressed quiet callback must not leave
+    // an old speaking/thinking label preventing standby after verification.
+    this.state.activity = "quiet";
+    if (!this.syncControls()) return;
+    try {
+      this.connection?.stopPlayback();
+    } catch {
+      void this.hangUp("connection-failed");
+      return;
+    }
+    this.publish();
   }
 
   async bindOwner(next: VoxOwner | null): Promise<void> {
@@ -453,7 +505,19 @@ export class VoxCallController {
     } catch {
       invalid = true;
     }
-    if (!invalid && sameOwner(this.state.owner, checked)) return;
+    if (this.disposed) return;
+    if (!invalid && sameOwner(this.state.owner, checked)) {
+      if (!checked || this.state.ownerVerified) return;
+      this.state.ownerVerified = true;
+      this.lastActivityAt = this.moment();
+      if (this.reconnectAfterCheck && this.joined()) {
+        this.reconnectAfterCheck = false;
+        await this.reconnect();
+      } else if (this.deferredJoin && this.ongoing()) {
+        await this.join(this.state.phase === "reconnecting");
+      } else if (this.syncControls()) this.publish();
+      return;
+    }
     await this.terminate("owner-changed", { owner: checked });
     if (invalid) throw new Error("Vox needs a verified account and workspace.");
   }
@@ -467,6 +531,8 @@ export class VoxCallController {
     rebind?: { owner: VoxOwner | null },
   ): Promise<void> {
     ++this.epoch;
+    this.deferredJoin = false;
+    this.reconnectAfterCheck = false;
     const previousAbort = this.abort;
     this.abort = null;
     const connection = this.connection;
@@ -485,6 +551,7 @@ export class VoxCallController {
     if (rebind) {
       // Rebind before resource callbacks or subscribers can reenter start().
       this.state.owner = rebind.owner;
+      this.state.ownerVerified = rebind.owner !== null;
       this.state.callId = null;
       this.state.startedAt = null;
       this.state.elapsedMs = 0;
@@ -500,6 +567,7 @@ export class VoxCallController {
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    this.state.ownerVerified = false;
     await this.hangUp("disposed");
     this.listeners.clear();
   }

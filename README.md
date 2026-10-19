@@ -57,6 +57,13 @@ The updates win within their respective scope. The roadmap maps requirements to 
 distinguishes implementation, automated verification and real-student validation;
 Vox, personal-calendar scheduling and conversation-derived memory remain planned.
 
+Vox ownership is prepared behind `NEXT_PUBLIC_NAVOX_STUDENT_VOX_ENABLED=false`.
+An opt-in build mounts one owner above page routes, suspends its audio authority
+during account checks, and ends old calls before sign-in changes or student-data
+reset. Its default transport is unavailable; a qualified server session, live
+audio transport and call entry still need integration. The
+[delivery plan](docs/product/delivery-plan.md) records that work and its gates.
+
 NavoX Board includes five authored practice lessons with step playback, quick
 checks, progressively drawn sketches, traced handwriting-shaped letter contours
 and equation reveals, pan/zoom and pen notes. Pause freezes the current reveal;

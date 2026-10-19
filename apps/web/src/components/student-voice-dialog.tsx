@@ -4,6 +4,8 @@ import {
   initialVoiceState,
   type VoiceSessionState,
 } from "@navox/assistant-runtime/voice";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   deleteAssistantSession,
@@ -113,6 +115,7 @@ export function StudentQuickAsk({
   accountKey?: string;
   onClose(): void;
 }) {
+  const router = useRouter();
   const dialog = useRef<HTMLDialogElement>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionRef = useRef<string | null>(null);
@@ -400,7 +403,9 @@ export function StudentQuickAsk({
       );
       return;
     }
-    window.location.assign("/classes?add=1");
+    stop();
+    onClose();
+    router.push("/classes?add=1");
   };
 
   const openSaved = () => {
@@ -416,7 +421,9 @@ export function StudentQuickAsk({
       );
       return;
     }
-    window.location.assign("/navox");
+    stop();
+    onClose();
+    router.push("/navox");
   };
 
   const clear = async () => {
@@ -583,7 +590,15 @@ export function StudentQuickAsk({
           : "Your quick asks are not saved as transcripts. NavoX does not save recordings. Private spoken answers expire from server memory within 10 minutes."}
       </p>
       <footer className={styles.footer}>
-        <a href="/classes">Open Timetable</a>
+        <Link
+          href="/classes"
+          onClick={() => {
+            stop();
+            onClose();
+          }}
+        >
+          Open Timetable
+        </Link>
         {savedRef.current && (
           <button type="button" onClick={openSaved}>
             Open saved conversation

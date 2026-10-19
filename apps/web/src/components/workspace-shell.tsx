@@ -1,7 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  notifyAccountSessionChanged,
+  notifyAccountSessionChanging,
+} from "../lib/account-session";
 import { productFeatures } from "../lib/product-features";
 import { StudentVoiceLauncher } from "./student-voice-launcher";
 import styles from "./workspace-shell.module.css";
@@ -103,6 +108,7 @@ export function WorkspaceShell({
   accountKey?: string;
   onSignOut?: () => Promise<void> | void;
 }) {
+  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState("");
@@ -112,13 +118,13 @@ export function WorkspaceShell({
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        window.location.assign("/navox/search");
+        router.push("/navox/search");
       }
       if (event.key === "Escape") setMenuOpen(false);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -162,16 +168,23 @@ export function WorkspaceShell({
     try {
       if (onSignOut) await onSignOut();
       else {
-        const apiBase =
-          process.env.NEXT_PUBLIC_API_BASE_URL ??
-          "http://localhost:8000/api/v1";
-        const response = await fetch(`${apiBase}/auth/logout`, {
-          method: "POST",
-          credentials: "include",
-        });
-        if (!response.ok)
-          throw new Error("We couldn’t sign you out. Please try again.");
-        window.location.assign("/");
+        const change = notifyAccountSessionChanging();
+        try {
+          const apiBase =
+            process.env.NEXT_PUBLIC_API_BASE_URL ??
+            "http://localhost:8000/api/v1";
+          const response = await fetch(`${apiBase}/auth/logout`, {
+            method: "POST",
+            credentials: "include",
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!response.ok)
+            throw new Error("We couldn’t sign you out. Please try again.");
+          router.replace("/");
+          router.refresh();
+        } finally {
+          notifyAccountSessionChanged(change);
+        }
       }
     } catch (cause) {
       setError(

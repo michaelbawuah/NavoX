@@ -305,6 +305,300 @@ describe("Vox silence and standby", () => {
   });
 });
 
+describe("Vox session-authority suspension", () => {
+  it("synchronously gates active audio without ending the same-owner call or changing preferences", async () => {
+    const current = rig();
+    await current.controller.start();
+    current.controller.setCaptionsEnabled(false);
+    current.controller.setMinimized(true);
+    const before = current.controller.current();
+    const request = current.requests[0];
+    const joined = current.connections[0];
+    current.controller.suspendForSessionCheck();
+    expect(current.controller.current()).toEqual({
+      ...before,
+      ownerVerified: false,
+    });
+    expect(request.mayTransmitAudio()).toBe(false);
+    expect(request.mayPlayAudio()).toBe(false);
+    expect(request.mayListenForWake()).toBe(false);
+    expect(joined.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+    expect(joined.setSpeakerEnabled).toHaveBeenLastCalledWith(false);
+    expect(joined.setWakeEnabled).toHaveBeenLastCalledWith(false);
+    expect(joined.stopPlayback).toHaveBeenCalledTimes(1);
+    expect(joined.close).not.toHaveBeenCalled();
+    await current.controller.bindOwner({ ...owner });
+    expect(current.controller.current()).toEqual(before);
+    expect(request.mayTransmitAudio()).toBe(true);
+    expect(request.mayPlayAudio()).toBe(true);
+    expect(current.transport.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves standby and mic/speaker preferences across a verified check without waking", async () => {
+    const current = rig();
+    await current.controller.start();
+    current.controller.setSpeakerEnabled(false);
+    current.controller.setMicrophoneMuted(true);
+    current.advance(VOX_STANDBY_AFTER_MS);
+    const before = current.controller.current();
+    current.controller.suspendForSessionCheck();
+    current.controller.resume();
+    await current.controller.reconnect();
+    await current.controller.start();
+    current.requests[0].onWake();
+    expect(current.controller.current()).toEqual({
+      ...before,
+      ownerVerified: false,
+    });
+    await current.controller.bindOwner(owner);
+    expect(current.controller.current()).toEqual(before);
+    expect(current.requests[0].mayListenForWake()).toBe(false);
+    expect(current.requests[0].mayTransmitAudio()).toBe(false);
+    expect(current.connections[0].setWakeEnabled).toHaveBeenLastCalledWith(
+      false,
+    );
+    current.controller.setMicrophoneMuted(false);
+    expect(current.requests[0].mayListenForWake()).toBe(true);
+  });
+
+  it("does not start for a suspended owner and never enables transport through preference controls", async () => {
+    const current = rig();
+    current.controller.suspendForSessionCheck();
+    await current.controller.start();
+    expect(current.transport.connect).not.toHaveBeenCalled();
+    await current.controller.bindOwner(owner);
+    await current.controller.start();
+    current.controller.suspendForSessionCheck();
+    current.controller.setMicrophoneMuted(true);
+    current.controller.setMicrophoneMuted(false);
+    current.controller.setSpeakerEnabled(false);
+    current.controller.setSpeakerEnabled(true);
+    current.controller.setCaptionsEnabled(false);
+    current.advance(VOX_STANDBY_AFTER_MS * 5);
+    expect(current.controller.current()).toMatchObject({
+      ownerVerified: false,
+      phase: "active",
+      microphoneMuted: false,
+      speakerEnabled: true,
+      captionsEnabled: false,
+    });
+    expect(
+      current.connections[0].setMicrophoneEnabled,
+    ).toHaveBeenLastCalledWith(false);
+    expect(current.connections[0].setSpeakerEnabled).toHaveBeenLastCalledWith(
+      false,
+    );
+    expect(current.requests[0].mayTransmitAudio()).toBe(false);
+  });
+
+  it("keeps a late successful join suspended until an explicit verified binding", async () => {
+    const current = rig();
+    const pending = deferred<VoxConnection>();
+    current.transport.connect.mockImplementationOnce(async (request) => {
+      current.requests.push(request);
+      return pending.promise;
+    });
+    const started = current.controller.start();
+    await vi.waitFor(() => expect(current.requests).toHaveLength(1));
+    current.controller.suspendForSessionCheck();
+    const joined = connection(current.requests[0]);
+    pending.resolve(joined);
+    await started;
+    expect(current.controller.current()).toMatchObject({
+      ownerVerified: false,
+      phase: "active",
+    });
+    expect(joined.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
+    expect(joined.setSpeakerEnabled).not.toHaveBeenCalledWith(true);
+    expect(current.requests[0].mayTransmitAudio()).toBe(false);
+    await current.controller.bindOwner(owner);
+    expect(joined.setMicrophoneEnabled).toHaveBeenLastCalledWith(true);
+    expect(current.transport.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("defers a not-yet-started reconnect join until session verification succeeds", async () => {
+    const current = rig();
+    await current.controller.start();
+    const callId = current.controller.current().callId;
+    const closing = deferred<void>();
+    current.connections[0].close.mockReturnValue(closing.promise);
+    const reconnect = current.controller.reconnect();
+    current.controller.suspendForSessionCheck();
+    closing.resolve();
+    await reconnect;
+    expect(current.controller.current()).toMatchObject({
+      ownerVerified: false,
+      phase: "reconnecting",
+      callId,
+    });
+    expect(current.transport.connect).toHaveBeenCalledTimes(1);
+    await current.controller.bindOwner(owner);
+    expect(current.transport.connect).toHaveBeenCalledTimes(2);
+    expect(current.controller.current()).toMatchObject({
+      ownerVerified: true,
+      phase: "active",
+      callId,
+    });
+  });
+
+  it("queues a disconnected transport while unverified and reconnects the same call only after binding", async () => {
+    const current = rig();
+    await current.controller.start();
+    const first = current.requests[0];
+    current.controller.suspendForSessionCheck();
+    first.onEvent({ type: "activity", activity: "speaking" });
+    first.onEvent({ type: "disconnected" });
+    first.onEvent({ type: "disconnected" });
+    await current.controller.reconnect();
+    expect(current.controller.current()).toMatchObject({
+      ownerVerified: false,
+      phase: "active",
+      activity: "quiet",
+    });
+    expect(current.transport.connect).toHaveBeenCalledTimes(1);
+    await current.controller.bindOwner(owner);
+    expect(current.transport.connect).toHaveBeenCalledTimes(2);
+    expect(current.requests[1].callId).toBe(first.callId);
+    expect(first.mayTransmitAudio()).toBe(false);
+    expect(current.requests[1].mayTransmitAudio()).toBe(true);
+  });
+
+  it.each([null, anotherOwner, { ...owner, workspaceId: "" }])(
+    "terminally clears the old call when session verification returns %j",
+    async (next) => {
+      const current = rig();
+      await current.controller.start();
+      const first = current.requests[0];
+      current.controller.suspendForSessionCheck();
+      await current.controller.bindOwner(next).catch(() => {});
+      expect(current.controller.current()).toMatchObject({
+        callId: null,
+        phase: "ended",
+        ownerVerified: next === anotherOwner,
+      });
+      expect(current.connections[0].close).toHaveBeenCalledTimes(1);
+      await current.controller.bindOwner(owner);
+      expect(first.mayTransmitAudio()).toBe(false);
+      expect(first.mayListenForWake()).toBe(false);
+      expect(current.controller.current().callId).toBeNull();
+      expect(current.transport.connect).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("fresh verification never revives a call ended during the check", async () => {
+    const current = rig();
+    await current.controller.start();
+    const first = current.requests[0];
+    current.controller.suspendForSessionCheck();
+    first.onEvent({ type: "ended" });
+    await current.controller.bindOwner(owner);
+    expect(current.controller.current()).toMatchObject({
+      ownerVerified: true,
+      phase: "ended",
+      endReason: "transport-ended",
+    });
+    expect(current.transport.connect).toHaveBeenCalledTimes(1);
+    expect(first.mayTransmitAudio()).toBe(false);
+    expect(first.mayPlayAudio()).toBe(false);
+  });
+
+  it("suspends before publishing so reentrant controls and wake callbacks cannot regain audio", async () => {
+    const current = rig();
+    await current.controller.start();
+    const first = current.requests[0];
+    current.advance(VOX_STANDBY_AFTER_MS);
+    let checked = false;
+    current.controller.subscribe((state) => {
+      if (!state.ownerVerified && !checked) {
+        checked = true;
+        expect(first.mayTransmitAudio()).toBe(false);
+        expect(first.mayListenForWake()).toBe(false);
+        current.controller.resume();
+        first.onWake();
+        void current.controller.reconnect();
+        void current.controller.start();
+      }
+    });
+    current.controller.suspendForSessionCheck();
+    expect(checked).toBe(true);
+    expect(current.controller.current()).toMatchObject({
+      phase: "standby",
+      ownerVerified: false,
+    });
+    expect(current.transport.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("a new session check during synchronous control restoration stays suspended", async () => {
+    const current = rig();
+    await current.controller.start();
+    current.controller.suspendForSessionCheck();
+    let once = false;
+    current.connections[0].setMicrophoneEnabled.mockImplementation(
+      (enabled) => {
+        if (enabled && !once) {
+          once = true;
+          current.controller.suspendForSessionCheck();
+        }
+      },
+    );
+    await current.controller.bindOwner(owner);
+    expect(current.controller.current().ownerVerified).toBe(false);
+    expect(current.requests[0].mayTransmitAudio()).toBe(false);
+    expect(current.requests[0].mayPlayAudio()).toBe(false);
+    expect(
+      current.connections[0].setMicrophoneEnabled,
+    ).toHaveBeenLastCalledWith(false);
+    expect(current.connections[0].setSpeakerEnabled).toHaveBeenLastCalledWith(
+      false,
+    );
+  });
+
+  it.each(["speaking", "thinking"] as const)(
+    "clears interrupted %s activity and gives the restored call a fresh quiet window",
+    async (activity) => {
+      const current = rig();
+      await current.controller.start();
+      current.requests[0].onEvent({ type: "activity", activity });
+      current.controller.suspendForSessionCheck();
+      current.requests[0].onEvent({ type: "activity", activity: "quiet" });
+      current.advance(VOX_STANDBY_AFTER_MS * 3);
+      expect(current.controller.current()).toMatchObject({
+        ownerVerified: false,
+        phase: "active",
+        activity: "quiet",
+      });
+      await current.controller.bindOwner(owner);
+      current.advance(VOX_STANDBY_AFTER_MS - 1);
+      expect(current.controller.current().phase).toBe("active");
+      current.advance(1);
+      expect(current.controller.current().phase).toBe("standby");
+    },
+  );
+
+  it("cannot restore disposed authority or inherit a call from a null initial owner", async () => {
+    const current = rig();
+    const controller = new VoxCallController({
+      owner: null,
+      transport: current.transport,
+      newCallId: () => "30000000-0000-4000-8000-000000000001",
+    });
+    expect(controller.current().ownerVerified).toBe(false);
+    await controller.bindOwner(owner);
+    expect(controller.current()).toMatchObject({
+      ownerVerified: true,
+      callId: null,
+    });
+    await controller.start();
+    await controller.dispose();
+    await controller.bindOwner(owner);
+    expect(controller.current()).toMatchObject({
+      ownerVerified: false,
+      phase: "ended",
+    });
+    expect(current.requests[0].mayTransmitAudio()).toBe(false);
+  });
+});
+
 describe("Vox reconnect and terminal resource fences", () => {
   it("closes the old connection before reconnect and preserves call identity and controls", async () => {
     const current = rig();

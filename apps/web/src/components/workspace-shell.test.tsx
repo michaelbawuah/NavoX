@@ -2,6 +2,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { drawerFocusControls, WorkspaceShell } from "./workspace-shell";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+}));
+
 describe("workspace navigation", () => {
   it("puts classes in student navigation and keeps optional products hidden", () => {
     const html = renderToStaticMarkup(

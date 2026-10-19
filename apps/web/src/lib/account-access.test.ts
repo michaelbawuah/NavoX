@@ -34,6 +34,7 @@ describe("account access", () => {
         {
           method: "POST",
           credentials: "include",
+          signal: expect.any(AbortSignal),
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         },

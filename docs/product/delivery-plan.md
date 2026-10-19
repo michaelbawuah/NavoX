@@ -32,7 +32,7 @@ its acceptance gate.
 
 | Lane | Next bounded increment | What qualifies the complete feature |
 | --- | --- | --- |
-| Vox lifecycle | An owner-bound, transport-injected call controller with independent controls, reconnect fences, standby and terminal cleanup. Keep unavailable transport explicit; do not present a local controller as a live call. | App-scoped call ownership; one LiveKit room per call; actual capture/playback; navigation continuity; reconnect; no silent audio transmission or wake listening after hang-up; supported-device latency and interruption checks. |
+| Vox lifecycle | A root-mounted owner boundary now hosts the transport-injected controller across client-route children behind a default-off flag. Session checks suspend authority; matched auth/reset mutations terminate old calls before I/O. | Qualified server sessions and one LiveKit room per call; actual capture/playback; browser navigation continuity; reconnect; no silent audio transmission or wake listening after hang-up; supported-device latency and interruption checks. |
 | Calendar availability | A deterministic interval engine using confirmed waking hours, owned fixed commitments, authorized calendar coverage, buffers and disclosed movable study conflicts. Incomplete inputs produce provisional results. | Calendar-purpose authorization, all connected calendars read, fresh coverage, correct local-time free slots and honest unknowns; separately reviewed writes to the selected calendar with exact retry verification and Undo. |
 | Conversation memory | A versioned disclosure/retention contract, encrypted owner-scoped history and shared lineage-aware deletion before extraction or recall. | Calls and chat use the same disclosed controls; source-linked summaries, facts and threads; correction, off-record mode, sensitive-fact agreement, expiry and deletion win over queued work and cached context. |
 | Existing release checks | Complete CI and browser/device flows for the stacked drafts, including account changes, uploads/downloads, notifications and save/reset races. | Exact revision/configuration recorded; required migration rehearsal; real device outcomes; staged rollout and production postchecks. A passing source test does not substitute for device evidence. |
@@ -42,11 +42,15 @@ provider calls. They are internal building blocks until connected through the
 qualified account/session and provider boundaries. No new source module by
 itself enables a calendar, microphone, history retention or AI route.
 
-The first prepared source increment implements those two cores: 32 synthetic
-transport/lifecycle tests and 69 availability tests pass, alongside the complete
-1,823-test web suite. An independent minute-mask oracle also matches 500 seeded
-synthetic schedules. This evidence covers the internal logic; app integration,
-actual transport, calendar authorization and real-device behavior remain open.
+The prepared ownership increment passes 124 focused checks: 47 controller,
+34 shared-observer, 22 provider, ten actual auth/reset UI-boundary and eleven
+navigation/handoff cases. The complete web suite passes 1,916 tests. Sign-in
+recovery is bounded without terminating healthy calls merely for staying hidden;
+late verification responses cannot restore expired authority. The unchanged
+availability core retains its 69 passing tests and independent 500-schedule
+minute-mask check. This evidence covers source and synthetic integration; actual
+transport, calendar authorization, browser routing and real-device behavior remain
+open.
 
 ## Release order and exit criteria
 
@@ -54,8 +58,9 @@ actual transport, calendar authorization and real-device behavior remain open.
    Next routes, account changes, recovery/email handoffs, goals, PDF downloads
    and saved Boards in supported browsers. Record microphone and notification
    delivery on supported devices. Keep each draft's remaining evidence visible.
-2. **Complete the Vox call foundation.** Connect the lifecycle controller to an
-   app-scoped owner boundary and qualified LiveKit transport. Add the call screen,
+2. **Complete the Vox call foundation.** The app-scoped owner boundary is mounted
+   behind its default-off flag. Next connect qualified server sessions and LiveKit
+   transport. Add the call screen,
    separate microphone/speaker controls, captions, minimize, standby and scoped
    reconnect. Hang-up, sign-out, account change and reset release resources and
    invalidate pending callbacks. Do not promise native lock-screen/background
