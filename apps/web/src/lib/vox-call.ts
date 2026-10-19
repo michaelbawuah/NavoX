@@ -23,6 +23,7 @@ export type VoxEndReason =
   | "disposed"
   | "transport-ended"
   | "connection-failed"
+  | "cleanup-incomplete"
   | "transport-unavailable";
 
 export interface VoxCallState {
@@ -34,6 +35,8 @@ export interface VoxCallState {
   activity: VoxActivity;
   microphoneMuted: boolean;
   speakerEnabled: boolean;
+  /** Browser playback needs another user gesture; microphone authority is separate. */
+  speakerBlocked: boolean;
   captionsEnabled: boolean;
   minimized: boolean;
   startedAt: number | null;
@@ -44,6 +47,8 @@ export interface VoxCallState {
 export type VoxTransportEvent =
   | { type: "activity"; activity: VoxActivity }
   | { type: "disconnected" }
+  | { type: "playback-blocked" }
+  | { type: "playback-ready" }
   | { type: "ended" };
 
 export interface VoxTransportRequest {
@@ -80,9 +85,14 @@ export interface VoxTransport {
   localWakeAvailable: boolean;
   /** Returning a connection means its authorized join has actually succeeded. */
   connect(request: VoxTransportRequest): Promise<VoxConnection>;
+  /** Terminal owned-call cleanup, distinct from closing one reconnect attempt. */
+  endCall?(owner: Readonly<VoxOwner>, callId: string): void | Promise<void>;
 }
 
 export const VOX_STANDBY_AFTER_MS = 2 * 60_000;
+// A terminal reservation may need context then end; physical release uses the
+// same bound and remains unsafe after timeout, even if a late close succeeds.
+export const VOX_END_CALL_TIMEOUT_MS = 25_000;
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -119,6 +129,12 @@ export class VoxCallController {
   private resumeStandby = false;
   private deferredJoin = false;
   private reconnectAfterCheck = false;
+  private cleanupIncomplete = false;
+  private callIntent: {
+    owner: Readonly<VoxOwner>;
+    callId: string;
+    ended: boolean;
+  } | null = null;
 
   constructor(
     private readonly options: {
@@ -137,6 +153,7 @@ export class VoxCallController {
       activity: "quiet",
       microphoneMuted: false,
       speakerEnabled: true,
+      speakerBlocked: false,
       captionsEnabled: true,
       minimized: false,
       startedAt: null,
@@ -233,12 +250,14 @@ export class VoxCallController {
         safe = false;
       }
     }
+    const timeout = setTimeout(() => complete(false), VOX_END_CALL_TIMEOUT_MS);
     void (async () => {
       try {
         await connection.close();
       } catch {
         safe = false;
       }
+      clearTimeout(timeout);
       complete(safe);
     })();
     return release;
@@ -279,6 +298,12 @@ export class VoxCallController {
       !["idle", "ended", "unavailable"].includes(this.state.phase)
     )
       return;
+    if (this.cleanupIncomplete) {
+      this.state.phase = "ended";
+      this.state.endReason = "cleanup-incomplete";
+      this.publish();
+      return;
+    }
     if (!this.options.transport.available) {
       this.state.phase = "unavailable";
       this.state.endReason = "transport-unavailable";
@@ -289,6 +314,11 @@ export class VoxCallController {
     if (!UUID.test(callId) || this.usedCallIds.has(callId))
       throw new Error("Vox needs a fresh call identifier.");
     this.usedCallIds.add(callId);
+    this.callIntent = {
+      owner: Object.freeze({ ...this.state.owner }),
+      callId,
+      ended: false,
+    };
     this.state = {
       ...this.state,
       callId,
@@ -298,6 +328,7 @@ export class VoxCallController {
       startedAt: null,
       elapsedMs: 0,
       endReason: null,
+      speakerBlocked: false,
     };
     this.resumeStandby = false;
     this.deferredJoin = false;
@@ -329,7 +360,7 @@ export class VoxCallController {
     if (!this.live(epoch)) return;
     this.publish();
     if (!(await this.cleanup)) {
-      if (this.live(epoch)) await this.hangUp("connection-failed");
+      if (this.live(epoch)) await this.hangUp("cleanup-incomplete");
       return;
     }
     if (!this.live(epoch)) return;
@@ -363,10 +394,25 @@ export class VoxCallController {
           if (this.state.ownerVerified) void this.reconnect();
           else this.reconnectAfterCheck = true;
         } else if (event.type === "ended") void this.hangUp("transport-ended");
-        else if (this.state.ownerVerified && this.state.phase === "active") {
-          if (event.activity !== "quiet" || this.state.activity !== "quiet")
+        else if (
+          event.type === "playback-blocked" ||
+          event.type === "playback-ready"
+        ) {
+          if (!this.state.ownerVerified) return;
+          this.state.speakerBlocked = event.type === "playback-blocked";
+          if (this.state.speakerBlocked && this.state.activity === "speaking") {
+            this.state.activity = "quiet";
             this.lastActivityAt = this.moment();
-          this.state.activity = event.activity;
+          }
+          this.publish();
+        } else if (this.state.ownerVerified && this.state.phase === "active") {
+          const activity =
+            event.activity === "speaking" && this.state.speakerBlocked
+              ? "quiet"
+              : event.activity;
+          if (activity !== "quiet" || this.state.activity !== "quiet")
+            this.lastActivityAt = this.moment();
+          this.state.activity = activity;
           this.publish();
         }
       },
@@ -530,7 +576,24 @@ export class VoxCallController {
     reason: VoxEndReason,
     rebind?: { owner: VoxOwner | null },
   ): Promise<void> {
-    ++this.epoch;
+    const intent = this.callIntent;
+    this.callIntent = null;
+    const endCall = this.options.transport.endCall;
+    // Register terminal cleanup before invoking any adapter or abort callbacks.
+    // Reentrant starts must wait for it, even while an old join is unresolved.
+    let finishEnd: (safe: boolean) => void = () => {};
+    let mustEnd = false;
+    if (intent && !intent.ended && endCall) {
+      intent.ended = true;
+      mustEnd = true;
+      const terminal = new Promise<boolean>((resolve) => {
+        finishEnd = resolve;
+      });
+      this.cleanup = Promise.all([this.cleanup, terminal]).then(
+        ([earlier, current]) => earlier && current,
+      );
+    }
+    const terminalEpoch = ++this.epoch;
     this.deferredJoin = false;
     this.reconnectAfterCheck = false;
     const previousAbort = this.abort;
@@ -546,6 +609,7 @@ export class VoxCallController {
       this.state.phase = "ended";
       this.state.activity = "quiet";
       this.state.minimized = false;
+      this.state.speakerBlocked = false;
       this.state.endReason = reason;
     }
     if (rebind) {
@@ -557,12 +621,43 @@ export class VoxCallController {
       this.state.elapsedMs = 0;
       this.state.microphoneMuted = false;
       this.state.speakerEnabled = true;
+      this.state.speakerBlocked = false;
       this.state.captionsEnabled = true;
     }
     if (connection) void this.release(connection);
     previousAbort?.abort();
+    if (mustEnd && intent) {
+      const complete = finishEnd;
+      const timeout = setTimeout(
+        () => complete(false),
+        VOX_END_CALL_TIMEOUT_MS,
+      );
+      try {
+        Promise.resolve(
+          endCall?.call(this.options.transport, intent.owner, intent.callId),
+        ).then(
+          () => {
+            clearTimeout(timeout);
+            complete(true);
+          },
+          () => {
+            clearTimeout(timeout);
+            complete(false);
+          },
+        );
+      } catch {
+        clearTimeout(timeout);
+        complete(false);
+      }
+    }
     this.publish();
-    await this.cleanup;
+    if (!(await this.cleanup)) {
+      this.cleanupIncomplete = true;
+      if (terminalEpoch === this.epoch && this.state.phase === "ended") {
+        this.state.endReason = "cleanup-incomplete";
+        this.publish();
+      }
+    }
   }
 
   async dispose(): Promise<void> {

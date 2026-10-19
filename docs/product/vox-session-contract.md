@@ -1,6 +1,6 @@
-# Vox server reservations
+# Vox reservations and browser transport
 
-This increment adds durable lifecycle metadata before live audio. It does not
+The server adds durable lifecycle metadata before live audio. It does not
 connect LiveKit, start a microphone, retain conversation text, issue media
 credentials or qualify an AI route. Every response explicitly says
 `media_enabled: false`. The existing Vox transport stays unavailable.
@@ -97,8 +97,56 @@ provider secrets or cookie hashes. The operational metadata is private and is
 not conversation history.
 
 Before live calls: qualify server-controlled room/token issuance and connection
-revocation, wire the browser transport and call UI, enforce capture/playback
-leases at the actual media boundary, verify interruptions/reconnect on supported
-devices, and complete disclosed encrypted history and shared erasure before
-retaining ordinary conversation text. A reservation response must never be
-treated as a successful `VoxTransport.connect()`.
+revocation, connect the browser adapter through that authority and a qualified
+voice worker, verify interruptions/reconnect on supported devices, and complete
+disclosed encrypted history and shared erasure before retaining ordinary
+conversation text. A reservation response must never be treated as a successful
+`VoxTransport.connect()`.
+
+## Browser implementation and admission gates
+
+An opt-in web build mounts one call dialog/dock inside the app-owned provider.
+It offers a timer, independent microphone/speaker controls, minimize/restore,
+typed navigation and Hang up. Captions are visibly unavailable. No microphone,
+reservation or SDK connection starts on mount. The default transport has neither
+available media admission nor qualified capture, so enabling the public UI flag
+alone cannot start a call or request microphone permission.
+
+The reservation client uses authenticated, account-scoped, no-store requests
+with bounded bodies and deadlines. It preserves the captured generation for
+same-call retries and sends terminal cleanup even when an earlier start is
+still pending. Metadata reservations never supply media credentials. The client
+does not yet renew the server's 120-second reservation lease; future admission
+must integrate that lifetime with the independently renewed media lease.
+
+The LiveKit 2.23 adapter loads the SDK only after explicit media admission. It
+checks the supplied owner/call/room/participant binding, waits for the expected
+agent, subscribes only to that agent's audio and limits outbound subscription to
+it. Browser claim checks are defense in depth; they do not verify JWT signatures
+or replace server authority. SDK automatic reconnect with cached credentials is
+disabled. A controller retry requires a fresh admission for the same call.
+
+The concrete capture factory processes local microphone frames with VAD and
+publishes a processed track, never the raw microphone track. Quiet frames are
+zeroed and idle upstream publication is paused. Explicit mute, ownership loss,
+hidden-page suspension and termination synchronously retire capture. Remote
+audio is separately silenced and detached; a blocked browser sound permission
+offers an explicit Enable sound action without unmuting the microphone.
+
+Capture currently uses deprecated Web Audio ScriptProcessor compatibility APIs
+and is unqualified by default. Fake SDK/Web Audio tests cover sequencing and
+cleanup; they do not establish device support, naturalness, background behavior,
+noise rejection, latency or speech-provider suitability. The existing bounded
+single-question speech gateway is not qualified for hours-long calls.
+
+LiveKit token expiry limits initial admission, not an already connected
+participant. Before activation, implement exact server connection epochs, a
+qualified named worker, expiry enforcement and durable room/participant cleanup
+that survives logout/reset and delayed external operations. Cloud revocation
+and room recreation need explicit reconciliation; short token expiry or room
+deletion alone must not be treated as a permanent replay fence. No such server
+media authority, provider worker or credentials are enabled by this increment.
+
+Authority references: LiveKit's [tokens and grants](https://docs.livekit.io/frontends/reference/tokens-grants/),
+[participant lifecycle](https://docs.livekit.io/intro/basics/rooms-participants-tracks/participants/)
+and [Room SDK reference](https://docs.livekit.io/reference/client-sdk-js/classes/Room.html).

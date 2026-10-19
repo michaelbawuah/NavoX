@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  VOX_END_CALL_TIMEOUT_MS,
   VOX_STANDBY_AFTER_MS,
   VoxCallController,
   type VoxConnection,
   type VoxOwner,
+  type VoxTransport,
   type VoxTransportRequest,
 } from "./vox-call";
 
@@ -79,6 +81,237 @@ function rig(
     },
   };
 }
+
+describe("Vox terminal transport cleanup", () => {
+  it("revokes gates and invokes the old scoped end hook once before a pending join settles", async () => {
+    const pending = deferred<VoxConnection>();
+    const requests: VoxTransportRequest[] = [];
+    const transport: VoxTransport = {
+      available: true,
+      localWakeAvailable: false,
+      connect: vi.fn(async (request) => {
+        requests.push(request);
+        return pending.promise;
+      }),
+      endCall: vi.fn((scope, id) => {
+        expect(scope).toEqual(owner);
+        expect(id).toBe("30000000-0000-4000-8000-000000000001");
+        expect(requests[0].signal.aborted).toBe(true);
+        expect(requests[0].mayTransmitAudio()).toBe(false);
+        expect(requests[0].mayPlayAudio()).toBe(false);
+        expect(call.current().owner).toEqual(anotherOwner);
+      }),
+    };
+    const call = new VoxCallController({
+      owner,
+      transport,
+      newCallId: () => "30000000-0000-4000-8000-000000000001",
+    });
+    const starting = call.start();
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    const changed = call.bindOwner(anotherOwner);
+    expect(transport.endCall).toHaveBeenCalledTimes(1);
+    const hangingUp = call.hangUp();
+    const disposed = call.dispose();
+    expect(transport.endCall).toHaveBeenCalledTimes(1);
+    const late = connection(requests[0]);
+    pending.resolve(late);
+    await Promise.all([starting, changed, hangingUp, disposed]);
+    expect(late.close).toHaveBeenCalledTimes(1);
+    expect(transport.endCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("registers server cleanup before reentrant starts and closes only attempts on reconnect", async () => {
+    const current = rig();
+    const end = deferred<void>();
+    let reentrant: Promise<void> | undefined;
+    const transport: VoxTransport = {
+      ...current.transport,
+      endCall: vi.fn(() => {
+        reentrant = call.start();
+        return end.promise;
+      }),
+    };
+    let serial = 0;
+    const call = new VoxCallController({
+      owner,
+      transport,
+      newCallId: () =>
+        `30000000-0000-4000-8000-${String(++serial).padStart(12, "0")}`,
+    });
+    await call.start();
+    await call.reconnect();
+    expect(transport.endCall).not.toHaveBeenCalled();
+    const hangingUp = call.hangUp();
+    expect(current.transport.connect).toHaveBeenCalledTimes(2);
+    end.resolve();
+    await hangingUp;
+    await reentrant;
+    expect(current.transport.connect).toHaveBeenCalledTimes(3);
+    expect(call.current().phase).toBe("active");
+    await call.dispose();
+  });
+
+  it("bounds a hung terminal hook and blocks replacement after unsafe server cleanup", async () => {
+    vi.useFakeTimers();
+    try {
+      const end = deferred<void>();
+      const transport: VoxTransport = {
+        available: true,
+        localWakeAvailable: false,
+        connect: vi.fn(async (request) => connection(request)),
+        endCall: vi.fn(() => end.promise),
+      };
+      let serial = 0;
+      const call = new VoxCallController({
+        owner,
+        transport,
+        newCallId: () =>
+          `30000000-0000-4000-8000-${String(++serial).padStart(12, "0")}`,
+      });
+      await call.start();
+      const hangingUp = call.hangUp();
+      let finished = false;
+      void hangingUp.then(() => {
+        finished = true;
+      });
+      await vi.advanceTimersByTimeAsync(VOX_END_CALL_TIMEOUT_MS - 1);
+      expect(finished).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await hangingUp;
+      expect(call.current().endReason).toBe("cleanup-incomplete");
+      await call.bindOwner(anotherOwner);
+      end.resolve();
+      await Promise.resolve();
+      await call.start();
+      expect(transport.connect).toHaveBeenCalledTimes(1);
+      expect(transport.endCall).toHaveBeenCalledTimes(1);
+      expect(call.current()).toMatchObject({
+        phase: "ended",
+        owner: anotherOwner,
+        callId: null,
+        endReason: "cleanup-incomplete",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("contains a throwing terminal hook without reviving the old call", async () => {
+    const current = rig();
+    const transport: VoxTransport = {
+      ...current.transport,
+      endCall: vi.fn(() => {
+        throw new Error("private server response");
+      }),
+    };
+    const call = new VoxCallController({
+      owner,
+      transport,
+      newCallId: () => "30000000-0000-4000-8000-000000000001",
+    });
+    await call.start();
+    await expect(call.hangUp()).resolves.toBeUndefined();
+    expect(current.requests[0].mayTransmitAudio()).toBe(false);
+    expect(JSON.stringify(call.current())).not.toContain("private");
+    await call.dispose();
+    expect(transport.endCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds stalled physical release and never recovers from its late success", async () => {
+    vi.useFakeTimers();
+    try {
+      const current = rig();
+      await current.controller.start();
+      const request = current.requests[0];
+      const close = deferred<void>();
+      current.connections[0].close.mockReturnValue(close.promise);
+      const hangingUp = current.controller.hangUp();
+      expect(request.signal.aborted).toBe(true);
+      expect(request.mayTransmitAudio()).toBe(false);
+      expect(request.mayPlayAudio()).toBe(false);
+      expect(
+        current.connections[0].setMicrophoneEnabled,
+      ).toHaveBeenLastCalledWith(false);
+      expect(current.connections[0].setSpeakerEnabled).toHaveBeenLastCalledWith(
+        false,
+      );
+      expect(current.connections[0].setWakeEnabled).toHaveBeenLastCalledWith(
+        false,
+      );
+      expect(current.connections[0].stopPlayback).toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(VOX_END_CALL_TIMEOUT_MS);
+      await hangingUp;
+      expect(current.controller.current().endReason).toBe("cleanup-incomplete");
+      await current.controller.bindOwner(anotherOwner);
+      close.resolve();
+      await Promise.resolve();
+      await current.controller.start();
+      expect(current.transport.connect).toHaveBeenCalledTimes(1);
+      expect(current.controller.current()).toMatchObject({
+        phase: "ended",
+        owner: anotherOwner,
+        callId: null,
+        endReason: "cleanup-incomplete",
+      });
+      expect(request.mayTransmitAudio()).toBe(false);
+      expect(current.connections[0].close).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("Vox recoverable browser playback", () => {
+  it("keeps blocked speaker playback separate from microphone and supports a user-gesture retry", async () => {
+    const current = rig();
+    await current.controller.start();
+    current.controller.setMicrophoneMuted(true);
+    const request = current.requests[0];
+    request.onEvent({ type: "activity", activity: "speaking" });
+    request.onEvent({ type: "playback-blocked" });
+    request.onEvent({ type: "activity", activity: "speaking" });
+    expect(current.controller.current()).toMatchObject({
+      phase: "active",
+      speakerBlocked: true,
+      activity: "quiet",
+      microphoneMuted: true,
+      speakerEnabled: true,
+    });
+    current.controller.setSpeakerEnabled(true);
+    expect(current.connections[0].setSpeakerEnabled).toHaveBeenLastCalledWith(
+      true,
+    );
+    expect(
+      current.connections[0].setMicrophoneEnabled,
+    ).toHaveBeenLastCalledWith(false);
+    expect(request.mayTransmitAudio()).toBe(false);
+    request.onEvent({ type: "playback-ready" });
+    expect(current.controller.current().speakerBlocked).toBe(false);
+    await current.controller.hangUp();
+    expect(current.controller.current().speakerBlocked).toBe(false);
+  });
+
+  it("ignores blocked/ready events from stale epochs and suspended authority", async () => {
+    const current = rig();
+    await current.controller.start();
+    const old = current.requests[0];
+    await current.controller.reconnect();
+    old.onEvent({ type: "playback-blocked" });
+    expect(current.controller.current().speakerBlocked).toBe(false);
+    const request = current.requests[1];
+    request.onEvent({ type: "playback-blocked" });
+    current.controller.suspendForSessionCheck();
+    request.onEvent({ type: "playback-ready" });
+    expect(current.controller.current().speakerBlocked).toBe(true);
+    await current.controller.bindOwner(owner);
+    request.onEvent({ type: "playback-ready" });
+    expect(current.controller.current().speakerBlocked).toBe(false);
+    await current.controller.hangUp();
+    request.onEvent({ type: "playback-blocked" });
+    expect(current.controller.current().speakerBlocked).toBe(false);
+  });
+});
 
 describe("Vox transport-independent call ownership", () => {
   it("opens nothing on construction, subscription, or a timer tick", () => {
@@ -879,7 +1112,7 @@ describe("Vox reconnect and terminal resource fences", () => {
     expect(current.transport.connect).toHaveBeenCalledTimes(1);
     expect(current.controller.current()).toMatchObject({
       phase: "ended",
-      endReason: "connection-failed",
+      endReason: "cleanup-incomplete",
     });
   });
 
@@ -937,7 +1170,7 @@ describe("Vox reconnect and terminal resource fences", () => {
     await current.controller.start();
     expect(current.controller.current()).toMatchObject({
       phase: "ended",
-      endReason: "connection-failed",
+      endReason: "cleanup-incomplete",
     });
     expect(current.transport.connect).toHaveBeenCalledTimes(2);
   });

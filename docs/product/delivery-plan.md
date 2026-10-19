@@ -32,7 +32,7 @@ its acceptance gate.
 
 | Lane | Next bounded increment | What qualifies the complete feature |
 | --- | --- | --- |
-| Vox lifecycle | A root-mounted owner boundary now hosts the transport-injected controller across client-route children behind a default-off flag. Session checks suspend authority; matched auth/reset mutations terminate old calls before I/O. | Qualified server sessions and one LiveKit room per call; actual capture/playback; browser navigation continuity; reconnect; no silent audio transmission or wake listening after hang-up; supported-device latency and interruption checks. |
+| Vox lifecycle | A root-mounted owner hosts the call dialog/dock, bounded native reservation client and gated LiveKit adapter across client routes. Session checks suspend authority; auth/reset mutations terminate old calls before I/O. Processed local VAD and separate playback have synthetic race coverage. | Server media authority and durable room cleanup, qualified named voice worker and speech route, reservation renewal, supported browser/device capture/playback and navigation evidence. Default admission/capture remain unavailable; no live call is enabled. |
 | Calendar availability | A deterministic interval engine using confirmed waking hours, owned fixed commitments, authorized calendar coverage, buffers and disclosed movable study conflicts. Incomplete inputs produce provisional results. | Calendar-purpose authorization, all connected calendars read, fresh coverage, correct local-time free slots and honest unknowns; separately reviewed writes to the selected calendar with exact retry verification and Undo. |
 | Conversation memory | A versioned disclosure/retention contract, encrypted owner-scoped history and shared lineage-aware deletion before extraction or recall. | Calls and chat use the same disclosed controls; source-linked summaries, facts and threads; correction, off-record mode, sensitive-fact agreement, expiry and deletion win over queued work and cached context. |
 | Existing release checks | Complete CI and browser/device flows for the stacked drafts, including account changes, uploads/downloads, notifications and save/reset races. | Exact revision/configuration recorded; required migration rehearsal; real device outcomes; staged rollout and production postchecks. A passing source test does not substitute for device evidence. |
@@ -42,15 +42,28 @@ provider calls. They are internal building blocks until connected through the
 qualified account/session and provider boundaries. No new source module by
 itself enables a calendar, microphone, history retention or AI route.
 
-The prepared ownership increment passes 124 focused checks: 47 controller,
+The original ownership increment passed 124 focused checks: 47 controller,
 34 shared-observer, 22 provider, ten actual auth/reset UI-boundary and eleven
-navigation/handoff cases. The complete web suite passes 1,916 tests. Sign-in
+navigation/handoff cases and the then-current 1,916-test web suite. Sign-in
 recovery is bounded without terminating healthy calls merely for staying hidden;
 late verification responses cannot restore expired authority. The unchanged
 availability core retains its 69 passing tests and independent 500-schedule
 minute-mask check. This evidence covers source and synthetic integration; actual
-transport, calendar authorization, browser routing and real-device behavior remain
+live transport, calendar authorization, browser routing and real-device behavior remain
 open.
+
+The browser increment adds a call dialog and minimized dock, independent audio
+controls, explicit autoplay recovery, a reservation client and a gated LiveKit
+2.23 SDK adapter. Its fake SDK/Web Audio checks cover delayed joins, mute,
+playback and cleanup races. Captions and the primary large Home entry remain
+open. Capture uses deprecated ScriptProcessor APIs and is unqualified by default.
+The adapter's media lease does not yet renew the native reservation. See the
+[Vox contract](vox-session-contract.md) for the activation boundaries. The
+integrated web suite passes 2,034 tests across 123 files; repository lint, type
+checks and the assistant migration contract pass. The unchanged runtime suite
+passes 542 tests with 14 integration cases skipped without its test database;
+all eight extension checks pass. A passing
+source check does not qualify a speech route or an actual device.
 
 ## Release order and exit criteria
 
@@ -61,9 +74,11 @@ open.
 2. **Complete the Vox call foundation.** The app-scoped owner boundary is mounted
    behind its default-off flag. Native content-free reservations now bind to the exact login
    and share reset/logout revocation; see the [server contract](vox-session-contract.md).
-   Next qualify media grants, LiveKit transport and the call screen,
-   separate microphone/speaker controls, captions, minimize, standby and scoped
-   reconnect. Hang-up, sign-out, account change and reset release resources and
+   The call screen, separate controls, minimize and SDK adapter are implemented
+   behind unavailable admission/capture gates. Next implement exact media grants,
+   connection epochs, durable external cleanup and the qualified voice worker;
+   integrate reservation renewal and qualify capture/playback, captions, standby
+   and reconnect on supported devices. Hang-up, sign-out, account change and reset release resources and
    invalidate pending callbacks. Do not promise native lock-screen/background
    behavior from the web app.
 3. **Connect calendars and answer availability.** Add separate calendar-purpose

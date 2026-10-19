@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { StudentAppRegistration } from "../components/student-notifications";
+import { VoxCallControls } from "../components/vox-call-controls";
 import { VoxCallProvider } from "../components/vox-call-provider";
 import { productFeatures } from "../lib/product-features";
 import "./globals.css";
@@ -27,6 +28,7 @@ export default function RootLayout({
         {productFeatures.studentVox ? (
           <VoxCallProvider>
             <StudentAppRegistration />
+            <VoxCallControls />
             {children}
           </VoxCallProvider>
         ) : (

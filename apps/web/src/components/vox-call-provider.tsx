@@ -14,19 +14,13 @@ import {
   type VoxCallState,
   type VoxTransport,
 } from "../lib/vox-call";
+import { createDefaultVoxTransport } from "../lib/vox-transport";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 const uuid =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const unavailableTransport: VoxTransport = {
-  available: false,
-  localWakeAvailable: false,
-  async connect() {
-    throw new Error("Vox calls are not available on this deployment.");
-  },
-};
 const newCallId = () => crypto.randomUUID();
 
 /** Identity checks never depend on permission to list connected Google accounts. */
@@ -87,13 +81,15 @@ type Binding = Configuration & { value: VoxCallContextValue };
  */
 export function VoxCallProvider({
   children,
-  transport = unavailableTransport,
+  transport: suppliedTransport,
   restoreAccess = restoreVoxAccountAccess,
   createCallId = newCallId,
   now,
 }: {
   children: ReactNode;
 } & Partial<Configuration>) {
+  const [defaultTransport] = useState(createDefaultVoxTransport);
+  const transport = suppliedTransport ?? defaultTransport;
   const [binding, setBinding] = useState<Binding | null>(null);
 
   useLayoutEffect(() => {

@@ -60,8 +60,11 @@ Vox, personal-calendar scheduling and conversation-derived memory remain planned
 Vox ownership is prepared behind `NEXT_PUBLIC_NAVOX_STUDENT_VOX_ENABLED=false`.
 An opt-in build mounts one owner above page routes, suspends its audio authority
 during account checks, and ends old calls before sign-in changes or student-data
-reset. Its default transport is unavailable; a qualified server session, live
-audio transport and call entry still need integration. The
+reset. An opt-in build includes a call dialog and minimized dock with separate
+microphone/speaker controls. A gated LiveKit adapter and local processed VAD
+capture have synthetic coverage; their default admission and capture remain
+unavailable. Server media authority, the voice worker and supported-device
+qualification still need integration. The
 [delivery plan](docs/product/delivery-plan.md) records that work and its gates.
 The server also has content-free call reservations behind
 `STUDENT_VOX_ENABLED=false`, tied to the exact browser login with short renewable
