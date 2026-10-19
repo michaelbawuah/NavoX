@@ -275,8 +275,9 @@ describe("account-owned whiteboard lifecycle", () => {
     expect(
       host.querySelector('[aria-label="Your pen annotations"]'),
     ).toBeNull();
-    expect(vi.getTimerCount()).toBe(0);
-    act(() => vi.advanceTimersByTime(60_000));
+    // Only the bounded sign-in watchdog remains; Board playback is stopped.
+    expect(vi.getTimerCount()).toBe(1);
+    act(() => vi.advanceTimersByTime(1_000));
     expect(board()).toBeNull();
     currentAccount = ownerB;
     await act(async () => nextCheck.resolve(restored(ownerB)));
@@ -293,6 +294,11 @@ describe("account-owned whiteboard lifecycle", () => {
   it("removes the board and pending timer on sign-out without retaining work after a new session", async () => {
     await act(async () => firstCheck.resolve(restored(ownerA)));
     markPrivateWork();
+    access.restore.mockResolvedValueOnce({
+      account: null,
+      connections: [],
+      connectionsError: "",
+    });
     await act(async () => button("Sign out").click());
     expect(board()).toBeNull();
     expect(host.textContent).toContain("Make yourself at home");
@@ -321,12 +327,12 @@ describe("account-owned whiteboard lifecycle", () => {
     access.restore.mockReturnValueOnce(failedCheck.promise);
     act(() => SessionChannel.changed());
     expect(board()).toBeNull();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(1);
     await act(async () =>
       failedCheck.reject(new Error("Synthetic check failed")),
     );
     expect(host.textContent).toContain("Your sign-in could not be checked");
-    expect(host.textContent).toContain("Make yourself at home");
+    expect(host.textContent).toContain("Welcome back");
     expect(board()).toBeNull();
     act(() => vi.advanceTimersByTime(60_000));
     expect(board()).toBeNull();
@@ -336,5 +342,29 @@ describe("account-owned whiteboard lifecycle", () => {
         ([, init]) => init?.method && init.method !== "GET",
       ),
     ).toHaveLength(0);
+  });
+
+  it("offers explicit sign-in recovery after a hung check without restoring its late private result", async () => {
+    await act(async () => firstCheck.resolve(restored(ownerA)));
+    markPrivateWork();
+    const hung = deferred<AccountAccess>();
+    access.restore.mockReturnValueOnce(hung.promise);
+    act(() => SessionChannel.changed());
+    expect(board()).toBeNull();
+    await act(async () => vi.advanceTimersByTime(30_000));
+    expect(host.textContent).toContain("Your sign-in could not be checked");
+    expect(button("Reload sign-in").type).toBe("button");
+    const submit = host.querySelector<HTMLButtonElement>(
+      'form button[type="submit"]',
+    );
+    expect(submit?.textContent).toBe("Sign in");
+    expect(submit?.disabled).toBe(true);
+    expect(board()).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+    currentAccount = ownerB;
+    await act(async () => hung.resolve(restored(ownerB)));
+    expect(board()).toBeNull();
+    expect(host.textContent).not.toContain("Synthetic student B");
+    expect(button("Reload sign-in").isConnected).toBe(true);
   });
 });

@@ -72,6 +72,8 @@ export async function restoreAccountAccess(
 ): Promise<AccountAccess> {
   const response = await fetch(`${apiBaseUrl}/auth/me`, {
     credentials: "include",
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok)
     return { account: null, connections: [], connectionsError: "" };
@@ -146,6 +148,7 @@ export async function authenticate(
     response = await fetch(`${apiBaseUrl}/auth/${mode}`, {
       method: "POST",
       credentials: "include",
+      signal: AbortSignal.timeout(10_000),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });

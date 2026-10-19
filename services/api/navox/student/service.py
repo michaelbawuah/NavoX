@@ -927,6 +927,7 @@ async def reset_data(
     from navox.student_goals.service import forget_goals_data
     from navox.student_planning.service import forget_planning_data
     from navox.student_recovery.service import forget_recovery_data
+    from navox.vox.service import forget_vox_data
 
     # Feed workers use connector→membership→User. Lock their authorities before
     # the shared student writer lock, then forget everything in one transaction.
@@ -969,6 +970,7 @@ async def reset_data(
     await forget_recovery_data(database, user_id, workspace_id)
     await forget_goals_data(database, user_id, workspace_id)
     await forget_board_data(database, user_id, workspace_id)
+    await forget_vox_data(database, user_id, workspace_id)
     await clear_coursework_data(database, user_id=user_id, workspace_id=workspace_id)
     from navox.student_alerts.service import clear_student_alert_data
 

@@ -52,6 +52,7 @@ function setup() {
     visibilityState: "visible",
   });
   vi.stubGlobal("document", surface);
+  vi.stubGlobal("window", new EventTarget());
   vi.stubGlobal("BroadcastChannel", SessionChannel);
   const callbacks = {
     checking: vi.fn(),

@@ -9,6 +9,10 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  notifyAccountSessionChanged,
+  notifyAccountSessionChanging,
+} from "../lib/account-session";
 import { productFeatures } from "../lib/product-features";
 import {
   type StudentScreenshotCandidate,
@@ -2150,40 +2154,45 @@ function StudentClassesAccount({
                 <StudentDataReset
                   busy={locked}
                   onReset={async (requestId) => {
-                    const result = await mutate(
-                      "/data/reset",
-                      (value) => {
-                        if (
-                          !value ||
-                          typeof value !== "object" ||
-                          !("cleared" in value) ||
-                          value.cleared !== true
-                        )
-                          throw new Error(
-                            "The reset result could not be checked.",
-                          );
-                        return value;
-                      },
-                      "POST",
-                      {
-                        confirmed: true,
-                        revision: profile.revision,
-                        request_id: requestId,
-                      },
-                    );
-                    if (!result) return false;
-                    setEditor(null);
-                    setException(null);
-                    setImportMode(null);
-                    setScreenshotSuggestion(null);
-                    setSpokenDraft("");
-                    setSetup(true);
-                    setEpoch((value) => value + 1);
-                    setTab("week");
-                    setNotice(
-                      "Your student timetable and profile have been forgotten.",
-                    );
-                    return true;
+                    const change = notifyAccountSessionChanging();
+                    try {
+                      const result = await mutate(
+                        "/data/reset",
+                        (value) => {
+                          if (
+                            !value ||
+                            typeof value !== "object" ||
+                            !("cleared" in value) ||
+                            value.cleared !== true
+                          )
+                            throw new Error(
+                              "The reset result could not be checked.",
+                            );
+                          return value;
+                        },
+                        "POST",
+                        {
+                          confirmed: true,
+                          revision: profile.revision,
+                          request_id: requestId,
+                        },
+                      );
+                      if (!result) return false;
+                      setEditor(null);
+                      setException(null);
+                      setImportMode(null);
+                      setScreenshotSuggestion(null);
+                      setSpokenDraft("");
+                      setSetup(true);
+                      setEpoch((value) => value + 1);
+                      setTab("week");
+                      setNotice(
+                        "Your student timetable and profile have been forgotten.",
+                      );
+                      return true;
+                    } finally {
+                      notifyAccountSessionChanged(change);
+                    }
                   }}
                 />
                 <p className={styles.hint}>

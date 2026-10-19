@@ -57,6 +57,20 @@ The updates win within their respective scope. The roadmap maps requirements to 
 distinguishes implementation, automated verification and real-student validation;
 Vox, personal-calendar scheduling and conversation-derived memory remain planned.
 
+Vox ownership is prepared behind `NEXT_PUBLIC_NAVOX_STUDENT_VOX_ENABLED=false`.
+An opt-in build mounts one owner above page routes, suspends its audio authority
+during account checks, and ends old calls before sign-in changes or student-data
+reset. An opt-in build includes a call dialog and minimized dock with separate
+microphone/speaker controls. A gated LiveKit adapter and local processed VAD
+capture have synthetic coverage; their default admission and capture remain
+unavailable. Server media authority, the voice worker and supported-device
+qualification still need integration. The
+[delivery plan](docs/product/delivery-plan.md) records that work and its gates.
+The server also has content-free call reservations behind
+`STUDENT_VOX_ENABLED=false`, tied to the exact browser login with short renewable
+leases and reset/logout replay fences. These reservations explicitly disable
+media. See the [server contract](docs/product/vox-session-contract.md).
+
 NavoX Board includes five authored practice lessons with step playback, quick
 checks, progressively drawn sketches, traced handwriting-shaped letter contours
 and equation reveals, pan/zoom and pen notes. Pause freezes the current reveal;

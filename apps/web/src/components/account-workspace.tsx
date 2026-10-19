@@ -11,12 +11,15 @@ import {
 } from "react";
 import {
   type Account,
-  type AccountAccess,
   authenticate,
   type GoogleConnection,
   loadGoogleConnections,
-  restoreAccountAccess,
 } from "../lib/account-access";
+import {
+  notifyAccountSessionChanged,
+  notifyAccountSessionChanging,
+  observeAccountSession,
+} from "../lib/account-session";
 import { productFeatures } from "../lib/product-features";
 import { NavoXCinematic } from "./navox-cinematic";
 import { StudentAssistantPanel } from "./student-assistant-panel";
@@ -40,64 +43,10 @@ type AuthMode = "register" | "login";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+const signInUnavailable =
+  "Your sign-in could not be checked. Reload sign-in to try again.";
 
-const accountSessionChannel = "navox-account-session";
-
-export function observeAccountSession(callbacks: {
-  checking: () => void;
-  restored: (access: AccountAccess) => void;
-  unavailable: () => void;
-}) {
-  let version = 0;
-  let disposed = false;
-  const channel =
-    typeof BroadcastChannel === "undefined"
-      ? null
-      : new BroadcastChannel(accountSessionChannel);
-
-  async function check() {
-    const request = ++version;
-    callbacks.checking();
-    try {
-      const access = await restoreAccountAccess(apiBaseUrl);
-      if (!disposed && request === version) callbacks.restored(access);
-    } catch {
-      if (!disposed && request === version) callbacks.unavailable();
-    }
-  }
-
-  function visibilityChanged() {
-    if (document.visibilityState === "visible") void check();
-    else {
-      ++version;
-      callbacks.checking();
-    }
-  }
-
-  const sessionChanged = () => void check();
-  document.addEventListener("visibilitychange", visibilityChanged);
-  channel?.addEventListener("message", sessionChanged);
-  void check();
-  return {
-    invalidate: () => {
-      ++version;
-    },
-    dispose: () => {
-      disposed = true;
-      ++version;
-      document.removeEventListener("visibilitychange", visibilityChanged);
-      channel?.removeEventListener("message", sessionChanged);
-      channel?.close();
-    },
-  };
-}
-
-function notifyAccountSessionChanged() {
-  if (typeof BroadcastChannel === "undefined") return;
-  const channel = new BroadcastChannel(accountSessionChannel);
-  channel.postMessage("session-changed");
-  channel.close();
-}
+export { observeAccountSession } from "../lib/account-session";
 
 export function AccountWorkspace({
   view = "today",
@@ -125,6 +74,7 @@ export function AccountWorkspace({
   const [connectionsUnavailable, setConnectionsUnavailable] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [sessionRestored, setSessionRestored] = useState(false);
+  const [sessionUnavailable, setSessionUnavailable] = useState(false);
   const sessionObserver = useRef<ReturnType<
     typeof observeAccountSession
   > | null>(null);
@@ -164,20 +114,28 @@ export function AccountWorkspace({
       checking: () => {
         ++sessionGeneration.current;
         setSessionRestored(false);
+        setSessionUnavailable(false);
       },
       restored: (restored) => {
+        setSessionUnavailable(false);
         setAccount(restored.account);
         setConnections(restored.connections);
         setConnectionsUnavailable(Boolean(restored.connectionsError));
         if (restored.connectionsError) setMessage(restored.connectionsError);
+        else
+          setMessage((current) =>
+            current === signInUnavailable ? "" : current,
+          );
         setIsLoading(false);
         setSessionRestored(true);
       },
       unavailable: () => {
+        setSessionUnavailable(true);
+        setMode("login");
         setAccount(null);
         setConnections([]);
         setConnectionsUnavailable(false);
-        setMessage("Your sign-in could not be checked. Please sign in again.");
+        setMessage(signInUnavailable);
         setIsLoading(false);
         setSessionRestored(true);
       },
@@ -191,6 +149,7 @@ export function AccountWorkspace({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const change = notifyAccountSessionChanging();
     setMessage("");
     setIsLoading(true);
 
@@ -201,28 +160,12 @@ export function AccountWorkspace({
     try {
       const authenticated = await authenticate(apiBaseUrl, mode, payload);
       sessionObserver.current?.invalidate();
-      const generation = ++sessionGeneration.current;
-      notifyAccountSessionChanged();
+      ++sessionGeneration.current;
       setAccount(authenticated);
       setConnections([]);
       setSessionRestored(false);
-      try {
-        const loadedConnections = await loadGoogleConnections(apiBaseUrl);
-        if (generation !== sessionGeneration.current) return;
-        setConnections(loadedConnections);
-        setConnectionsUnavailable(false);
-      } catch (error) {
-        if (generation !== sessionGeneration.current) return;
-        setConnections([]);
-        setConnectionsUnavailable(true);
-        setMessage(
-          error instanceof Error
-            ? error.message
-            : "Connected apps could not be loaded. Please retry.",
-        );
-      } finally {
-        if (generation === sessionGeneration.current) setSessionRestored(true);
-      }
+      // The matched completion below refreshes the current cookie account and
+      // its connections through the shared observer, including this document.
       setPassword("");
     } catch (error) {
       setMessage(
@@ -231,6 +174,7 @@ export function AccountWorkspace({
           : "Something went wrong. Please try again.",
       );
     } finally {
+      notifyAccountSessionChanged(change);
       setIsLoading(false);
     }
   }
@@ -258,17 +202,18 @@ export function AccountWorkspace({
   }, []);
 
   async function signOut() {
+    const change = notifyAccountSessionChanging();
     setIsLoading(true);
     try {
       const response = await fetch(`${apiBaseUrl}/auth/logout`, {
         method: "POST",
         credentials: "include",
+        signal: AbortSignal.timeout(10_000),
       });
       if (!response.ok)
         throw new Error("We couldn’t sign you out. Please try again.");
       sessionObserver.current?.invalidate();
       ++sessionGeneration.current;
-      notifyAccountSessionChanged();
       setAccount(null);
       setConnections([]);
       setConnectionsUnavailable(false);
@@ -281,6 +226,7 @@ export function AccountWorkspace({
           : "We couldn’t sign you out. Please try again.",
       );
     } finally {
+      notifyAccountSessionChanged(change);
       setIsLoading(false);
     }
   }
@@ -556,7 +502,16 @@ export function AccountWorkspace({
               {message}
             </p>
           )}
-          <button className="primary-button" disabled={isLoading} type="submit">
+          {sessionUnavailable && (
+            <button type="button" onClick={() => window.location.reload()}>
+              Reload sign-in
+            </button>
+          )}
+          <button
+            className="primary-button"
+            disabled={isLoading || sessionUnavailable}
+            type="submit"
+          >
             {isLoading
               ? "Working…"
               : mode === "register"

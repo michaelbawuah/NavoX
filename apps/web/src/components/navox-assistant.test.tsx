@@ -2,6 +2,11 @@ import type { AssistantTurnView } from "@navox/contracts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+}));
+
 import {
   activeDraftSpeechKey,
   DraftSpeechControl,

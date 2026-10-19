@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   type FormEvent,
   useCallback,
@@ -273,6 +274,7 @@ export function TodayWorkspace({
   onConnectionsChanged,
   onSignOut,
 }: TodayWorkspaceProps) {
+  const router = useRouter();
   const needsConnectionSetup =
     !connectionsUnavailable &&
     !connections.some((connection) => connection.status === "active");
@@ -564,9 +566,7 @@ export function TodayWorkspace({
 
   function openReply(item: TodayItem) {
     if (view !== "inbox") {
-      window.location.assign(
-        `/inbox?reply=${encodeURIComponent(item.id)}#drafts`,
-      );
+      router.push(`/inbox?reply=${encodeURIComponent(item.id)}#drafts`);
       return;
     }
     setSelectedReplyId(item.id);

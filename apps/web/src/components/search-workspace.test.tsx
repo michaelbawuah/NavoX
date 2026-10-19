@@ -4,6 +4,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { ResultCard, SearchWorkspace } from "./search-workspace";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+}));
+
 const resource: EvidenceResource = {
   source_type: "EMAIL",
   resource_id: "3d2b6b1a-0000-4000-8000-000000000001",

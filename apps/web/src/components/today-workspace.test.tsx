@@ -8,6 +8,10 @@ import {
   workspaceItemGroups,
 } from "./today-workspace";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+}));
+
 const account = {
   id: "owner-1",
   email: "owner@example.test",

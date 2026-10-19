@@ -4,6 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { productFeatures } from "../lib/product-features";
 import { TodayWorkspace, type TodayWorkspaceView } from "./today-workspace";
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+}));
+
 const original = productFeatures.studentEmail;
 afterEach(() => {
   productFeatures.studentEmail = original;

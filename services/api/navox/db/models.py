@@ -33,6 +33,7 @@ from navox.db import (
     student_planning,  # noqa: F401 - registers owned study tasks and plans
     student_recovery,  # noqa: F401 - registers expiring private recovery proposals
     thread_watches,  # noqa: F401 - registers verified-send follow-up watches
+    vox,  # noqa: F401 - registers content-free Vox reservations and generation fences
 )
 from navox.db.base import Base
 
