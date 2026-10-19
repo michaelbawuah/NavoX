@@ -7,10 +7,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pwdlib import PasswordHash
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from navox.connectors.sync_state import database_now, utc
 from navox.core.settings import Settings, get_settings
 from navox.db.models import User, UserSession, Workspace, WorkspaceMembership
 from navox.db.session import get_database_session
@@ -185,6 +186,69 @@ async def password_account(
     return user, workspace
 
 
+async def revoke_presented_session(
+    database: AsyncSession,
+    token: str | None,
+    *,
+    client_type: str,
+    additional_user_id: UUID | None = None,
+    required: bool = False,
+) -> None:
+    """Revoke one presented login and its calls in the caller's transaction.
+
+    Discover ownership without locking the session, then lock all involved User
+    rows in UUID order before refreshing the session. Cross-account replacements
+    cannot acquire UserSession -> User locks or reverse two User locks.
+    """
+    digest = hash_session_token(token) if token is not None else None
+    session_user_id = (
+        await database.scalar(
+            select(UserSession.user_id).where(
+                UserSession.token_hash == digest, UserSession.client_type == client_type
+            )
+        )
+        if digest is not None
+        else None
+    )
+    user_ids = {value for value in (session_user_id, additional_user_id) if value is not None}
+    locked = set()
+    for user_id in sorted(user_ids, key=lambda value: value.int):
+        current = await database.scalar(
+            select(User)
+            .where(User.id == user_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if current is not None:
+            locked.add(current.id)
+    if additional_user_id is not None and additional_user_id not in locked:
+        raise authentication_required()
+    session = (
+        await database.scalar(
+            select(UserSession)
+            .where(UserSession.token_hash == digest, UserSession.client_type == client_type)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if session_user_id is not None
+        else None
+    )
+    now = utc(await database_now(database))
+    if required and (
+        session is None or session.revoked_at is not None or utc(session.expires_at) <= now
+    ):
+        raise authentication_required()
+    if session is None:
+        return
+    if session.user_id not in locked:
+        raise authentication_required()
+    from navox.vox.service import revoke_session_calls
+
+    if session.revoked_at is None:
+        session.revoked_at = now
+    await revoke_session_calls(database, session.id, now=now)
+
+
 async def get_current_account(
     request: Request,
     database: DatabaseSession,
@@ -219,6 +283,7 @@ CurrentAccountDependency = Annotated[CurrentAccount, Depends(get_current_account
 @router.post("/register", response_model=AccountResponse, status_code=status.HTTP_201_CREATED)
 async def register(
     payload: RegistrationRequest,
+    request: Request,
     response: Response,
     database: DatabaseSession,
     settings: SettingsDependency,
@@ -251,6 +316,12 @@ async def register(
                     role="owner",
                 )
             )
+            await revoke_presented_session(
+                database,
+                request.cookies.get(settings.session_cookie_name),
+                client_type="web",
+                additional_user_id=user.id,
+            )
             database.add(
                 UserSession(
                     user_id=user.id,
@@ -271,11 +342,18 @@ async def register(
 @router.post("/login", response_model=AccountResponse)
 async def login(
     payload: LoginRequest,
+    request: Request,
     response: Response,
     database: DatabaseSession,
     settings: SettingsDependency,
 ) -> AccountResponse:
     user, workspace = await password_account(payload, database)
+    await revoke_presented_session(
+        database,
+        request.cookies.get(settings.session_cookie_name),
+        client_type="web",
+        additional_user_id=user.id,
+    )
     token, _expires_at = await create_session(database, user.id, settings)
     await database.commit()
     set_session_cookie(response, token, settings)
@@ -295,13 +373,8 @@ async def logout(
     settings: SettingsDependency,
 ) -> dict[str, str]:
     token = request.cookies.get(settings.session_cookie_name)
-    if token is not None:
-        await database.execute(
-            update(UserSession)
-            .where(UserSession.token_hash == hash_session_token(token))
-            .values(revoked_at=datetime.now(UTC))
-        )
-        await database.commit()
+    await revoke_presented_session(database, token, client_type="web")
+    await database.commit()
     response.delete_cookie(key=settings.session_cookie_name, path="/")
     return {"status": "signed_out"}
 
@@ -336,16 +409,6 @@ async def extension_logout(
     token = request_bearer_token(request)
     if token is None:
         raise authentication_required()
-    session = await database.scalar(
-        select(UserSession).where(
-            UserSession.token_hash == hash_session_token(token),
-            UserSession.client_type == "extension",
-            UserSession.revoked_at.is_(None),
-            UserSession.expires_at > datetime.now(UTC),
-        )
-    )
-    if session is None:
-        raise authentication_required()
-    session.revoked_at = datetime.now(UTC)
+    await revoke_presented_session(database, token, client_type="extension", required=True)
     await database.commit()
     return {"status": "signed_out"}

@@ -49,6 +49,7 @@ from navox.api.student_work_export import router as student_work_export_router
 from navox.api.subscriptions import router as subscriptions_router
 from navox.api.thread_watches import router as thread_watches_router
 from navox.api.today import router as today_router
+from navox.api.vox import router as vox_router
 from navox.api.workspace import router as workspace_router
 from navox.core.settings import get_settings
 
@@ -112,6 +113,7 @@ def create_app() -> FastAPI:
     app.include_router(student_email_router, prefix="/api/v1")
     app.include_router(student_goals_router, prefix="/api/v1")
     app.include_router(board_router, prefix="/api/v1")
+    app.include_router(vox_router, prefix="/api/v1")
     app.include_router(student_coach_router, prefix="/api/v1")
     app.include_router(student_work_export_router, prefix="/api/v1")
     app.include_router(lms_feed_router, prefix="/api/v1")

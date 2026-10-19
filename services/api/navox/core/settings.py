@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     student_lms_feeds_enabled: bool = False
     student_coursework_enabled: bool = False
     student_board_enabled: bool = False
+    student_vox_enabled: bool = False
     student_recovery_enabled: bool = False
     student_email_enabled: bool = False
     student_goals_enabled: bool = False

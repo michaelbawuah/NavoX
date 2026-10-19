@@ -59,8 +59,9 @@ open.
    and saved Boards in supported browsers. Record microphone and notification
    delivery on supported devices. Keep each draft's remaining evidence visible.
 2. **Complete the Vox call foundation.** The app-scoped owner boundary is mounted
-   behind its default-off flag. Next connect qualified server sessions and LiveKit
-   transport. Add the call screen,
+   behind its default-off flag. Native content-free reservations now bind to the exact login
+   and share reset/logout revocation; see the [server contract](vox-session-contract.md).
+   Next qualify media grants, LiveKit transport and the call screen,
    separate microphone/speaker controls, captions, minimize, standby and scoped
    reconnect. Hang-up, sign-out, account change and reset release resources and
    invalidate pending callbacks. Do not promise native lock-screen/background
