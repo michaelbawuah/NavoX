@@ -38,6 +38,7 @@ import { StudentEmailCard } from "./student-email-actions";
 import { StudentGoalsCard } from "./student-goals";
 import { StudentLmsFeeds } from "./student-lms-feeds";
 import { StudentNotifications } from "./student-notifications";
+import { StudentPlanToday } from "./student-plan-today";
 import { StudentRecoveryCard } from "./student-recovery";
 import { ThreadWatchPanel } from "./thread-watch-panel";
 import styles from "./today-workspace.module.css";
@@ -1171,6 +1172,11 @@ export function TodayWorkspace({
         {view === "today" && (
           <div className={styles.focusLayout}>
             <div className={styles.focusColumn}>
+              {productFeatures.studentPlanning && (
+                <StudentPlanToday
+                  accountId={`${account.workspace.id}:${account.id}`}
+                />
+              )}
               <StudentDayPanel
                 accountId={`${account.workspace.id}:${account.id}`}
               />
