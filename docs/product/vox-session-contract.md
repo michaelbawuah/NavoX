@@ -116,8 +116,25 @@ The reservation client uses authenticated, account-scoped, no-store requests
 with bounded bodies and deadlines. It preserves the captured generation for
 same-call retries and sends terminal cleanup even when an earlier start is
 still pending. Metadata reservations never supply media credentials. The client
-does not yet renew the server's 120-second reservation lease; future admission
-must integrate that lifetime with the independently renewed media lease.
+renews the same server reservation only while the exact call epoch and account
+remain verified. Renewal is independent of microphone mute, speaker controls,
+minimizing and standby. One-shot scheduling uses the remaining lease minus a
+30-second margin; there is no automatic retry after a failed renewal. The
+original absolute expiry and a conservative 120-second monotonic bound from
+request dispatch both remain effective until a strictly later, identity-matched
+renewal is checked. Response latency never adds authority, and a delayed result
+cannot revive a lease that expired while the browser was throttled.
+
+Account verification or privacy suspension synchronously aborts an in-flight
+renewal, including during a pending SDK join, and retains the old expiry. A fresh
+same-owner verification can resume renewal before that expiry; missing the lease
+ends the call rather than silently extending it. Requests without synchronous
+ownership notifications do not receive automatic renewal. Every outbound,
+playback and local-wake gate also checks the native lease, independently of the
+timer. Terminal cleanup keeps the original generation and closes late joins;
+uncertain physical cleanup blocks replacement admission in that transport.
+This metadata lease is not media authority. Future admission must integrate its
+lifetime with independently qualified media renewal and server revocation.
 
 The LiveKit 2.23 adapter loads the SDK only after explicit media admission. It
 checks the supplied owner/call/room/participant binding, waits for the expected

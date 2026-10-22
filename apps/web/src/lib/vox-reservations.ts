@@ -1,9 +1,11 @@
 /** Owned, content-free native reservations. These never grant media or AI access. */
-import type { VoxOwner, VoxTransport } from "./vox-call";
+import type { VoxConnection, VoxOwner, VoxTransport } from "./vox-call";
 
 export const VOX_RESERVATION_TIMEOUT_MS = 10_000;
 export const VOX_RESERVATION_RESPONSE_BYTES = 8192;
 export const VOX_RESERVATION_LIMIT = 200;
+export const VOX_RESERVATION_LEASE_MS = 120_000;
+export const VOX_RESERVATION_RENEW_BEFORE_MS = 30_000;
 
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -33,6 +35,7 @@ export interface VoxReservationClientOptions {
   apiBaseUrl?: string;
   fetch?: typeof globalThis.fetch;
   now?: () => number;
+  monotonicNow?: () => number;
 }
 
 export class VoxReservationError extends Error {
@@ -190,6 +193,10 @@ interface Intent {
   proof: Promise<void>;
   creating: Promise<VoxReservationView> | null;
   ending: Promise<void> | null;
+  reservation: VoxReservationView | null;
+  deadline: number;
+  renewing: Promise<VoxReservationView> | null;
+  renewalSignal: AbortSignal | null;
 }
 
 /** One instance per transport; no timers, fetches or storage until an explicit call. */
@@ -197,6 +204,64 @@ export class VoxReservationClient {
   private readonly intents = new Map<string, Intent>();
 
   constructor(private readonly options: VoxReservationClientOptions = {}) {}
+
+  private monotonic(): number {
+    const value = (this.options.monotonicNow ?? (() => performance.now()))();
+    if (!Number.isFinite(value)) invalid();
+    return value;
+  }
+
+  private remaining(intent: Intent): number {
+    if (intent.ended || intent.failed || !intent.reservation) return 0;
+    const wall = (this.options.now ?? Date.now)();
+    if (!Number.isFinite(wall)) return 0;
+    return Math.max(
+      0,
+      Math.min(
+        Date.parse(intent.reservation.expires_at) - wall,
+        intent.deadline - this.monotonic(),
+      ),
+    );
+  }
+
+  leaseRemaining(owner: Readonly<VoxOwner>, callId: string): number {
+    const intent = this.intents.get(this.key(scope(owner), uuid(callId)));
+    return intent ? this.remaining(intent) : 0;
+  }
+
+  private sameReservation(
+    left: VoxReservationView,
+    right: VoxReservationView,
+  ): boolean {
+    return (
+      left.id === right.id &&
+      left.client_call_id === right.client_call_id &&
+      left.generation === right.generation &&
+      left.mode === right.mode &&
+      left.created_at === right.created_at
+    );
+  }
+
+  private installLease(
+    intent: Intent,
+    reserved: VoxReservationView,
+    started: number,
+  ): void {
+    const wall = (this.options.now ?? Date.now)();
+    const remaining = Date.parse(reserved.expires_at) - wall;
+    if (
+      !Number.isFinite(wall) ||
+      remaining <= 0 ||
+      remaining > VOX_RESERVATION_LEASE_MS
+    )
+      invalid();
+    intent.reservation = reserved;
+    intent.deadline = Math.min(
+      started + VOX_RESERVATION_LEASE_MS,
+      this.monotonic() + remaining,
+    );
+    if (this.remaining(intent) <= 0) invalid();
+  }
 
   private key(owner: Readonly<VoxOwner>, callId: string): string {
     return `${owner.workspaceId}:${owner.userId}:${callId}`;
@@ -324,6 +389,10 @@ export class VoxReservationClient {
         proof: Promise.resolve(),
         creating: null,
         ending: null,
+        reservation: null,
+        deadline: 0,
+        renewing: null,
+        renewalSignal: null,
       };
       this.intents.set(key, intent);
       const captured = intent;
@@ -342,9 +411,14 @@ export class VoxReservationClient {
     try {
       await captured.proof;
       this.fresh(captured);
+      if (captured.reservation && this.remaining(captured) <= 0) {
+        captured.failed = true;
+        throw new VoxReservationError("scope-changed");
+      }
       if (signal.aborted) throw new VoxReservationError("cancelled");
       if (!captured.creating) {
         captured.creating = (async () => {
+          const started = this.monotonic();
           const reserved = view(
             await this.request(
               captured.owner,
@@ -365,9 +439,16 @@ export class VoxReservationClient {
             reserved.status !== "reserved"
           )
             invalid();
-          const now = (this.options.now ?? Date.now)();
-          if (!Number.isFinite(now) || Date.parse(reserved.expires_at) <= now)
-            invalid();
+          this.fresh(captured);
+          if (signal.aborted) throw new VoxReservationError("cancelled");
+          if (captured.reservation) {
+            if (
+              !this.sameReservation(captured.reservation, reserved) ||
+              captured.reservation.expires_at !== reserved.expires_at ||
+              this.remaining(captured) <= 0
+            )
+              invalid();
+          } else this.installLease(captured, reserved, started);
           return reserved;
         })();
       }
@@ -391,6 +472,86 @@ export class VoxReservationClient {
     } finally {
       captured.creating = null;
     }
+  }
+
+  async renew(
+    owner: Readonly<VoxOwner>,
+    callId: string,
+    signal: AbortSignal,
+  ): Promise<VoxReservationView> {
+    const intent = this.intents.get(this.key(scope(owner), uuid(callId)));
+    if (!intent?.reservation || intent.generation === null)
+      throw new VoxReservationError("scope-changed");
+    this.fresh(intent);
+    if (signal.aborted) throw new VoxReservationError("cancelled");
+    if (this.remaining(intent) <= 0) {
+      intent.failed = true;
+      throw new VoxReservationError("scope-changed");
+    }
+    if (intent.renewing && intent.renewalSignal?.aborted) {
+      // Fresh verification may arrive synchronously after privacy suspension.
+      // Retire the cancelled operation before creating its successor, without
+      // coalescing fresh authority into the old rejected promise.
+      const retired = intent.renewing;
+      await retired.catch(() => {});
+      if (intent.renewing === retired) {
+        intent.renewing = null;
+        intent.renewalSignal = null;
+      }
+      this.fresh(intent);
+      if (signal.aborted) throw new VoxReservationError("cancelled");
+      if (this.remaining(intent) <= 0) {
+        intent.failed = true;
+        throw new VoxReservationError("scope-changed");
+      }
+    }
+    if (!intent.renewing) {
+      const previous = intent.reservation;
+      const started = this.monotonic();
+      intent.renewalSignal = signal;
+      const pending = (async () => {
+        try {
+          const renewed = view(
+            await this.request(
+              intent.owner,
+              `/${intent.callId}/renew`,
+              "POST",
+              { generation: intent.generation },
+              200,
+              signal,
+            ),
+          );
+          this.fresh(intent);
+          if (signal.aborted) throw new VoxReservationError("cancelled");
+          if (
+            this.remaining(intent) <= 0 ||
+            !this.sameReservation(previous, renewed) ||
+            renewed.status !== "reserved" ||
+            Date.parse(renewed.expires_at) <= Date.parse(previous.expires_at)
+          )
+            invalid();
+          this.installLease(intent, renewed, started);
+          return renewed;
+        } catch (error) {
+          if (!signal.aborted) intent.failed = true;
+          throw error;
+        }
+      })();
+      intent.renewing = pending;
+      void pending
+        .finally(() => {
+          if (intent.renewing === pending) {
+            intent.renewing = null;
+            intent.renewalSignal = null;
+          }
+        })
+        .catch(() => {});
+    }
+    const renewed = await abortable(intent.renewing, signal);
+    this.fresh(intent);
+    if (signal.aborted || this.remaining(intent) <= 0)
+      throw new VoxReservationError("cancelled");
+    return { ...renewed };
   }
 
   async end(owner: Readonly<VoxOwner>, callId: string): Promise<void> {
@@ -425,26 +586,228 @@ export function wrapVoxReservations(
   inner: VoxTransport,
   client: VoxReservationClient,
 ): VoxTransport {
+  let cleanupBlocked = false;
+  const attempts = new Set<{
+    owner: Readonly<VoxOwner>;
+    callId: string;
+    stop(): Promise<void>;
+  }>();
   return {
     get available() {
-      return inner.available;
+      return inner.available && !cleanupBlocked;
     },
     get localWakeAvailable() {
       return inner.localWakeAvailable;
     },
     async connect(request) {
-      if (!inner.available) throw new VoxReservationError("unavailable");
-      await client.reserve(request.owner, request.callId, request.signal);
-      if (request.signal.aborted) throw new VoxReservationError("cancelled");
-      return inner.connect(request);
+      if (!inner.available || cleanupBlocked)
+        throw new VoxReservationError("unavailable");
+      const abort = new AbortController();
+      let live = true;
+      let reserved = false;
+      let connection: VoxConnection | null = null;
+      let closing: Promise<void> | null = null;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let renewal: AbortController | null = null;
+      let unsubscribe: (() => void) | undefined;
+      let cleanupError = false;
+      const remaining = () =>
+        client.leaseRemaining(request.owner, request.callId);
+      // A legacy transport request without synchronous privacy notifications
+      // gets its original bounded lease, never automatic renewal.
+      const mayRenew = () =>
+        Boolean(
+          request.observeReservationAuthority &&
+            request.mayRenewReservation?.(),
+        );
+      const clearTimer = () => {
+        if (timer !== null) clearTimeout(timer);
+        timer = null;
+      };
+      const stop = (): Promise<void> => {
+        live = false;
+        clearTimer();
+        renewal?.abort();
+        renewal = null;
+        abort.abort();
+        const unobserve = unsubscribe;
+        unsubscribe = undefined;
+        try {
+          unobserve?.();
+        } catch {
+          cleanupBlocked = true;
+          cleanupError = true;
+        }
+        request.signal.removeEventListener("abort", aborted);
+        attempts.delete(attempt);
+        if (connection && !closing) {
+          const captured = connection;
+          let safe = !cleanupError;
+          let complete!: () => void;
+          let failed!: (error: unknown) => void;
+          // Register release before adapter callbacks can reenter close/start.
+          closing = new Promise<void>((resolve, reject) => {
+            complete = resolve;
+            failed = reject;
+          });
+          for (const disable of [
+            () => captured.setMicrophoneEnabled(false),
+            () => captured.setSpeakerEnabled(false),
+            () => captured.setWakeEnabled(false),
+            () => captured.stopPlayback(),
+          ]) {
+            try {
+              disable();
+            } catch {
+              safe = false;
+              cleanupBlocked = true;
+            }
+          }
+          void Promise.resolve()
+            .then(() => captured.close())
+            .then(() => {
+              if (!safe) throw new VoxReservationError("unavailable");
+              complete();
+            })
+            .catch((error) => {
+              cleanupBlocked = true;
+              failed(error);
+            });
+        }
+        return (
+          closing ??
+          (cleanupError
+            ? Promise.reject(new VoxReservationError("unavailable"))
+            : Promise.resolve())
+        );
+      };
+      const attempt = { owner: request.owner, callId: request.callId, stop };
+      const aborted = () => {
+        void stop().catch(() => {});
+      };
+      const ended = () => {
+        if (!live) return;
+        void stop().catch(() => {});
+        request.onEvent({ type: "ended" });
+      };
+      const alive = () => {
+        if (!live || request.signal.aborted) return false;
+        if (!reserved || remaining() <= 0) {
+          ended();
+          return false;
+        }
+        return true;
+      };
+      const renew = async () => {
+        if (!alive() || !mayRenew() || renewal) return;
+        const current = new AbortController();
+        renewal = current;
+        reconcile();
+        try {
+          await client.renew(request.owner, request.callId, current.signal);
+          if (!live || renewal !== current) return;
+          renewal = null;
+          if (!mayRenew()) return reconcile();
+          reconcile();
+        } catch {
+          if (!live || renewal !== current) return;
+          renewal = null;
+          ended();
+        }
+      };
+      const reconcile = () => {
+        clearTimer();
+        if (!live || !reserved) return;
+        if (!alive()) return;
+        if (!mayRenew()) {
+          renewal?.abort();
+          renewal = null;
+        }
+        const left = remaining();
+        if (!renewal && mayRenew() && left <= VOX_RESERVATION_RENEW_BEFORE_MS) {
+          void renew();
+          return;
+        }
+        const delay =
+          !renewal && mayRenew()
+            ? left - VOX_RESERVATION_RENEW_BEFORE_MS
+            : left;
+        timer = setTimeout(reconcile, Math.max(0, delay));
+      };
+      attempts.add(attempt);
+      request.signal.addEventListener("abort", aborted, { once: true });
+      try {
+        try {
+          unsubscribe = request.observeReservationAuthority?.(reconcile);
+        } catch (error) {
+          cleanupBlocked = true;
+          throw error;
+        }
+        if (request.signal.aborted) aborted();
+        await client.reserve(request.owner, request.callId, abort.signal);
+        if (!live || request.signal.aborted)
+          throw new VoxReservationError("cancelled");
+        reserved = true;
+        reconcile();
+        if (!alive()) throw new VoxReservationError("cancelled");
+        connection = await inner.connect({
+          ...request,
+          signal: abort.signal,
+          mayTransmitAudio: () => alive() && request.mayTransmitAudio(),
+          mayPlayAudio: () => alive() && request.mayPlayAudio(),
+          mayListenForWake: () => alive() && request.mayListenForWake(),
+          onEvent: (event) => {
+            if (alive()) request.onEvent(event);
+          },
+        });
+        // Keep an abort-ignoring join owned until its resource is released.
+        if (!alive()) {
+          await stop();
+          throw new VoxReservationError("cancelled");
+        }
+        return {
+          owner: connection.owner,
+          callId: connection.callId,
+          setMicrophoneEnabled(enabled) {
+            reconcile();
+            connection?.setMicrophoneEnabled(enabled && alive());
+          },
+          setSpeakerEnabled(enabled) {
+            reconcile();
+            connection?.setSpeakerEnabled(enabled && alive());
+          },
+          setWakeEnabled(enabled) {
+            reconcile();
+            connection?.setWakeEnabled(enabled && alive());
+          },
+          stopPlayback() {
+            connection?.stopPlayback();
+          },
+          close: stop,
+        };
+      } catch (error) {
+        await stop();
+        throw error;
+      }
     },
     async endCall(owner, callId) {
+      const closing = [...attempts]
+        .filter(
+          (attempt) =>
+            attempt.callId === callId &&
+            attempt.owner.userId === owner.userId &&
+            attempt.owner.workspaceId === owner.workspaceId,
+        )
+        .map((attempt) => attempt.stop());
       const results = await Promise.allSettled([
+        ...closing,
         client.end(owner, callId),
         Promise.resolve().then(() => inner.endCall?.(owner, callId)),
       ]);
-      if (results.some((result) => result.status === "rejected"))
+      if (results.some((result) => result.status === "rejected")) {
+        cleanupBlocked = true;
         throw new VoxReservationError("unavailable");
+      }
     },
   };
 }
