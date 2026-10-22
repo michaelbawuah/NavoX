@@ -252,10 +252,18 @@ assistant sessions or transcripts. Before allocating media, a read-only prefligh
 requires all three exact gateway paths to have ordinary owner grants, configured
 adapters, healthy full-rollout assignments and the bounded turn budget. It does
 not reserve quota, execute a prompt, prove provider connectivity or qualify voice.
-The shared text-answer contract allows up to 3,000 characters; the bounded worker
-rejects answers above its 600-character speech ceiling rather than silently
-truncating them. Live spoken-answer qualification remains required independently
-of valid RTC credentials.
+The worker and admission preflight use the separately versioned answer-only
+`vox_spoken_answer@v1` prompt and schema, with a 600-character maximum matching
+the existing speech ceiling. Its source-free transient context contains the
+current question and at most four preceding turns, each with a spoken answer of
+at most 600 characters. Invalid answers are rejected, never silently truncated,
+retried through another model or split into extra synthesis calls.
+Ordinary text `assistant_conversation@v1` remains unchanged at 3,000 characters;
+its grants and evaluation do not qualify the new spoken-answer task. Adding
+reviewable catalog artifacts neither publishes a registry nor creates grants,
+model assignments, evaluations or traffic. All existing Vox flags remain off.
+Live spoken-answer qualification remains required independently of valid RTC
+credentials.
 
 Each media epoch has an immutable deadline of at most 120 seconds. Its periodic
 proof checks do not extend that deadline. Continuous calls still require fresh
