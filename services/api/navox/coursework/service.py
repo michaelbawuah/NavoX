@@ -623,6 +623,44 @@ def material_view(
     )
 
 
+async def material_page(
+    database: AsyncSession,
+    settings: Settings,
+    *,
+    user_id: UUID,
+    workspace_id: UUID,
+    course_id: UUID,
+    material_id: UUID,
+    revision: int,
+    page: int,
+) -> dict[str, object]:
+    """A bounded literal page read; no model, derived answer or persisted excerpt."""
+    await require_course(database, user_id=user_id, workspace_id=workspace_id, course_id=course_id)
+    row = await owned_material(
+        database,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        course_id=course_id,
+        material_id=material_id,
+    )
+    if row.revision != revision:
+        raise CourseworkError("This course material changed; open its current version", 409)
+    data = reveal(row, settings, "material")
+    if not 1 <= page <= len(data["pages"]):
+        raise CourseworkError("Course material page was not found", 404)
+    raw = data["pages"][page - 1].encode("utf-8")
+    text = raw[:2048].decode("utf-8", errors="ignore")
+    return {
+        "course_id": str(course_id),
+        "material_id": str(row.id),
+        "revision": row.revision,
+        "title": data["title"],
+        "page": page,
+        "text": text,
+        "truncated": len(text.encode("utf-8")) < len(raw),
+    }
+
+
 async def list_materials(
     database: AsyncSession,
     settings: Settings,

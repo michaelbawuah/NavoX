@@ -22,6 +22,7 @@ import {
 } from "../lib/account-session";
 import { productFeatures } from "../lib/product-features";
 import { notifyCalendarAccessChanged } from "../lib/student-calendar-privacy";
+import type { CourseMaterialReference } from "../lib/student-material-link";
 import { NavoXCinematic } from "./navox-cinematic";
 import { StudentAssistantPanel } from "./student-assistant-panel";
 import { StudentAvailability } from "./student-availability";
@@ -53,6 +54,7 @@ export { observeAccountSession } from "../lib/account-session";
 export function AccountWorkspace({
   view = "today",
   courseId,
+  materialReference,
 }: {
   view?:
     | TodayWorkspaceView
@@ -65,6 +67,7 @@ export function AccountWorkspace({
     | "day-review"
     | "board";
   courseId?: string;
+  materialReference?: CourseMaterialReference | null;
 }) {
   const [mode, setMode] = useState<AuthMode>("register");
   const [account, setAccount] = useState<Account | null>(null);
@@ -306,6 +309,7 @@ export function AccountWorkspace({
                   key={`${account.workspace.id}:${account.id}:${courseId}`}
                   accountId={`${account.workspace.id}:${account.id}`}
                   courseId={courseId}
+                  materialReference={materialReference}
                 />
               ) : (
                 <p>This course could not be opened.</p>

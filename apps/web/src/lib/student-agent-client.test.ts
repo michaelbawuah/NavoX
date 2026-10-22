@@ -261,4 +261,94 @@ describe("safe browser result projection", () => {
     ])
       expect(() => readStudentAssistantReply(value, turn, session)).toThrow();
   });
+  function materialRaw(name = "course.materials.search") {
+    return {
+      ...raw(),
+      reply: {
+        ...raw().reply,
+        status: "answer",
+        answer: "Saved source matches.",
+        observations: [
+          {
+            name,
+            effect: "read",
+            data: {
+              course_id: user,
+              query: "flip-flop",
+              limit_reached: false,
+              results: [
+                {
+                  material_id: workspace,
+                  title: "Lecture 3",
+                  revision: 2,
+                  page: 4,
+                  snippet: "Private source excerpt",
+                  url: "https://evil.test/file",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    };
+  }
+  it("constructs source links from checked IDs and discards raw excerpts and supplied URLs", () => {
+    const result = readStudentAssistantReply(materialRaw(), turn, session);
+    expect(result.reply.links).toEqual([
+      {
+        href: `/classes/${user}?material=${workspace}&page=4&revision=2`,
+        label: "Lecture 3 · page 4",
+        note: "Open the saved source, version 2.",
+      },
+    ]);
+    expect(JSON.stringify(result)).not.toContain("Private source excerpt");
+    expect(JSON.stringify(result)).not.toContain("evil.test");
+  });
+  it("projects a bounded material page into the same exact-edition source link", () => {
+    const value = materialRaw("course.materials.page");
+    const row = value.reply.observations[0].data.results[0];
+    const result = readStudentAssistantReply(
+      {
+        ...value,
+        reply: {
+          ...value.reply,
+          observations: [
+            {
+              name: "course.materials.page",
+              effect: "read",
+              data: {
+                course_id: user,
+                ...row,
+                text: "Saved page",
+                truncated: true,
+              },
+            },
+          ],
+        },
+      },
+      turn,
+      session,
+    );
+    expect(result.reply.links[0].href).toContain("page=4&revision=2");
+  });
+  it("rejects malformed material IDs, unsupported pages, oversized excerpts and review claims", () => {
+    for (const patch of [
+      { material_id: "//evil.test" },
+      { page: 0 },
+      { page: 101 },
+      { revision: 0 },
+      { title: "Lecture\n3" },
+      { snippet: "x".repeat(321) },
+    ]) {
+      const value = materialRaw();
+      Object.assign(value.reply.observations[0].data.results[0], patch);
+      expect(() => readStudentAssistantReply(value, turn, session)).toThrow();
+    }
+    const value = materialRaw();
+    value.reply.observations[0].effect = "review";
+    expect(() => readStudentAssistantReply(value, turn, session)).toThrow();
+    value.reply.observations[0].effect = "read";
+    value.reply.status = "review";
+    expect(() => readStudentAssistantReply(value, turn, session)).toThrow();
+  });
 });

@@ -44,6 +44,7 @@ import {
   readCourseSearch,
   uploadCourseMaterial,
 } from "../lib/student-coursework";
+import type { CourseMaterialReference } from "../lib/student-material-link";
 import { studentError, studentWriteUncertain } from "../lib/student-schedule";
 import styles from "./student-course-workspace.module.css";
 import { StudentWorkExportEntry } from "./student-work-export";
@@ -1026,12 +1027,14 @@ function CourseWorkspaceAccount({
   proof,
   privacy,
   readEpoch,
+  materialReference,
 }: {
   accountId: string;
   courseId: string;
   proof: CourseProof;
   privacy: CoursePrivacySession;
   readEpoch: number;
+  materialReference?: CourseMaterialReference | null;
 }) {
   const [overview, setOverview] = useState<CourseOverview | null>(
       proof.overview,
@@ -1069,6 +1072,7 @@ function CourseWorkspaceAccount({
     searchGeneration = useRef(0);
   const selectedReadEpoch = useRef(readEpoch),
     resultReadEpoch = useRef(readEpoch);
+  const openedReference = useRef("");
   const load = useCallback(
     async (_reset = false) => privacy.refresh(),
     [privacy],
@@ -1139,53 +1143,95 @@ function CourseWorkspaceAccount({
       if (alive.current) setBusy(false);
     }
   }
-  async function material(id: string) {
-    try {
-      const detail = await read(`/materials/${id}`, readCourseMaterialDetail);
-      const expected = proof.materials.find((row) => row.id === id);
-      if (
-        !expected ||
-        detail.id !== id ||
-        detail.revision !== expected.revision ||
-        detail.page_count !== expected.page_count
-      ) {
-        privacy.rejectSource();
+  const material = useCallback(
+    async (id: string) => {
+      try {
+        const detail = await read(`/materials/${id}`, readCourseMaterialDetail);
+        const expected = proof.materials.find((row) => row.id === id);
+        if (
+          !expected ||
+          detail.id !== id ||
+          detail.revision !== expected.revision ||
+          detail.page_count !== expected.page_count
+        ) {
+          privacy.rejectSource();
+          return null;
+        }
+        return detail;
+      } catch {
         return null;
       }
-      return detail;
-    } catch {
-      return null;
-    }
-  }
-  async function openMaterial(id: string, nextPage = 1, revision?: number) {
-    const request = ++readerGeneration.current;
-    setReading(true);
-    setError("");
-    const detail = await material(id);
-    if (!alive.current || request !== readerGeneration.current) return;
-    setReading(false);
-    if (!detail) return;
-    if (
-      (revision !== undefined && detail.revision !== revision) ||
-      nextPage < 1 ||
-      nextPage > detail.page_count
-    ) {
-      privacy.rejectSource();
-      return;
-    }
-    selectedReadEpoch.current = readEpoch;
-    setSelected(detail);
-    setPage(nextPage);
+    },
+    [read, proof.materials, privacy],
+  );
+  const openMaterial = useCallback(
+    async (id: string, nextPage = 1, revision?: number) => {
+      const request = ++readerGeneration.current;
+      setReading(true);
+      setError("");
+      const detail = await material(id);
+      if (!alive.current || request !== readerGeneration.current) return;
+      setReading(false);
+      if (!detail) return;
+      if (
+        (revision !== undefined && detail.revision !== revision) ||
+        nextPage < 1 ||
+        nextPage > detail.page_count
+      ) {
+        privacy.rejectSource();
+        return;
+      }
+      selectedReadEpoch.current = readEpoch;
+      setSelected(detail);
+      setPage(nextPage);
+      setReplacement(undefined);
+      setEditor(null);
+      setTab(
+        detail.kind === "note"
+          ? "notes"
+          : detail.kind === "syllabus"
+            ? "syllabus"
+            : "materials",
+      );
+    },
+    [material, privacy, readEpoch],
+  );
+  const linkedMaterial = materialReference?.materialId;
+  const linkedPage = materialReference?.page;
+  const linkedRevision = materialReference?.revision;
+  useEffect(() => {
+    const key =
+      linkedMaterial && linkedPage && linkedRevision
+        ? `${linkedMaterial}:${linkedPage}:${linkedRevision}`
+        : "";
+    if (openedReference.current === key) return;
+    openedReference.current = key;
+    ++readerGeneration.current;
+    setSelected(null);
     setReplacement(undefined);
     setEditor(null);
-    setTab(
-      detail.kind === "note"
-        ? "notes"
-        : detail.kind === "syllabus"
-          ? "syllabus"
-          : "materials",
-    );
-  }
+    setReading(false);
+    if (!linkedMaterial || !linkedPage || !linkedRevision) return;
+    const current = proof.materials.find((row) => row.id === linkedMaterial);
+    if (
+      !current ||
+      current.revision !== linkedRevision ||
+      linkedPage > current.page_count
+    ) {
+      setTab("materials");
+      setError(
+        "This source changed or was removed. Search the current course materials.",
+      );
+      return;
+    }
+    void openMaterial(linkedMaterial, linkedPage, linkedRevision);
+  }, [
+    linkedMaterial,
+    linkedPage,
+    linkedRevision,
+    proof.materials,
+    openMaterial,
+  ]);
   function source(id: string, nextPage: number, revision: number) {
     void openMaterial(id, nextPage, revision);
   }
@@ -1923,16 +1969,19 @@ export function StudentCourseWorkspace({
   accountId,
   courseId,
   enabled = productFeatures.studentCoursework,
+  materialReference,
 }: {
   accountId: string;
   courseId: string;
   enabled?: boolean;
+  materialReference?: CourseMaterialReference | null;
 }) {
   return enabled ? (
     <CourseWorkspaceSession
       key={`${accountId}:${courseId}`}
       accountId={accountId}
       courseId={courseId}
+      materialReference={materialReference}
     />
   ) : (
     <p>Course workspaces are not available here yet.</p>
@@ -1941,9 +1990,11 @@ export function StudentCourseWorkspace({
 function CourseWorkspaceSession({
   accountId,
   courseId,
+  materialReference,
 }: {
   accountId: string;
   courseId: string;
+  materialReference?: CourseMaterialReference | null;
 }) {
   const [privacy] = useState(
     () => new CoursePrivacySession(accountId, courseId),
@@ -1987,6 +2038,7 @@ function CourseWorkspaceSession({
           proof={state.proof}
           privacy={privacy}
           readEpoch={state.readEpoch}
+          materialReference={materialReference}
         />
       )}
     </CourseAccessView>

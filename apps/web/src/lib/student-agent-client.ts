@@ -1,6 +1,11 @@
 /** Browser projection: never retain raw tool records, review hashes, or conversation history. */
+import {
+  type CourseMaterialHref,
+  courseMaterialHref,
+} from "./student-material-link";
+
 export interface StudentAssistantLink {
-  href: "/classes" | "/planner" | "/connections";
+  href: "/classes" | "/planner" | "/connections" | CourseMaterialHref;
   label: string;
   note: string;
 }
@@ -77,6 +82,58 @@ const LINKS: Record<string, StudentAssistantLink> = {
     note: "No refresh has been queued. Confirm it in Connections.",
   },
 };
+const MATERIAL_TOOLS = ["course.materials.search", "course.materials.page"];
+function materialLinks(name: string, raw: unknown): StudentAssistantLink[] {
+  if (!record(raw) || !uuid(raw.course_id)) invalid();
+  const courseId = raw.course_id;
+  const search = name === "course.materials.search";
+  let results: unknown[];
+  if (search) {
+    if (
+      typeof raw.query !== "string" ||
+      raw.query.length < 1 ||
+      raw.query.length > 100 ||
+      typeof raw.limit_reached !== "boolean" ||
+      !Array.isArray(raw.results) ||
+      raw.results.length > 5
+    )
+      invalid();
+    results = raw.results;
+  } else {
+    if (
+      typeof raw.text !== "string" ||
+      new TextEncoder().encode(raw.text).length > 2048 ||
+      typeof raw.truncated !== "boolean"
+    )
+      invalid();
+    results = [raw];
+  }
+  return results.map((row) => {
+    if (
+      !record(row) ||
+      !uuid(row.material_id) ||
+      typeof row.title !== "string" ||
+      !row.title.trim() ||
+      row.title.length > 200 ||
+      Array.from(row.title).some(
+        (char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127,
+      ) ||
+      !Number.isSafeInteger(row.page) ||
+      !Number.isSafeInteger(row.revision) ||
+      (search && (typeof row.snippet !== "string" || row.snippet.length > 320))
+    )
+      invalid();
+    return {
+      href: courseMaterialHref(courseId, {
+        materialId: row.material_id,
+        page: row.page as number,
+        revision: row.revision as number,
+      }),
+      label: `${row.title} · page ${row.page}`,
+      note: `Open the saved source, version ${row.revision}.`,
+    };
+  });
+}
 export function readStudentAssistantReply(
   raw: unknown,
   turnId: string,
@@ -112,10 +169,24 @@ export function readStudentAssistantReply(
     if (
       !record(item) ||
       typeof item.name !== "string" ||
-      !["clock.read", ...Object.keys(LINKS)].includes(item.name) ||
+      !["clock.read", ...Object.keys(LINKS), ...MATERIAL_TOOLS].includes(
+        item.name,
+      ) ||
       !["read", "review"].includes(String(item.effect))
     )
       invalid();
+    if (MATERIAL_TOOLS.includes(item.name)) {
+      if (
+        item.effect !== "read" ||
+        reply.status !== "answer" ||
+        reply.source !== "tools"
+      )
+        invalid();
+      for (const link of materialLinks(item.name, item.data))
+        if (!links.some((existing) => existing.href === link.href))
+          links.push(link);
+      continue;
+    }
     const link = LINKS[item.name];
     if (link && !links.some((existing) => existing.href === link.href))
       links.push({ ...link });
