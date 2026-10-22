@@ -21,9 +21,7 @@ def shard_for(node_id: str, count: int) -> int:
 
 
 def source_head() -> str:
-    return subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=API_ROOT, text=True
-    ).strip()
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=API_ROOT, text=True).strip()
 
 
 def run_shard(index: int, count: int, output_dir: Path) -> int:
@@ -44,12 +42,8 @@ def run_shard(index: int, count: int, output_dir: Path) -> int:
             collected = [item.nodeid for item in items]
             if len(collected) != len(set(collected)):
                 raise pytest.UsageError("Duplicate API test node IDs")
-            selected = [
-                item for item in items if shard_for(item.nodeid, count) == index
-            ]
-            deselected = [
-                item for item in items if shard_for(item.nodeid, count) != index
-            ]
+            selected = [item for item in items if shard_for(item.nodeid, count) == index]
+            deselected = [item for item in items if shard_for(item.nodeid, count) != index]
             manifest["collected"] = sorted(collected)
             manifest["selected"] = sorted(item.nodeid for item in selected)
             config.hook.pytest_deselected(items=deselected)
@@ -90,9 +84,7 @@ def merge_shards(input_dir: Path, count: int, output: Path) -> dict[str, object]
             or manifest.get("count") != count
             or manifest.get("exit_code") != 0
         ):
-            raise ValueError(
-                f"API shard {index} has invalid or failed execution evidence"
-            )
+            raise ValueError(f"API shard {index} has invalid or failed execution evidence")
         current = manifest.get("collected")
         if (
             not isinstance(current, list)
@@ -116,9 +108,7 @@ def merge_shards(input_dir: Path, count: int, output: Path) -> dict[str, object]
         if len(cases) != len(expected):
             raise ValueError(f"API shard {index} has incomplete JUnit results")
         for case in cases:
-            if any(
-                case.find(tag) is not None for tag in ("error", "failure", "skipped")
-            ):
+            if any(case.find(tag) is not None for tag in ("error", "failure", "skipped")):
                 raise ValueError(f"API shard {index} contains failed or skipped tests")
             key = (case.get("classname", ""), case.get("name", ""))
             if not all(key) or key in seen_cases:
