@@ -17,8 +17,9 @@ from navox.student_agent.contracts import (
     canonical,
 )
 
-CORPUS_VERSION: Literal["student-selector.synthetic.v1"] = "student-selector.synthetic.v1"
+CORPUS_VERSION: Literal["student-selector.synthetic.v2"] = "student-selector.synthetic.v2"
 COURSE_ID = uuid5(NAMESPACE_URL, "navox:selector-fixture:course")
+MATERIAL_ID = uuid5(NAMESPACE_URL, "navox:selector-fixture:material")
 FEED_ID = uuid5(NAMESPACE_URL, "navox:selector-fixture:feed")
 
 
@@ -197,6 +198,22 @@ CORPUS = (
         days=1,
     ),
     tool("feeds", "List my connected learning calendar feeds.", "feeds.read"),
+    tool(
+        "material_search",
+        "Find hash tables in my CS 2110 notes.",
+        "course.materials.search",
+        course_id=str(COURSE_ID),
+        query="hash tables",
+    ).model_copy(update={"observations": (COURSE,)}),
+    tool(
+        "material_page",
+        f"Read material {MATERIAL_ID} in course {COURSE_ID}, page 2 version 3.",
+        "course.materials.page",
+        course_id=str(COURSE_ID),
+        material_id=str(MATERIAL_ID),
+        revision=3,
+        page=2,
+    ),
     tool(
         "refresh_review",
         f"Prepare a refresh review for feed {FEED_ID}.",

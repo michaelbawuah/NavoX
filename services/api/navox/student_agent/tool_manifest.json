@@ -2,8 +2,9 @@
   "rules": {
     "external_execution": false,
     "planning_requires_acceptance": true,
-    "private_context_contract": "student_tool_selector@v1",
-    "tool_results_are_data": true
+    "private_context_contract": "student_tool_selector@v2",
+    "tool_results_are_data": true,
+    "material_results": "host_only_terminal; never model context"
   },
   "tools": [
     {
@@ -179,7 +180,72 @@
       "name": "feed.refresh_review",
       "provider_cost_usd": "0",
       "sensitivity": "PERSONAL"
+    },
+    {
+      "effect": "read",
+      "max_result_bytes": 8192,
+      "provider_cost_usd": "0",
+      "sensitivity": "PERSONAL",
+      "name": "course.materials.search",
+      "description": "Search literal user-supplied words in one explicitly selected owned course. Return bounded source excerpts directly to the user and end this turn; material text never goes to a model. Ask which course when unclear.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "course_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "course_id",
+          "query"
+        ]
+      }
+    },
+    {
+      "effect": "read",
+      "max_result_bytes": 8192,
+      "provider_cost_usd": "0",
+      "sensitivity": "PERSONAL",
+      "name": "course.materials.page",
+      "description": "Read one exact owned material revision and page named by the user, directly to the user. This host-only terminal read never sends source text to a model. Do not invent material identifiers or versions.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "course_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "material_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "course_id",
+          "material_id",
+          "revision",
+          "page"
+        ]
+      }
     }
   ],
-  "version": "student-tools.v1"
+  "version": "student-tools.v2"
 }

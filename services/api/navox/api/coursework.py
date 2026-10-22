@@ -8,7 +8,7 @@ from typing import Annotated
 from urllib.parse import unquote
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -173,6 +173,32 @@ async def get_material(
 
 async def _detail(row: CourseMaterial, settings: Settings) -> MaterialDetail:
     return MaterialDetail.model_validate(service.material_view(row, settings, detail=True))
+
+
+@router.get("/materials/{material_id}/pages/{page}")
+async def get_material_page(
+    course_id: UUID,
+    material_id: UUID,
+    page: Annotated[int, Path(ge=1, le=100)],
+    revision: Annotated[int, Query(ge=1, le=2_147_483_647)],
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    response: Response,
+) -> dict[str, object]:
+    user_id, workspace_id = scope(account, settings, response)
+    return await result(
+        service.material_page(
+            database,
+            settings,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            course_id=course_id,
+            material_id=material_id,
+            revision=revision,
+            page=page,
+        )
+    )
 
 
 @router.get("/materials/{material_id}/file")

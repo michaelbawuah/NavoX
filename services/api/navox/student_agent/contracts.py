@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal
@@ -20,6 +21,15 @@ MAX_OBSERVATION_BYTES = 8192
 MAX_OBSERVATIONS_BYTES = 32768
 MAX_SELECTION_BODY_BYTES = 40960
 MAX_SELECTION_COST = Decimal("0.005")
+MetadataToolName = Literal[
+    "clock.read",
+    "classes.lookup",
+    "course.info",
+    "tasks.read",
+    "plan.preview",
+    "feeds.read",
+    "feed.refresh_review",
+]
 ToolName = Literal[
     "clock.read",
     "classes.lookup",
@@ -28,6 +38,8 @@ ToolName = Literal[
     "plan.preview",
     "feeds.read",
     "feed.refresh_review",
+    "course.materials.search",
+    "course.materials.page",
 ]
 
 
@@ -53,7 +65,9 @@ def tool_manifest() -> dict[str, Any]:
 
 class Observation(Contract):
     call_id: UUID
-    name: ToolName
+    # Material reads terminate at the host. Even an otherwise valid material
+    # result must never enter the metadata-only selector context.
+    name: MetadataToolName
     effect: Literal["read", "review"]
     data: dict[str, JsonValue] = Field(repr=False)
 
@@ -139,6 +153,14 @@ class ToolSelection(Contract):
             if not isinstance(value, str):
                 raise ValueError("A valid date is required")
             date.fromisoformat(value)
+        if self.name == "course.materials.search":
+            query = normalized["query"]
+            if (
+                not isinstance(query, str)
+                or not 1 <= len(re.findall(r"\w+", query)) <= 8
+                or any(ord(character) < 32 for character in query)
+            ):
+                raise ValueError("Search for one to eight literal words")
         object.__setattr__(self, "args", normalized)
         return self
 

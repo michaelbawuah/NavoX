@@ -35,7 +35,10 @@ describe("student assistant text panel", () => {
     expect(html).toContain('type="checkbox"');
     expect(html).not.toContain(" checked=");
     expect(html).toContain("selected class, course, task and feed facts");
-    expect(html).toContain("does not enable an unqualified model");
+    expect(html).toContain("aren’t included in AI context");
+    expect(html).toContain(
+      "Matching passages from course materials are shown only to you",
+    );
   });
   it("offers review links without rendering tool data or implying a saved plan", () => {
     const reply: StudentAssistantReply = {
