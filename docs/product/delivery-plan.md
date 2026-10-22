@@ -13,27 +13,26 @@ its acceptance gate.
 
 ## Release checkpoint — October 22, 2026
 
-- The last verified production release is PR 38 head
-  `ad24f96110115947c076e5ce481e09283319be2f`, deployed October 19 with schema
-  `0048_vox_calls`. Home study plans, recorded outcomes, manual goals and manual
-  morning/evening/week-so-far reviews are enabled. The large Home card is a
-  study-plan entry, not the required large Vox entry.
-- PRs 35, 36 and 37 are merged. Their source includes reviewed recovery/email
-  handoffs, own-work PDF formatting, authored Board rendering/saves and the Vox
-  ownership/adapter foundation. Disabled capabilities are not shipped features
-  merely because their code is present in the deployed source.
-- PR 39's bounded reservation renewal is merged but not deployed in that release.
-  PR 40 head `143d11eee39a8c973238705768a42c698f2cabe0` adds media epochs,
-  durable cleanup intents and dependency security updates. Its verified CI
-  result is success on all six protected checks in run `39819823810`; it merged
-  as `151df7ec03657c70e0564e1fbbb9888ffd10fb16`. No PR 40 deployment is claimed.
-  Running API/worker images must be rebuilt and qualified to receive a source
-  dependency patch.
-- The next working increment connects provider admission, the voice worker and
-  AudioWorklet capture. These changes are in progress and not live-qualified.
-  Production Vox, generated lessons, complete multi-calendar availability and
-  conversation-derived memory remain unfinished. No student gate is met by
-  source or synthetic tests.
+- Production source `47d6518c64fe3ed7ba21a9808715ffb1eac9e785` was deployed and
+  postchecked on October 22 at 20:58 UTC with schema
+  `0051_student_calendar_consent`. Its full tracked tree matches protected PR 43
+  squash merge `073a53ff475eab681e989b92879d9dcef3934ca0`.
+- Home study plans, recorded outcomes, manual goals and manual
+  morning/evening/week-so-far reviews remain enabled. Course workspaces and
+  own-work PDF formatting are now enabled. Existing worker pins and configuration
+  were retained; the new Vox worker is not activated.
+- All six protected CI checks passed. Forty-two isolated exact-source browser
+  checks, a packaged AMD64 PDF smoke check and a schema 49-to-51 clone rehearsal
+  passed; the rehearsal preserved all 145 existing tables' contents. Production
+  health and public routes returned 200, and unauthenticated private coursework,
+  export, planner, goals and coach routes returned 401. The off-host backup was
+  acknowledged. Signed-in production browser checks have not been performed.
+- Merged source includes Vox provider/worker/AudioWorklet integration and
+  consent-aware calendar availability, but production Vox, calendar availability,
+  Board, feeds, recovery/email and student agent/model routes remain off.
+  Enabled course workspaces and PDF formatting do not complete the unified
+  coursework assistant. Live Google/Vox, physical-device and consenting-student
+  gates remain open; source and isolated checks do not satisfy them.
 
 ## Ranked completion slices
 
@@ -47,13 +46,13 @@ Partial source is identified below rather than promoted to a completed stage.
 
 | Rank | Student outcome and requirements | Current evidence | Remaining completion acceptance |
 | --- | --- | --- | --- |
-| 0 | A reliable current site — ARC-03, ARC-05–06 | PR 38 release deployed and postchecked; PR 40 source/CI checkpoint above | Qualify exact source, migrations and rebuilt API/worker images; pass required CI, authenticated browser flows, backup/rollback and production postchecks. |
-| 1 | Tap Vox and talk off the record — VOI-01–06, VOI-10 | Partial verified controller/reservation/adapter source; provider/worker/capture integration in progress; not deployed | Actual supported-device mic → RTC → approved speech/model gateway → audible answer; independent mute/speaker, navigation, interruption and hang-up/logout/reset cleanup; no retained text in this first off-record slice. |
+| 0 | A reliable current site — ARC-03, ARC-05–06 | Source 47 deployed with schema 0051; required CI, isolated browser/PDF checks, migration rehearsal and read-only production postchecks passed; backup acknowledged | Complete signed-in production browser checks and remaining supported-device qualification; preserve exact revisions, rollback evidence and capability guards. |
+| 1 | Tap Vox and talk off the record — VOI-01–06, VOI-10 | Controller/reservation/adapter and provider/worker/AudioWorklet integration are merged source; Vox remains disabled and live/device qualification is open | Actual supported-device mic → RTC → approved speech/model gateway → audible answer; independent mute/speaker, navigation, interruption and hang-up/logout/reset cleanup; no retained text in this first off-record slice. |
 | 2 | Keep the call useful — VOI-03–04, VOI-07–11 | Synthetic standby, renewal and reconnect primitives; no long-call/device qualification | Exact session renewal/reconnect, no audio leaving during standby, local wake/tap resume, supported noise/Bluetooth behavior and measured first audio <800 ms median / interruption stop <200 ms. Native background entries remain explicitly separate. |
-| 3 | Connect calendars and find free time — STU-27–28, CAL-01–03, CAL-05, AVL-01–03 | Read-only primary Google foundation and verified pure interval core; no complete availability endpoint | Separate provider permissions, all authorized calendars and fresh source coverage; routine/classes/shifts/travel/buffers respected; honest unknowns and two feasible options. Qualify each provider separately. |
+| 3 | Connect calendars and find free time — STU-27–28, CAL-01–03, CAL-05, AVL-01–03 | Calendar-purpose consent, read-only Google coverage and an interval availability endpoint are merged source; production availability remains disabled and live Google qualification is open | Separate provider permissions, all authorized calendars and fresh source coverage; routine/classes/shifts/travel/buffers respected; honest unknowns and two feasible options. Qualify each provider separately. |
 | 4 | Approve a calendar event — STU-14, STU-29, CAL-04, AVL-04 | Generic reviewed-action foundation; personal-calendar writes missing | Exact contextual read-back/yes, selected write target, fresh conflict check, verified creation, uncertain-outcome deduplication and exact Undo. |
 | 5 | Useful, controllable memory — STU-30, MEM-01–06, ARC-04 | Explicit user-saved memory only; ordinary conversation history/derivation missing | Disclosure/retention choice, encrypted history, source-linked summaries/facts/threads, authorized recall, correction/expiry/shared erasure; off-record text neither saved nor learned. |
-| 6 | Act on coursework through one assistant — STU-12–17, LMS-01–06, ARC-01 | Substantial source, a mock-transport model-selector corpus and historical isolated checks; capabilities disabled | Qualified registered tool selection/chaining with bounded budgets and clarification; actual routed browser upload/feed preview/update/remove/search, recovery/email handoff and PDF download; refresh cadence, deletion races and exact source/model scopes. |
+| 6 | Act on coursework through one assistant — STU-12–17, LMS-01–06, ARC-01 | Course workspaces and own-work PDF formatting enabled; exact-source isolated browser/PDF checks passed; signed-in production checks remain open and agent/model/feed/recovery/email routes stay off | Qualified registered tool selection/chaining with bounded budgets and clarification; actual routed browser upload/feed preview/update/remove/search, recovery/email handoff and PDF download; refresh cadence, deletion races and exact source/model scopes. |
 | 7 | Turn a question into a Board lesson — STU-31, TUT-01–10, TUT-21–22, TUT-28–31 | Five authored lessons, renderer and encrypted saves verified in source; generated lessons missing | Owned generated-step contract, four starter/home cards, full 100-question run: ≥95% valid scripts, ≥95% correct final answers, 100% KaTeX; median first checked step <2 s; actual-phone rendering. |
 | 8 | Solve and talk through a lesson — TUT-11–12, TUT-16, TUT-25, TUT-29 | Authored quick checks only; interactive verified steps and Vox sync missing | Numbered step cards, correct/wrong/unknown checking with method, ≥95% check decisions; exact interruption/resume and drawing/word sync within 150 ms on supported devices. |
 | 9 | Ask about slides and photographed work — TUT-13, TUT-23–24, TUT-30–31 | Existing course uploads do not implement the new page pipeline | Thirty permitted files/ninety page questions; explicit page first 100%, descriptive top-three ≥90%; first page <10 s / fifty pages <60 s; forty actual work photos meet checking thresholds; complete derivative deletion. |
@@ -86,9 +85,13 @@ cannot silently consume the runner's full job allowance.
 
 Prepare the next independent source slice while a pinned candidate runs CI or
 release qualification. Build and deploy from exact revisions, preserving required
-checks and production guards. Historical API CI took roughly eighty minutes;
-report the new critical-path duration only after a complete measured run.
-Parallel work is not evidence that CI or a user flow completed faster.
+checks and production guards. With the same API source tree and 4,035 passing
+tests with no skips, green [run 39819823810](https://github.com/michaelbawuah/NavoX/actions/runs/39819823810)
+took 79m31s through API quality and 85m18s overall; six-shard green
+[run 39842431584](https://github.com/michaelbawuah/NavoX/actions/runs/39842431584)
+took 24m02s and 27m40s respectively. This observed full-CI duration was about 68%
+shorter; runner variation can change future timings. Parallel work is not evidence
+that a user flow completed faster.
 
 An external credential or device gate blocks that capability's enablement, not
 independent source work. Keep it visible in the ranked queue with the exact
@@ -105,10 +108,10 @@ while retaining PDF/PowerPoint; a cut changes the visible supported scope.
 
 | Lane | Next bounded increment | What qualifies the complete feature |
 | --- | --- | --- |
-| Vox lifecycle | A root-mounted owner hosts the call dialog/dock, bounded renewable native reservation client and gated LiveKit adapter across client routes. Session checks suspend authority; auth/reset mutations terminate old calls before I/O. PR 40 adds media epochs and durable cleanup intents. Provider/worker integration and AudioWorklet capture are working changes. | Actual Cloud issuance/revocation, a qualified named voice worker and speech route, supported browser/device capture/playback and navigation evidence. No live call is enabled by this source work. |
-| Calendar availability | A deterministic interval engine using confirmed waking hours, owned fixed commitments, authorized calendar coverage, buffers and disclosed movable study conflicts. Incomplete inputs produce provisional results. | Calendar-purpose authorization, all connected calendars read, fresh coverage, correct local-time free slots and honest unknowns; separately reviewed writes to the selected calendar with exact retry verification and Undo. |
+| Vox lifecycle | Merged source includes the root-mounted owner, renewable reservations, gated LiveKit adapter, media epochs, cleanup intents, provider/worker integration and AudioWorklet capture. Session and auth/reset boundaries retain call authority. Production Vox remains off. | Actual Cloud issuance/revocation, a qualified named voice worker and speech route, supported browser/device capture/playback and navigation evidence. No live call is enabled by this source work. |
+| Calendar availability | Merged calendar-purpose consent and read-only Google coverage feed an interval availability endpoint using confirmed waking hours, fixed commitments, buffers and disclosed movable study conflicts. Incomplete inputs produce provisional results; the production capability remains off. | Calendar-purpose authorization, all connected calendars read, fresh coverage, correct local-time free slots and honest unknowns; separately reviewed writes to the selected calendar with exact retry verification and Undo. |
 | Conversation memory | A versioned disclosure/retention contract, encrypted owner-scoped history and shared lineage-aware deletion before extraction or recall. | Calls and chat use the same disclosed controls; source-linked summaries, facts and threads; correction, off-record mode, sensitive-fact agreement, expiry and deletion win over queued work and cached context. |
-| Existing release checks | Complete CI and browser/device flows for the stacked drafts, including account changes, uploads/downloads, notifications and save/reset races. | Exact revision/configuration recorded; required migration rehearsal; real device outcomes; staged rollout and production postchecks. A passing source test does not substitute for device evidence. |
+| Existing release checks | The source 47 release passed required CI, isolated exact-source browser/PDF checks, migration rehearsal and read-only production postchecks. Complete signed-in production browser and supported-device evidence next. | Exact revision/configuration recorded; required migration rehearsal; real device outcomes; staged rollout and production postchecks. A passing source test does not substitute for device evidence. |
 
 Availability and call-controller groundwork can proceed without external
 provider calls. They are internal building blocks until connected through the
@@ -130,7 +133,7 @@ The historical browser increment added a call dialog and minimized dock, indepen
 controls, explicit autoplay recovery, a reservation client and a gated LiveKit
 2.23 SDK adapter. Its fake SDK/Web Audio checks cover delayed joins, mute,
 playback and cleanup races. Captions and the primary large Home entry remain
-open. The current working capture uses AudioWorklet and remains unqualified on a
+open. The merged capture uses AudioWorklet and remains unqualified on a
 physical device. PR 39 adds native reservation renewal; PR 40 adds immutable
 media deadlines rather than extending a connection epoch with that renewal. See
 the [Vox contract](vox-session-contract.md) for the activation boundaries. The
@@ -142,24 +145,26 @@ source check does not qualify a speech route or an actual device.
 
 ## Release order and exit criteria
 
-1. **Close the current foundation release.** Finish current CI; verify the actual
-   Next routes, account changes, recovery/email handoffs, goals, PDF downloads
-   and saved Boards in supported browsers. Record microphone and notification
-   delivery on supported devices. Keep each capability's remaining evidence visible.
+1. **Close the current foundation release.** Complete signed-in production
+   browser checks for the enabled study, goals, course workspace and PDF flows.
+   Recovery/email and Board remain disabled. Record microphone and notification
+   delivery on supported devices before qualifying those capabilities. Keep each
+   remaining evidence gate visible.
 2. **Complete the Vox call foundation.** The app-scoped owner boundary is mounted
    behind its default-off flag. Native content-free reservations now bind to the exact login
    and share reset/logout revocation; see the [server contract](vox-session-contract.md).
-   The call screen, separate controls, minimize and SDK adapter are implemented
-   behind unavailable admission/capture gates. Next implement exact media grants,
-   provider issuance/revocation over the new connection epochs and cleanup outbox,
-   plus the qualified voice worker; qualify capture/playback, captions, standby
-   and reconnect on supported devices. Hang-up, sign-out, account change and reset release resources and
+   The call screen, separate controls, minimize, SDK adapter, exact media grants,
+   provider issuance/revocation, cleanup outbox, worker integration and AudioWorklet
+   capture are merged behind disabled production gates. Next qualify live provider
+   admission and the speech route, capture/playback, captions, standby and reconnect
+   on supported devices. Hang-up, sign-out, account change and reset release resources and
    invalidate pending callbacks. Do not promise native lock-screen/background
    behavior from the web app.
-3. **Connect calendars and answer availability.** Add separate calendar-purpose
-   permissions for Google, Outlook and supported Apple/iCloud entry paths. Read
-   all authorized calendars, normalize busy intervals and expose source freshness
-   before using the deterministic engine. Then add exact reviewed event writes,
+3. **Connect calendars and answer availability.** Qualify the merged Google
+   calendar-purpose consent, authorized calendar reads and availability endpoint
+   with live permissions, complete coverage and fresh source evidence before
+   enabling it. Add separately qualified Outlook and supported Apple/iCloud entry
+   paths, then exact reviewed event writes,
    verification, conflict refresh and Undo. Other people's availability is never
    inferred from a gap in the student's calendar.
 4. **Enable useful conversation memory.** Implement encrypted history and its
