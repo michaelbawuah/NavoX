@@ -23,6 +23,7 @@ if (!connectionString) {
 const migrationPaths = [
   "../migrations/0001_assistant_runtime.sql",
   "../migrations/0002_assistant_goals.sql",
+  "../migrations/0003_goal_turn_projections.sql",
 ].map((path) => new URL(path, import.meta.url));
 
 const client = new Client({ connectionString });
