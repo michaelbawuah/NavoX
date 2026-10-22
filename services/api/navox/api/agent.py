@@ -15,7 +15,8 @@ from navox.agent.service import (
     BoundedAgentService,
 )
 from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
-from navox.db.models import Action, Plan, PlanStep, WorkflowRef
+from navox.connectors.sync_state import database_now
+from navox.db.models import Action, Plan, PlanStep, User, WorkflowRef
 
 router = APIRouter(tags=["agent"])
 
@@ -285,7 +286,23 @@ async def set_agent_paused(
     current_account: CurrentAccountDependency,
     database: DatabaseSession,
 ) -> AgentStateResponse:
-    current_account.user.agent_paused = paused
+    # Share Vox's User-first lifecycle boundary: a queued media confirmation must
+    # reread this pause and cannot commit new authority after it.
+    user = await database.scalar(
+        select(User)
+        .where(User.id == current_account.user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if user is None:
+        raise HTTPException(401, "Authentication required")
+    user.agent_paused = paused
+    if paused:
+        from navox.vox.media import revoke_user_connections
+
+        await revoke_user_connections(
+            database, user.id, now=await database_now(database), reason="paused"
+        )
     add_audit_event(
         database,
         user_id=current_account.user.id,
