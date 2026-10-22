@@ -8,6 +8,8 @@ import sys
 from argparse import Namespace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from ipaddress import ip_address
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import httpx
@@ -66,12 +68,88 @@ from navox.db.ai_registry import AIEvaluationRun, AIProfileAssignment
 CAPABILITIES = frozenset({Capability.TEXT, Capability.STRUCTURED_OUTPUT})
 
 
-@pytest.fixture(autouse=True)
-def forbid_live_network(monkeypatch):
-    def forbidden(*args, **kwargs):
+def postgres_test_address(dsn, *, allow_database):
+    if not allow_database:
+        return None
+    try:
+        parsed = urlsplit(dsn)
+        host = parsed.hostname
+        if parsed.scheme.split("+")[0] != "postgresql" or host is None:
+            return None
+        if not ip_address(host).is_loopback:
+            return None
+        return host, parsed.port or 5432
+    except ValueError:
+        return None
+
+
+def guarded_connect(connect, database_address):
+    def guarded(sock, address):
+        if (
+            database_address is not None
+            and isinstance(address, tuple)
+            and address[:2] == database_address
+        ):
+            return connect(sock, address)
         pytest.fail("Conversation evaluation tests must not connect to a network")
 
-    monkeypatch.setattr(socket.socket, "connect", forbidden)
+    return guarded
+
+
+@pytest.fixture(autouse=True)
+def forbid_live_network(monkeypatch, request):
+    # Only the ingestion test's database fixture may use its explicitly configured
+    # numeric loopback PostgreSQL endpoint. Provider calls remain MockTransport-only.
+    database_address = postgres_test_address(
+        os.environ.get("NAVOX_CONNECTOR_TEST_DSN", ""),
+        allow_database="ai_database" in request.fixturenames,
+    )
+    for method in ("connect", "connect_ex"):
+        monkeypatch.setattr(
+            socket.socket, method, guarded_connect(getattr(socket.socket, method), database_address)
+        )
+
+
+@pytest.mark.parametrize(
+    ("dsn", "allow_database", "expected"),
+    [
+        ("postgresql+asyncpg://fixture@127.0.0.1:58500/test", True, ("127.0.0.1", 58500)),
+        ("postgresql+asyncpg://fixture@[::1]:58500/test", True, ("::1", 58500)),
+        ("postgresql+asyncpg://fixture@127.0.0.1:58500/test", False, None),
+        ("postgresql+asyncpg://fixture@192.0.2.1:58500/test", True, None),
+        ("postgresql+asyncpg://fixture@localhost:58500/test", True, None),
+        ("postgresql+asyncpg://fixture@127.0.0.1:bad/test", True, None),
+        ("https://127.0.0.1:58500/test", True, None),
+        ("sqlite+aiosqlite://", True, None),
+    ],
+)
+def test_network_exception_requires_database_fixture_and_numeric_loopback(
+    dsn, allow_database, expected
+):
+    assert postgres_test_address(dsn, allow_database=allow_database) == expected
+
+
+def test_network_guard_allows_only_exact_database_endpoint():
+    calls = []
+
+    def connect(sock, address):
+        calls.append((sock, address))
+        return "test-connect-result"
+
+    guard = guarded_connect(connect, ("127.0.0.1", 58500))
+    assert guard(None, ("127.0.0.1", 58500)) == "test-connect-result"
+    assert calls == [(None, ("127.0.0.1", 58500))]
+    for address in (("127.0.0.1", 58501), ("::1", 58500), ("api.openai.com", 443)):
+        with pytest.raises(pytest.fail.Exception, match="must not connect to a network"):
+            guard(None, address)
+    assert calls == [(None, ("127.0.0.1", 58500))]
+
+
+@pytest.mark.parametrize("method", ["connect", "connect_ex"])
+def test_installed_guard_keeps_provider_network_blocked(method):
+    with socket.socket() as sock:
+        with pytest.raises(pytest.fail.Exception, match="must not connect to a network"):
+            getattr(sock, method)(("api.openai.com", 443))
 
 
 def configuration(provider=Provider.OPENAI):
