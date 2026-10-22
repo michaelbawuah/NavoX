@@ -39,6 +39,7 @@ async def calendar_env(ai_database, monkeypatch):
         app_environment="test",
         ai_provider="disabled",
         student_calendar_availability_enabled=True,
+        student_calendar_writes_enabled=True,
         google_oauth_client_id="synthetic-calendar-client",
         google_oauth_client_secret="synthetic-calendar-secret",
         google_token_encryption_key=Fernet.generate_key().decode(),

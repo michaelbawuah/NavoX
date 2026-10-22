@@ -50,7 +50,7 @@ Partial source is identified below rather than promoted to a completed stage.
 | 1 | Tap Vox and talk off the record — VOI-01–06, VOI-10 | Controller/reservation/adapter and provider/worker/AudioWorklet integration are merged source; Vox remains disabled and live/device qualification is open | Actual supported-device mic → RTC → approved speech/model gateway → audible answer; independent mute/speaker, navigation, interruption and hang-up/logout/reset cleanup; no retained text in this first off-record slice. |
 | 2 | Keep the call useful — VOI-03–04, VOI-07–11 | Synthetic standby, renewal and reconnect primitives; no long-call/device qualification | Exact session renewal/reconnect, no audio leaving during standby, local wake/tap resume, supported noise/Bluetooth behavior and measured first audio <800 ms median / interruption stop <200 ms. Native background entries remain explicitly separate. |
 | 3 | Connect calendars and find free time — STU-27–28, CAL-01–03, CAL-05, AVL-01–03 | Calendar-purpose consent, read-only Google coverage and an interval availability endpoint are merged source; production availability remains disabled and live Google qualification is open | Separate provider permissions, all authorized calendars and fresh source coverage; routine/classes/shifts/travel/buffers respected; honest unknowns and two feasible options. Qualify each provider separately. |
-| 4 | Approve a calendar event — STU-14, STU-29, CAL-04, AVL-04 | Generic reviewed-action foundation; personal-calendar writes missing | Exact contextual read-back/yes, selected write target, fresh conflict check, verified creation, uncertain-outcome deduplication and exact Undo. |
+| 4 | Approve a calendar event — STU-14, STU-29, CAL-04, AVL-04 | Separate Google scheduling consent, encrypted exact previews, verified creation, read-only recovery and original-version Undo implemented behind independent default-off write gates; focused automated checks passed | Finish required CI, native PostgreSQL and actual browser/provider qualification. Native claims retain known events when free/busy lags; GET-only recovery cannot offer Undo without creation-version proof. Natural spoken approval and other calendar providers remain separate work. |
 | 5 | Useful, controllable memory — STU-30, MEM-01–06, ARC-04 | Explicit user-saved memory only; ordinary conversation history/derivation missing | Disclosure/retention choice, encrypted history, source-linked summaries/facts/threads, authorized recall, correction/expiry/shared erasure; off-record text neither saved nor learned. |
 | 6 | Act on coursework through one assistant — STU-12–17, LMS-01–06, ARC-01 | Course workspaces and own-work PDF formatting enabled; exact-source isolated browser/PDF checks passed; signed-in production checks remain open and agent/model/feed/recovery/email routes stay off | Qualified registered tool selection/chaining with bounded budgets and clarification; actual routed browser upload/feed preview/update/remove/search, recovery/email handoff and PDF download; refresh cadence, deletion races and exact source/model scopes. |
 | 7 | Turn a question into a Board lesson — STU-31, TUT-01–10, TUT-21–22, TUT-28–31 | Five authored lessons, renderer and encrypted saves verified in source; generated lessons missing | Owned generated-step contract, four starter/home cards, full 100-question run: ≥95% valid scripts, ≥95% correct final answers, 100% KaTeX; median first checked step <2 s; actual-phone rendering. |
@@ -66,6 +66,25 @@ retention require real consenting cohorts and recorded denominators. No outreach
 is sent by this plan. The roadmap's Board corpora, phone demonstrations and
 voice/cost measures remain required evidence; synthetic fixtures cannot satisfy
 them.
+
+### Current source increments
+
+- [PR 45](https://github.com/michaelbawuah/NavoX/pull/45) adds host-only material
+  search and exact page citations. All 2,282 web tests, 131 PostgreSQL checks
+  with no skips, focused runtime checks and the production web build passed.
+  `student_tool_selector@v2` remains unpublished and unqualified; file excerpts
+  never enter model context or speech receipts. Required CI and activation remain
+  separate from these checks.
+- [PR 46](https://github.com/michaelbawuah/NavoX/pull/46) fixes the mismatch
+  between the 3,000-character ordinary text answer and the 600-character speech
+  ceiling. The worker and admission preflight use `vox_spoken_answer@v1`; 141
+  focused PostgreSQL checks passed with no skips. The exact new artifact still
+  requires publication and qualification, followed by Cloud and device evidence.
+- Reviewed calendar writes use separate scheduling consent and write flags.
+  Failed or uncertain submissions are never replayed automatically. The bounded
+  native claim scan, conservative changed-event handling and GET-only Undo limit
+  are recorded in [the calendar write contract](calendar-write-contract.md).
+  No new production capability is enabled by these increments.
 
 ## Working efficiently
 

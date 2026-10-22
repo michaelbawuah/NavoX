@@ -1,0 +1,137 @@
+.panel {
+  margin-block: 1.25rem;
+  padding: 1.25rem;
+  border: 1px solid #b9c9bc;
+  border-radius: 1rem;
+  background: #f7faf3;
+  color: #24382f;
+  min-width: 0;
+}
+.heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.panel h2,
+.panel h3,
+.panel h4 {
+  margin: 0.3rem 0 0.7rem;
+  letter-spacing: -0.02em;
+}
+.panel p {
+  line-height: 1.55;
+}
+.eyebrow {
+  font-size: 0.73rem;
+  font-weight: 700;
+  color: #4e6b55;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 1rem;
+  margin-block: 1rem;
+  padding: 0;
+  border: 0;
+}
+.fields label {
+  display: grid;
+  gap: 0.4rem;
+  align-content: start;
+  font-size: 0.9rem;
+}
+.panel input,
+.panel select,
+.panel button {
+  font: inherit;
+}
+.fields input,
+.fields select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 0.65rem;
+  border: 1px solid #a7bba9;
+  border-radius: 0.55rem;
+  background: white;
+  color: inherit;
+}
+.panel button {
+  padding: 0.65rem 0.9rem;
+  margin: 0.3rem 0.5rem 0.3rem 0;
+  border: 1px solid #647d69;
+  border-radius: 0.65rem;
+  background: #244d39;
+  color: white;
+  cursor: pointer;
+}
+.panel button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.panel :is(button, input, select, a, summary):focus-visible {
+  outline: 3px solid #426f4e;
+  outline-offset: 3px;
+}
+.check {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  grid-column: 1 / -1;
+  margin-block: 1rem;
+  line-height: 1.5;
+}
+.check input {
+  flex-shrink: 0;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: 0.2rem;
+}
+.card {
+  margin-block: 1rem;
+  padding: 1rem;
+  border: 1px solid #c3d1bd;
+  border-radius: 0.8rem;
+  background: white;
+  overflow-wrap: anywhere;
+}
+.card dl {
+  display: grid;
+  gap: 0.5rem;
+}
+.card dl div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.card dt {
+  font-weight: 650;
+}
+.card dd {
+  margin: 0;
+}
+.hint {
+  color: #4f6256;
+  font-size: 0.85rem;
+}
+.error,
+.warning {
+  padding: 0.8rem 1rem;
+  border: 1px solid #bf9861;
+  border-radius: 0.7rem;
+  background: #fff8e8;
+  color: #62421d;
+  line-height: 1.55;
+}
+.error {
+  border-color: #be8b81;
+  background: #fff1ee;
+  color: #743e33;
+}
+.list {
+  padding-left: 1rem;
+}
