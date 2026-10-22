@@ -22,6 +22,7 @@ import {
 } from "../lib/account-session";
 import { productFeatures } from "../lib/product-features";
 import { notifyCalendarAccessChanged } from "../lib/student-calendar-privacy";
+import type { CourseMaterialReference } from "../lib/student-material-link";
 import { NavoXCinematic } from "./navox-cinematic";
 import { StudentAssistantPanel } from "./student-assistant-panel";
 import { StudentAvailability } from "./student-availability";
@@ -53,6 +54,7 @@ export { observeAccountSession } from "../lib/account-session";
 export function AccountWorkspace({
   view = "today",
   courseId,
+  materialReference,
 }: {
   view?:
     | TodayWorkspaceView
@@ -65,6 +67,7 @@ export function AccountWorkspace({
     | "day-review"
     | "board";
   courseId?: string;
+  materialReference?: CourseMaterialReference | null;
 }) {
   const [mode, setMode] = useState<AuthMode>("register");
   const [account, setAccount] = useState<Account | null>(null);
@@ -87,7 +90,10 @@ export function AccountWorkspace({
       "google_connection",
     );
     if (connectionOutcome !== null) {
-      if (connectionOutcome.startsWith("calendar_availability_"))
+      if (
+        connectionOutcome.startsWith("calendar_availability_") ||
+        connectionOutcome.startsWith("calendar_scheduling_")
+      )
         notifyCalendarAccessChanged();
       const outcomes: Record<string, string> = {
         cancelled: "Google connection was cancelled.",
@@ -103,13 +109,17 @@ export function AccountWorkspace({
           "Google calendar busy-time access enabled. Open Planner to check for openings.",
         calendar_availability_failed:
           "Google calendar access did not complete. Review Calendar availability in Connections.",
+        calendar_scheduling_enabled:
+          "Google calendar scheduling enabled. Every event still needs your review and approval.",
+        calendar_scheduling_failed:
+          "Google calendar scheduling did not complete. Review Calendar scheduling in Connections.",
         failed: "Google could not complete the connection. Please try again.",
         refresh_token_required:
           "Google did not return a refresh credential. Please try connecting again.",
         scope_mismatch:
           "Google returned an unrequested permission. NavoX did not link the account.",
         account_mismatch:
-          "Gmail permission was granted from a different Google account, so NavoX rejected it.",
+          "Permission was granted from a different Google account, so NavoX rejected it.",
         unverified: "Google did not confirm a verified email address.",
       };
       setMessage(
@@ -299,6 +309,7 @@ export function AccountWorkspace({
                   key={`${account.workspace.id}:${account.id}:${courseId}`}
                   accountId={`${account.workspace.id}:${account.id}`}
                   courseId={courseId}
+                  materialReference={materialReference}
                 />
               ) : (
                 <p>This course could not be opened.</p>

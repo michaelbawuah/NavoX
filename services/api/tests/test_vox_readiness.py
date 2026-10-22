@@ -18,6 +18,7 @@ from test_vox_provider import FakeProvider
 from navox.ai import configured
 from navox.ai.catalog import catalog_template
 from navox.ai.control import record_evaluation
+from navox.ai.conversation import CONVERSATION_PROMPT, CONVERSATION_SCHEMA
 from navox.ai.foundation.contracts import (
     Capability,
     Profile,
@@ -99,8 +100,8 @@ async def ready_voice(vox_env, monkeypatch):
             Profile.ASSISTANT_INTERACTIVE,
             TaskType.REASON,
             Sensitivity.PERSONAL,
-            "assistant_conversation",
-            "assistant_conversation",
+            "vox_spoken_answer",
+            "vox_spoken_answer",
         ),
         (
             Profile.SPEECH_SYNTHESIS,
@@ -376,4 +377,41 @@ async def test_unready_routing_never_spends_quota_or_allocates_rtc(ready_voice, 
         json={"generation": row["generation"], "request_id": str(uuid4())},
     )
     assert response.status_code == 503, response.text
+    await assert_no_model_or_media_writes(env)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ordinary_only", ["qualification", "grant"])
+async def test_ordinary_text_approval_never_qualifies_the_new_spoken_answer(
+    ready_voice, ordinary_only
+):
+    env = ready_voice
+    if ordinary_only == "grant":
+        scopes = tuple(
+            scope.model_copy(
+                update={"prompt": CONVERSATION_PROMPT, "output_schema": CONVERSATION_SCHEMA}
+            )
+            if scope.profile == Profile.ASSISTANT_INTERACTIVE
+            else scope
+            for scope in env.voice_policy.task_scopes
+        )
+        env.settings.ai_provider_policy = env.voice_policy.model_copy(
+            update={"task_scopes": scopes}
+        ).model_dump(mode="json")
+    else:
+        async with env.factory() as database:
+            key = model_key(env.voice_models[Profile.ASSISTANT_INTERACTIVE].reference)
+            for evaluation in await database.scalars(
+                select(AIEvaluationRun).where(AIEvaluationRun.model_id == key)
+            ):
+                evaluation.prompt = "assistant_conversation@v1"
+                evaluation.schema = "assistant_conversation@v1"
+            await database.commit()
+    row, _ = await start(env)
+    response = await env.client.post(
+        f"{ROOT}/{row['client_call_id']}/media",
+        json={"generation": row["generation"], "request_id": str(uuid4())},
+    )
+    assert response.status_code == 503, response.text
+    assert response.headers["cache-control"] == "private, no-store"
     await assert_no_model_or_media_writes(env)

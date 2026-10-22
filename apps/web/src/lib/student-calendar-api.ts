@@ -462,7 +462,7 @@ export function readCalendarView(value: unknown): CalendarView {
     changes_applied: false,
   };
 }
-function command(value: CalendarCommand): CalendarCommand {
+export function readCalendarCommand(value: CalendarCommand): CalendarCommand {
   const v = obj(value, ["generation", "revision", "request_id"]);
   return {
     generation: num(v.generation),
@@ -483,7 +483,7 @@ function startInput(value: CalendarStartInput): CalendarStartInput {
   if (v.consent_version !== CALENDAR_CONSENT_VERSION || v.confirmed !== true)
     return invalid();
   return {
-    ...command({
+    ...readCalendarCommand({
       generation: num(v.generation),
       revision: num(v.revision),
       request_id: id(v.request_id),
@@ -502,9 +502,10 @@ function sameSet(values: string[], expected: readonly string[]): boolean {
     values.every((item) => expected.includes(item))
   );
 }
-function authorization(
+export function readCalendarAuthorization(
   value: unknown,
-  request: CalendarStartInput,
+  request: Pick<CalendarCommand, "generation" | "revision">,
+  expectedScopes: readonly string[] = CALENDAR_READ_SCOPES,
 ): CalendarAuthorization {
   const v = obj(value, [
       "authorization_url",
@@ -513,8 +514,13 @@ function authorization(
       "revision",
       "grant_id",
     ]),
-    scopes = list(v.requested_scopes, (item) => text(item, 200, 1), 4, 4);
-  if (!sameSet(scopes, CALENDAR_READ_SCOPES)) return invalid();
+    scopes = list(
+      v.requested_scopes,
+      (item) => text(item, 200, 1),
+      expectedScopes.length,
+      expectedScopes.length,
+    );
+  if (!sameSet(scopes, expectedScopes)) return invalid();
   let target: URL;
   try {
     target = new URL(
@@ -529,7 +535,7 @@ function authorization(
     return entries[0];
   };
   if (
-    !sameSet(single("scope").split(" "), CALENDAR_READ_SCOPES) ||
+    !sameSet(single("scope").split(" "), expectedScopes) ||
     single("response_type") !== "code" ||
     single("access_type") !== "offline" ||
     single("prompt") !== "consent" ||
@@ -551,7 +557,7 @@ function authorization(
     grant_id: id(v.grant_id),
   };
 }
-function previewInput(
+export function readAvailabilityPreviewInput(
   value: AvailabilityPreviewInput,
 ): AvailabilityPreviewInput {
   const v = obj(value, [
@@ -1020,14 +1026,16 @@ function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
     );
   });
 }
-export function createStudentCalendarApi(
+export interface StudentCalendarTransportOptions {
+  fetch?: typeof globalThis.fetch;
+  baseUrl?: string;
+  now?: () => number;
+}
+
+export function createStudentCalendarTransport(
   accountId: string,
-  options: {
-    fetch?: typeof globalThis.fetch;
-    baseUrl?: string;
-    now?: () => number;
-  } = {},
-): StudentCalendarApi {
+  options: StudentCalendarTransportOptions = {},
+) {
   const parts = accountId.split(":");
   if (parts.length !== 2 || `${id(parts[0])}:${id(parts[1])}` !== accountId)
     throw new CalendarRequestError("account-changed");
@@ -1121,6 +1129,14 @@ export function createStudentCalendarApi(
       clearTimeout(timer);
     }
   };
+  return send;
+}
+
+export function createStudentCalendarApi(
+  accountId: string,
+  options: StudentCalendarTransportOptions = {},
+): StudentCalendarApi {
+  const send = createStudentCalendarTransport(accountId, options);
   return {
     account: (signal) =>
       send(
@@ -1157,7 +1173,7 @@ export function createStudentCalendarApi(
       const checked = startInput(input);
       return send(
         "/student/calendars/google/start",
-        (value) => authorization(value, checked),
+        (value) => readCalendarAuthorization(value, checked),
         signal,
         checked,
       );
@@ -1167,10 +1183,10 @@ export function createStudentCalendarApi(
         `/student/calendars/${id(grantId)}/disconnect`,
         readCalendarView,
         signal,
-        command(input),
+        readCalendarCommand(input),
       ),
     preview: (input, signal) => {
-      const checked = previewInput(input);
+      const checked = readAvailabilityPreviewInput(input);
       return send(
         "/student/availability/preview",
         (value) =>

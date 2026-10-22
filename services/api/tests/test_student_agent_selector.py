@@ -273,7 +273,7 @@ def test_manifest_is_identical_to_typescript_and_artifacts_remain_unpublished():
     assert all(schema.reference != SELECTOR_SCHEMA for schema in registry.schemas)
     schema = selector_output_schema()
     assert schema["additionalProperties"] is False
-    assert len(schema["properties"]["selection"]["anyOf"]) == 9
+    assert len(schema["properties"]["selection"]["anyOf"]) == 11
 
 
 @pytest.mark.asyncio

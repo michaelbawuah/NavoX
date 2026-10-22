@@ -17,7 +17,6 @@ from navox.ai.configured import build_runtime
 from navox.ai.conversation import (
     MAX_CONVERSATION_HISTORY,
     MAX_CONVERSATION_UTTERANCE,
-    conversation_task,
 )
 from navox.ai.factory import AIProviderNotConfigured
 from navox.ai.foundation.contracts import AITask, ProviderPolicy
@@ -34,6 +33,7 @@ from navox.ai.store import RoutingSnapshot
 from navox.ai.validation import compile_schema
 from navox.core.settings import Settings
 from navox.db.ai_registry import AIProfileAssignment, AIProviderHealth
+from navox.vox.conversation import spoken_answer_task
 from navox.vox.provider import MediaUnavailable
 
 
@@ -93,7 +93,7 @@ async def require_voice_models(
         async with asyncio.timeout(5):
             runtime = await build_runtime(settings, factory)
             ceiling = runtime.store.operator_policy
-            conversation = conversation_task(
+            conversation = spoken_answer_task(
                 workspace_id=workspace_id,
                 user_id=user_id,
                 max_cost=ceiling.max_cost,

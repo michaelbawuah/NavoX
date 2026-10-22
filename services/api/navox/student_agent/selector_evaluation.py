@@ -87,7 +87,7 @@ class SelectorEvaluationReport(Contract):
     prompt: VersionedRef = SELECTOR_PROMPT
     output_schema: VersionedRef = SELECTOR_SCHEMA
     manifest_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
-    corpus_version: Literal["student-selector.synthetic.v1"] = CORPUS_VERSION
+    corpus_version: Literal["student-selector.synthetic.v2"] = CORPUS_VERSION
     corpus_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
     corpus: tuple[SelectorCase, ...] = Field(repr=False)
     evaluated_at: AwareDatetime
@@ -114,7 +114,7 @@ def case_context(case: SelectorCase) -> JSONDocument:
     request = case.request()
     content = canonical(
         {
-            "schema_version": "student-selector-input.v1",
+            "schema_version": "student-selector-input.v2",
             "turn_id": str(request.turn_id),
             "step": request.step,
             "question": request.question,

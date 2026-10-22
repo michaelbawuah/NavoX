@@ -331,7 +331,9 @@ describe("private calendar connection and availability screens", () => {
     await chooseAssumptions();
     await click("Find openings");
     const signal = vi.mocked(client.preview).mock.calls[0][1];
-    await act(async () => observers[0].revoking?.());
+    await act(async () => {
+      for (const observer of observers) observer.revoking?.();
+    });
     expect(signal.aborted).toBe(true);
     await act(async () => {
       delayed.resolve(snapshot());
@@ -413,7 +415,9 @@ describe("private calendar connection and availability screens", () => {
       }),
       expect.any(AbortSignal),
     );
-    await act(async () => observers[0].revoking?.());
+    await act(async () => {
+      for (const observer of observers) observer.revoking?.();
+    });
     expect(vi.mocked(client.start).mock.calls[0][1].aborted).toBe(true);
     await act(async () => {
       delayed.resolve({

@@ -121,6 +121,140 @@ async function privateReply() {
   expect(response.status).toBe(200);
   return response.json();
 }
+
+describe("course-material transport", () => {
+  function materialTransport() {
+    const read = vi.fn(async (_url: string, _init: RequestInit) =>
+      Response.json({ literal: "owned source" }),
+    );
+    const upstream = createStudentAgentTransport(
+      "navox_session=private",
+      origin,
+      {
+        baseUrl: api,
+        fetchImpl: read,
+      },
+    ).upstream;
+    if (
+      !upstream.materialSearch ||
+      !upstream.materials ||
+      !upstream.materialPage
+    )
+      throw new Error("Material transport methods must be available");
+    return {
+      read,
+      upstream: {
+        materialSearch: upstream.materialSearch,
+        materials: upstream.materials,
+        materialPage: upstream.materialPage,
+      },
+    };
+  }
+
+  it("uses fixed owned-course paths and encodes the entire literal search", async () => {
+    const { read, upstream } = materialTransport();
+    const signal = new AbortController().signal;
+    await expect(
+      upstream.materialSearch(
+        { course_id: other, query: "linear & algebra / café? #1" },
+        signal,
+      ),
+    ).resolves.toEqual({ literal: "owned source" });
+    await upstream.materials(other, signal);
+    await upstream.materialPage(
+      { course_id: other, material_id: turn, revision: 2, page: 3 },
+      signal,
+    );
+    expect(read.mock.calls.map(([url]) => url)).toEqual([
+      `${api}/student/courses/${other}/workspace/search?q=linear+%26+algebra+%2F+caf%C3%A9%3F+%231`,
+      `${api}/student/courses/${other}/workspace/materials`,
+      `${api}/student/courses/${other}/workspace/materials/${turn}/pages/3?revision=2`,
+    ]);
+    for (const [, init] of read.mock.calls)
+      expect(init).toMatchObject({
+        method: "GET",
+        headers: { cookie: "navox_session=private", origin },
+        cache: "no-store",
+        redirect: "error",
+        signal,
+      });
+  });
+
+  it.each(["../other-course", "https://evil.test", "", `${other}/materials`])(
+    "rejects invalid course identifiers before any request: %s",
+    (courseId) => {
+      const { read, upstream } = materialTransport();
+      const signal = new AbortController().signal;
+      expect(() => upstream.materials(courseId, signal)).toThrow();
+      expect(() =>
+        upstream.materialSearch({ course_id: courseId, query: "test" }, signal),
+      ).toThrow();
+      expect(() =>
+        upstream.materialPage(
+          { course_id: courseId, material_id: turn, revision: 1, page: 1 },
+          signal,
+        ),
+      ).toThrow();
+      expect(read).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["../secret", "https://evil.test/file", "", `${turn}?revision=9`])(
+    "rejects invalid material identifiers before any request: %s",
+    (materialId) => {
+      const { read, upstream } = materialTransport();
+      expect(() =>
+        upstream.materialPage(
+          { course_id: other, material_id: materialId, revision: 1, page: 1 },
+          new AbortController().signal,
+        ),
+      ).toThrow();
+      expect(read).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { revision: 0 },
+    { revision: -1 },
+    { revision: 2_147_483_648 },
+    { revision: 1.5 },
+    { revision: "1" },
+    { page: 0 },
+    { page: 101 },
+    { page: 1.5 },
+    { page: "1" },
+  ])("rejects invalid page/version arguments before any request: %j", (bad) => {
+    const { read, upstream } = materialTransport();
+    expect(() =>
+      upstream.materialPage(
+        {
+          course_id: other,
+          material_id: turn,
+          revision: 1,
+          page: 1,
+          ...bad,
+        } as Parameters<NonNullable<typeof upstream.materialPage>>[0],
+        new AbortController().signal,
+      ),
+    ).toThrow();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "   ", "x".repeat(101), "topic\nsecret", null, 1])(
+    "rejects invalid query values before any request: %s",
+    (query) => {
+      const { read, upstream } = materialTransport();
+      expect(() =>
+        upstream.materialSearch(
+          { course_id: other, query: query as string },
+          new AbortController().signal,
+        ),
+      ).toThrow();
+      expect(read).not.toHaveBeenCalled();
+    },
+  );
+});
+
 describe("student private route boundaries", () => {
   it("gates every route before network work", async () => {
     vi.stubEnv("NAVOX_STUDENT_AGENT_ENABLED", "false");
@@ -189,6 +323,87 @@ describe("student private route boundaries", () => {
         ([url]) =>
           String(url).includes("/conversation") ||
           String(url).includes("/select"),
+      ),
+    ).toBe(false);
+  });
+  it("returns material excerpts without a speech receipt, synthesis or model follow-up", async () => {
+    vi.stubEnv("NAVOX_STUDENT_AGENT_MODEL_ENABLED", "true");
+    const fallback = fetcher.getMockImplementation();
+    const materialId = "66666666-6666-4666-8666-666666666666";
+    const base = `/student/courses/${other}/workspace`;
+    fetcher.mockImplementation(async (url, init) => {
+      const path = String(url).slice(api.length);
+      if (path === "/student/courses")
+        return Response.json({
+          courses: [{ id: other, code: "CS 2110", name: "Programming" }],
+        });
+      if (path === "/student-agent/select") {
+        const selected = JSON.parse(String(init?.body));
+        return Response.json({
+          turn_id: selected.turn_id,
+          step: selected.step,
+          manifest_hash: selected.manifest_hash,
+          selection: {
+            kind: "tool",
+            name: "course.materials.search",
+            args: { course_id: other, query: "hash tables" },
+          },
+          task_id: turn,
+          trace_id: other,
+          estimated_cost: "0.001",
+          actions_executed: false,
+        });
+      }
+      if (path === `${base}/search?q=hash+tables`)
+        return Response.json({
+          course_id: other,
+          limit_reached: false,
+          results: [
+            {
+              material_id: materialId,
+              revision: 1,
+              title: "Lecture notes",
+              page: 1,
+              snippet: "PRIVATE MATERIAL: hash tables.",
+            },
+          ],
+        });
+      if (path === `${base}/materials`)
+        return Response.json({
+          materials: [
+            {
+              id: materialId,
+              revision: 1,
+              title: "Lecture notes",
+              page_count: 1,
+            },
+          ],
+        });
+      if (!fallback) throw new Error("Original fixed transport is required");
+      return fallback(url, init);
+    });
+    const response = await ask(
+      request("ask", {
+        ...input,
+        question: `Find hash tables in course ${other}`,
+        allow_tool_context: true,
+      }),
+    );
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.reply.status, JSON.stringify(result.reply)).toBe("answer");
+    expect(result.reply.answer).toContain("PRIVATE MATERIAL");
+    expect(result.reply.source).toBe("tools");
+    expect(result.receipt_id).toBeNull();
+    expect(result.expires_at).toBeNull();
+    const selectors = fetcher.mock.calls.filter(([url]) =>
+      String(url).endsWith("/student-agent/select"),
+    );
+    expect(selectors).toHaveLength(1);
+    expect(String(selectors[0][1]?.body)).not.toContain("PRIVATE MATERIAL");
+    expect(
+      fetcher.mock.calls.some(([url]) =>
+        /conversation|synthesize/.test(String(url)),
       ),
     ).toBe(false);
   });

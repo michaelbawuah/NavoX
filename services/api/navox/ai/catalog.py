@@ -6,7 +6,10 @@ from navox.ai.prompts import builtin_prompts
 
 
 def catalog_template() -> RegistrySnapshot:
+    from navox.vox.conversation import spoken_answer_artifacts
+
     prompts, schemas = builtin_prompts()
+    spoken_prompt, spoken_schema = spoken_answer_artifacts()
     tasks = {
         Profile.EMBEDDING: {TaskType.EMBED},
         Profile.EXTRACTION_FAST: {TaskType.EXTRACT, TaskType.CLASSIFY},
@@ -23,8 +26,8 @@ def catalog_template() -> RegistrySnapshot:
     }
     return RegistrySnapshot(
         revision=1,
-        prompts=prompts,
-        schemas=schemas,
+        prompts=(*prompts, spoken_prompt),
+        schemas=(*schemas, spoken_schema),
         profiles=tuple(
             ProfileDefinition(
                 profile=profile,

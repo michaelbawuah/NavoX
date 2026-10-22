@@ -8,6 +8,7 @@ import {
 } from "../lib/student-calendar-api";
 import { notifyCalendarAccessChanged } from "../lib/student-calendar-privacy";
 import styles from "./student-calendar.module.css";
+import { StudentCalendarSchedulingConsent } from "./student-calendar-scheduling";
 import { useCalendarWorkspace } from "./use-calendar-workspace";
 
 export const calendarConsent =
@@ -19,7 +20,15 @@ interface CalendarConnectionsProps {
 }
 
 export function StudentCalendarConnections(props: CalendarConnectionsProps) {
-  return <CalendarConnectionsWorkspace key={props.accountId} {...props} />;
+  return (
+    <>
+      <CalendarConnectionsWorkspace key={props.accountId} {...props} />
+      <StudentCalendarSchedulingConsent
+        key={`scheduling:${props.accountId}`}
+        accountId={props.accountId}
+      />
+    </>
+  );
 }
 
 function CalendarConnectionsWorkspace({

@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from navox.api.auth import (
     CurrentAccountDependency,
@@ -20,11 +21,19 @@ from navox.api.auth import (
     hash_session_token,
 )
 from navox.api.student import result, scope
-from navox.student_calendars import oauth, service
+from navox.student_calendars import oauth, scheduling, service
 from navox.student_calendars.schemas import (
     CalendarAuthorization,
     CalendarCommand,
+    CalendarEventApproval,
+    CalendarEventCommand,
+    CalendarEventPreview,
+    CalendarEventView,
+    CalendarSchedulingStart,
+    CalendarSchedulingView,
     CalendarStart,
+    CalendarTargetsRequest,
+    CalendarTargetsView,
     CalendarView,
 )
 
@@ -87,6 +96,12 @@ ExpectedAccountDependency = Annotated[None, Depends(expected_account)]
 def enabled(settings: SettingsDependency) -> None:
     if not settings.student_calendar_availability_enabled:
         raise HTTPException(404, "Calendar availability is not enabled", headers=PRIVATE)
+
+
+def enabled_writes(settings: SettingsDependency) -> None:
+    enabled(settings)
+    if not getattr(settings, "student_calendar_writes_enabled", False):
+        raise HTTPException(404, "Calendar scheduling is not enabled", headers=PRIVATE)
 
 
 async def bounded_json[T: BaseModel](request: Request, model: type[T]) -> T:
@@ -166,4 +181,181 @@ async def disconnect(
     payload = await bounded_json(request, CalendarCommand)
     return await result(
         service.disconnect(database, *scope(account), token_hash, grant_id, payload, settings)
+    )
+
+
+@router.get("/scheduling", response_model=CalendarSchedulingView)
+async def scheduling_permissions(
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    token_hash: SessionHashDependency,
+) -> CalendarSchedulingView:
+    return await result(scheduling.scheduling_view(database, *scope(account), token_hash, settings))
+
+
+@router.post(
+    "/google/scheduling/start",
+    response_model=CalendarAuthorization,
+    dependencies=[Depends(enabled_writes)],
+)
+async def start_scheduling(
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    token_hash: SessionHashDependency,
+) -> CalendarAuthorization:
+    payload = await bounded_json(request, CalendarSchedulingStart)
+    return await result(
+        oauth.start(database, *scope(account), token_hash, payload, settings, scheduling=True)
+    )
+
+
+@router.post("/scheduling/{grant_id}/disconnect", response_model=CalendarSchedulingView)
+async def stop_scheduling(
+    grant_id: UUID,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    token_hash: SessionHashDependency,
+) -> CalendarSchedulingView:
+    payload = await bounded_json(request, CalendarCommand)
+    return await result(
+        scheduling.disconnect(database, *scope(account), token_hash, grant_id, payload, settings)
+    )
+
+
+def factory(database: DatabaseSession) -> async_sessionmaker[Any]:
+    assert database.bind is not None
+    return async_sessionmaker(database.bind, expire_on_commit=False)
+
+
+@router.post(
+    "/scheduling/targets",
+    response_model=CalendarTargetsView,
+    dependencies=[Depends(enabled_writes)],
+)
+async def scheduling_targets(
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    token_hash: SessionHashDependency,
+) -> CalendarTargetsView:
+    payload = await bounded_json(request, CalendarTargetsRequest)
+    return await result(
+        scheduling.targets(factory(database), settings, *scope(account), token_hash, payload)
+    )
+
+
+@router.get("/events")
+async def calendar_events(
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    token_hash: SessionHashDependency,
+    cursor: UUID | None = None,
+) -> dict[str, Any]:
+    return await result(
+        scheduling.list_events(
+            database,
+            *scope(account),
+            token_hash,
+            settings,
+            cursor=cursor,
+        )
+    )
+
+
+@router.post(
+    "/events/preview", response_model=CalendarEventView, dependencies=[Depends(enabled_writes)]
+)
+async def event_preview(
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    token_hash: SessionHashDependency,
+) -> CalendarEventView:
+    payload = await bounded_json(request, CalendarEventPreview)
+    return await result(
+        scheduling.preview(factory(database), settings, *scope(account), token_hash, payload)
+    )
+
+
+@router.get("/events/{event_id}", response_model=CalendarEventView)
+async def calendar_event(
+    event_id: UUID,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    token_hash: SessionHashDependency,
+) -> CalendarEventView:
+    return await result(
+        scheduling.event_view(
+            database,
+            *scope(account),
+            token_hash,
+            event_id,
+            settings,
+        )
+    )
+
+
+@router.post(
+    "/events/{event_id}/approve",
+    response_model=CalendarEventView,
+    dependencies=[Depends(enabled_writes)],
+)
+async def event_approve(
+    event_id: UUID,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    token_hash: SessionHashDependency,
+) -> CalendarEventView:
+    payload = await bounded_json(request, CalendarEventApproval)
+    return await result(
+        scheduling.approve(
+            factory(database), settings, *scope(account), token_hash, event_id, payload
+        )
+    )
+
+
+@router.post("/events/{event_id}/reconcile", response_model=CalendarEventView)
+async def event_reconcile(
+    event_id: UUID,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    token_hash: SessionHashDependency,
+) -> CalendarEventView:
+    payload = await bounded_json(request, CalendarEventCommand)
+    return await result(
+        scheduling.reconcile(
+            factory(database), settings, *scope(account), token_hash, event_id, payload
+        )
+    )
+
+
+@router.post(
+    "/events/{event_id}/undo",
+    response_model=CalendarEventView,
+    dependencies=[Depends(enabled_writes)],
+)
+async def event_undo(
+    event_id: UUID,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    token_hash: SessionHashDependency,
+) -> CalendarEventView:
+    payload = await bounded_json(request, CalendarEventApproval)
+    return await result(
+        scheduling.undo(factory(database), settings, *scope(account), token_hash, event_id, payload)
     )

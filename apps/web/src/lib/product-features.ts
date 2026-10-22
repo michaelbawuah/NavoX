@@ -18,6 +18,8 @@ export const productFeatures = {
   studentCalendarAvailability:
     process.env.NEXT_PUBLIC_NAVOX_STUDENT_CALENDAR_AVAILABILITY_ENABLED ===
     "true",
+  studentCalendarWrites:
+    process.env.NEXT_PUBLIC_NAVOX_STUDENT_CALENDAR_WRITES_ENABLED === "true",
   studentLmsFeeds:
     process.env.NEXT_PUBLIC_NAVOX_STUDENT_LMS_FEEDS_ENABLED === "true",
   studentCoursework:
