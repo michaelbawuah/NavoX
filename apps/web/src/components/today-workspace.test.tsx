@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { productFeatures } from "../lib/product-features";
 import {
   TodayWorkspace,
   type TodayWorkspaceView,
@@ -36,6 +37,49 @@ function renderView(view: TodayWorkspaceView = "today") {
     }),
   );
 }
+
+describe("Home Vox feature entry", () => {
+  const originalVox = productFeatures.studentVox;
+  const originalPlanning = productFeatures.studentPlanning;
+  afterEach(() => {
+    productFeatures.studentVox = originalVox;
+    productFeatures.studentPlanning = originalPlanning;
+  });
+
+  it("keeps the study plan when the independent Vox flag is off", () => {
+    productFeatures.studentVox = false;
+    productFeatures.studentPlanning = true;
+    const markup = renderView();
+    expect(markup).not.toContain('data-vox-launcher="home"');
+    expect(markup).toContain("Your work, with time to do it.");
+  });
+
+  it("places the opted-in Home entry above the study plan without opening another owner or dialog", () => {
+    productFeatures.studentVox = true;
+    productFeatures.studentPlanning = true;
+    const fetch = vi.spyOn(globalThis, "fetch");
+    try {
+      const markup = renderView();
+      const vox = markup.indexOf('data-vox-launcher="home"');
+      expect(vox).toBeGreaterThan(-1);
+      expect(vox).toBeLessThan(
+        markup.indexOf("Your work, with time to do it."),
+      );
+      expect(markup.match(/data-vox-launcher="home"/g)).toHaveLength(1);
+      expect(markup).toContain("Checking your sign-in");
+      expect(markup).not.toContain("<dialog");
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+
+  it("keeps the large entry on Today while other destinations retain only root controls", () => {
+    productFeatures.studentVox = true;
+    for (const view of ["inbox", "planner", "connections", "settings"] as const)
+      expect(renderView(view)).not.toContain('data-vox-launcher="home"');
+  });
+});
 
 describe("workspace destinations", () => {
   it("does not advertise an empty connection list when its state is unavailable", () => {
