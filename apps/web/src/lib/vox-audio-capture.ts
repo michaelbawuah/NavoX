@@ -7,12 +7,12 @@ interface AudioNodeLike {
 }
 
 interface ProcessorLike extends AudioNodeLike {
-  onaudioprocess:
-    | ((event: {
-        inputBuffer: { getChannelData(channel: number): Float32Array };
-        outputBuffer: { getChannelData(channel: number): Float32Array };
-      }) => void)
-    | null;
+  port: {
+    onmessage: ((event: { data: unknown }) => void) | null;
+    postMessage(message: unknown, transfer?: Transferable[]): void;
+    close(): void;
+  };
+  onprocessorerror: (() => void) | null;
 }
 
 interface GainLike extends AudioNodeLike {
@@ -24,11 +24,7 @@ interface ContextLike {
   state?: string;
   destination: unknown;
   createMediaStreamSource(stream: MediaStream): AudioNodeLike;
-  createScriptProcessor(
-    size: number,
-    input: number,
-    output: number,
-  ): ProcessorLike;
+  audioWorklet: { addModule(url: string): Promise<void> };
   createMediaStreamDestination(): AudioNodeLike & { stream: MediaStream };
   createGain(): GainLike;
   resume(): Promise<void> | void;
@@ -43,9 +39,15 @@ interface CaptureScope {
   };
   AudioContext?: new () => ContextLike;
   webkitAudioContext?: new () => ContextLike;
+  AudioWorkletNode?: new (
+    context: ContextLike,
+    name: string,
+    options: AudioWorkletNodeOptions,
+  ) => ProcessorLike;
 }
 
 const FRAME_SAMPLES = 1024;
+const WORKLET_URL = "/audio/vox-pcm-processor-v1.js";
 const BUFFER_SECONDS = 0.35;
 const VOICED_RMS = 0.025;
 
@@ -115,8 +117,9 @@ function abortable<T>(
 
 /**
  * Opt-in local VAD and processed audio, never a raw microphone publication.
- * ScriptProcessor is a deprecated compatibility path: this implementation is
- * unqualified by default, and source tests do not establish device latency,
+ * A same-origin AudioWorklet bridges bounded PCM frames through the local VAD
+ * and permission gate. No PCM is sent to a server by this factory. It remains
+ * unqualified by default: source tests do not establish device latency,
  * background behavior, echo rejection, or autoplay support. No I/O occurs until
  * an admitted adapter explicitly calls create after its room/agent are ready.
  */
@@ -127,13 +130,14 @@ export function createBrowserVoxAudioCaptureFactory(
     (typeof window === "undefined" ? {} : window)) as CaptureScope;
   const devices = environment.navigator?.mediaDevices;
   const Context = environment.AudioContext ?? environment.webkitAudioContext;
+  const Worklet = environment.AudioWorkletNode;
   const methods = Context?.prototype;
   const supported =
     typeof devices?.getUserMedia === "function" &&
     typeof Context === "function" &&
+    typeof Worklet === "function" &&
     [
       methods?.createMediaStreamSource,
-      methods?.createScriptProcessor,
       methods?.createMediaStreamDestination,
       methods?.createGain,
       methods?.resume,
@@ -144,7 +148,7 @@ export function createBrowserVoxAudioCaptureFactory(
   return {
     qualified,
     async create({ signal, mayCapture, onVoiceActivity }) {
-      if (!qualified || !Context || !devices) {
+      if (!qualified || !Context || !Worklet || !devices) {
         throw new Error(
           "Vox microphone capture is not qualified on this device.",
         );
@@ -168,6 +172,7 @@ export function createBrowserVoxAudioCaptureFactory(
       let acknowledged = false;
       let waitingSamples = 0;
       let voiceEpoch = 0;
+      let expectedFrame = 0;
       const releaseTrackEvents: (() => void)[] = [];
 
       const permitted = () => {
@@ -215,7 +220,20 @@ export function createBrowserVoxAudioCaptureFactory(
           }
         }
         clearFrames();
-        if (processor) processor.onaudioprocess = null;
+        if (processor) {
+          processor.onprocessorerror = null;
+          processor.port.onmessage = null;
+          try {
+            processor.port.postMessage({ type: "stop" });
+          } catch {
+            // Physical tracks and graph edges are independently released.
+          }
+          try {
+            processor.port.close();
+          } catch {
+            // Continue releasing the graph even when the port has failed.
+          }
+        }
         for (const node of [
           source,
           processor,
@@ -277,8 +295,20 @@ export function createBrowserVoxAudioCaptureFactory(
         ) {
           throw new Error("Vox microphone sample rate is unsupported.");
         }
+        if (typeof context.audioWorklet?.addModule !== "function") {
+          throw new Error("Vox microphone AudioWorklet is unavailable.");
+        }
+        await abortable(context.audioWorklet.addModule(WORKLET_URL), signal);
+        if (!permitted()) throw aborted();
         source = context.createMediaStreamSource(raw);
-        processor = context.createScriptProcessor(FRAME_SAMPLES, 1, 1);
+        processor = new Worklet(context, "navox-vox-pcm-v1", {
+          numberOfInputs: 1,
+          numberOfOutputs: 1,
+          outputChannelCount: [1],
+          channelCount: 1,
+          channelCountMode: "explicit",
+          channelInterpretation: "discrete",
+        });
         master = context.createGain();
         master.gain.value = 0;
         silentSink = context.createGain();
@@ -320,17 +350,35 @@ export function createBrowserVoxAudioCaptureFactory(
           }
         };
 
-        processor.onaudioprocess = (event) => {
+        const worklet = processor;
+        worklet.onprocessorerror = stop;
+        worklet.port.onmessage = (event) => {
+          let frame: Float32Array | null = null;
           let out: Float32Array | null = null;
+          let frameId = -1;
           try {
-            out = event.outputBuffer.getChannelData(0);
-            out.fill(0);
+            const data = event.data as {
+              type?: unknown;
+              id?: unknown;
+              frame?: unknown;
+            } | null;
+            if (
+              data?.type !== "frame" ||
+              data.id !== expectedFrame ||
+              !(data.frame instanceof Float32Array) ||
+              data.frame.length !== FRAME_SAMPLES
+            ) {
+              stop();
+              return;
+            }
+            frameId = expectedFrame++;
+            frame = data.frame;
+            out = new Float32Array(FRAME_SAMPLES);
             if (stopped || !enabled) return;
             if (!permitted()) {
               stop();
               return;
             }
-            const frame = event.inputBuffer.getChannelData(0);
             if (
               frame.length !== out.length ||
               frame.length === 0 ||
@@ -403,13 +451,26 @@ export function createBrowserVoxAudioCaptureFactory(
           } catch {
             out?.fill(0);
             stop();
+          } finally {
+            // Transferred input is browser-local and is erased after the gate.
+            frame?.fill(0);
+            if (!stopped && out && frameId >= 0) {
+              try {
+                worklet.port.postMessage(
+                  { type: "output", id: frameId, frame: out },
+                  [out.buffer],
+                );
+              } catch {
+                stop();
+              }
+            }
           }
         };
         source.connect(processor);
         processor.connect(master);
         master.connect(destination);
-        // Some ScriptProcessor implementations pull only toward the hardware
-        // destination. This independent sink is permanently silent.
+        // Keep an independently silent hardware sink so processing remains
+        // pulled even when the processed stream has no active consumer yet.
         processor.connect(silentSink);
         silentSink.connect(context.destination);
         await abortable(Promise.resolve(context.resume()), signal);
@@ -440,6 +501,7 @@ export function createBrowserVoxAudioCaptureFactory(
               throw aborted();
             }
             try {
+              if (!enabled) processor?.port.postMessage({ type: "enabled" });
               enabled = true;
               for (const rawTrack of raw?.getAudioTracks() ?? []) {
                 rawTrack.enabled = true;

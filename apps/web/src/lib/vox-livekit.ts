@@ -11,7 +11,13 @@ export interface VoxMediaAdmission {
   join(request: VoxTransportRequest): Promise<VoxMediaLease>;
 }
 
-export interface VoxMediaLease {
+export interface VoxMediaProof {
+  connectionId: string;
+  generation: number;
+  expiresAt: number;
+}
+
+export interface VoxMediaLease extends VoxMediaProof {
   owner: VoxOwner;
   callId: string;
   roomName: string;
@@ -19,8 +25,7 @@ export interface VoxMediaLease {
   agentIdentity: string;
   serverUrl: string;
   token: string;
-  expiresAt: number;
-  renew(signal: AbortSignal): Promise<{ expiresAt: number }>;
+  renew(signal: AbortSignal): Promise<VoxMediaProof>;
   /** Retire this media connection only; the app owner ends its reservation. */
   close(): Promise<void>;
 }
@@ -193,6 +198,10 @@ function validLease(
   if (
     !sameOwner(lease.owner, request.owner) ||
     lease.callId !== request.callId ||
+    !uuid.test(lease.connectionId) ||
+    !Number.isInteger(lease.generation) ||
+    lease.generation < 0 ||
+    lease.generation > 2147483647 ||
     !identity.test(lease.roomName) ||
     !identity.test(lease.participantIdentity) ||
     !identity.test(lease.agentIdentity) ||
@@ -223,15 +232,44 @@ function validLease(
   if (!claims || typeof claims !== "object") throw unavailable();
   const value = claims as Record<string, unknown>;
   const video = value.video as Record<string, unknown> | undefined;
+  const metadata: unknown =
+    typeof value.metadata === "string" ? JSON.parse(value.metadata) : null;
   if (
+    !metadata ||
+    typeof metadata !== "object" ||
+    (metadata as Record<string, unknown>).connection_id !==
+      lease.connectionId ||
+    (metadata as Record<string, unknown>).generation !== lease.generation ||
     value.sub !== lease.participantIdentity ||
     typeof value.exp !== "number" ||
     !Number.isFinite(value.exp) ||
     value.exp * 1000 <= now ||
+    value.exp * 1000 > lease.expiresAt ||
+    typeof value.nbf !== "number" ||
+    !Number.isFinite(value.nbf) ||
+    value.nbf * 1000 > now ||
     !video ||
     video.room !== lease.roomName ||
     video.roomJoin !== true ||
-    video.canPublishData !== false
+    video.canPublishData !== false ||
+    video.canPublish !== true ||
+    video.canSubscribe !== true ||
+    video.canUpdateOwnMetadata !== false ||
+    !Array.isArray(video.canPublishSources) ||
+    video.canPublishSources.length !== 1 ||
+    video.canPublishSources[0] !== "microphone" ||
+    Object.keys(video).some(
+      (key) =>
+        ![
+          "room",
+          "roomJoin",
+          "canPublish",
+          "canPublishSources",
+          "canSubscribe",
+          "canPublishData",
+          "canUpdateOwnMetadata",
+        ].includes(key),
+    )
   )
     throw unavailable();
 }
@@ -667,6 +705,9 @@ export function createLiveKitVoxTransport(options: {
                 return;
               }
               if (
+                value.connectionId !== lease?.connectionId ||
+                value.generation !== lease?.generation ||
+                value.expiresAt !== lease?.expiresAt ||
                 !Number.isFinite(value.expiresAt) ||
                 value.expiresAt <= now() ||
                 value.expiresAt > now() + 300_000

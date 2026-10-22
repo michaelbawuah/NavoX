@@ -1,4 +1,4 @@
-"""Cookie-bound, private metadata reservations; no live media or provider entry point."""
+"""Cookie-bound private reservations and separately qualified media admission."""
 
 import asyncio
 import json
@@ -11,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ValidationError
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from navox.api.auth import (
     CurrentAccountDependency,
@@ -18,7 +19,10 @@ from navox.api.auth import (
     SettingsDependency,
     hash_session_token,
 )
-from navox.vox import service
+from navox.vox import admission, media, readiness, service
+from navox.vox.media import ConnectionIntent
+from navox.vox.media_schemas import MediaBinding, MediaGrant, MediaStart
+from navox.vox.provider import LiveKitCloudProvider, MediaUnavailable, cloud_config
 from navox.vox.schemas import VoxCallView, VoxContext, VoxLease, VoxStart
 
 PRIVATE = {"Cache-Control": "private, no-store"}
@@ -131,6 +135,30 @@ async def result[T](operation: Awaitable[T]) -> T:
         raise HTTPException(error.status_code, str(error), headers=PRIVATE) from None
     except (ValueError, ValidationError):
         raise HTTPException(422, "The Vox request is invalid", headers=PRIVATE) from None
+    except MediaUnavailable:
+        raise HTTPException(503, "Vox media is temporarily unavailable", headers=PRIVATE) from None
+
+
+def media_provider(settings: SettingsDependency) -> LiveKitCloudProvider:
+    try:
+        return LiveKitCloudProvider(cloud_config(settings))
+    except MediaUnavailable:
+        raise HTTPException(503, "Vox media is not available", headers=PRIVATE) from None
+
+
+MediaProviderDependency = Annotated[LiveKitCloudProvider, Depends(media_provider)]
+
+
+def media_binding(intent: ConnectionIntent) -> MediaBinding:
+    return MediaBinding(
+        connection_id=intent.connection_id,
+        client_call_id=intent.client_call_id,
+        generation=intent.generation,
+        room_name=intent.room_name,
+        participant_identity=intent.client_identity,
+        agent_identity=intent.agent_identity,
+        expires_at=intent.expires_at,
+    )
 
 
 @router.get("/context", response_model=VoxContext, dependencies=[Depends(enabled)])
@@ -195,6 +223,119 @@ async def end(
             session_token_hash,
             client_call_id,
             payload,
+        )
+    )
+    return Response(status_code=204, headers=PRIVATE)
+
+
+@router.post("/{client_call_id}/media", response_model=MediaGrant)
+async def join_media(
+    client_call_id: UUID,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    session_token_hash: SessionHashDependency,
+    settings: SettingsDependency,
+    provider: MediaProviderDependency,
+) -> MediaGrant:
+    payload = await bounded_json(request, MediaStart)
+    assert database.bind is not None
+    factory = async_sessionmaker(database.bind, expire_on_commit=False)
+    await result(
+        readiness.require_voice_models(
+            settings=settings,
+            factory=factory,
+            workspace_id=account.workspace.id,
+            user_id=account.user.id,
+        )
+    )
+    intent = await result(
+        media.begin_connection(
+            database,
+            account.user.id,
+            account.workspace.id,
+            session_token_hash,
+            client_call_id,
+            generation=payload.generation,
+            request_id=payload.request_id,
+        )
+    )
+    confirmed = await result(
+        admission.provision(
+            factory, provider, intent, account.user.id, account.workspace.id, session_token_hash
+        )
+    )
+    try:
+        token = provider.participant_token(confirmed)
+    except MediaUnavailable:
+        await result(
+            media.revoke_connection(
+                database,
+                account.user.id,
+                account.workspace.id,
+                session_token_hash,
+                confirmed.connection_id,
+            )
+        )
+        raise HTTPException(503, "Vox media is temporarily unavailable", headers=PRIVATE) from None
+    return MediaGrant(
+        **media_binding(confirmed).model_dump(), server_url=provider.config.server_url, token=token
+    )
+
+
+@router.post("/{client_call_id}/media/{connection_id}/renew", response_model=MediaBinding)
+async def renew_media(
+    client_call_id: UUID,
+    connection_id: UUID,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    session_token_hash: SessionHashDependency,
+    provider: MediaProviderDependency,
+) -> MediaBinding:
+    payload = await bounded_json(request, VoxLease)
+    await result(
+        admission.bound_connection(
+            database,
+            account.user.id,
+            account.workspace.id,
+            client_call_id,
+            connection_id,
+            payload.generation,
+        )
+    )
+    intent = await result(
+        media.confirm_connection(
+            database, account.user.id, account.workspace.id, session_token_hash, connection_id
+        )
+    )
+    return media_binding(intent)
+
+
+@router.post("/{client_call_id}/media/{connection_id}/close", status_code=204)
+async def close_media(
+    client_call_id: UUID,
+    connection_id: UUID,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    session_token_hash: SessionHashDependency,
+) -> Response:
+    # Closing still works with every media/release switch disabled.
+    payload = await bounded_json(request, VoxLease)
+    await result(
+        admission.bound_connection(
+            database,
+            account.user.id,
+            account.workspace.id,
+            client_call_id,
+            connection_id,
+            payload.generation,
+        )
+    )
+    await result(
+        media.revoke_connection(
+            database, account.user.id, account.workspace.id, session_token_hash, connection_id
         )
     )
     return Response(status_code=204, headers=PRIVATE)

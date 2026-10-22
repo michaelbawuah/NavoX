@@ -1,9 +1,11 @@
 # Vox reservations and browser transport
 
-The server adds durable lifecycle metadata before live audio. It does not
-connect LiveKit, start a microphone, retain conversation text, issue media
-credentials or qualify an AI route. Every response explicitly says
-`media_enabled: false`. The existing Vox transport stays unavailable.
+The reservation surface adds durable lifecycle metadata before live audio. Its
+responses explicitly say `media_enabled: false` and never issue a media grant.
+Separate, disabled-by-default media routes now connect that metadata to a
+LiveKit Cloud adapter and named voice worker. Source implementation does not
+qualify the Cloud service, an AI route or a supported device. No conversation
+text is retained by these off-record calls.
 
 `STUDENT_VOX_ENABLED` defaults to false. The browser ownership flag remains
 separate and also defaults to false. Enabling either does not enable the other
@@ -21,7 +23,7 @@ by this web-only surface, including requests that also carry a valid cookie.
 Each owner/workspace has at most one reserved call, enforced by the shared User
 lock and a partial unique database index. The client call UUID is a correlation
 key. The server allocates its own stable reservation UUID; a retry or renewal
-does not allocate another one. No room or join credential is issued yet.
+does not allocate another one. A reservation itself issues no room or join credential.
 
 A reservation lease lasts at most 120 seconds and never outlives its authenticating
 session. Renewal keeps the same server reservation. A missed lease becomes
@@ -44,6 +46,9 @@ echoing their contents.
 | `POST /` | `client_call_id`, `generation`, required `mode: "off-record"` | Allocate one reservation or return its exact still-live retry. Does not extend a retried start's lease. |
 | `POST /{client_call_id}/renew` | `generation` | Renew that same live reservation for the same login and generation. |
 | `POST /{client_call_id}/end` | `generation` | Idempotent terminal cleanup; remains available with Vox disabled or the assistant paused. |
+| `POST /{client_call_id}/media` | `generation`, unique `request_id` | Provision an opaque connection epoch and named worker, then confirm fresh authority before returning the bound browser token. Requires independent media/Cloud/worker qualification. |
+| `POST /{client_call_id}/media/{connection_id}/renew` | `generation` | Revalidate the exact immutable media binding; does not extend its deadline or return a token. |
+| `POST /{client_call_id}/media/{connection_id}/close` | `generation` | Revoke that epoch and durably queue provider cleanup, including with new admission disabled. |
 
 `generation` is an immutable call-lifetime/admission epoch, not a mutable renewal
 revision. Start and renewal require a fresh epoch and an unpaused assistant.
@@ -150,8 +155,10 @@ hidden-page suspension and termination synchronously retire capture. Remote
 audio is separately silenced and detached; a blocked browser sound permission
 offers an explicit Enable sound action without unmuting the microphone.
 
-Capture currently uses deprecated Web Audio ScriptProcessor compatibility APIs
-and is unqualified by default. Fake SDK/Web Audio tests cover sequencing and
+Capture uses a versioned same-origin AudioWorklet PCM bridge with bounded local
+queues. Main-thread VAD, permission and speech acknowledgments gate processed
+frames; a stalled bridge fails closed within 350 ms. Capture is unqualified by
+default until supported-device acceptance. Fake SDK/Web Audio tests cover sequencing and
 cleanup; they do not establish device support, naturalness, background behavior,
 noise rejection, latency or speech-provider suitability. The existing bounded
 single-question speech gateway is not qualified for hours-long calls.
@@ -170,11 +177,12 @@ and [Room SDK reference](https://docs.livekit.io/reference/client-sdk-js/classes
 
 ## Internal connection intents and durable cleanup
 
-The next server foundation records an immutable, server-generated connection
+The server records an immutable, server-generated connection
 UUID beneath the reservation. Each connection gets distinct opaque room,
 browser participant and agent identities. These contain no user names, email,
 account IDs or conversation content. A committed intent is not a room, a token,
-a worker assignment or a media grant; no public HTTP route issues one here.
+a worker assignment or a media grant. Only the separately gated admission
+route can provision and confirm it before issuing a token.
 
 An exact request retry retains its connection and deadline. Confirmation checks
 the fresh owner, exact login, reservation generation, personal membership,
@@ -182,7 +190,7 @@ pause state and database clock under the shared User lock. A reservation renewal
 does not renew a media connection. Expired or revoked epochs cannot revive.
 Another connection waits until the previous connection's cleanup is verified.
 
-Cleanup locators are saved with the intent, before any future external room
+Cleanup locators are saved with the intent, before any external room
 operation. This separate ledger deliberately has no cascading foreign keys:
 reset, session removal or account deletion cannot erase the instruction to
 retire a remote resource. It contains opaque locators and operational timestamps,
@@ -191,7 +199,7 @@ Terminal reservation paths and pause atomically revoke media and request cleanup
 A bounded sweep also discovers expired sessions, lost membership and abandoned
 connections without a new browser request. Cascade-orphaned cleanup is rescued.
 
-Future provisioning adapters must report external completion through the trusted
+Provisioning adapters report external completion through the trusted
 internal finalizer even if the original browser request was canceled or its
 account records were erased. A late completion reopens cleanup and invalidates
 older worker claims or completion receipts; it cannot regain media authority.
@@ -212,7 +220,53 @@ failure does not skip the remaining cleanup. An unresolved join or teardown
 blocks replacement attempts, and uncertain cleanup quarantines the adapter.
 The reservation wrapper remains responsible for ending the reservation.
 
-This increment installs no provider adapter, token issuer, periodic worker or
-new deployment setting. The cleanup protocol and bounded invocation are tested
-with synthetic resources. Real provider revocation, worker shutdown, browser
-capture and end-to-end device behavior remain required before live activation.
+## Provider and worker source integration
+
+The server-only Cloud adapter uses bounded HTTPS control requests, restrictive
+microphone-only JWT grants and opaque epoch metadata. Both participant identities
+are explicitly revoked with the Cloud cutoff before room deletion and verified
+absence. Not-found responses alone never prove token revocation. The adapter
+requires a separately qualified Cloud configuration; self-hosted room removal
+is not substituted for Cloud token revocation.
+
+Admission retains trusted provisioning work through HTTP cancellation and always
+finalizes late external completion against the durable cleanup ledger.
+
+Migration `0050_vox_provision_attempts` records one globally exclusive physical
+provisioning attempt per epoch before external I/O. An HTTP timeout, crash or
+unknown outcome cannot be marked settled by a room-absence observation or an
+assumed waiting period. Its independent evidence survives account deletion and
+holds cleanup incomplete until specific provider/operator evidence resolves it.
+Retries in another API replica never launch a second attempt or retire its holder.
+
+The browser captures the already-owned reservation generation, checks the server
+connection UUID in token metadata and rejects swapped or extended renewal
+proofs. Its close request has an independent bounded lifetime after caller abort.
+
+`python -m navox.vox.worker_livekit start` runs the named off-record worker.
+`python -m navox.vox.worker_reconcile` runs independent durable cleanup. Cleanup
+must continue after disabling new calls while outstanding entries exist. The
+worker uses the existing approved Python gateway for speech and conversation;
+SDK model plugins do not acquire provider authority. It does not create retained
+assistant sessions or transcripts. Before allocating media, a read-only preflight
+requires all three exact gateway paths to have ordinary owner grants, configured
+adapters, healthy full-rollout assignments and the bounded turn budget. It does
+not reserve quota, execute a prompt, prove provider connectivity or qualify voice.
+The shared text-answer contract allows up to 3,000 characters; the bounded worker
+rejects answers above its 600-character speech ceiling rather than silently
+truncating them. Live spoken-answer qualification remains required independently
+of valid RTC credentials.
+
+Each media epoch has an immutable deadline of at most 120 seconds. Its periodic
+proof checks do not extend that deadline. Continuous calls still require fresh
+epoch handover and real interruption/reconnect qualification; these bounded
+workers do not establish hours-long Vox behavior.
+
+Browser media and capture qualification default off through
+`NEXT_PUBLIC_NAVOX_STUDENT_VOX_MEDIA_ENABLED` and
+`NEXT_PUBLIC_NAVOX_STUDENT_VOX_CAPTURE_QUALIFIED`. Server media, worker and Cloud
+qualification are separate. Credentials remain server-only. Real Cloud
+revocation/late-creation acceptance and verified disabled project recording/auto-egress,
+actual supported-device microphone/playback,
+worker teardown and complete end-to-end gateway behavior are required before
+live activation. Synthetic tests do not satisfy those gates.

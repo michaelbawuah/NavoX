@@ -52,10 +52,7 @@ function node() {
   return { connect: vi.fn(), disconnect: vi.fn() };
 }
 
-type ProcessEvent = {
-  inputBuffer: { getChannelData(channel: number): Float32Array };
-  outputBuffer: { getChannelData(channel: number): Float32Array };
-};
+type ProcessEvent = { data: unknown };
 
 function browser(
   options: {
@@ -65,6 +62,7 @@ function browser(
     sampleRate?: number;
     opening?: Promise<MediaStream>;
     resuming?: Promise<void>;
+    loading?: Promise<void>;
   } = {},
 ) {
   const raw = fakeTrack();
@@ -78,23 +76,27 @@ function browser(
   }[] = [];
   const processor = {
     ...node(),
-    onaudioprocess: null as ((event: ProcessEvent) => void) | null,
+    onprocessorerror: null as (() => void) | null,
+    port: {
+      onmessage: null as ((event: ProcessEvent) => void) | null,
+      postMessage: vi.fn(),
+      close: vi.fn(),
+    },
   };
   const contexts: FakeContext[] = [];
   class FakeContext {
     sampleRate = options.sampleRate ?? 16_000;
     state = options.suspended ? "suspended" : "running";
     destination = { id: "hardware" };
+    audioWorklet = {
+      addModule: vi.fn(() => options.loading ?? Promise.resolve()),
+    };
     constructor() {
       contexts.push(this);
     }
     createMediaStreamSource() {
       if (options.failure === "source") throw new Error("source");
       return source;
-    }
-    createScriptProcessor() {
-      if (options.failure === "processor") throw new Error("processor");
-      return processor;
     }
     createMediaStreamDestination() {
       if (options.failure === "destination") throw new Error("destination");
@@ -114,6 +116,7 @@ function browser(
     }
   }
   const close = vi.spyOn(FakeContext.prototype, "close");
+  const resume = vi.spyOn(FakeContext.prototype, "resume");
   if (options.failure === "connect") {
     source.connect.mockImplementation(() => {
       throw new Error("connect");
@@ -122,7 +125,23 @@ function browser(
   const getUserMedia = vi.fn(
     () => options.opening ?? Promise.resolve(stream(raw)),
   );
+  class FakeWorklet {
+    connect = processor.connect;
+    disconnect = processor.disconnect;
+    port = processor.port;
+    get onprocessorerror() {
+      return processor.onprocessorerror;
+    }
+    set onprocessorerror(value) {
+      processor.onprocessorerror = value;
+    }
+    constructor() {
+      if (options.failure === "processor") throw new Error("processor");
+    }
+  }
+  let sequence = 0;
   const scope = {
+    AudioWorkletNode: FakeWorklet,
     AudioContext: FakeContext,
     navigator: { mediaDevices: { getUserMedia } },
   };
@@ -133,19 +152,20 @@ function browser(
     gains,
     contexts,
     close,
+    resume,
     source,
     destination,
     getUserMedia,
     scope,
     factory: createBrowserVoxAudioCaptureFactory({ qualified: true, scope }),
-    emit(amplitude = 0, count = 1024, callback = processor.onaudioprocess) {
+    emit(amplitude = 0, count = 1024, callback = processor.port.onmessage) {
       const input = new Float32Array(count).fill(amplitude);
-      const output = new Float32Array(count).fill(callback ? 1 : 0);
-      callback?.({
-        inputBuffer: { getChannelData: () => input },
-        outputBuffer: { getChannelData: () => output },
-      });
-      return output;
+      const id = sequence++;
+      callback?.({ data: { type: "frame", id, frame: input } });
+      const reply = processor.port.postMessage.mock.calls.find(
+        ([message]) => message.type === "output" && message.id === id,
+      );
+      return reply?.[0].frame ?? new Float32Array(count);
     },
   };
 }
@@ -208,7 +228,9 @@ describe("Vox local processed microphone capture", () => {
     expect(capture.track).not.toBe(fake.raw);
     expect(fake.raw.enabled).toBe(false);
     expect(fake.processed.enabled).toBe(false);
-    expect(fake.source.connect).toHaveBeenCalledWith(fake.processor);
+    expect(fake.source.connect).toHaveBeenCalledWith(
+      expect.objectContaining({ port: fake.processor.port }),
+    );
     expect(fake.processor.connect).toHaveBeenCalledWith(fake.gains[0]);
     expect(fake.gains[0].connect).toHaveBeenCalledWith(fake.destination);
     expect(fake.gains.map((gain) => gain.gain.value)).toEqual([0, 0]);
@@ -303,7 +325,7 @@ describe("Vox local processed microphone capture", () => {
     capture.setEnabled(true);
     fake.emit(0.1);
     fake.emit(0.2);
-    const stale = fake.processor.onaudioprocess;
+    const stale = fake.processor.port.onmessage;
     capture.setEnabled(false);
     expect(fake.gains[0].gain.value).toBe(0);
     expect(fake.processed.enabled).toBe(false);
@@ -371,7 +393,7 @@ describe("Vox local processed microphone capture", () => {
     expect(fake.gains[0].gain.value).toBe(0);
     expect(fake.raw.stop).toHaveBeenCalledTimes(1);
     expect(fake.processed.stop).toHaveBeenCalledTimes(1);
-    expect(fake.processor.onaudioprocess).toBeNull();
+    expect(fake.processor.port.onmessage).toBeNull();
     expect(fake.source.disconnect).toHaveBeenCalledTimes(1);
     expect(fake.processor.disconnect).toHaveBeenCalledTimes(1);
     expect(fake.destination.disconnect).toHaveBeenCalledTimes(1);
@@ -385,8 +407,7 @@ describe("Vox local processed microphone capture", () => {
     const pending = fake.factory.create(
       captureOptions({ signal: controller.signal }),
     );
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.waitFor(() => expect(fake.resume).toHaveBeenCalledTimes(1));
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     resuming.resolve();
@@ -394,7 +415,84 @@ describe("Vox local processed microphone capture", () => {
     expect(fake.raw.stop).toHaveBeenCalledTimes(1);
     expect(fake.processed.stop).toHaveBeenCalledTimes(1);
     expect(fake.gains[0].gain.value).toBe(0);
-    expect(fake.processor.onaudioprocess).toBeNull();
+    expect(fake.processor.port.onmessage).toBeNull();
+  });
+
+  it("aborts a pending same-origin worklet module load before constructing or connecting nodes", async () => {
+    const loading = deferred<void>();
+    const fake = browser({ loading: loading.promise });
+    const controller = new AbortController();
+    const pending = fake.factory.create(
+      captureOptions({ signal: controller.signal }),
+    );
+    await vi.waitFor(() => expect(fake.contexts).toHaveLength(1));
+    expect(fake.contexts[0].audioWorklet.addModule).toHaveBeenCalledWith(
+      "/audio/vox-pcm-processor-v1.js",
+    );
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    loading.resolve();
+    await Promise.resolve();
+    expect(fake.raw.stop).toHaveBeenCalledTimes(1);
+    expect(fake.close).toHaveBeenCalledTimes(1);
+    expect(fake.source.connect).not.toHaveBeenCalled();
+    expect(fake.processed.enabled).toBe(true);
+    expect(fake.processed.stop).not.toHaveBeenCalled();
+  });
+
+  it("releases the microphone if loading the worklet module fails", async () => {
+    const fake = browser({
+      loading: Promise.reject(new Error("module refused")),
+    });
+    await expect(fake.factory.create(captureOptions())).rejects.toThrow(
+      "module refused",
+    );
+    expect(fake.raw.stop).toHaveBeenCalledTimes(1);
+    expect(fake.close).toHaveBeenCalledTimes(1);
+    expect(fake.source.connect).not.toHaveBeenCalled();
+  });
+
+  it("stops both tracks on processor errors, worklet faults, malformed or replayed frames", async () => {
+    for (const failure of ["processor", "fault", "missing", "replay"]) {
+      const fake = browser();
+      const capture = await fake.factory.create(captureOptions());
+      capture.setEnabled(true);
+      if (failure === "processor") fake.processor.onprocessorerror?.();
+      else if (failure === "fault")
+        fake.processor.port.onmessage?.({ data: { type: "fault" } });
+      else if (failure === "missing")
+        fake.processor.port.onmessage?.({ data: null });
+      else {
+        fake.emit();
+        fake.processor.port.onmessage?.({
+          data: { type: "frame", id: 0, frame: new Float32Array(1024) },
+        });
+      }
+      expect(fake.raw.stop).toHaveBeenCalledTimes(1);
+      expect(fake.processed.stop).toHaveBeenCalledTimes(1);
+      expect(fake.processor.port.close).toHaveBeenCalledTimes(1);
+      expect(fake.processor.port.onmessage).toBeNull();
+      expect(fake.processor.onprocessorerror).toBeNull();
+      expect(fake.gains[0].gain.value).toBe(0);
+    }
+  });
+
+  it("continues physical teardown when the worklet port has already failed", async () => {
+    const fake = browser();
+    const capture = await fake.factory.create(captureOptions());
+    capture.setEnabled(true);
+    fake.processor.port.postMessage.mockImplementation(() => {
+      throw new Error("port unavailable");
+    });
+    fake.processor.port.close.mockImplementation(() => {
+      throw new Error("port already closed");
+    });
+    expect(() => capture.stop()).not.toThrow();
+    expect(fake.raw.stop).toHaveBeenCalledTimes(1);
+    expect(fake.processed.stop).toHaveBeenCalledTimes(1);
+    expect(fake.source.disconnect).toHaveBeenCalledTimes(1);
+    expect(fake.processor.disconnect).toHaveBeenCalledTimes(1);
+    expect(fake.close).toHaveBeenCalledTimes(1);
   });
 
   it("stops the whole graph when the hardware track ends and removes track listeners", async () => {
@@ -459,16 +557,13 @@ describe("Vox local processed microphone capture", () => {
     }
   });
 
-  it("cleans up if the output buffer getter throws and if enabling a track throws", async () => {
+  it("cleans up if a worklet message getter throws and if enabling a track throws", async () => {
     const fake = browser();
     const capture = await fake.factory.create(captureOptions());
     capture.setEnabled(true);
-    fake.processor.onaudioprocess?.({
-      inputBuffer: { getChannelData: () => new Float32Array(1024) },
-      outputBuffer: {
-        getChannelData: () => {
-          throw new Error("buffer unavailable");
-        },
+    fake.processor.port.onmessage?.({
+      get data() {
+        throw new Error("buffer unavailable");
       },
     });
     expect(fake.raw.stop).toHaveBeenCalledTimes(1);

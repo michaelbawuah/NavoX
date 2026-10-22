@@ -35,6 +35,7 @@ from navox.db import (
     thread_watches,  # noqa: F401 - registers verified-send follow-up watches
     vox,  # noqa: F401 - registers content-free Vox reservations and generation fences
     vox_media,  # noqa: F401 - registers media epochs and independent cleanup instructions
+    vox_provision,  # noqa: F401 - registers independent uncertain provider outcomes
 )
 from navox.db.base import Base
 
