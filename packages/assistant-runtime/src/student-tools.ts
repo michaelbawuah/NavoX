@@ -241,13 +241,50 @@ function calendarDate(value: string): string {
     year: "numeric",
   }).format(new Date(`${value}T00:00:00Z`));
 }
+function courseSummary(
+  courses: {
+    code: string;
+    name: string;
+    professor: string | null;
+    term_start: string;
+    term_end: string;
+  }[],
+  total: number,
+  maximumRows = 10,
+  nameLimit = 200,
+  professorLimit = 120,
+): string {
+  const shown = courses.slice(0, maximumRows);
+  const shortened = shown.some(
+    (row) =>
+      row.name.length > nameLimit ||
+      (row.professor?.length ?? 0) > professorLimit,
+  );
+  const lines = shown.map(
+    (row) =>
+      `${row.code ? `${row.code} — ` : ""}${shortLabel(row.name, nameLimit)}. Professor: ${row.professor === null ? "not recorded" : shortLabel(row.professor, professorLimit)}. Term: ${calendarDate(row.term_start)} to ${calendarDate(row.term_end)}.`,
+  );
+  if (shown.length < total)
+    lines.push(`${total - shown.length} more saved courses in Classes.`);
+  if (shortened)
+    lines.push("Some labels are shortened. Open Classes for full details.");
+  else if (shown.length < total) lines.push("Open Classes for full details.");
+  return lines.join("\n");
+}
 function previewTime(start: string, end: string): string {
   // Preview results provide instants, not an authoritative student timezone.
   const first = new Date(start).toISOString().slice(0, 16);
   const last = new Date(end).toISOString().slice(0, 16);
   return `${first.replace("T", " ")}–${first.slice(0, 10) === last.slice(0, 10) ? last.slice(11) : last.replace("T", " ")} UTC`;
 }
-function planSummary(result: ReturnType<typeof planResult>): string {
+function planSummary(
+  result: ReturnType<typeof planResult>,
+  maximumRows = 3,
+  labelLimit = 120,
+  warningLimit = 300,
+): string {
+  if (maximumRows === 0)
+    return `Preview only: ${result.blocks.length} blocks, ${result.unfitted_work.length} unfitted, ${result.warnings.length} warnings. No changes applied. Review omitted details in Planner.`;
   const reasons: Record<string, string> = {
     deadline_passed: "the deadline has passed",
     cannot_meet_deadline: "the available time cannot meet the deadline",
@@ -258,31 +295,38 @@ function planSummary(result: ReturnType<typeof planResult>): string {
     `Plan preview: ${result.blocks.length} proposed blocks, ${result.unfitted_work.length} unfitted tasks, ${result.warnings.length} warnings. Review in Planner before saving. No plan or calendar changes have been applied.`,
   ];
   if (!result.blocks.length) lines.push("No proposed study blocks.");
-  for (const block of result.blocks.slice(0, 3))
+  for (const block of result.blocks.slice(0, maximumRows))
     lines.push(
-      `${shortLabel(block.title)}: ${block.minutes} minutes, ${previewTime(block.start_at, block.end_at)}${block.focus_window ? "; in a focus window" : ""}.`,
+      `${shortLabel(block.title, labelLimit)}: ${block.minutes} minutes, ${previewTime(block.start_at, block.end_at)}${block.focus_window ? "; in a focus window" : ""}.`,
     );
-  if (result.blocks.length > 3)
-    lines.push(`${result.blocks.length - 3} more proposed blocks in Planner.`);
-  for (const work of result.unfitted_work.slice(0, 3))
+  if (result.blocks.length > maximumRows)
     lines.push(
-      `Unfitted — ${shortLabel(work.title)}: ${work.minutes} minutes; ${reasons[String(work.reason)]}${work.due_at ? `; due ${new Date(work.due_at).toISOString().replace("T", " ").slice(0, 16)} UTC` : ""}.`,
+      `${result.blocks.length - maximumRows} more proposed blocks in Planner.`,
     );
-  if (result.unfitted_work.length > 3)
+  for (const work of result.unfitted_work.slice(0, maximumRows))
     lines.push(
-      `${result.unfitted_work.length - 3} more unfitted tasks in Planner.`,
+      `Unfitted — ${shortLabel(work.title, labelLimit)}: ${work.minutes} minutes; ${reasons[String(work.reason)]}${work.due_at ? `; due ${new Date(work.due_at).toISOString().replace("T", " ").slice(0, 16)} UTC` : ""}.`,
     );
-  for (const capacity of result.capacities.slice(0, 3))
+  if (result.unfitted_work.length > maximumRows)
+    lines.push(
+      `${result.unfitted_work.length - maximumRows} more unfitted tasks in Planner.`,
+    );
+  for (const capacity of result.capacities.slice(0, maximumRows))
     lines.push(
       `${calendarDate(capacity.day)}: ${capacity.free_minutes} free minutes, ${capacity.planned_minutes} planned, ${capacity.buffer_minutes} buffer minutes.`,
     );
-  if (result.capacities.length > 3)
-    lines.push(`${result.capacities.length - 3} more days in Planner.`);
-  for (const warning of result.warnings.slice(0, 2))
-    lines.push(`Warning: ${shortLabel(warning, 300)}`);
-  if (result.warnings.length > 2)
-    lines.push(`${result.warnings.length - 2} more warnings in Planner.`);
-  return summaryWithin(lines.join("\n"));
+  if (result.capacities.length > maximumRows)
+    lines.push(
+      `${result.capacities.length - maximumRows} more days in Planner.`,
+    );
+  const warningRows = Math.min(2, maximumRows);
+  for (const warning of result.warnings.slice(0, warningRows))
+    lines.push(`Warning: ${shortLabel(warning, warningLimit)}`);
+  if (result.warnings.length > warningRows)
+    lines.push(
+      `${result.warnings.length - warningRows} more warnings in Planner.`,
+    );
+  return lines.join("\n");
 }
 function optionalId(args: Record<string, unknown>, key: string) {
   if (args[key] !== undefined && !isUuid(args[key])) invalidArgs();
@@ -664,6 +708,7 @@ export async function executeStudentTool(
   requireStudentScope(await upstream.authorize(signal), expectedScope);
   let data: Record<string, unknown>;
   let summary: string;
+  let compactSummaries: (() => Iterable<string>) | undefined;
   let effect: StudentToolEffect = "read";
   switch (call.name) {
     case "clock.read": {
@@ -728,21 +773,15 @@ export async function executeStudentTool(
         truncated: matching.length > 10,
       };
       summary = matching.length
-        ? summaryWithin(
-            matching
-              .slice(0, 10)
-              .map(
-                (row) =>
-                  `${row.code ? `${row.code} — ` : ""}${row.name}. Professor: ${row.professor ?? "not recorded"}. Term: ${calendarDate(row.term_start)} to ${calendarDate(row.term_end)}.`,
-              )
-              .concat(
-                matching.length > 10
-                  ? [`${matching.length - 10} more saved courses in Classes.`]
-                  : [],
-              )
-              .join("\n"),
-          )
+        ? courseSummary(matching, matching.length)
         : "You have no saved courses yet.";
+      if (matching.length)
+        compactSummaries = function* () {
+          yield courseSummary(matching, matching.length, 10, 120);
+          for (let rows = Math.min(10, matching.length); rows >= 1; rows--)
+            yield courseSummary(matching, matching.length, rows, 80, 80);
+          yield courseSummary(matching, matching.length, 1, 40, 40);
+        };
       break;
     }
     case "tasks.read": {
@@ -811,6 +850,12 @@ export async function executeStudentTool(
       };
       effect = "review";
       summary = planSummary(result);
+      compactSummaries = function* () {
+        yield planSummary(result, 2, 80, 160);
+        yield planSummary(result, 1, 60, 100);
+        yield planSummary(result, 1, 40, 40);
+        yield planSummary(result, 0);
+      };
       break;
     }
     case "feeds.read": {
@@ -955,7 +1000,27 @@ export async function executeStudentTool(
     data,
     summary,
   };
-  if (bytes(result) > STUDENT_AGENT_LIMITS.toolBytes)
+  if (
+    compactSummaries &&
+    (result.summary.length > 4000 ||
+      bytes(result) > STUDENT_AGENT_LIMITS.toolBytes)
+  ) {
+    // Change only display text. Check the entire serialized record so UTF-8 and
+    // JSON escaping cannot consume observation space or enlarge the tool limit.
+    for (const candidate of compactSummaries())
+      if (
+        candidate.length <= 4000 &&
+        bytes({ ...result, summary: candidate }) <=
+          STUDENT_AGENT_LIMITS.toolBytes
+      ) {
+        result.summary = candidate;
+        break;
+      }
+  }
+  if (
+    bytes(result) > STUDENT_AGENT_LIMITS.toolBytes ||
+    (compactSummaries && result.summary.length > 4000)
+  )
     throw new StudentToolError(
       "budget",
       "This result is too large to review safely here. Open the student screen for the full details.",

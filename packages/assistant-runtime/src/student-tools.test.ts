@@ -329,6 +329,76 @@ describe("host-owned course and preview presentation", () => {
     },
   );
 
+  it.each([
+    ["ASCII", "a".repeat(200)],
+    ["Unicode", `${"学".repeat(4)}${"a".repeat(196)}`],
+    ["JSON escaping", `${'"'.repeat(8)}${"a".repeat(192)}`],
+  ])(
+    "keeps formerly admitted maximum-length course data within the real byte budget (%s)",
+    async (kind, name) => {
+      const courses = Array.from({ length: 10 }, (_, index) => ({
+        ...course,
+        id: `55555555-5555-4555-8555-${String(index).padStart(12, "0")}`,
+        code: "CS1",
+        name,
+        professor: "p".repeat(120),
+      }));
+      // Pin a previously admitted payload, including the historical display text.
+      // Data and observation limits must not change to accommodate presentation.
+      const historical = {
+        call_id: TURN,
+        name: "course.info",
+        effect: "read",
+        data: { courses, truncated: false },
+        summary: courses
+          .map((row) => `${row.code} — ${row.name}, ${row.professor}`)
+          .join("; "),
+      };
+      expect(Buffer.byteLength(JSON.stringify(historical), "utf8")).toBe(
+        kind === "ASCII" ? 7997 : 8157,
+      );
+      const upstream = { ...fake(), courses: vi.fn(async () => ({ courses })) };
+      const result = await executeStudentTool(
+        upstream,
+        scope,
+        { call_id: TURN, name: "course.info", args: {} },
+        new AbortController().signal,
+      );
+      expect(result.data).toEqual(historical.data);
+      expect(
+        Buffer.byteLength(JSON.stringify(result), "utf8"),
+      ).toBeLessThanOrEqual(8192);
+      expect(result.summary.length).toBeLessThanOrEqual(4000);
+      expect(
+        result.summary.match(/Term: Aug 20, 2026 to Dec 10, 2026/g),
+      ).toHaveLength(10);
+      expect(result.summary).toContain("Some labels are shortened.");
+      expect(result.summary).toContain("Open Classes for full details.");
+      expect(upstream.select).not.toHaveBeenCalled();
+      expect(upstream.converse).not.toHaveBeenCalled();
+    },
+  );
+
+  it("still rejects course observations whose data alone exceed the byte budget", async () => {
+    const courses = Array.from({ length: 10 }, () => ({
+      ...course,
+      name: "学".repeat(200),
+      professor: "讲".repeat(120),
+    }));
+    expect(
+      Buffer.byteLength(JSON.stringify({ courses, truncated: false }), "utf8"),
+    ).toBeGreaterThan(8192);
+    const upstream = { ...fake(), courses: vi.fn(async () => ({ courses })) };
+    await expect(
+      executeStudentTool(
+        upstream,
+        scope,
+        { call_id: TURN, name: "course.info", args: {} },
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({ reasonCode: "budget" });
+  });
+
   it("summarizes actual block times, focus, unfitted work, capacity and warnings without accepting", async () => {
     const source = proposed();
     const upstream = { ...fake(), preview: vi.fn(async () => source) };
@@ -451,6 +521,55 @@ describe("host-owned course and preview presentation", () => {
     expect(result.summary).toContain("Warning:");
     expect(result.summary.length).toBeLessThanOrEqual(4000);
     expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(8192);
+  });
+
+  it("fits preview display into remaining serialized space without changing observations or review authority", async () => {
+    const source = proposed();
+    source.result.warnings = [];
+    const historical = (warnings: string[]) => ({
+      call_id: TURN,
+      name: "plan.preview",
+      effect: "review",
+      data: { ...source, result: { ...source.result, warnings } },
+      summary:
+        "Your plan preview is ready. Review every block in Planner before saving it. No plan or calendar changes have been applied.",
+    });
+    for (let count = 1; count <= 30; count++) {
+      const warnings = Array.from({ length: count }, () => "w".repeat(500));
+      if (
+        Buffer.byteLength(JSON.stringify(historical(warnings)), "utf8") > 8192
+      )
+        break;
+      source.result.warnings = warnings;
+    }
+    expect(source.result.warnings.length).toBeGreaterThan(2);
+    expect(
+      Buffer.byteLength(
+        JSON.stringify(historical(source.result.warnings)),
+        "utf8",
+      ),
+    ).toBeLessThanOrEqual(8192);
+    const upstream = { ...fake(), preview: vi.fn(async () => source) };
+    const result = await executeStudentTool(
+      upstream,
+      scope,
+      { call_id: TURN, name: "plan.preview", args: {} },
+      new AbortController().signal,
+    );
+    expect(result.data).toEqual(source);
+    expect(
+      Buffer.byteLength(JSON.stringify(result), "utf8"),
+    ).toBeLessThanOrEqual(8192);
+    expect(result.summary.length).toBeLessThanOrEqual(4000);
+    expect(result.summary).toContain("Planner");
+    expect(result.summary).toMatch(/Review/);
+    expect(result.summary).toMatch(
+      /No plan or calendar changes have been applied|No changes applied/,
+    );
+    expect(result.summary).toMatch(
+      /more warnings in Planner|Review omitted details in Planner/,
+    );
+    expect(result.effect).toBe("review");
   });
 
   it.each([false, true])(
