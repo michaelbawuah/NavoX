@@ -1,26 +1,25 @@
 import { createBrowserVoxAudioCaptureFactory } from "./vox-audio-capture";
 import type { VoxTransport } from "./vox-call";
-import {
-  createLiveKitVoxTransport,
-  type VoxMediaAdmission,
-} from "./vox-livekit";
+import { createLiveKitVoxTransport } from "./vox-livekit";
+import { createVoxMediaAdmission } from "./vox-media-admission";
 import { VoxReservationClient, wrapVoxReservations } from "./vox-reservations";
-
-/** A reservation is never a media grant. No public setting may manufacture one. */
-const unavailableAdmission: VoxMediaAdmission = {
-  available: false,
-  async join() {
-    throw new Error("Vox calls are not available on this deployment.");
-  },
-};
 
 /** New private lifecycle per provider; construction performs no network or media I/O. */
 export function createDefaultVoxTransport(): VoxTransport {
+  const reservations = new VoxReservationClient();
   return wrapVoxReservations(
     createLiveKitVoxTransport({
-      admission: unavailableAdmission,
-      capture: createBrowserVoxAudioCaptureFactory({ qualified: false }),
+      admission: createVoxMediaAdmission({
+        reservations,
+        qualified:
+          process.env.NEXT_PUBLIC_NAVOX_STUDENT_VOX_MEDIA_ENABLED === "true",
+      }),
+      capture: createBrowserVoxAudioCaptureFactory({
+        qualified:
+          process.env.NEXT_PUBLIC_NAVOX_STUDENT_VOX_CAPTURE_QUALIFIED ===
+          "true",
+      }),
     }),
-    new VoxReservationClient(),
+    reservations,
   );
 }

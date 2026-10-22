@@ -1,0 +1,197 @@
+/** Cookie-bound media admission. Construction never opens a room or microphone. */
+import type { VoxTransportRequest } from "./vox-call";
+import type { VoxMediaAdmission, VoxMediaLease } from "./vox-livekit";
+import type { VoxReservationClient } from "./vox-reservations";
+
+const uuid =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const opaque = {
+  room_name: /^vx-[0-9a-f]{32}$/,
+  participant_identity: /^vc-[0-9a-f]{32}$/,
+  agent_identity: /^va-[0-9a-f]{32}$/,
+};
+const date =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/;
+const unavailable = () => new Error("The Vox media connection is unavailable.");
+const bindingKeys = [
+  "connection_id",
+  "client_call_id",
+  "generation",
+  "room_name",
+  "participant_identity",
+  "agent_identity",
+  "expires_at",
+] as const;
+
+type Binding = {
+  connection_id: string;
+  client_call_id: string;
+  generation: number;
+  room_name: string;
+  participant_identity: string;
+  agent_identity: string;
+  expires_at: string;
+};
+
+function record(
+  raw: unknown,
+  keys: readonly string[],
+): Record<string, unknown> {
+  if (
+    !raw ||
+    typeof raw !== "object" ||
+    Array.isArray(raw) ||
+    Object.keys(raw).length !== keys.length ||
+    Object.keys(raw).some((key) => !keys.includes(key))
+  )
+    throw unavailable();
+  return raw as Record<string, unknown>;
+}
+
+function binding(
+  value: Record<string, unknown>,
+  request: VoxTransportRequest,
+  generation: number,
+  deadline: number,
+  now: number,
+): Binding {
+  if (
+    typeof value.connection_id !== "string" ||
+    !uuid.test(value.connection_id) ||
+    value.client_call_id !== request.callId ||
+    value.generation !== generation ||
+    typeof value.expires_at !== "string" ||
+    !date.test(value.expires_at)
+  )
+    throw unavailable();
+  const expiry = Date.parse(value.expires_at);
+  if (
+    !Number.isFinite(now) ||
+    !Number.isFinite(expiry) ||
+    expiry <= now ||
+    expiry > deadline ||
+    expiry > now + 120_000
+  )
+    throw unavailable();
+  for (const key of [
+    "room_name",
+    "participant_identity",
+    "agent_identity",
+  ] as const) {
+    if (typeof value[key] !== "string" || !opaque[key].test(value[key]))
+      throw unavailable();
+  }
+  return value as unknown as Binding;
+}
+
+/** The server and a separately qualified capture stack must both allow the call. */
+export function createVoxMediaAdmission(options: {
+  reservations: VoxReservationClient;
+  qualified: boolean;
+  now?: () => number;
+  requestId?: () => string;
+}): VoxMediaAdmission {
+  return {
+    available: options.qualified === true,
+    async join(request) {
+      if (!options.qualified || request.signal.aborted) throw unavailable();
+      const now = options.now ?? Date.now;
+      const owner = Object.freeze({ ...request.owner });
+      const callId = request.callId;
+      const authority = options.reservations.mediaAuthority(owner, callId);
+      const requestId = (options.requestId ?? (() => crypto.randomUUID()))();
+      const value = record(
+        await options.reservations.mediaRequest(
+          owner,
+          callId,
+          authority.generation,
+          { action: "join", requestId },
+          request.signal,
+        ),
+        [...bindingKeys, "server_url", "token"],
+      );
+      const admitted = binding(
+        value,
+        request,
+        authority.generation,
+        authority.expiresAt,
+        now(),
+      );
+      if (
+        typeof value.server_url !== "string" ||
+        value.server_url.length > 2048 ||
+        typeof value.token !== "string" ||
+        value.token.length > 8192 ||
+        !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(value.token)
+      )
+        throw unavailable();
+      const url = new URL(value.server_url);
+      if (
+        url.protocol !== "wss:" ||
+        !url.hostname ||
+        url.username ||
+        url.password ||
+        url.search ||
+        url.hash
+      )
+        throw unavailable();
+      // Keep this snapshot immutable even when the enclosing reservation renews.
+      const expiresAt = Date.parse(admitted.expires_at);
+      let closing: Promise<void> | null = null;
+      const lease: VoxMediaLease = {
+        owner,
+        callId,
+        connectionId: admitted.connection_id,
+        generation: admitted.generation,
+        roomName: admitted.room_name,
+        participantIdentity: admitted.participant_identity,
+        agentIdentity: admitted.agent_identity,
+        serverUrl: value.server_url,
+        token: value.token,
+        expiresAt,
+        async renew(signal) {
+          if (closing || signal.aborted) throw unavailable();
+          const renewed = binding(
+            record(
+              await options.reservations.mediaRequest(
+                owner,
+                callId,
+                admitted.generation,
+                { action: "renew", connectionId: admitted.connection_id },
+                signal,
+              ),
+              bindingKeys,
+            ),
+            request,
+            admitted.generation,
+            expiresAt,
+            now(),
+          );
+          if (
+            closing ||
+            signal.aborted ||
+            bindingKeys.some((key) => renewed[key] !== admitted[key])
+          )
+            throw unavailable();
+          return {
+            connectionId: admitted.connection_id,
+            generation: admitted.generation,
+            expiresAt,
+          };
+        },
+        close() {
+          // Cleanup has an independent bounded lifetime, including after the
+          // browser aborts or ends its reservation. Never retry an unknown join.
+          closing ??= options.reservations
+            .mediaRequest(owner, callId, admitted.generation, {
+              action: "close",
+              connectionId: admitted.connection_id,
+            })
+            .then(() => {});
+          return closing;
+        },
+      };
+      return lease;
+    },
+  };
+}

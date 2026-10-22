@@ -49,6 +49,14 @@ class Settings(BaseSettings):
     student_coursework_enabled: bool = False
     student_board_enabled: bool = False
     student_vox_enabled: bool = False
+    # Media is a separate release gate. A URL/key alone never admits a call.
+    student_vox_media_enabled: bool = False
+    student_vox_worker_qualified: bool = False
+    student_vox_livekit_cloud_qualified: bool = False
+    student_vox_livekit_url: str = ""
+    student_vox_livekit_api_key: SecretStr | None = None
+    student_vox_livekit_api_secret: SecretStr | None = None
+    student_vox_livekit_agent_name: str = "navox-vox"
     student_recovery_enabled: bool = False
     student_email_enabled: bool = False
     student_goals_enabled: bool = False

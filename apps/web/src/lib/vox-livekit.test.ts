@@ -17,6 +17,8 @@ const owner = {
   workspaceId: "22222222-2222-4222-8222-222222222222",
 };
 const callId = "33333333-3333-4333-8333-333333333333";
+const connectionId = "44444444-4444-4444-8444-444444444444";
+const generation = 4;
 const agent = "navox-agent";
 const participant = "navox-student";
 
@@ -36,9 +38,19 @@ async function settle() {
 
 function token(changes: Record<string, unknown> = {}) {
   const value = {
+    metadata: JSON.stringify({ connection_id: connectionId, generation }),
     sub: participant,
     exp: Math.floor((Date.now() + 120_000) / 1000),
-    video: { room: "navox-room", roomJoin: true, canPublishData: false },
+    nbf: Math.floor(Date.now() / 1000) - 1,
+    video: {
+      room: "navox-room",
+      roomJoin: true,
+      canPublishData: false,
+      canPublish: true,
+      canSubscribe: true,
+      canUpdateOwnMetadata: false,
+      canPublishSources: ["microphone"],
+    },
     ...changes,
   };
   return `e30.${btoa(JSON.stringify(value)).replaceAll("=", "")}.c2ln`;
@@ -82,13 +94,19 @@ function environment() {
   const lease: VoxMediaLease = {
     owner: { ...owner },
     callId,
+    connectionId,
+    generation,
     roomName: "navox-room",
     participantIdentity: participant,
     agentIdentity: agent,
     serverUrl: "wss://media.example.com",
     token: token(),
     expiresAt: Date.now() + 120_000,
-    renew: vi.fn(async () => ({ expiresAt: Date.now() + 120_000 })),
+    renew: vi.fn(async () => ({
+      connectionId,
+      generation,
+      expiresAt: lease.expiresAt,
+    })),
     close: vi.fn(async () => {}),
   };
   const room = new FakeRoom();
@@ -280,6 +298,95 @@ describe("qualified LiveKit Vox adapter", () => {
     );
     expect(env.room.disconnect).toHaveBeenCalled();
     expect(env.factory.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    undefined,
+    "not-json",
+    null,
+    JSON.stringify({ connection_id: callId, generation }),
+    JSON.stringify({ connection_id: connectionId, generation: generation + 1 }),
+    JSON.stringify({
+      connection_id: connectionId,
+      generation: String(generation),
+    }),
+    JSON.stringify({ connection_id: connectionId }),
+    JSON.stringify([connectionId, generation]),
+  ])(
+    "rejects absent, forged or swapped JWT epoch metadata before loading media: %j",
+    async (metadata) => {
+      const env = environment();
+      env.lease.token = token({ metadata });
+      await expect(env.transport.connect(env.request)).rejects.toThrow(
+        "unavailable",
+      );
+      expect(env.loadSdk).not.toHaveBeenCalled();
+      expect(env.factory.create).not.toHaveBeenCalled();
+      expect(env.room.connect).not.toHaveBeenCalled();
+      expect(env.lease.close).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it.each([
+    { connectionId: callId },
+    { generation: generation + 1 },
+    { generation: String(generation) },
+    { expiresAt: 1_800_000_121_000 },
+  ])(
+    "retires the exact active epoch and microphone for a swapped renewal proof: %j",
+    async (change) => {
+      const env = environment();
+      const connection = await env.transport.connect(env.request);
+      connection.setMicrophoneEnabled(true);
+      await settle();
+      await env.voice(true);
+      expect(env.media.enabled).toBe(true);
+      vi.mocked(env.lease.renew).mockResolvedValue({
+        connectionId,
+        generation,
+        expiresAt: env.lease.expiresAt,
+        ...change,
+      } as Awaited<ReturnType<VoxMediaLease["renew"]>>);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await settle();
+      expect(env.lease.renew).toHaveBeenCalledTimes(1);
+      expect(env.request.onEvent).toHaveBeenCalledWith({ type: "ended" });
+      expect(env.media.enabled).toBe(false);
+      expect(env.capture.stop).toHaveBeenCalled();
+      expect(env.local.stop).toHaveBeenCalled();
+      expect(env.lease.close).toHaveBeenCalledTimes(1);
+      expect(env.room.disconnect).toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+      await connection.close();
+      expect(env.lease.close).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("cannot revive a retired epoch when its in-flight renewal returns late", async () => {
+    const env = environment();
+    const renewal = deferred<Awaited<ReturnType<VoxMediaLease["renew"]>>>();
+    vi.mocked(env.lease.renew).mockReturnValue(renewal.promise);
+    const connection = await env.transport.connect(env.request);
+    connection.setMicrophoneEnabled(true);
+    await settle();
+    await env.voice(true);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(env.lease.renew).toHaveBeenCalledTimes(1);
+    await connection.close();
+    renewal.resolve({
+      connectionId,
+      generation,
+      expiresAt: env.lease.expiresAt,
+    });
+    await settle();
+    connection.setMicrophoneEnabled(true);
+    await settle();
+    expect(env.media.enabled).toBe(false);
+    expect(env.factory.create).toHaveBeenCalledTimes(1);
+    expect(env.lease.close).toHaveBeenCalledTimes(1);
+    expect(env.room.connect).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("does not load the SDK after a late admission resolves for an aborted attempt", async () => {
@@ -960,5 +1067,29 @@ describe("qualified LiveKit Vox adapter", () => {
     } finally {
       vi.doUnmock("livekit-client");
     }
+  });
+});
+
+describe("bounded Vox provider grants", () => {
+  it.each([
+    { exp: 1_800_000_121 },
+    { nbf: 1_800_000_060 },
+    { nbf: undefined },
+    { video: { canPublishSources: ["microphone", "camera"] } },
+    { video: { canPublishData: true } },
+    { video: { canUpdateOwnMetadata: true } },
+    { video: { roomAdmin: true } },
+  ])("rejects broader or future provider claims %j", async (change) => {
+    const env = environment();
+    const original = JSON.parse(atob(env.lease.token.split(".")[1]));
+    env.lease.token = token({
+      ...change,
+      ...(change.video
+        ? { video: { ...original.video, ...change.video } }
+        : {}),
+    });
+    await expect(env.transport.connect(env.request)).rejects.toThrow();
+    expect(env.loadSdk).not.toHaveBeenCalled();
+    expect(env.lease.close).toHaveBeenCalledTimes(1);
   });
 });

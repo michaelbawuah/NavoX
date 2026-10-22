@@ -229,6 +229,55 @@ export class VoxReservationClient {
     return intent ? this.remaining(intent) : 0;
   }
 
+  /** A media intent must use the already-owned live reservation generation. */
+  mediaAuthority(
+    owner: Readonly<VoxOwner>,
+    callId: string,
+  ): {
+    generation: number;
+    expiresAt: number;
+  } {
+    const intent = this.intents.get(this.key(scope(owner), uuid(callId)));
+    if (!intent?.reservation || intent.generation === null)
+      throw new VoxReservationError("scope-changed");
+    this.fresh(intent);
+    if (this.remaining(intent) <= 0)
+      throw new VoxReservationError("scope-changed");
+    return {
+      generation: intent.generation,
+      expiresAt: Date.parse(intent.reservation.expires_at),
+    };
+  }
+
+  /** Reuse the same bounded, private cookie transport for a captured media epoch. */
+  async mediaRequest(
+    owner: Readonly<VoxOwner>,
+    callId: string,
+    capturedGeneration: number,
+    operation:
+      | { action: "join"; requestId: string }
+      | { action: "renew" | "close"; connectionId: string },
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    const checked = scope(owner);
+    const id = uuid(callId);
+    const gen = generation(capturedGeneration);
+    const path =
+      operation.action === "join"
+        ? `/${id}/media`
+        : `/${id}/media/${uuid(operation.connectionId)}/${operation.action}`;
+    return this.request(
+      checked,
+      path,
+      "POST",
+      operation.action === "join"
+        ? { generation: gen, request_id: uuid(operation.requestId) }
+        : { generation: gen },
+      operation.action === "close" ? 204 : 200,
+      signal,
+    );
+  }
+
   private sameReservation(
     left: VoxReservationView,
     right: VoxReservationView,

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from navox.connectors.sync_state import database_now, utc
 from navox.db.vox_media import VoxMediaCleanup, VoxMediaConnection
+from navox.db.vox_provision import VoxMediaProvisionAttempt
 
 CLAIM_SECONDS = 30
 PROVIDER_SECONDS = 10
@@ -139,6 +140,16 @@ async def finish_cleanup(
         .with_for_update()
         .execution_options(populate_existing=True)
     )
+    unsettled = None
+    if row is not None:
+        unsettled = await database.scalar(
+            select(VoxMediaProvisionAttempt.id)
+            .where(
+                VoxMediaProvisionAttempt.connection_id == row.connection_id,
+                VoxMediaProvisionAttempt.status != "acknowledged",
+            )
+            .limit(1)
+        )
     now = await database_now(database)
     if (
         row is None
@@ -152,9 +163,11 @@ async def finish_cleanup(
     ):
         await database.commit()
         return False
+    # A timed-out RPC may create a room or dispatch after today's absence check.
+    # Without acknowledged completion, no finite guessed delay proves quiescence.
+    verified = _verified(claim, receipt) and unsettled is None
     row.claim_id = None
     row.claim_expires_at = None
-    verified = _verified(claim, receipt)
     if verified:
         row.status = "done"
         row.completed_at = now
