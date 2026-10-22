@@ -131,13 +131,26 @@ function CallDialog({
   onStart: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const returnTarget = useRef<HTMLElement | null>(null);
   const id = useId();
   const ended = state.phase === "ended";
   const cleanupIncomplete = state.endReason === "cleanup-incomplete";
-  const dismiss = ended ? onDone : onMinimize;
+  function dismiss() {
+    if (ended) onDone();
+    else onMinimize();
+    queueMicrotask(() => {
+      if (returnTarget.current?.isConnected) returnTarget.current.focus();
+    });
+  }
   useLayoutEffect(() => {
     const element = dialog.current;
     if (!element) return;
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      active.hasAttribute("data-vox-launcher")
+    )
+      returnTarget.current = active;
     if (typeof element.showModal === "function") element.showModal();
     else element.setAttribute("open", "");
     element.querySelector<HTMLButtonElement>("button")?.focus();
@@ -321,7 +334,7 @@ function CallDialog({
               Start another call
             </button>
           )}
-          <button type="button" className={styles.secondary} onClick={onDone}>
+          <button type="button" className={styles.secondary} onClick={dismiss}>
             Done
           </button>
         </div>
@@ -334,6 +347,128 @@ function CallDialog({
         Continue in typed chat <span aria-hidden="true">↗</span>
       </Link>
     </dialog>
+  );
+}
+
+/** A route-owned entry only; the root controls own the one call dialog. */
+export function VoxHomeLauncher({
+  chatHref = "/navox",
+}: {
+  chatHref?: string;
+}) {
+  const call = useVoxCall();
+  const id = useId();
+  const [startError, setStartError] = useState(false);
+  const state = call?.state;
+  const verified = state?.owner !== null && state?.ownerVerified === true;
+  const ongoing =
+    state !== undefined &&
+    ["connecting", "reconnecting", "active", "standby"].includes(state.phase);
+  const cleanupIncomplete = state?.endReason === "cleanup-incomplete";
+  const unavailable = !call?.available || state?.phase === "unavailable";
+  const label = cleanupIncomplete
+    ? "Reload NavoX"
+    : ongoing
+      ? "Return to Vox call"
+      : "Talk with NavoX";
+  const status = !verified
+    ? "Checking your sign-in…"
+    : cleanupIncomplete
+      ? "Reload needed"
+      : unavailable
+        ? "Vox calls are not available yet"
+        : state?.endReason === "connection-failed"
+          ? "The call could not connect"
+          : state
+            ? phaseLabel(state)
+            : "Talk with NavoX";
+  const detail = !verified
+    ? "Your call can start after your sign-in is checked."
+    : cleanupIncomplete
+      ? "Call cleanup could not be confirmed. Reload before starting another call."
+      : unavailable
+        ? "You can still ask NavoX in typed chat."
+        : ongoing && state
+          ? phaseDetail(state)
+          : state?.endReason === "connection-failed"
+            ? "Try again when you’re ready, or continue in typed chat."
+            : "A question, an idea, or a moment to think.";
+
+  async function openCall() {
+    if (!call || !verified) return;
+    if (cleanupIncomplete) {
+      window.location.reload();
+      return;
+    }
+    if (unavailable) return;
+    setStartError(false);
+    if (ongoing) {
+      call.controller.setMinimized(false);
+      return;
+    }
+    try {
+      await call.controller.start();
+    } catch {
+      setStartError(true);
+    }
+  }
+
+  return (
+    <section
+      className={`${styles.widget} ${styles.homeEntry}`}
+      aria-label="Vox for your day"
+    >
+      <button
+        type="button"
+        className={styles.homeLauncher}
+        data-vox-launcher="home"
+        aria-label={label}
+        aria-haspopup={cleanupIncomplete ? undefined : "dialog"}
+        aria-describedby={`${id}-status ${id}-detail`}
+        title="Talk with NavoX"
+        disabled={!verified || (unavailable && !cleanupIncomplete)}
+        onClick={() => void openCall()}
+      >
+        <span className={styles.homeWave}>
+          <Wave activity={verified && ongoing ? state?.activity : "quiet"} />
+        </span>
+        <span className={styles.homeWords}>
+          <span className={styles.homeEyebrow}>Talk with NavoX</span>
+          <strong>Vox</strong>
+          <span
+            id={`${id}-status`}
+            className={styles.homeStatus}
+            role="status"
+            aria-live="polite"
+          >
+            {status}
+            {verified &&
+              ongoing &&
+              state?.microphoneMuted &&
+              state.activity === "speaking" &&
+              " · Microphone muted"}
+            {verified &&
+              ongoing &&
+              state?.speakerEnabled === false &&
+              " · Speaker off"}
+          </span>
+        </span>
+        <span className={styles.homeArrow} aria-hidden="true">
+          ↗
+        </span>
+      </button>
+      <div className={styles.homeFooter}>
+        <p id={`${id}-detail`}>{detail}</p>
+        <Link href={chatHref}>
+          Use typed chat <span aria-hidden="true">↗</span>
+        </Link>
+      </div>
+      {startError && verified && !ongoing && !cleanupIncomplete && (
+        <p role="alert" className={styles.hint}>
+          The call could not be started. Please try again.
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -415,6 +550,7 @@ export function VoxCallControls({
         ref={launcher}
         type="button"
         className={styles.launcher}
+        data-vox-launcher={variant}
         aria-label={label}
         aria-haspopup={cleanupIncomplete ? undefined : "dialog"}
         aria-expanded={cleanupIncomplete ? undefined : open}

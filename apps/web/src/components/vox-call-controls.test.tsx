@@ -9,7 +9,7 @@ import {
   type VoxConnection,
   type VoxTransportRequest,
 } from "../lib/vox-call";
-import { VoxCallControls } from "./vox-call-controls";
+import { VoxCallControls, VoxHomeLauncher } from "./vox-call-controls";
 import {
   useVoxCall,
   type VoxCallContextValue,
@@ -41,9 +41,14 @@ let host: HTMLDivElement;
 let root: Root;
 let visibility: DocumentVisibilityState;
 
-function Route({ page }: { page: string }) {
+function Route({ page, home = false }: { page: string; home?: boolean }) {
   latest = useVoxCall();
-  return <p>{page}</p>;
+  return (
+    <>
+      {home && <VoxHomeLauncher />}
+      <p>{page}</p>
+    </>
+  );
 }
 
 function rig(available = true) {
@@ -84,12 +89,13 @@ function rig(available = true) {
   async function mount(
     page = "Today",
     variant: "home" | "floating" = "floating",
+    home = false,
   ) {
     await act(async () =>
       root.render(
         <VoxCallProvider {...configuration}>
           <VoxCallControls variant={variant} />
-          <Route key={page} page={page} />
+          <Route key={page} page={page} home={home && page === "Today"} />
         </VoxCallProvider>,
       ),
     );
@@ -146,6 +152,219 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
+});
+
+function homeButton() {
+  const element = host.querySelector<HTMLButtonElement>(
+    '[data-vox-launcher="home"]',
+  );
+  if (!element) throw new Error("Missing Home Vox entry");
+  return element;
+}
+
+async function clickHome() {
+  await act(async () => {
+    homeButton().focus();
+    homeButton().click();
+  });
+}
+
+describe("Home entry shares the app-scoped Vox call", () => {
+  it("never creates a call or another dialog on mount and waits for verified sign-in", async () => {
+    const test = rig();
+    const check = deferred<AccountAccess>();
+    test.restoreAccess.mockImplementationOnce(() => check.promise);
+    await test.mount("Today", "floating", true);
+    expect(homeButton().disabled).toBe(true);
+    expect(homeButton().textContent).toContain("Checking your sign-in");
+    expect(test.transport.connect).not.toHaveBeenCalled();
+    expect(host.querySelectorAll("dialog")).toHaveLength(0);
+    await act(async () => check.resolve(proof));
+    expect(homeButton().disabled).toBe(false);
+    expect(homeButton().getAttribute("aria-haspopup")).toBe("dialog");
+    expect(homeButton().getAttribute("title")).toBe("Talk with NavoX");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("starts once on repeated Home taps and opens only the root dialog", async () => {
+    const test = rig();
+    const pending = deferred<ReturnType<typeof test.join>>();
+    test.transport.connect.mockImplementationOnce(async (request) => {
+      test.requests.push(request);
+      return pending.promise;
+    });
+    await test.mount("Today", "floating", true);
+    await act(async () => {
+      homeButton().focus();
+      homeButton().click();
+      homeButton().click();
+    });
+    expect(test.transport.connect).toHaveBeenCalledOnce();
+    expect(homeButton().textContent).toContain("Connecting");
+    expect(host.querySelectorAll("dialog")).toHaveLength(1);
+    expect(document.activeElement).toBe(button("Minimize call"));
+    await act(async () => pending.resolve(test.join(test.requests[0])));
+    expect(homeButton().textContent).toContain("Ready when you are");
+    expect(host.querySelectorAll("dialog")).toHaveLength(1);
+  });
+
+  it("returns keyboard focus to Home and reopens the same muted call", async () => {
+    const test = rig();
+    await test.mount("Today", "floating", true);
+    await clickHome();
+    const controller = latest?.controller;
+    const callId = latest?.state.callId;
+    await click("Mute microphone");
+    await click("Turn speaker off");
+    await act(async () =>
+      dialog().dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    );
+    expect(host.querySelectorAll("dialog")).toHaveLength(0);
+    expect(document.activeElement).toBe(homeButton());
+    expect(homeButton().textContent).toContain("Microphone muted");
+    expect(homeButton().textContent).toContain("Speaker off");
+    await clickHome();
+    expect(latest?.controller).toBe(controller);
+    expect(latest?.state.callId).toBe(callId);
+    expect(latest?.state.microphoneMuted).toBe(true);
+    expect(latest?.state.speakerEnabled).toBe(false);
+    expect(test.transport.connect).toHaveBeenCalledOnce();
+    expect(host.querySelectorAll("dialog")).toHaveLength(1);
+    expect(test.requests[0].mayTransmitAudio()).toBe(false);
+    expect(test.requests[0].mayPlayAudio()).toBe(false);
+  });
+
+  it("keeps the same call when the Home route leaves and returns", async () => {
+    const test = rig();
+    await test.mount("Today", "floating", true);
+    await clickHome();
+    const callId = latest?.state.callId;
+    const controller = latest?.controller;
+    await click("Minimize call");
+    await test.mount("Classes", "floating", true);
+    expect(host.querySelector('[data-vox-launcher="home"]')).toBeNull();
+    expect(latest?.controller).toBe(controller);
+    expect(latest?.state.callId).toBe(callId);
+    expect(test.connections[0].close).not.toHaveBeenCalled();
+    await click("Return to Vox call");
+    expect(host.querySelectorAll("dialog")).toHaveLength(1);
+    await click("Minimize call");
+    await test.mount("Today", "floating", true);
+    await clickHome();
+    expect(latest?.controller).toBe(controller);
+    expect(latest?.state.callId).toBe(callId);
+    expect(test.transport.connect).toHaveBeenCalledOnce();
+    expect(host.querySelectorAll("dialog")).toHaveLength(1);
+  });
+
+  it("returns Done to the Home initiator even after starting another call in the same dialog", async () => {
+    const test = rig();
+    await test.mount("Today", "floating", true);
+    await clickHome();
+    await click("Hang up");
+    await click("Start another call");
+    expect(test.transport.connect).toHaveBeenCalledTimes(2);
+    expect(host.querySelectorAll("dialog")).toHaveLength(1);
+    await click("Hang up");
+    await click("Done");
+    expect(host.querySelectorAll("dialog")).toHaveLength(0);
+    expect(document.activeElement).toBe(homeButton());
+  });
+
+  it("returns Done to the floating launcher if the Home initiator left while the dialog stayed open", async () => {
+    const test = rig();
+    await test.mount("Today", "floating", true);
+    await clickHome();
+    const controller = latest?.controller;
+    await test.mount("Classes", "floating", true);
+    expect(host.querySelector('[data-vox-launcher="home"]')).toBeNull();
+    expect(host.querySelectorAll("dialog")).toHaveLength(1);
+    expect(latest?.controller).toBe(controller);
+    expect(test.connections[0].close).not.toHaveBeenCalled();
+    await click("Hang up");
+    await click("Done");
+    expect(host.querySelectorAll("dialog")).toHaveLength(0);
+    expect(document.activeElement).toBe(button("Talk with NavoX"));
+    expect(test.transport.connect).toHaveBeenCalledOnce();
+  });
+
+  it("disables Home when calls are unavailable and retains a typed alternative", async () => {
+    const test = rig(false);
+    await test.mount("Today", "floating", true);
+    expect(homeButton().disabled).toBe(true);
+    expect(homeButton().textContent).toContain(
+      "Vox calls are not available yet",
+    );
+    const section = homeButton().closest("section");
+    expect(section?.querySelector("a")?.getAttribute("href")).toBe("/navox");
+    await clickHome();
+    expect(test.transport.connect).not.toHaveBeenCalled();
+    expect(host.querySelectorAll("dialog")).toHaveLength(0);
+  });
+
+  it("masks an active call while sign-in is being checked without granting new audio authority", async () => {
+    const test = rig();
+    await test.mount("Today", "floating", true);
+    await clickHome();
+    const controller = latest?.controller;
+    if (!controller) throw new Error("Missing shared call controller");
+    const callId = latest?.state.callId;
+    await act(async () => controller.suspendForSessionCheck());
+    expect(homeButton().disabled).toBe(true);
+    expect(homeButton().textContent).toContain("Checking your sign-in");
+    expect(test.requests[0].mayTransmitAudio()).toBe(false);
+    expect(test.requests[0].mayPlayAudio()).toBe(false);
+    await act(async () =>
+      controller.bindOwner({
+        userId: account.id,
+        workspaceId: account.workspace.id,
+      }),
+    );
+    expect(homeButton().disabled).toBe(false);
+    expect(latest?.state.callId).toBe(callId);
+    expect(test.transport.connect).toHaveBeenCalledOnce();
+  });
+
+  it("reports failed connection without leaking transport details or claiming audio works", async () => {
+    const test = rig();
+    test.transport.connect.mockRejectedValueOnce(
+      new Error("Private transport details"),
+    );
+    await test.mount("Today", "floating", true);
+    await clickHome();
+    expect(homeButton().textContent).toContain("The call could not connect");
+    expect(host.textContent).not.toContain("Private transport details");
+    expect(host.textContent).not.toContain("Listening");
+    expect(
+      homeButton().closest("section")?.querySelector("a")?.getAttribute("href"),
+    ).toBe("/navox");
+    expect(test.transport.connect).toHaveBeenCalledOnce();
+  });
+
+  it("requires reload after unconfirmed cleanup instead of offering another Home call", async () => {
+    const test = rig();
+    test.transport.endCall.mockRejectedValueOnce(
+      new Error("Private cleanup failure"),
+    );
+    await test.mount("Today", "floating", true);
+    await clickHome();
+    await click("Hang up");
+    await click("Done");
+    expect(homeButton().getAttribute("aria-label")).toBe("Reload NavoX");
+    expect(homeButton().textContent).toContain("Reload needed");
+    expect(homeButton().closest("section")?.textContent).toContain(
+      "Reload before starting another call",
+    );
+    expect(homeButton().disabled).toBe(false);
+    expect(test.transport.connect).toHaveBeenCalledOnce();
+    expect(host.textContent).not.toContain("Private cleanup failure");
+  });
 });
 
 afterEach(async () => {
