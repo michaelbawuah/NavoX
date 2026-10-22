@@ -111,6 +111,9 @@ async def _locked(
     if reserved is not None and utc(reserved.expires_at) <= now:
         state = await _ensure_state(database, boundary, user_id, workspace_id)
         _finish(reserved, state, now, "expired")
+        from navox.vox.media import revoke_call_connections
+
+        await revoke_call_connections(database, reserved.id, now=now, reason="expired")
         await database.flush()
     # Every terminal transition advances generation first. Deleting an old opaque
     # row therefore cannot make its original start or end command valid again.
@@ -307,6 +310,9 @@ async def end(
                 raise VoxError(409, "This call belongs to a different call state")
             state = await _ensure_state(database, boundary, user_id, workspace_id)
             _finish(call, state, boundary.now, "hang-up")
+            from navox.vox.media import revoke_call_connections
+
+            await revoke_call_connections(database, call.id, now=boundary.now, reason="hang-up")
             return
         if payload.generation != boundary.generation:
             return  # The absent command is already fenced; do not alter a newer call.
@@ -352,6 +358,9 @@ async def revoke_session_calls(
             state = VoxState(user_id=call.user_id, workspace_id=call.workspace_id, generation=0)
             database.add(state)
         _finish(call, state, now, "sign-out")
+    from navox.vox.media import revoke_session_connections
+
+    await revoke_session_connections(database, auth_session_id, now=now)
     await database.flush()
 
 
@@ -362,6 +371,11 @@ async def forget_vox_data(database: AsyncSession, user_id: UUID, workspace_id: U
         state = VoxState(user_id=user_id, workspace_id=workspace_id, generation=0)
         database.add(state)
     _advance(state)
+    from navox.vox.media import revoke_owned_connections
+
+    await revoke_owned_connections(
+        database, user_id, workspace_id, now=await database_now(database), reason="reset"
+    )
     await database.execute(
         delete(VoxCall).where(VoxCall.user_id == user_id, VoxCall.workspace_id == workspace_id)
     )

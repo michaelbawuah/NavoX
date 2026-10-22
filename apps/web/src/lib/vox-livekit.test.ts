@@ -208,7 +208,7 @@ describe("qualified LiveKit Vox adapter", () => {
     expect(env.factory.create).not.toHaveBeenCalled();
     expect(env.room.publishAudio).not.toHaveBeenCalled();
     await connection.close();
-    expect(env.lease.close).not.toHaveBeenCalled();
+    expect(env.lease.close).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -257,7 +257,7 @@ describe("qualified LiveKit Vox adapter", () => {
       );
       expect(env.loadSdk).not.toHaveBeenCalled();
       expect(env.factory.create).not.toHaveBeenCalled();
-      expect(env.lease.close).not.toHaveBeenCalled();
+      expect(env.lease.close).toHaveBeenCalledTimes(1);
     },
   );
 
@@ -293,7 +293,7 @@ describe("qualified LiveKit Vox adapter", () => {
     admission.resolve(env.lease);
     await pending;
     expect(env.loadSdk).not.toHaveBeenCalled();
-    expect(env.lease.close).not.toHaveBeenCalled();
+    expect(env.lease.close).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -310,6 +310,7 @@ describe("qualified LiveKit Vox adapter", () => {
     join.resolve();
     await pending;
     expect(env.room.disconnect).toHaveBeenCalledTimes(2);
+    expect(env.lease.close).toHaveBeenCalledTimes(1);
     expect(env.factory.create).not.toHaveBeenCalled();
     expect(env.room.events).toBeNull();
   });
@@ -465,7 +466,7 @@ describe("qualified LiveKit Vox adapter", () => {
     await settle();
     expect(env.request.onEvent).toHaveBeenCalledWith({ type: "ended" });
     expect(vi.getTimerCount()).toBe(0);
-    expect(env.lease.close).not.toHaveBeenCalled();
+    expect(env.lease.close).toHaveBeenCalledTimes(1);
     await connection.close();
     const expired = environment();
     const active = await expired.transport.connect(expired.request);
@@ -483,7 +484,7 @@ describe("qualified LiveKit Vox adapter", () => {
     expect(env.request.onEvent).toHaveBeenCalledTimes(1);
     expect(env.request.onEvent).toHaveBeenCalledWith({ type: "disconnected" });
     expect(env.room.events).toBeNull();
-    expect(env.lease.close).not.toHaveBeenCalled();
+    expect(env.lease.close).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
     await connection.close();
   });
@@ -655,6 +656,237 @@ describe("qualified LiveKit Vox adapter", () => {
     expect(env.factory.create).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it("retires the media lease once across duplicate close, abort and disconnect callbacks", async () => {
+    const env = environment();
+    const connection = await env.transport.connect(env.request);
+    const disconnected = env.room.events?.disconnected;
+    const first = connection.close();
+    expect(connection.close()).toBe(first);
+    env.abort.abort();
+    disconnected?.();
+    await first;
+    expect(env.lease.close).toHaveBeenCalledTimes(1);
+    expect(env.room.disconnect).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("waits for media cleanup before allowing replacement admission", async () => {
+    const env = environment();
+    const cleanup = deferred<void>();
+    vi.mocked(env.lease.close).mockReturnValue(cleanup.promise);
+    const connection = await env.transport.connect(env.request);
+    const closing = connection.close();
+    expect(env.transport.available).toBe(false);
+    await expect(env.transport.connect(env.request)).rejects.toThrow(
+      "unavailable",
+    );
+    expect(env.admission.join).toHaveBeenCalledTimes(1);
+    cleanup.resolve();
+    await closing;
+    expect(env.transport.available).toBe(true);
+    expect(env.lease.close).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["resolve", "reject"] as const)(
+    "blocks replacement after abort until pending admission and its %s cleanup finish",
+    async (outcome) => {
+      const env = environment();
+      const admission = deferred<VoxMediaLease>();
+      const cleanup = deferred<void>();
+      env.admission.join.mockReturnValue(admission.promise);
+      vi.mocked(env.lease.close).mockReturnValue(cleanup.promise);
+      const pending = expect(
+        env.transport.connect(env.request),
+      ).rejects.toThrow("unavailable");
+      env.abort.abort();
+      await settle();
+      await expect(
+        env.transport.connect(environment().request),
+      ).rejects.toThrow("unavailable");
+      expect(env.admission.join).toHaveBeenCalledTimes(1);
+      admission.resolve(env.lease);
+      await settle();
+      expect(env.lease.close).toHaveBeenCalledTimes(1);
+      expect(env.transport.available).toBe(false);
+      await expect(
+        env.transport.connect(environment().request),
+      ).rejects.toThrow("unavailable");
+      expect(env.admission.join).toHaveBeenCalledTimes(1);
+      if (outcome === "resolve") cleanup.resolve();
+      else cleanup.reject(new Error("synthetic unknown cleanup"));
+      await pending;
+      expect(env.transport.available).toBe(outcome === "resolve");
+      expect(env.loadSdk).not.toHaveBeenCalled();
+      expect(env.lease.close).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("quarantines an aborted admission rejection with no cleanup handle", async () => {
+    const env = environment();
+    const admission = deferred<VoxMediaLease>();
+    env.admission.join.mockReturnValue(admission.promise);
+    const pending = expect(env.transport.connect(env.request)).rejects.toThrow(
+      "unavailable",
+    );
+    env.abort.abort();
+    await settle();
+    admission.reject(new Error("synthetic admission uncertainty"));
+    await pending;
+    expect(env.transport.available).toBe(false);
+    await expect(env.transport.connect(environment().request)).rejects.toThrow(
+      "unavailable",
+    );
+    expect(env.admission.join).toHaveBeenCalledTimes(1);
+    expect(env.loadSdk).not.toHaveBeenCalled();
+  });
+
+  it("blocks replacement until a late capture publication retires", async () => {
+    const env = environment();
+    const publication = deferred<void>();
+    env.room.publishAudio.mockReturnValue(publication.promise);
+    const connection = await env.transport.connect(env.request);
+    connection.setMicrophoneEnabled(true);
+    await settle();
+    const closing = connection.close();
+    await settle();
+    expect(env.lease.close).toHaveBeenCalledTimes(1);
+    expect(env.transport.available).toBe(false);
+    await expect(env.transport.connect(environment().request)).rejects.toThrow(
+      "unavailable",
+    );
+    expect(env.admission.join).toHaveBeenCalledTimes(1);
+    publication.resolve();
+    await closing;
+    expect(env.transport.available).toBe(true);
+    expect(env.media.enabled).toBe(false);
+    expect(env.room.unpublishAudio).toHaveBeenCalled();
+  });
+
+  it.each(["load", "connect"] as const)(
+    "retires admitted media after %s failure without exposing provider details",
+    async (failure) => {
+      const env = environment();
+      const error = new Error("synthetic private media details");
+      if (failure === "load") env.loadSdk.mockRejectedValue(error);
+      else env.room.connect.mockRejectedValue(error);
+      await expect(env.transport.connect(env.request)).rejects.toThrow(
+        "The Vox media connection is unavailable.",
+      );
+      expect(env.lease.close).toHaveBeenCalledTimes(1);
+      expect(env.factory.create).not.toHaveBeenCalled();
+      expect(env.transport.available).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it("retires admitted media when capture fails after connection", async () => {
+    const env = environment();
+    vi.mocked(env.factory.create).mockRejectedValue(
+      new Error("synthetic microphone failure"),
+    );
+    const connection = await env.transport.connect(env.request);
+    connection.setMicrophoneEnabled(true);
+    await settle();
+    expect(env.request.onEvent).toHaveBeenCalledWith({ type: "ended" });
+    expect(env.lease.close).toHaveBeenCalledTimes(1);
+    expect(env.room.disconnect).toHaveBeenCalled();
+    expect(env.room.publishAudio).not.toHaveBeenCalled();
+    await connection.close();
+    expect(env.lease.close).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(["resolve", "reject"] as const)(
+    "still retires an aborted late admission when its media cleanup will %s",
+    async (outcome) => {
+      const env = environment();
+      const admission = deferred<VoxMediaLease>();
+      env.admission.join.mockReturnValue(admission.promise);
+      if (outcome === "reject")
+        vi.mocked(env.lease.close).mockRejectedValue(
+          new Error("synthetic stale authority"),
+        );
+      const pending = expect(
+        env.transport.connect(env.request),
+      ).rejects.toThrow("unavailable");
+      env.abort.abort();
+      await settle();
+      admission.resolve(env.lease);
+      await pending;
+      expect(env.lease.close).toHaveBeenCalledTimes(1);
+      expect(env.loadSdk).not.toHaveBeenCalled();
+      expect(env.transport.available).toBe(outcome === "resolve");
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it.each([
+    "lease-reject",
+    "lease-throw",
+    "unlisten",
+    "capture-disable",
+    "capture-stop",
+    "local-stop",
+    "audio-pause",
+    "audio-detach",
+  ] as const)(
+    "continues physical cleanup and quarantines admission after %s failure",
+    async (failure) => {
+      const env = environment();
+      const connection = await env.transport.connect(env.request);
+      connection.setMicrophoneEnabled(true);
+      connection.setSpeakerEnabled(true);
+      await settle();
+      await env.voice(true);
+      const audio = remoteAudio();
+      env.room.events?.trackSubscribed(audio.track, agent);
+      await settle();
+      const error = new Error("synthetic private cleanup details");
+      const throws = () => {
+        throw error;
+      };
+      if (failure === "lease-reject")
+        vi.mocked(env.lease.close).mockRejectedValue(error);
+      else if (failure === "lease-throw")
+        vi.mocked(env.lease.close).mockImplementation(throws);
+      else if (failure === "unlisten")
+        env.room.unlisten.mockImplementation(throws);
+      else if (failure === "capture-disable")
+        vi.mocked(env.capture.setEnabled).mockImplementation(throws);
+      else if (failure === "capture-stop")
+        vi.mocked(env.capture.stop).mockImplementation(throws);
+      else if (failure === "local-stop")
+        env.local.stop.mockImplementation(throws);
+      else if (failure === "audio-pause")
+        vi.mocked(audio.element.pause).mockImplementation(throws);
+      else audio.track.detach.mockImplementation(throws);
+      const closing = connection.close();
+      expect(env.media.enabled).toBe(false);
+      expect(env.capture.setEnabled).toHaveBeenCalledWith(false);
+      expect(env.capture.stop).toHaveBeenCalled();
+      expect(env.local.stop).toHaveBeenCalled();
+      expect(audio.element.muted).toBe(true);
+      expect(audio.element.pause).toHaveBeenCalled();
+      expect(audio.element.srcObject).toBeNull();
+      expect(env.room.unlisten).toHaveBeenCalled();
+      expect(env.room.disconnect).toHaveBeenCalled();
+      await expect(closing).rejects.toThrow(
+        "The Vox media connection is unavailable.",
+      );
+      expect(env.lease.close).toHaveBeenCalledTimes(1);
+      expect(env.transport.available).toBe(false);
+      await expect(connection.close()).rejects.toThrow("unavailable");
+      await expect(env.transport.connect(env.request)).rejects.toThrow(
+        "unavailable",
+      );
+      expect(env.admission.join).toHaveBeenCalledTimes(1);
+      expect(env.lease.close).toHaveBeenCalledTimes(1);
+      // Flush jsdom's media-element tasks; no adapter interval may remain.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
 
   it("binds actual SDK signal reconnects to synchronous controller-owned cleanup", async () => {
     const env = environment();

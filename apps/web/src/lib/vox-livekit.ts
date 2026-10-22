@@ -21,7 +21,7 @@ export interface VoxMediaLease {
   token: string;
   expiresAt: number;
   renew(signal: AbortSignal): Promise<{ expiresAt: number }>;
-  /** Terminal reservation cleanup belongs to the app owner, not a reconnect attempt. */
+  /** Retire this media connection only; the app owner ends its reservation. */
   close(): Promise<void>;
 }
 
@@ -245,10 +245,13 @@ export function createLiveKitVoxTransport(options: {
   // A rejected join must not permit a replacement if its resource teardown was
   // uncertain. The app must replace this adapter only after resolving cleanup.
   let cleanupBlocked = false;
+  let pendingCleanup = 0;
+  let pendingConnections = 0;
   return {
     get available() {
       return (
         !cleanupBlocked &&
+        pendingCleanup === 0 &&
         options.admission.available &&
         options.capture?.qualified === true
       );
@@ -258,6 +261,8 @@ export function createLiveKitVoxTransport(options: {
       const captureFactory = options.capture;
       if (
         cleanupBlocked ||
+        pendingCleanup !== 0 ||
+        pendingConnections !== 0 ||
         !options.admission.available ||
         captureFactory?.qualified !== true ||
         request.signal.aborted ||
@@ -284,6 +289,9 @@ export function createLiveKitVoxTransport(options: {
       let upstream = Promise.resolve();
       let retiring = Promise.resolve();
       let closing: Promise<void> | null = null;
+      let leaseClosing: Promise<void> | null = null;
+      let cleanupFailed = false;
+      let admissionStarted = false;
       let unlisten = () => {};
       let timer: ReturnType<typeof setInterval> | null = null;
       let agentTimer: ReturnType<typeof setTimeout> | null = null;
@@ -295,6 +303,39 @@ export function createLiveKitVoxTransport(options: {
       type Attachment = { element: HTMLMediaElement; epoch: number };
       const elements = new Map<VoxRemoteAudio, Attachment>();
       let playbackEpoch = 0;
+      const cleanup = (operation: () => void) => {
+        try {
+          operation();
+        } catch {
+          cleanupFailed = cleanupBlocked = true;
+        }
+      };
+      const attempt = (operation: () => unknown): Promise<unknown> => {
+        try {
+          return Promise.resolve(operation());
+        } catch {
+          return Promise.reject(unavailable());
+        }
+      };
+      const closeMediaLease = (): Promise<void> => {
+        if (!lease) return Promise.resolve();
+        if (!leaseClosing) {
+          const captured = lease;
+          ++pendingCleanup;
+          // Install the promise before calling the adapter: cleanup may throw
+          // synchronously or reenter close, but this epoch is retired once.
+          leaseClosing = Promise.resolve()
+            .then(() => captured.close())
+            .catch(() => {
+              cleanupFailed = cleanupBlocked = true;
+              throw unavailable();
+            })
+            .finally(() => {
+              --pendingCleanup;
+            });
+        }
+        return leaseClosing;
+      };
       const visible = () =>
         typeof document === "undefined" ||
         document.visibilityState === "visible";
@@ -327,20 +368,27 @@ export function createLiveKitVoxTransport(options: {
         capture = null;
         local = null;
         if (retiredCapture) {
-          retiredCapture.track.enabled = false;
-          retiredCapture.setEnabled(false);
-          retiredCapture.stop();
+          cleanup(() => {
+            retiredCapture.track.enabled = false;
+          });
+          cleanup(() => retiredCapture.setEnabled(false));
+          cleanup(() => retiredCapture.stop());
         }
         if (retired) {
-          retired.mediaStreamTrack.enabled = false;
-          retired.stop();
+          cleanup(() => {
+            retired.mediaStreamTrack.enabled = false;
+          });
+          cleanup(() => retired.stop());
         }
-        if (retired)
+        if (retired || cleanupFailed)
           retiring = Promise.allSettled([
             retiring,
-            room?.unpublishAudio(retired),
+            retired ? attempt(() => room?.unpublishAudio(retired)) : undefined,
           ]).then((results) => {
-            if (results.some((result) => result.status === "rejected")) {
+            if (
+              cleanupFailed ||
+              results.some((result) => result.status === "rejected")
+            ) {
               cleanupBlocked = true;
               throw unavailable();
             }
@@ -353,18 +401,22 @@ export function createLiveKitVoxTransport(options: {
         if (expected && attachment !== expected) return;
         elements.delete(track);
         const element = attachment?.element;
-        if (element) {
-          element.muted = true;
-          element.pause();
-          element.srcObject = null;
-          element.remove();
-        }
-        for (const attached of track.detach()) {
-          attached.muted = true;
-          attached.pause();
-          attached.srcObject = null;
-          attached.remove();
-        }
+        const stop = (attached: HTMLMediaElement) => {
+          cleanup(() => {
+            attached.muted = true;
+          });
+          cleanup(() => attached.pause());
+          cleanup(() => {
+            attached.srcObject = null;
+          });
+          cleanup(() => attached.remove());
+        };
+        if (element) stop(element);
+        let attached: HTMLMediaElement[] = [];
+        cleanup(() => {
+          attached = track.detach();
+        });
+        for (const audio of attached) stop(audio);
       };
       const stopPlayback = () => {
         ++playbackEpoch;
@@ -372,30 +424,49 @@ export function createLiveKitVoxTransport(options: {
       };
       const close = (): Promise<void> => {
         if (closing) return closing;
+        ++pendingCleanup;
+        let complete = () => {};
+        let reject = (_error: Error) => {};
+        // Publish the shared result before any synchronous cleanup callback.
+        closing = new Promise<void>((resolve, failed) => {
+          complete = resolve;
+          reject = failed;
+        });
         closed = true;
         joined = false;
         microphone = speaker = speech = false;
-        abort.abort();
-        silence();
-        stopPlayback();
+        cleanup(() => abort.abort());
+        cleanup(silence);
+        cleanup(stopPlayback);
         remoteTracks.clear();
-        unlisten();
-        request.signal.removeEventListener("abort", aborted);
+        cleanup(unlisten);
+        cleanup(() => request.signal.removeEventListener("abort", aborted));
         if (typeof document !== "undefined")
-          document.removeEventListener("visibilitychange", hidden);
-        if (timer !== null) clearInterval(timer);
-        if (agentTimer !== null) clearTimeout(agentTimer);
-        agentFailed?.();
-        closing = Promise.allSettled([
-          room?.disconnect(),
+          cleanup(() =>
+            document.removeEventListener("visibilitychange", hidden),
+          );
+        cleanup(() => {
+          if (timer !== null) clearInterval(timer);
+        });
+        cleanup(() => {
+          if (agentTimer !== null) clearTimeout(agentTimer);
+        });
+        cleanup(() => agentFailed?.());
+        void Promise.allSettled([
+          attempt(() => room?.disconnect()),
+          closeMediaLease(),
           creating,
           upstream,
           retiring,
         ]).then((results) => {
-          if (results.some((result) => result.status === "rejected")) {
+          --pendingCleanup;
+          if (
+            cleanupFailed ||
+            results.some((result) => result.status === "rejected")
+          ) {
             cleanupBlocked = true;
-            throw unavailable();
-          }
+            reject(unavailable());
+          } else complete();
         });
         return closing;
       };
@@ -497,7 +568,9 @@ export function createLiveKitVoxTransport(options: {
       request.signal.addEventListener("abort", aborted, { once: true });
       if (typeof document !== "undefined")
         document.addEventListener("visibilitychange", hidden);
+      ++pendingConnections;
       try {
+        admissionStarted = true;
         lease = await options.admission.join(request);
         if (!fresh() || !visible()) throw unavailable();
         validLease(lease, request, now());
@@ -718,14 +791,23 @@ export function createLiveKitVoxTransport(options: {
           close,
         };
       } catch {
-        await close().catch(() => {
+        // A rejected admission cannot prove that its external side effect was
+        // absent. Quarantine this adapter if it never returned a cleanup handle.
+        if (admissionStarted && !lease) cleanupBlocked = true;
+        // Admission or SDK join may settle after an abort's first close already
+        // finished. Retire a late lease and disconnect a late room independently.
+        const results = await Promise.allSettled([
+          close(),
+          closeMediaLease(),
+          attempt(() => room?.disconnect()),
+        ]);
+        if (results.some((result) => result.status === "rejected"))
           cleanupBlocked = true;
-        });
-        // SDK connection resolution after an abort may have reactivated its room.
-        await room?.disconnect().catch(() => {
-          cleanupBlocked = true;
-        });
         throw unavailable();
+      } finally {
+        // An abort's first close can finish before admission or SDK join does.
+        // Keep replacement connects blocked until the entire attempt retires.
+        --pendingConnections;
       }
     },
   };

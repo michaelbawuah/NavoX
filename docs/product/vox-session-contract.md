@@ -167,3 +167,52 @@ media authority, provider worker or credentials are enabled by this increment.
 Authority references: LiveKit's [tokens and grants](https://docs.livekit.io/frontends/reference/tokens-grants/),
 [participant lifecycle](https://docs.livekit.io/intro/basics/rooms-participants-tracks/participants/)
 and [Room SDK reference](https://docs.livekit.io/reference/client-sdk-js/classes/Room.html).
+
+## Internal connection intents and durable cleanup
+
+The next server foundation records an immutable, server-generated connection
+UUID beneath the reservation. Each connection gets distinct opaque room,
+browser participant and agent identities. These contain no user names, email,
+account IDs or conversation content. A committed intent is not a room, a token,
+a worker assignment or a media grant; no public HTTP route issues one here.
+
+An exact request retry retains its connection and deadline. Confirmation checks
+the fresh owner, exact login, reservation generation, personal membership,
+pause state and database clock under the shared User lock. A reservation renewal
+does not renew a media connection. Expired or revoked epochs cannot revive.
+Another connection waits until the previous connection's cleanup is verified.
+
+Cleanup locators are saved with the intent, before any future external room
+operation. This separate ledger deliberately has no cascading foreign keys:
+reset, session removal or account deletion cannot erase the instruction to
+retire a remote resource. It contains opaque locators and operational timestamps,
+not retained speech, transcripts, credentials or personal workspace content.
+Terminal reservation paths and pause atomically revoke media and request cleanup.
+A bounded sweep also discovers expired sessions, lost membership and abandoned
+connections without a new browser request. Cascade-orphaned cleanup is rescued.
+
+Future provisioning adapters must report external completion through the trusted
+internal finalizer even if the original browser request was canceled or its
+account records were erased. A late completion reopens cleanup and invalidates
+older worker claims or completion receipts; it cannot regain media authority.
+The ordinary authenticated confirmation method alone cannot compensate a late
+external result after logout or erasure.
+
+The cleanup reconciler commits one short-lived claim before provider I/O. Crashed
+claims can be reclaimed; an old worker cannot acknowledge a replacement claim.
+Failures, timeouts and partial evidence remain pending with bounded backoff.
+Completion requires a receipt for the exact epoch, attempt and three locators,
+explicitly verifying both participant revocations and room absence. Room absence
+alone is insufficient. A real provider adapter must establish those facts; a
+callback returning the receipt is not by itself provider qualification.
+
+The browser adapter retires its media lease on Hang up, failed joins and late
+admission. Lease retirement and physical audio shutdown are independent: one
+failure does not skip the remaining cleanup. An unresolved join or teardown
+blocks replacement attempts, and uncertain cleanup quarantines the adapter.
+The reservation wrapper remains responsible for ending the reservation.
+
+This increment installs no provider adapter, token issuer, periodic worker or
+new deployment setting. The cleanup protocol and bounded invocation are tested
+with synthetic resources. Real provider revocation, worker shutdown, browser
+capture and end-to-end device behavior remain required before live activation.
