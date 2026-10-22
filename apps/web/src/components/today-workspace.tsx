@@ -43,6 +43,7 @@ import { StudentPlanToday } from "./student-plan-today";
 import { StudentRecoveryCard } from "./student-recovery";
 import { ThreadWatchPanel } from "./thread-watch-panel";
 import styles from "./today-workspace.module.css";
+import { VoxHomeLauncher } from "./vox-call-controls";
 import { WorkspaceShell } from "./workspace-shell";
 
 interface Account {
@@ -1173,6 +1174,7 @@ export function TodayWorkspace({
         {view === "today" && (
           <div className={styles.focusLayout}>
             <div className={styles.focusColumn}>
+              {productFeatures.studentVox && <VoxHomeLauncher />}
               {productFeatures.studentPlanning && (
                 <StudentPlanToday
                   accountId={`${account.workspace.id}:${account.id}`}

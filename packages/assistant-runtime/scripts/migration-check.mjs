@@ -14,8 +14,9 @@ import { readFileSync } from "node:fs";
 const migrationPaths = [
   "../migrations/0001_assistant_runtime.sql",
   "../migrations/0002_assistant_goals.sql",
+  "../migrations/0003_goal_turn_projections.sql",
 ].map((path) => new URL(path, import.meta.url));
-const [runtimeSql, goalsSql] = migrationPaths.map((path) =>
+const [runtimeSql, goalsSql, projectionSql] = migrationPaths.map((path) =>
   readFileSync(path, "utf8"),
 );
 const sql = runtimeSql;
@@ -180,6 +181,39 @@ check(
     !/\bDROP\s+(TABLE|COLUMN)\b/i.test(goalsSql),
 );
 
+// ---- Content-free goal provenance (additive; no worker cutover) ------------
+const projectionNormalized = projectionSql.replace(/\s+/g, " ");
+check(
+  "projection schema binds the exact turn, session, workspace and user",
+  /FOREIGN KEY \(turn_id, session_id, workspace_id, user_id\) REFERENCES assistant_runtime_turns \(id, session_id, workspace_id, user_id\) ON DELETE CASCADE/.test(
+    projectionNormalized,
+  ),
+);
+check(
+  "projection schema accepts only v1 and a closed classification",
+  /CHECK \(contract_version = 1\)/.test(projectionNormalized) &&
+    /classification IN \('BRIEFING', 'MEETING_PREP', 'NOT_GROUNDED', 'UNREADABLE'\)/.test(
+      projectionNormalized,
+    ),
+);
+check(
+  "semantic or ownership updates invalidate, never recertify, the projection",
+  /BEFORE UPDATE OF id, session_id, workspace_id, user_id, state, plan, decision, presentation/.test(
+    projectionNormalized,
+  ) &&
+    /DELETE FROM assistant_runtime_turn_goal_projections WHERE turn_id = OLD.id/.test(
+      projectionNormalized,
+    ),
+);
+check(
+  "the projection migration never backfills or changes legacy/action authority",
+  !/\bINSERT INTO\b/i.test(projectionSql) &&
+    !/\bUPDATE (?:assistant_runtime_turns|assistant_runtime_goals|actions)\s+SET\b/i.test(
+      projectionSql,
+    ) &&
+    !/\bDROP\s+(?:TABLE|COLUMN)\b|alembic_version/i.test(projectionSql),
+);
+
 for (const label of passed) console.log(`PASS: ${label}`);
 
 const databaseUrl =
@@ -194,12 +228,33 @@ if (!databaseUrl) {
   const client = new Client({ connectionString: databaseUrl });
   try {
     await client.connect();
-    for (const migration of [runtimeSql, goalsSql])
+    for (const migration of [runtimeSql, goalsSql, projectionSql])
       await client.query(migration);
     const { rows: tables } = await client.query(
-      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('assistant_runtime_sessions','assistant_runtime_turns','assistant_runtime_requests','assistant_runtime_goals')",
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('assistant_runtime_sessions','assistant_runtime_turns','assistant_runtime_requests','assistant_runtime_goals','assistant_runtime_turn_goal_projections')",
     );
-    check("live: all four runtime tables exist", tables.length === 4);
+    check("live: all five runtime tables exist", tables.length === 5);
+
+    const { rows: projectionColumns } = await client.query(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'assistant_runtime_turn_goal_projections'
+        ORDER BY ordinal_position`,
+    );
+    check(
+      "live: projection contains only bound IDs, closed verification metadata and a timestamp",
+      projectionColumns.map((row) => row.column_name).join(",") ===
+        "turn_id,session_id,workspace_id,user_id,contract_version,classification,created_at",
+    );
+    const { rows: projectionTrigger } = await client.query(
+      `SELECT t.tgenabled FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname = 'assistant_runtime_turns'
+          AND t.tgname = 'assistant_runtime_turn_goal_projection_invalidate' AND NOT t.tgisinternal`,
+    );
+    check(
+      "live: source invalidation trigger is enabled",
+      projectionTrigger[0]?.tgenabled === "O",
+    );
 
     const { rows: foreignKeys } = await client.query(
       `SELECT con.conname AS name, rel.relname AS target
@@ -257,6 +312,8 @@ if (!databaseUrl) {
       "assistant_runtime_goals_status_valid",
       "assistant_runtime_goals_completion",
       "assistant_runtime_goals_exactly_one_source",
+      "assistant_runtime_turn_goal_projections_version",
+      "assistant_runtime_turn_goal_projections_classification",
     ]) {
       check(`live: constraint ${name} exists`, checkNames.includes(name));
     }

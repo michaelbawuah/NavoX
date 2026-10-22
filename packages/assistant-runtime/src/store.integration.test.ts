@@ -19,6 +19,10 @@ const migrationSql = readFileSync(
   new URL("../migrations/0001_assistant_runtime.sql", import.meta.url),
   "utf8",
 );
+const projectionSql = readFileSync(
+  new URL("../migrations/0003_goal_turn_projections.sql", import.meta.url),
+  "utf8",
+);
 
 const suite = connectionString ? describe : describe.skip;
 
@@ -37,6 +41,7 @@ suite("assistant persistence against disposable PostgreSQL", () => {
   beforeAll(async () => {
     await client.connect();
     await client.query(migrationSql);
+    await client.query(projectionSql);
     await client.query("INSERT INTO users (id, email) VALUES ($1, $2)", [
       userId,
       `m1-${userId}@example.test`,

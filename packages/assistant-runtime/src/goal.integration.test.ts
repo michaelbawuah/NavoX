@@ -17,6 +17,7 @@ const connectionString = process.env.ASSISTANT_TEST_DATABASE_URL;
 const migrations = [
   "../migrations/0001_assistant_runtime.sql",
   "../migrations/0002_assistant_goals.sql",
+  "../migrations/0003_goal_turn_projections.sql",
 ].map((path) => readFileSync(new URL(path, import.meta.url), "utf8"));
 
 const suite = connectionString ? describe : describe.skip;
