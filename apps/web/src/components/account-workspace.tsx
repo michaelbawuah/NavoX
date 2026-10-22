@@ -21,8 +21,10 @@ import {
   observeAccountSession,
 } from "../lib/account-session";
 import { productFeatures } from "../lib/product-features";
+import { notifyCalendarAccessChanged } from "../lib/student-calendar-privacy";
 import { NavoXCinematic } from "./navox-cinematic";
 import { StudentAssistantPanel } from "./student-assistant-panel";
+import { StudentAvailability } from "./student-availability";
 import { StudentClassesWorkspace } from "./student-classes";
 import { StudentCourseWorkspace } from "./student-course-workspace";
 import { StudentDailyPlan } from "./student-daily-plan";
@@ -85,6 +87,8 @@ export function AccountWorkspace({
       "google_connection",
     );
     if (connectionOutcome !== null) {
+      if (connectionOutcome.startsWith("calendar_availability_"))
+        notifyCalendarAccessChanged();
       const outcomes: Record<string, string> = {
         cancelled: "Google connection was cancelled.",
         connected:
@@ -95,6 +99,10 @@ export function AccountWorkspace({
           "Google read access approved. Start a sync when you are ready.",
         gmail_send_enabled:
           "Gmail sending permission enabled. Every send still requires exact approval.",
+        calendar_availability_enabled:
+          "Google calendar busy-time access enabled. Open Planner to check for openings.",
+        calendar_availability_failed:
+          "Google calendar access did not complete. Review Calendar availability in Connections.",
         failed: "Google could not complete the connection. Please try again.",
         refresh_token_required:
           "Google did not return a refresh credential. Please try connecting again.",
@@ -381,7 +389,9 @@ export function AccountWorkspace({
                 </Link>
               </p>
             </WorkspaceShell>
-          ) : view === "planner" && productFeatures.studentPlanning ? (
+          ) : view === "planner" &&
+            (productFeatures.studentPlanning ||
+              productFeatures.studentCalendarAvailability) ? (
             <WorkspaceShell
               current="Planner"
               accountKey={`${account.workspace.id}:${account.id}`}
@@ -390,10 +400,19 @@ export function AccountWorkspace({
             >
               {productFeatures.studentRecovery && <StudentRecoveryCard />}
               {productFeatures.studentGoals && <StudentGoalsCard />}
-              <StudentDailyPlan
-                key={`${account.workspace.id}:${account.id}`}
-                accountId={`${account.workspace.id}:${account.id}`}
-              />
+              {productFeatures.studentCalendarAvailability && (
+                <StudentAvailability
+                  key={`availability:${account.workspace.id}:${account.id}`}
+                  accountId={`${account.workspace.id}:${account.id}`}
+                  timezone={account.timezone ?? "UTC"}
+                />
+              )}
+              {productFeatures.studentPlanning && (
+                <StudentDailyPlan
+                  key={`${account.workspace.id}:${account.id}`}
+                  accountId={`${account.workspace.id}:${account.id}`}
+                />
+              )}
             </WorkspaceShell>
           ) : (
             <TodayWorkspace

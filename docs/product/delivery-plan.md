@@ -70,18 +70,30 @@ them.
 
 ## Working efficiently
 
-Keep independent source owners for Vox, calendars, memory and Board, with one
-integration owner resolving shared contracts before edits overlap. Finish a
-complete user flow before widening its scope. Run focused checks during edits,
-then the full required check set on the integrated release candidate; repeat a
-check only for a new change, failure or unresolved concern.
+Keep one frozen release candidate and at most two independent feature increments
+in active implementation. Give each increment one owner and a complete user
+outcome; agree on shared API contracts before parallel edits. The integration
+owner handles shared files, reviews the complete flow and deploys the qualified
+release while the next source increment proceeds.
+
+Run focused checks during edits, then the full required check set once on the
+integrated candidate. Repeat a check for a new change, failure or unresolved
+concern. Required CI now runs six isolated API test shards and verifies that
+their combined evidence covers every collected test without failures or skips.
+Retain successful checks when retrying an infrastructure failure. Package
+installation has bounded network and step timeouts so an unavailable mirror
+cannot silently consume the runner's full job allowance.
 
 Prepare the next independent source slice while a pinned candidate runs CI or
 release qualification. Build and deploy from exact revisions, preserving required
-checks and production guards. Historical API CI has taken roughly eighty
-minutes; splitting independent existing jobs may shorten that bottleneck, but
-any saving is an estimate until measured on the changed workflow. Parallel work
-is not evidence that CI or a user flow completed faster.
+checks and production guards. Historical API CI took roughly eighty minutes;
+report the new critical-path duration only after a complete measured run.
+Parallel work is not evidence that CI or a user flow completed faster.
+
+An external credential or device gate blocks that capability's enablement, not
+independent source work. Keep it visible in the ranked queue with the exact
+missing evidence. A milestone closes with the enabled flow's production
+postchecks; merged code and disabled controls retain their separate status.
 
 Update this checkpoint once per qualified release and keep remaining gates in
 this queue. Reuse existing code and requirement IDs rather than add overlapping

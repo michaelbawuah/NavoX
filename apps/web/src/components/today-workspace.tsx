@@ -32,6 +32,7 @@ import { PersonalMemoryPanel } from "./personal-memory";
 import { PersonalRoutines } from "./personal-routines";
 import { ProactivePanel } from "./proactive-panel";
 import { SourceReferences } from "./source-references";
+import { StudentCalendarConnections } from "./student-calendar-connections";
 import { StudentDayPanel } from "./student-day-panel";
 import { StudentDayReviewEntry } from "./student-day-review-entry";
 import { StudentEmailCard } from "./student-email-actions";
@@ -1527,6 +1528,12 @@ export function TodayWorkspace({
 
         {view === "connections" && (
           <>
+            {productFeatures.studentCalendarAvailability && (
+              <StudentCalendarConnections
+                key={`calendar:${account.workspace.id}:${account.id}`}
+                accountId={`${account.workspace.id}:${account.id}`}
+              />
+            )}
             {productFeatures.studentLmsFeeds && (
               <StudentLmsFeeds
                 key={`${account.workspace.id}:${account.id}`}
