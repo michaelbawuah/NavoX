@@ -20,12 +20,6 @@ from test_vox_media import begin, confirm
 
 from navox.ai.catalog import catalog_template
 from navox.ai.control import record_evaluation
-from navox.ai.conversation import (
-    CONVERSATION_PROMPT,
-    CONVERSATION_SCHEMA,
-    ConversationAnswer,
-    conversation_task,
-)
 from navox.ai.foundation.contracts import (
     Profile,
     Provider,
@@ -44,6 +38,12 @@ from navox.db.models import User, UserSession, WorkspaceMembership
 from navox.db.vox import VoxCall, VoxState
 from navox.db.vox_media import VoxMediaCleanup, VoxMediaConnection
 from navox.vox import media
+from navox.vox.conversation import (
+    SPOKEN_ANSWER_PROMPT,
+    SPOKEN_ANSWER_SCHEMA,
+    SpokenAnswer,
+    spoken_answer_task,
+)
 from navox.vox.worker import (
     DatabaseAuthority,
     PolicyVoiceGateway,
@@ -522,8 +522,9 @@ async def test_exclusive_worker_terminal_path_revokes_exact_epoch_and_queues_cle
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("answer_text", ["Primary voice answer.", "x" * 600])
 async def test_voice_answer_denies_shadow_even_when_operator_and_qualified_assignment_allow_it(
-    vox_env,
+    vox_env, answer_text
 ):
     env = vox_env
     intent, check = await prepared(env)
@@ -572,8 +573,8 @@ async def test_voice_answer_denies_shadow_even_when_operator_and_qualified_assig
                 evidence=EvaluationEvidence(
                     profile=Profile.ASSISTANT_INTERACTIVE,
                     task_type=TaskType.REASON,
-                    prompt=CONVERSATION_PROMPT,
-                    output_schema=CONVERSATION_SCHEMA,
+                    prompt=SPOKEN_ANSWER_PROMPT,
+                    output_schema=SPOKEN_ANSWER_SCHEMA,
                     quality=1,
                     reliability=1,
                     p95_latency_ms=10,
@@ -594,14 +595,14 @@ async def test_voice_answer_denies_shadow_even_when_operator_and_qualified_assig
         max_cost=Decimal("0.01"),
         allow_shadow=True,
     )
-    primary = FakeAdapter(Provider.OPENAI, output='{"answer":"Primary voice answer."}')
+    primary = FakeAdapter(Provider.OPENAI, output=json.dumps({"answer": answer_text}))
     shadow = FakeAdapter(Provider.GEMINI, output='{"answer":"Discarded shadow answer."}')
     runtime = GatewayRuntime(
         GatewayStore(env.factory, operator), {Provider.OPENAI: primary, Provider.GEMINI: shadow}
     )
     # Positive control: these are genuinely qualified shadow conditions, not an
     # absent adapter or a failed evaluation that would accidentally mask a leak.
-    task = conversation_task(
+    task = spoken_answer_task(
         workspace_id=env.workspace_id,
         user_id=env.user_id,
         max_cost=operator.max_cost,
@@ -620,14 +621,18 @@ async def test_voice_answer_denies_shadow_even_when_operator_and_qualified_assig
             check, env.settings, await check(), "Explain gravity.", ()
         ),
         documents={},
-        semantic_validator=lambda value: ConversationAnswer.model_validate(value),
+        semantic_validator=lambda value: SpokenAnswer.model_validate(value),
     )
     assert len(primary.calls) == len(shadow.calls) == 1
     primary.calls.clear()
     shadow.calls.clear()
     answer = await PolicyVoiceGateway(runtime, env.settings, check).answer("Explain gravity.", ())
-    assert answer == "Primary voice answer."
+    assert answer == answer_text
     assert len(primary.calls) == 1 and not shadow.calls
+    assert primary.calls[0].prompt_ref == SPOKEN_ANSWER_PROMPT
+    assert primary.calls[0].schema_ref == SPOKEN_ANSWER_SCHEMA
+    answer_schema = json.loads(primary.calls[0].output_schema.text)["properties"]["answer"]
+    assert answer_schema["maxLength"] == 600
     assert runtime.store.operator_policy.allow_shadow is True  # Caller policy was not mutated.
     async with env.factory() as database:
         runs = list(
@@ -636,3 +641,4 @@ async def test_voice_answer_denies_shadow_even_when_operator_and_qualified_assig
             )
         )
         assert len(runs) == 1 and not runs[0].shadow and runs[0].status == "COMPLETED"
+        assert runs[0].prompt == runs[0].schema == "vox_spoken_answer@v1"

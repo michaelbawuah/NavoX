@@ -24,13 +24,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 from navox.ai.context import ContextDenied, MinimizedContext, reject_credentials
-from navox.ai.conversation import (
-    CONVERSATION_PROMPT,
-    CONVERSATION_SCHEMA,
-    MAX_CONVERSATION_HISTORY,
-    ConversationAnswer,
-    conversation_task,
-)
+from navox.ai.conversation import MAX_CONVERSATION_HISTORY
 from navox.ai.foundation.contracts import (
     AITask,
     JSONDocument,
@@ -50,6 +44,14 @@ from navox.db.vox import VoxCall, VoxState
 from navox.db.vox_media import VoxMediaCleanup, VoxMediaConnection
 from navox.intelligence.contracts import SourceDocument
 from navox.vox import media
+from navox.vox.conversation import (
+    SPOKEN_ANSWER_PROMPT,
+    SPOKEN_ANSWER_SCHEMA,
+    SpokenAnswer,
+    SpokenAnswerInput,
+    SpokenHistoryTurn,
+    spoken_answer_task,
+)
 
 SAMPLE_RATE = 16_000
 SAMPLE_WIDTH = 2
@@ -315,8 +317,8 @@ class TransientConversationContext:
                 current.workspace_id,
                 Profile.ASSISTANT_INTERACTIVE,
                 TaskType.REASON,
-                CONVERSATION_PROMPT,
-                CONVERSATION_SCHEMA,
+                SPOKEN_ANSWER_PROMPT,
+                SPOKEN_ANSWER_SCHEMA,
                 Sensitivity.PERSONAL,
             )
             or task.context_references
@@ -326,15 +328,15 @@ class TransientConversationContext:
             raise ContextDenied("Voice conversation scope changed")
         from navox.ai.features import configured_secrets
 
+        content = SpokenAnswerInput(
+            question=self.question,
+            recent_conversation=tuple(
+                SpokenHistoryTurn(question=turn.question, answer=turn.answer)
+                for turn in self.history[-MAX_CONVERSATION_HISTORY:]
+            ),
+        )
         text = json.dumps(
-            {
-                "schema_version": "assistant-conversation-input.v1",
-                "question": self.question,
-                "recent_conversation": [
-                    {"question": turn.question, "answer": turn.answer}
-                    for turn in self.history[-MAX_CONVERSATION_HISTORY:]
-                ],
-            },
+            {"schema_version": "vox-spoken-answer-input.v1", **content.model_dump(mode="json")},
             ensure_ascii=False,
         )
         reject_credentials(text, configured_secrets(self.settings))
@@ -375,7 +377,7 @@ class PolicyVoiceGateway:
     async def answer(self, question: str, history: tuple[MemoryTurn, ...]) -> str:
         authority = await self.check()
         ceiling = self.runtime.store.operator_policy
-        task = conversation_task(
+        task = spoken_answer_task(
             workspace_id=authority.workspace_id,
             user_id=authority.user_id,
             max_cost=ceiling.max_cost,
@@ -395,7 +397,7 @@ class PolicyVoiceGateway:
         def validate(value: Any) -> None:
             from navox.ai.features import configured_secrets
 
-            text = bounded_speech_text(ConversationAnswer.model_validate(value).answer)
+            text = bounded_speech_text(SpokenAnswer.model_validate(value).answer)
             reject_credentials(text, configured_secrets(self.settings))
 
         # Do not call for_conversation: that entitlement requires a native retained
@@ -414,7 +416,7 @@ class PolicyVoiceGateway:
         )
         if await self.check() != authority:
             raise WorkerAccessLost("Voice authority changed")
-        value = ConversationAnswer.model_validate_json(result.output.text)
+        value = SpokenAnswer.model_validate_json(result.output.text)
         validate(value.model_dump())
         return value.answer
 
