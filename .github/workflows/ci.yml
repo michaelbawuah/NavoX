@@ -71,9 +71,13 @@ jobs:
           unzip -l /tmp/navox-chrome-extension.zip | grep -F capture.js
           unzip -l /tmp/navox-chrome-extension.zip | grep -F sidepanel.html
 
-  api:
-    name: API quality
+  api-tests:
+    name: API tests (shard ${{ matrix.shard }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
     services:
       postgres:
         image: postgres:17.5-alpine
@@ -103,22 +107,80 @@ jobs:
           version: "0.12.15"
       - run: uv sync --locked --all-groups
         working-directory: services/api
+      - name: Install local timetable OCR and course PDF dependencies
+        timeout-minutes: 8
+        run: |
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng poppler-utils
+          test -x /usr/bin/tesseract
+          /usr/bin/tesseract --list-langs | grep -Fx eng
+          test -x /usr/bin/pdftotext
+          test -x /usr/bin/pdfinfo
+      - name: Run isolated API test shard
+        run: >-
+          uv run python ../../.github/scripts/api_test_shards.py run
+          --index ${{ matrix.shard }} --count 6 --output-dir /tmp/navox-api-shards
+        env:
+          NAVOX_CONNECTOR_TEST_DSN: postgresql+asyncpg://navox:navox@localhost:5432/navox_recovery
+          NAVOX_TEMPORAL_TEST_TARGET: localhost:7233
+        working-directory: services/api
+      - name: Upload API shard evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: navox-api-tests-shard-${{ matrix.shard }}
+          path: /tmp/navox-api-shards/
+          if-no-files-found: error
+          retention-days: 30
+
+  api:
+    name: API quality
+    needs: [api-tests]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17.5-alpine
+        env:
+          POSTGRES_USER: navox
+          POSTGRES_PASSWORD: navox
+          POSTGRES_DB: navox_recovery
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U navox -d navox_recovery"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - name: Require every API test shard to succeed
+        env:
+          TEST_SHARDS_RESULT: ${{ needs.api-tests.result }}
+        run: test "$TEST_SHARDS_RESULT" = success
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.15"
+      - run: uv sync --locked --all-groups
+        working-directory: services/api
       - run: uv run ruff check .
         working-directory: services/api
       - run: uv run ruff format --check .
         working-directory: services/api
       - run: uv run mypy navox
         working-directory: services/api
-      - name: Install local timetable OCR and course PDF dependencies
+      - name: Check API shard helper
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng poppler-utils
-          test -x /usr/bin/pdftotext
-          test -x /usr/bin/pdfinfo
-      - run: uv run pytest --junitxml=/tmp/navox-api-tests.xml
-        env:
-          NAVOX_CONNECTOR_TEST_DSN: postgresql+asyncpg://navox:navox@localhost:5432/navox_recovery
-          NAVOX_TEMPORAL_TEST_TARGET: localhost:7233
+          uv run ruff check ../../.github/scripts/api_test_shards.py
+          uv run ruff format --check ../../.github/scripts/api_test_shards.py
+        working-directory: services/api
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: navox-api-tests-shard-*
+          path: /tmp/navox-api-shards
+          merge-multiple: true
+      - name: Verify complete API test coverage and merge JUnit evidence
+        run: >-
+          uv run python ../../.github/scripts/api_test_shards.py merge
+          --count 6 --input-dir /tmp/navox-api-shards --output /tmp/navox-api-tests.xml
         working-directory: services/api
       - name: Enforce measured SPEC-003 fixture thresholds
         if: always()
@@ -192,7 +254,6 @@ jobs:
 
   evaluation-hardening:
     name: Evaluation & hardening
-    needs: [api]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
