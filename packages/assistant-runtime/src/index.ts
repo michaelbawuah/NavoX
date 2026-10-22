@@ -7,6 +7,7 @@ export * from "./email-actions";
 export * from "./errors";
 export * from "./gateway";
 export * from "./goal-service";
+export * from "./goal-turn-projection";
 export * from "./goals";
 export * from "./http";
 export * from "./ledger";

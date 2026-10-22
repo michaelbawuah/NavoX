@@ -12,6 +12,11 @@ import type {
 } from "@navox/contracts";
 import { AssistantError, isAssistantError } from "./errors";
 import {
+  deriveTurnGoalProjection,
+  parseTurnGoalProjection,
+  type TurnGoalProjection,
+} from "./goal-turn-projection";
+import {
   GOAL_DETAIL,
   GOAL_LIMITS,
   parseGoalDetail,
@@ -125,6 +130,33 @@ export interface GoalSourceCheck {
     verified_at: string | null;
   } | null;
 }
+
+/**
+ * Additive preparation for a separately qualified memory/worker cutover.
+ * Unlike the legacy source check, this read never selects turn content.
+ * A missing/invalidated legacy projection remains unavailable; it is never
+ * inferred from a goal's status and never falls back to plaintext.
+ */
+export interface GoalVerificationProjectionCheck {
+  goal: AssistantGoalRecord;
+  source_owned: boolean;
+  turn: {
+    state: string;
+    projection: TurnGoalProjection | null;
+  } | null;
+  action: GoalSourceCheck["action"];
+}
+
+/** Kept separate so the deployed worker's AssistantStore contract is unchanged. */
+export interface GoalProjectionStore {
+  readGoalVerificationProjection(input: {
+    goal_id: string;
+  }): Promise<GoalVerificationProjectionCheck | null>;
+}
+
+export interface PostgresAssistantStore
+  extends AssistantStore,
+    GoalProjectionStore {}
 
 export interface AssistantStore {
   createSession(input: {
@@ -463,7 +495,9 @@ export function toTurnView(record: AssistantTurnRecord): AssistantTurnView {
   };
 }
 
-export function createPostgresStore(executor: SqlExecutor): AssistantStore {
+export function createPostgresStore(
+  executor: SqlExecutor,
+): PostgresAssistantStore {
   return {
     async createSession(input) {
       const { rows } = await executor.query<SessionRow>(
@@ -669,15 +703,26 @@ export function createPostgresStore(executor: SqlExecutor): AssistantStore {
     },
 
     async insertTurn(input) {
+      const projection = deriveTurnGoalProjection(input);
       let rows: TurnRow[];
       try {
         const result = await executor.query<TurnRow>(
-          `INSERT INTO assistant_runtime_turns
+          `WITH saved_turn AS (
+           INSERT INTO assistant_runtime_turns
              (id, session_id, workspace_id, user_id, sequence, modality, state, request_id,
               request_fingerprint, question, response_text, plan, decision, presentation,
               action_refs, created_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-           RETURNING ${TURN_COLUMNS}`,
+           RETURNING ${TURN_COLUMNS}, workspace_id, user_id
+           ), saved_projection AS (
+             INSERT INTO assistant_runtime_turn_goal_projections
+               (turn_id, session_id, workspace_id, user_id, contract_version, classification, created_at)
+             SELECT id, session_id, workspace_id, user_id, $17, $18, created_at
+               FROM saved_turn
+             RETURNING turn_id
+           )
+           SELECT saved_turn.* FROM saved_turn
+           JOIN saved_projection ON saved_projection.turn_id = saved_turn.id`,
           [
             input.id,
             input.session_id,
@@ -697,6 +742,8 @@ export function createPostgresStore(executor: SqlExecutor): AssistantStore {
             JSON.stringify(input.presentation),
             JSON.stringify(input.action_refs),
             input.created_at,
+            projection.contract_version,
+            projection.classification,
           ],
         );
         rows = result.rows;
@@ -895,6 +942,83 @@ export function createPostgresStore(executor: SqlExecutor): AssistantStore {
                 decision: row.turn_decision,
                 presentation: row.turn_presentation,
               },
+        action:
+          row.action_status === null
+            ? null
+            : {
+                status: row.action_status,
+                executed_at: isoOrNull(row.action_executed_at),
+                verified_at: isoOrNull(row.action_verified_at),
+              },
+      };
+    },
+
+    async readGoalVerificationProjection(input) {
+      const { rows } = await executor.query<
+        GoalRow & {
+          turn_state: string | null;
+          projection_version: unknown;
+          projection_classification: unknown;
+          action_status: string | null;
+          action_executed_at: Date | string | null;
+          action_verified_at: Date | string | null;
+          source_owned: boolean;
+        }
+      >(
+        `SELECT ${GOAL_COLUMNS_QUALIFIED},
+                t.state AS turn_state,
+                p.contract_version AS projection_version,
+                p.classification AS projection_classification,
+                a.status AS action_status,
+                a.executed_at AS action_executed_at,
+                a.verified_at AS action_verified_at,
+                ((g.source_turn_id IS NOT NULL AND t.id IS NOT NULL)
+                  OR (g.action_id IS NOT NULL AND a.id IS NOT NULL)) AS source_owned
+           FROM assistant_runtime_goals g
+           LEFT JOIN assistant_runtime_turns t
+             ON t.id = g.source_turn_id
+            AND t.session_id = g.session_id
+            AND t.user_id = g.user_id
+            AND t.workspace_id = g.workspace_id
+           LEFT JOIN assistant_runtime_turn_goal_projections p
+             ON p.turn_id = t.id
+            AND p.session_id = t.session_id
+            AND p.workspace_id = t.workspace_id
+            AND p.user_id = t.user_id
+           LEFT JOIN actions a
+             ON a.id = g.action_id
+            AND a.user_id = g.user_id
+            AND a.workspace_id = g.workspace_id
+          WHERE g.id = $1`,
+        [input.goal_id],
+      );
+      const row = rows[0];
+      if (!row) return null;
+      let projection: TurnGoalProjection | null = null;
+      if (row.turn_state !== null) {
+        try {
+          projection = parseTurnGoalProjection({
+            contract_version: row.projection_version,
+            classification: row.projection_classification,
+          });
+          if (
+            row.turn_state !== "READY" &&
+            (projection.classification === "BRIEFING" ||
+              projection.classification === "MEETING_PREP")
+          )
+            projection = null;
+        } catch {
+          // Legacy, invalidated and unknown-version evidence is explicitly
+          // unavailable. Neither goal status nor plaintext may fill this gap.
+        }
+      }
+      return {
+        goal: goalFromRow(row),
+        source_owned: row.source_owned === true,
+        turn:
+          row.turn_state === null
+            ? null
+            : { state: row.turn_state, projection },
         action:
           row.action_status === null
             ? null
