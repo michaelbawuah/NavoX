@@ -15,8 +15,9 @@ from navox.student_agent.contracts import (
 )
 from navox.student_agent.selector import SELECTOR_PROMPT, SELECTOR_SCHEMA, validate_selection
 
-COURSE = str(uuid4())
-MATERIAL = str(uuid4())
+# Parametrized questions include these values in shard collection node IDs.
+COURSE = "55555555-5555-4555-8555-555555555555"
+MATERIAL = "66666666-6666-4666-8666-666666666666"
 
 
 def request(question, observations=()):
