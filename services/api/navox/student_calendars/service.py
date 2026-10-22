@@ -6,7 +6,7 @@ ordinary Google/Gmail connections and their credentials are not disconnected.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID
 
 from sqlalchemy import delete, select
@@ -16,7 +16,12 @@ from navox.connectors.sync_state import database_now, utc
 from navox.core.credential_vault import CredentialVault, CredentialVaultError
 from navox.core.settings import Settings
 from navox.db.models import Connection, ConnectorConnection, OAuthAuthorizationAttempt, UserSession
-from navox.db.student_calendars import StudentCalendarGrant, StudentCalendarState
+from navox.db.student_calendars import (
+    StudentCalendarEvent,
+    StudentCalendarGrant,
+    StudentCalendarState,
+    StudentCalendarWriteGrant,
+)
 from navox.student import service as schedule
 from navox.student_calendars.schemas import (
     AVAILABILITY_SCOPES,
@@ -154,23 +159,24 @@ def advance(row: StudentCalendarState) -> None:
 
 
 async def grants(
-    database: AsyncSession, user_id: UUID, workspace_id: UUID
-) -> list[StudentCalendarGrant]:
+    database: AsyncSession, user_id: UUID, workspace_id: UUID, *, scheduling: bool = False
+) -> list[StudentCalendarGrant | StudentCalendarWriteGrant]:
+    model = StudentCalendarWriteGrant if scheduling else StudentCalendarGrant
     rows = list(
         await database.scalars(
-            select(StudentCalendarGrant)
+            select(model)
             .where(
-                StudentCalendarGrant.user_id == user_id,
-                StudentCalendarGrant.workspace_id == workspace_id,
+                model.user_id == user_id,
+                model.workspace_id == workspace_id,
             )
-            .order_by(StudentCalendarGrant.accepted_at, StudentCalendarGrant.id)
+            .order_by(model.accepted_at, model.id)
             .limit(MAX_GRANTS + 1)
             .execution_options(populate_existing=True)
         )
     )
     if len(rows) > MAX_GRANTS:
         raise schedule.StudentError(409, "Too many calendar permission records to check safely")
-    return rows
+    return cast(list[StudentCalendarGrant | StudentCalendarWriteGrant], rows)
 
 
 async def owned_connection(
@@ -306,7 +312,9 @@ async def view(
     )
 
 
-async def retire(database: AsyncSession, grant: StudentCalendarGrant, now: datetime) -> None:
+async def retire(
+    database: AsyncSession, grant: StudentCalendarGrant | StudentCalendarWriteGrant, now: datetime
+) -> None:
     if grant.status == "revoked":
         return
     grant.status, grant.revoked_at = "revoked", now
@@ -363,6 +371,20 @@ async def forget_calendar_data(database: AsyncSession, user_id: UUID, workspace_
     now = await database_now(database)
     for grant in await grants(database, user_id, workspace_id):
         await retire(database, grant, now)
+    for write_grant in await grants(database, user_id, workspace_id, scheduling=True):
+        await retire(database, write_grant, now)
+    # Unsent previews contain no operational side effect and can be erased.
+    # Submitted/uncertain receipts remain held; reset must never convert an
+    # unknown provider outcome into permission to send it again.
+    await database.execute(
+        delete(StudentCalendarEvent).where(
+            StudentCalendarEvent.owner_scope_id == row.id,
+            StudentCalendarEvent.status.in_(["pending", "failed"]),
+        )
+    )
+    await database.execute(
+        delete(StudentCalendarWriteGrant).where(StudentCalendarWriteGrant.owner_scope_id == row.id)
+    )
     await database.flush()
     await database.execute(
         delete(StudentCalendarGrant).where(StudentCalendarGrant.owner_scope_id == row.id)

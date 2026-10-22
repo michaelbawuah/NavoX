@@ -30,8 +30,14 @@ export const STUDENT_TOOL_NAMES = [
   "plan.preview",
   "feeds.read",
   "feed.refresh_review",
+  "course.materials.search",
+  "course.materials.page",
 ] as const;
 export type StudentToolName = (typeof STUDENT_TOOL_NAMES)[number];
+export type StudentMetadataToolName = Exclude<
+  StudentToolName,
+  "course.materials.search" | "course.materials.page"
+>;
 export type StudentToolEffect = "read" | "review";
 export interface StudentAgentScope {
   user_id: string;
@@ -313,6 +319,39 @@ export function parseStudentToolArgs(
       args = exact(value, ["feed_id"]);
       if (!isUuid(args.feed_id)) invalidArgs();
       return { ...args };
+    case "course.materials.search": {
+      args = exact(value, ["course_id", "query"]);
+      if (
+        !isUuid(args.course_id) ||
+        typeof args.query !== "string" ||
+        !args.query.trim() ||
+        args.query.length > 100 ||
+        Array.from(args.query).some((character) => character.charCodeAt(0) < 32)
+      )
+        invalidArgs();
+      const words = args.query.match(/[\p{L}\p{N}_]+/gu) ?? [];
+      if (!words.length || words.length > 8) invalidArgs();
+      return { course_id: args.course_id.toLowerCase(), query: args.query };
+    }
+    case "course.materials.page":
+      args = exact(value, ["course_id", "material_id", "revision", "page"]);
+      if (
+        !isUuid(args.course_id) ||
+        !isUuid(args.material_id) ||
+        !Number.isSafeInteger(args.revision) ||
+        Number(args.revision) < 1 ||
+        Number(args.revision) > 2_147_483_647 ||
+        !Number.isSafeInteger(args.page) ||
+        Number(args.page) < 1 ||
+        Number(args.page) > 100
+      )
+        invalidArgs();
+      return {
+        course_id: args.course_id.toLowerCase(),
+        material_id: args.material_id.toLowerCase(),
+        revision: args.revision,
+        page: args.page,
+      };
   }
 }
 
@@ -364,7 +403,9 @@ export interface StudentSelectorInput {
   step: number;
   question: string;
   manifest_hash: string;
-  observations: readonly StudentToolObservation[];
+  observations: readonly (Omit<StudentToolObservation, "name"> & {
+    name: StudentMetadataToolName;
+  })[];
   previous_error: "invalid_selection" | null;
   max_cost: "0.005";
 }
@@ -379,6 +420,20 @@ export interface StudentToolUpstream {
     signal: AbortSignal,
   ): Promise<unknown>;
   feeds(signal: AbortSignal): Promise<unknown>;
+  materialSearch?(
+    args: { course_id: string; query: string },
+    signal: AbortSignal,
+  ): Promise<unknown>;
+  materials?(courseId: string, signal: AbortSignal): Promise<unknown>;
+  materialPage?(
+    args: {
+      course_id: string;
+      material_id: string;
+      revision: number;
+      page: number;
+    },
+    signal: AbortSignal,
+  ): Promise<unknown>;
   select(input: StudentSelectorInput, signal: AbortSignal): Promise<unknown>;
   converse(
     input: { session_id: string; question: string; recent_turns: readonly [] },
@@ -439,6 +494,98 @@ function feedsFrom(value: unknown) {
           row.last_synced_at === null ? null : timestamp(row.last_synced_at),
       };
     });
+}
+
+function materialTool(name: StudentToolName): boolean {
+  return name === "course.materials.search" || name === "course.materials.page";
+}
+function clipUtf8(value: string, maximum: number): string {
+  let result = "";
+  let length = 0;
+  for (const character of value) {
+    const next = Buffer.byteLength(character, "utf8");
+    if (length + next > maximum) break;
+    result += character;
+    length += next;
+  }
+  return result;
+}
+async function materialIndex(
+  upstream: StudentToolUpstream,
+  courseId: string,
+  signal: AbortSignal,
+) {
+  if (!upstream.materials)
+    throw new StudentToolError(
+      "model_unconfigured",
+      "Course material lookup is unavailable.",
+    );
+  return rawRows(
+    await upstream.materials(courseId, signal),
+    "materials",
+    40,
+  ).map((row) => ({
+    id: id(row.id),
+    revision: integer(row.revision, 1, 2_147_483_647),
+    title: str(row.title, 160),
+    page_count: integer(row.page_count, 1, 100),
+  }));
+}
+
+/** A proposed file read must be tied to this question, never guessed from an identifier. */
+function materialSelectionMatchesQuestion(
+  selection: Extract<StudentToolSelection, { kind: "tool" }>,
+  question: string,
+  courses: readonly Record<string, unknown>[],
+): void {
+  const args = selection.args;
+  const lower = question.toLowerCase();
+  let courseSelected = lower.includes(String(args.course_id).toLowerCase());
+  const namedCourses = new Set<string>();
+  const escaped = (value: string) =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (const course of courses) {
+    for (const label of [course.code, course.name])
+      if (
+        typeof label === "string" &&
+        label.trim() &&
+        new RegExp(
+          `(?:^|[^\\p{L}\\p{N}_])${label.trim().split(/\s+/).map(escaped).join("\\s*")}(?![\\p{L}\\p{N}_])`,
+          "iu",
+        ).test(question)
+      )
+        namedCourses.add(id(course.id));
+  }
+  courseSelected =
+    courseSelected ||
+    (namedCourses.size === 1 && namedCourses.has(String(args.course_id)));
+  if (!courseSelected)
+    throw new StudentToolError(
+      "invalid_args",
+      "Which saved course should I search?",
+    );
+  if (selection.name === "course.materials.search") {
+    const words =
+      String(args.query)
+        .toLowerCase()
+        .match(/[\p{L}\p{N}_]+/gu) ?? [];
+    const questionWords = new Set(lower.match(/[\p{L}\p{N}_]+/gu) ?? []);
+    if (words.some((word) => !questionWords.has(word)))
+      throw new StudentToolError(
+        "invalid_args",
+        "Which literal words should I find in that course?",
+      );
+  } else if (
+    !lower.includes(String(args.material_id).toLowerCase()) ||
+    !new RegExp(`\\bpage\\s+${args.page}\\b`, "i").test(question) ||
+    !new RegExp(`\\b(?:revision|version)\\s+${args.revision}\\b`, "i").test(
+      question,
+    )
+  )
+    throw new StudentToolError(
+      "invalid_args",
+      "Choose the exact material, version and page first.",
+    );
 }
 
 /** No tool accepts an approval; review tools create proposals, never saved plans or external changes. */
@@ -619,6 +766,107 @@ export async function executeStudentTool(
       };
       effect = "review";
       summary = `Review refreshing ${feed.name} (${feed.domain}) in Connections. The feed has not been queued or fetched.`;
+      break;
+    }
+    case "course.materials.search": {
+      if (!upstream.materialSearch)
+        throw new StudentToolError(
+          "model_unconfigured",
+          "Course material search is unavailable.",
+        );
+      const request = args as unknown as { course_id: string; query: string };
+      const raw = await upstream.materialSearch(request, signal);
+      if (
+        !isRecord(raw) ||
+        raw.course_id !== request.course_id ||
+        typeof raw.limit_reached !== "boolean"
+      )
+        invalidResult();
+      const rows = rawRows(raw, "results", 8);
+      const index = await materialIndex(upstream, request.course_id, signal);
+      const seen = new Set<string>();
+      const matches = rows.slice(0, 5).map((row) => {
+        const materialId = id(row.material_id);
+        const revision = integer(row.revision, 1, 2_147_483_647);
+        const page = integer(row.page, 1, 100);
+        const title = str(row.title, 160);
+        const current = index.find((item) => item.id === materialId);
+        const key = `${materialId}:${page}`;
+        if (
+          !current ||
+          current.revision !== revision ||
+          current.title !== title ||
+          page > current.page_count ||
+          seen.has(key)
+        )
+          throw new StudentToolError(
+            "unverified_result",
+            "A source changed. Search the current course materials again.",
+          );
+        seen.add(key);
+        return {
+          material_id: materialId,
+          revision,
+          page,
+          title: clipUtf8(title, 160),
+          snippet: clipUtf8(str(row.snippet, 320), 256),
+        };
+      });
+      data = {
+        course_id: request.course_id,
+        query: request.query,
+        results: matches,
+        limit_reached: raw.limit_reached || rows.length > matches.length,
+      };
+      summary = matches.length
+        ? `Literal source excerpts from your saved course materials:\n\n${matches.map((row) => `${row.title} — page ${row.page}, version ${row.revision}\n${row.snippet}`).join("\n\n")}${data.limit_reached ? "\n\nOpen the course workspace for more matches." : ""}`
+        : "No saved material page in this course contains all those words. Try fewer words or add the relevant notes.";
+      break;
+    }
+    case "course.materials.page": {
+      if (!upstream.materialPage)
+        throw new StudentToolError(
+          "model_unconfigured",
+          "Course material pages are unavailable.",
+        );
+      const request = args as unknown as {
+        course_id: string;
+        material_id: string;
+        revision: number;
+        page: number;
+      };
+      const raw = await upstream.materialPage(request, signal);
+      if (
+        !isRecord(raw) ||
+        raw.course_id !== request.course_id ||
+        raw.material_id !== request.material_id ||
+        raw.revision !== request.revision ||
+        raw.page !== request.page ||
+        typeof raw.truncated !== "boolean"
+      )
+        invalidResult();
+      const text = str(raw.text, 2048, true);
+      if (Buffer.byteLength(text, "utf8") > 2048) invalidResult();
+      const title = str(raw.title, 160);
+      const index = await materialIndex(upstream, request.course_id, signal);
+      const current = index.find((item) => item.id === request.material_id);
+      if (
+        !current ||
+        current.revision !== request.revision ||
+        current.title !== title ||
+        request.page > current.page_count
+      )
+        throw new StudentToolError(
+          "unverified_result",
+          "This source changed. Open its current version in the course workspace.",
+        );
+      data = {
+        ...request,
+        title: clipUtf8(title, 160),
+        text,
+        truncated: raw.truncated,
+      };
+      summary = `Literal source excerpt: ${data.title} — page ${request.page}, version ${request.revision}\n\n${text || "This page has no extracted text."}${raw.truncated ? "\n\nThis excerpt is shortened. Open the source page for the full text." : ""}`;
       break;
     }
   }
@@ -884,12 +1132,15 @@ export function createStudentToolAgent(
           modelAttempts += 1;
           reserved += STUDENT_AGENT_LIMITS.selectionReservedUsd;
           const observations = results.map(
-            ({ call_id, name, effect, data }) => ({
-              call_id,
-              name,
-              effect,
-              data,
-            }),
+            ({ call_id, name, effect, data }) => {
+              // File data is terminal user evidence, never selector context.
+              if (
+                name === "course.materials.search" ||
+                name === "course.materials.page"
+              )
+                invalidResult();
+              return { call_id, name, effect, data };
+            },
           );
           const request: StudentSelectorInput = {
             session_id: input.session_id,
@@ -942,6 +1193,16 @@ export function createStudentToolAgent(
             )
               invalidArgs();
             selection = parseStudentToolSelection(raw.selection, observations);
+            if (selection.kind === "tool" && materialTool(selection.name))
+              materialSelectionMatchesQuestion(
+                selection,
+                input.question,
+                rawRows(
+                  await within(upstream.courses(controller.signal)),
+                  "courses",
+                  60,
+                ),
+              );
           } catch (error) {
             if (
               !(error instanceof StudentToolError) ||
@@ -992,6 +1253,12 @@ export function createStudentToolAgent(
               "tools",
             );
           await run(selection.name, selection.args);
+          if (materialTool(selection.name))
+            return result(
+              "answer",
+              results[results.length - 1].summary,
+              "tools",
+            );
         }
         return result(
           "limit",

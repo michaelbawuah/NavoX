@@ -75,6 +75,31 @@ jobs:
           unzip -l /tmp/navox-chrome-extension.zip | grep -F capture.js
           unzip -l /tmp/navox-chrome-extension.zip | grep -F sidepanel.html
 
+  api-static:
+    name: API static quality
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.15"
+      - run: uv sync --locked --all-groups
+        working-directory: services/api
+      - run: uv run ruff check .
+        working-directory: services/api
+      - run: uv run ruff format --check .
+        working-directory: services/api
+      - run: uv run mypy navox
+        working-directory: services/api
+      - name: Check API shard helper
+        run: |
+          uv run ruff check ../../.github/scripts/api_test_shards.py
+          uv run ruff format --check ../../.github/scripts/api_test_shards.py
+        working-directory: services/api
+      - name: Verify API CI failure and coverage gates
+        run: uv run pytest tests/test_api_ci_contract.py -q
+        working-directory: services/api
+
   api-tests:
     name: API tests (shard ${{ matrix.shard }})
     runs-on: ubuntu-24.04
@@ -146,7 +171,7 @@ jobs:
 
   api:
     name: API quality
-    needs: [api-tests]
+    needs: [api-static, api-tests]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     services:
@@ -162,26 +187,18 @@ jobs:
           --health-cmd "pg_isready -U navox -d navox_recovery"
           --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
-      - name: Require every API test shard to succeed
+      - name: Require API static quality and every test shard to succeed
         env:
+          STATIC_QUALITY_RESULT: ${{ needs.api-static.result }}
           TEST_SHARDS_RESULT: ${{ needs.api-tests.result }}
-        run: test "$TEST_SHARDS_RESULT" = success
+        run: |
+          test "$STATIC_QUALITY_RESULT" = success
+          test "$TEST_SHARDS_RESULT" = success
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.12.15"
       - run: uv sync --locked --all-groups
-        working-directory: services/api
-      - run: uv run ruff check .
-        working-directory: services/api
-      - run: uv run ruff format --check .
-        working-directory: services/api
-      - run: uv run mypy navox
-        working-directory: services/api
-      - name: Check API shard helper
-        run: |
-          uv run ruff check ../../.github/scripts/api_test_shards.py
-          uv run ruff format --check ../../.github/scripts/api_test_shards.py
         working-directory: services/api
       - uses: actions/download-artifact@v4
         with:

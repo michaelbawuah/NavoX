@@ -19,7 +19,7 @@ from navox.core.credential_vault import CredentialVault, CredentialVaultError
 from navox.core.settings import Settings
 from navox.db.models import Connection, ConnectionCredential, OAuthAuthorizationAttempt
 from navox.providers.google_sources import CALENDAR_READ_SCOPE, GMAIL_READ_SCOPE
-from navox.student_calendars.schemas import AVAILABILITY_SCOPES
+from navox.student_calendars.schemas import AVAILABILITY_SCOPES, CALENDAR_WRITE_SCOPE
 
 router = APIRouter(prefix="/connections", tags=["connections"])
 
@@ -43,6 +43,7 @@ GOOGLE_ALLOWED_SCOPES = frozenset(
         GMAIL_READ_SCOPE,
         CALENDAR_READ_SCOPE,
         *AVAILABILITY_SCOPES,
+        CALENDAR_WRITE_SCOPE,
     )
 )
 OAUTH_ATTEMPT_TTL = timedelta(minutes=10)
@@ -374,7 +375,7 @@ async def complete_google_authorization(
     await database.commit()
 
     calendar_hash: str | None = None
-    if attempt.purpose == "calendar_availability":
+    if attempt.purpose in {"calendar_availability", "calendar_scheduling"}:
         from navox.api.student_calendars import session_hash
         from navox.student import service as student_service
         from navox.student_calendars import oauth as calendar_oauth
@@ -390,6 +391,7 @@ async def complete_google_authorization(
                 calendar_hash,
                 attempt.id,
                 settings,
+                scheduling=attempt.purpose == "calendar_scheduling",
             )
             await database.commit()
         except (HTTPException, student_service.StudentError, SQLAlchemyError, TimeoutError):
@@ -426,6 +428,7 @@ async def complete_google_authorization(
                 attempt.id,
                 token_response,
                 settings,
+                scheduling=attempt.purpose == "calendar_scheduling",
             )
         except (
             HTTPException,
@@ -437,7 +440,7 @@ async def complete_google_authorization(
         ):
             await database.rollback()
             outcome = "failed"
-        if outcome != "calendar_availability_enabled":
+        if outcome not in {"calendar_availability_enabled", "calendar_scheduling_enabled"}:
             await database.rollback()
         response = connection_redirect(settings, outcome)
         response.headers["Cache-Control"] = "private, no-store"

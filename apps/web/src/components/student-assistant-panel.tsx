@@ -107,6 +107,7 @@ function StudentAssistantAccount({
     "What class do I have next?",
     "List my tasks",
     "Preview my daily plan",
+    "Find “flip-flop” in my course materials",
     "Explain a flip-flop",
   ];
   return (
@@ -119,7 +120,8 @@ function StudentAssistantAccount({
         <span className={styles.private}>Private question</span>
       </div>
       <p className={styles.intro}>
-        Find your next class, check your tasks, or work through an idea.
+        Find your next class, check your tasks, find a passage in your course
+        materials, or work through an idea.
       </p>
       <div className={styles.examples}>
         {examples.map((example) => (
@@ -175,8 +177,8 @@ function StudentAssistantAccount({
               facts for this question.
               <small>
                 Files, saved memory, previous questions and private calendar
-                links aren’t included. This option does not enable an
-                unqualified model.
+                links aren’t included in AI context. Matching passages from
+                course materials are shown only to you.
               </small>
             </span>
           </label>

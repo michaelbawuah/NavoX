@@ -13,6 +13,15 @@ import { assistantApiBaseUrl } from "./assistant-server";
 const MAX_UPSTREAM_BYTES = 512 * 1024;
 type AgentFetch = (input: string, init: RequestInit) => Promise<Response>;
 
+function courseWorkspacePath(courseId: unknown): string {
+  if (!isUuid(courseId))
+    throw new AssistantError(
+      "invalid_request",
+      "Choose one saved course before reading its materials.",
+    );
+  return `/student/courses/${encodeURIComponent(courseId)}/workspace`;
+}
+
 function statusError(status: number): AssistantError {
   return new AssistantError(
     status === 401
@@ -149,6 +158,46 @@ export function createStudentAgentTransport(
         ...(args.date ? { day: args.date } : {}),
       }),
     feeds: (signal) => send("/student/lms-feeds", "GET", signal),
+    materialSearch(args, signal) {
+      const path = courseWorkspacePath(args.course_id);
+      if (
+        typeof args.query !== "string" ||
+        !args.query.trim() ||
+        args.query.length > 100 ||
+        Array.from(args.query).some((char) => char.charCodeAt(0) < 32)
+      )
+        throw new AssistantError(
+          "invalid_request",
+          "Search course materials with a short, literal phrase.",
+        );
+      const params = new URLSearchParams({ q: args.query });
+      return send(`${path}/search?${params.toString()}`, "GET", signal);
+    },
+    materials(courseId, signal) {
+      return send(`${courseWorkspacePath(courseId)}/materials`, "GET", signal);
+    },
+    materialPage(args, signal) {
+      const path = courseWorkspacePath(args.course_id);
+      if (
+        !isUuid(args.material_id) ||
+        !Number.isSafeInteger(args.revision) ||
+        args.revision < 1 ||
+        args.revision > 2_147_483_647 ||
+        !Number.isSafeInteger(args.page) ||
+        args.page < 1 ||
+        args.page > 100
+      )
+        throw new AssistantError(
+          "invalid_request",
+          "Choose a current saved material and a valid page before reading it.",
+        );
+      const params = new URLSearchParams({ revision: String(args.revision) });
+      return send(
+        `${path}/materials/${encodeURIComponent(args.material_id)}/pages/${args.page}?${params.toString()}`,
+        "GET",
+        signal,
+      );
+    },
     select: (input, signal) =>
       send("/student-agent/select", "POST", signal, input),
     async converse(input, signal) {

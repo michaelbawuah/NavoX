@@ -144,7 +144,7 @@ afterEach(() => vi.useRealTimers());
 describe("student server-owned registry", () => {
   it("pins the canonical cross-language manifest", () =>
     expect(STUDENT_TOOL_MANIFEST_HASH).toBe(
-      "23e2aa5314f4ad8d6d05c747a6cf1035ece9fab3a97d54360c21ffda89d4b7f3",
+      "bffb9fba5da9b8fa8aece7ab9dc5f9ce09c437998f870f0470359b898ca149df",
     ));
   it.each([
     "email.send",
