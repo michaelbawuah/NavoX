@@ -28,6 +28,7 @@ from navox.db import (
     routines,  # noqa: F401 - registers opt-in schedules and run history
     student,  # noqa: F401 - registers owner-managed classes and timetable
     student_alerts,  # noqa: F401 - registers opt-in device alerts and delivery history
+    student_calendars,  # noqa: F401 - registers calendar-purpose consent and reset fences
     student_email,  # noqa: F401 - registers expiring reviews and accepted email task provenance
     student_goals,  # noqa: F401 - registers encrypted explicit goals and self-reported check-ins
     student_planning,  # noqa: F401 - registers owned study tasks and plans

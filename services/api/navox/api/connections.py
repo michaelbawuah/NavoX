@@ -7,10 +7,11 @@ from urllib.parse import urlencode
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
 from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
 from navox.connectors.builtin.google import ensure_google_connector_connection
@@ -18,6 +19,7 @@ from navox.core.credential_vault import CredentialVault, CredentialVaultError
 from navox.core.settings import Settings
 from navox.db.models import Connection, ConnectionCredential, OAuthAuthorizationAttempt
 from navox.providers.google_sources import CALENDAR_READ_SCOPE, GMAIL_READ_SCOPE
+from navox.student_calendars.schemas import AVAILABILITY_SCOPES
 
 router = APIRouter(prefix="/connections", tags=["connections"])
 
@@ -35,7 +37,13 @@ GOOGLE_ACCOUNT_BINDING_SCOPES = (
     "https://www.googleapis.com/auth/userinfo.email",
 )
 GOOGLE_ALLOWED_SCOPES = frozenset(
-    (*GOOGLE_IDENTITY_SCOPES, GOOGLE_GMAIL_SEND_SCOPE, GMAIL_READ_SCOPE, CALENDAR_READ_SCOPE)
+    (
+        *GOOGLE_IDENTITY_SCOPES,
+        GOOGLE_GMAIL_SEND_SCOPE,
+        GMAIL_READ_SCOPE,
+        CALENDAR_READ_SCOPE,
+        *AVAILABILITY_SCOPES,
+    )
 )
 OAUTH_ATTEMPT_TTL = timedelta(minutes=10)
 
@@ -336,6 +344,7 @@ async def complete_google_authorization(
     code: Annotated[str | None, Query()] = None,
     state_value: Annotated[str | None, Query(alias="state")] = None,
     error: Annotated[str | None, Query()] = None,
+    request: Request = None,  # type: ignore[assignment]  # Legacy direct helper callers have no Request.
 ) -> RedirectResponse:
     if error is not None:
         return connection_redirect(settings, "cancelled")
@@ -364,17 +373,75 @@ async def complete_google_authorization(
     attempt.used_at = datetime.now(UTC)
     await database.commit()
 
+    calendar_hash: str | None = None
+    if attempt.purpose == "calendar_availability":
+        from navox.api.student_calendars import session_hash
+        from navox.student import service as student_service
+        from navox.student_calendars import oauth as calendar_oauth
+
+        try:
+            if request is None:
+                raise HTTPException(403, "Calendar authorization requires a browser session")
+            calendar_hash = session_hash(request, settings)
+            await calendar_oauth.pending(
+                database,
+                current_account.user.id,
+                current_account.workspace.id,
+                calendar_hash,
+                attempt.id,
+                settings,
+            )
+            await database.commit()
+        except (HTTPException, student_service.StudentError, SQLAlchemyError, TimeoutError):
+            await database.rollback()
+            response = connection_redirect(settings, "failed")
+            response.headers["Cache-Control"] = "private, no-store"
+            return response
+
     try:
-        token_response = await exchange_authorization_code(
-            code,
-            attempt.code_verifier,
-            settings,
-        )
+        if calendar_hash is not None:
+            token_response = await calendar_oauth.exchange_authorization_code(
+                code, attempt.code_verifier, settings
+            )
+        else:
+            token_response = await exchange_authorization_code(
+                code, attempt.code_verifier, settings
+            )
         access_token = token_response.get("access_token")
         if not isinstance(access_token, str) or not access_token:
             raise GoogleOAuthProviderError("Google did not return an access token")
     except GoogleOAuthProviderError:
-        return connection_redirect(settings, "failed")
+        response = connection_redirect(settings, "failed")
+        if calendar_hash is not None:
+            response.headers["Cache-Control"] = "private, no-store"
+        return response
+
+    if calendar_hash is not None:
+        try:
+            outcome = await calendar_oauth.complete(
+                database,
+                current_account.user.id,
+                current_account.workspace.id,
+                calendar_hash,
+                attempt.id,
+                token_response,
+                settings,
+            )
+        except (
+            HTTPException,
+            GoogleOAuthProviderError,
+            CredentialVaultError,
+            student_service.StudentError,
+            SQLAlchemyError,
+            TimeoutError,
+        ):
+            await database.rollback()
+            outcome = "failed"
+        if outcome != "calendar_availability_enabled":
+            await database.rollback()
+        response = connection_redirect(settings, outcome)
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
 
     if attempt.purpose in {"gmail_send", "intelligence_read", "reconnect"}:
         connection = await database.scalar(

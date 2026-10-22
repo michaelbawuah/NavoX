@@ -206,3 +206,50 @@ class AvailabilityResult(FrozenInput):
     busy: tuple[TimeInterval, ...]
     warnings: tuple[AvailabilityWarning, ...]
     changes_applied: Literal[False] = False
+
+
+class AvailabilityPreview(TimeInterval):
+    """Only search choices are accepted; all source facts are loaded for the owner."""
+
+    duration_minutes: int = Field(ge=1, le=480, strict=True)
+    preferences_revision: int = Field(ge=0, strict=True)
+    expected_timezone: str = Field(min_length=1, max_length=64)
+    routine_confirmed: bool = Field(strict=True)
+    travel_assumption: Literal["unknown", "zero"]
+    include_short_slots: bool = Field(default=False, strict=True)
+
+    _zone = field_validator("expected_timezone")(valid_zone)
+
+
+class AvailabilityRevisions(FrozenInput):
+    student_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    planning_revision: int = Field(ge=0)
+    preferences_revision: int = Field(ge=0)
+    availability_generation: int = Field(ge=0)
+    availability_revision: int = Field(ge=0)
+
+
+class AvailabilitySourceSummary(FrozenInput):
+    source_id: SourceId
+    state: Literal["complete", "partial", "stale", "unavailable", "revoked"]
+    calendar_count: int = Field(ge=0, le=1000)
+
+
+class AvailabilitySnapshot(FrozenInput):
+    input: AvailabilityRequest
+    result: AvailabilityResult
+    checked_at: datetime
+    expires_at: datetime
+    revision: AvailabilityRevisions
+    source_summary: tuple[AvailabilitySourceSummary, ...] = Field(max_length=200)
+    changes_applied: Literal[False] = False
+
+    _instants = field_validator("checked_at", "expires_at")(instant)
+
+    @model_validator(mode="after")
+    def freshness(self) -> Self:
+        if not self.checked_at < self.expires_at <= self.checked_at + timedelta(seconds=60):
+            raise ValueError("Availability snapshots expire within 60 seconds")
+        if self.input.now != self.checked_at or self.result.checked_at != self.checked_at:
+            raise ValueError("The availability observation changed")
+        return self

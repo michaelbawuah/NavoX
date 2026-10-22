@@ -923,6 +923,7 @@ async def reset_data(
         erase_all_owned_feeds,
         lock_all_feeds_for_reset,
     )
+    from navox.student_calendars.service import forget_calendar_data
     from navox.student_email.service import forget_email_data
     from navox.student_goals.service import forget_goals_data
     from navox.student_planning.service import forget_planning_data
@@ -966,6 +967,7 @@ async def reset_data(
             409, "The saved calendar connection needs review before resetting data"
         ) from None
     await forget_email_data(database, user_id=user_id, workspace_id=workspace_id)
+    await forget_calendar_data(database, user_id, workspace_id)
     await forget_planning_data(database, user_id, workspace_id)
     await forget_recovery_data(database, user_id, workspace_id)
     await forget_goals_data(database, user_id, workspace_id)

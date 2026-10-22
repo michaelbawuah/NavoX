@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     student_push_vapid_subject: str = ""
     # Later student increments remain opt-in until their release gates are met.
     student_planning_enabled: bool = False
+    student_calendar_availability_enabled: bool = False
     student_lms_feeds_enabled: bool = False
     student_coursework_enabled: bool = False
     student_board_enabled: bool = False
