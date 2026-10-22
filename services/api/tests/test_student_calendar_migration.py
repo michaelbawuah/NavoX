@@ -125,6 +125,10 @@ def test_empty_downgrade_removes_only_new_tables(database):
 )
 async def test_postgres_additive_migration_and_retained_reset_guard(ai_database):
     async with ai_database() as database:
+        # Later additive children are outside this historical migration's DDL.
+        # Remove their empty fixture tables before reconstructing its parents.
+        await database.execute(text("DROP TABLE student_calendar_events"))
+        await database.execute(text("DROP TABLE student_calendar_write_grants"))
         await database.execute(text("DROP TABLE student_calendar_grants"))
         await database.execute(text("DROP TABLE student_calendar_states"))
         user_id, workspace_id = uuid4(), uuid4()

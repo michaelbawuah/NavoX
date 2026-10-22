@@ -23,10 +23,32 @@ describe("calendar availability release gate", () => {
     );
     vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_PLANNING_ENABLED", "false");
     vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_EMAIL_ENABLED", "false");
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_CALENDAR_WRITES_ENABLED", "false");
     const { productFeatures } = await import("./product-features");
     expect(productFeatures.studentCalendarAvailability).toBe(true);
     expect(productFeatures.studentPlanning).toBe(false);
     expect(productFeatures.studentEmail).toBe(false);
+    expect(productFeatures.studentCalendarWrites).toBe(false);
+  });
+});
+describe("reviewed calendar write release gate", () => {
+  it.each([undefined, "false", "1", "TRUE"])(
+    "keeps calendar writes off without exact true (%s)",
+    async (value) => {
+      vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_CALENDAR_WRITES_ENABLED", value);
+      const { productFeatures } = await import("./product-features");
+      expect(productFeatures.studentCalendarWrites).toBe(false);
+    },
+  );
+  it("requires the separately configured scheduling capability", async () => {
+    vi.stubEnv("NEXT_PUBLIC_NAVOX_STUDENT_CALENDAR_WRITES_ENABLED", "true");
+    vi.stubEnv(
+      "NEXT_PUBLIC_NAVOX_STUDENT_CALENDAR_AVAILABILITY_ENABLED",
+      "false",
+    );
+    const { productFeatures } = await import("./product-features");
+    expect(productFeatures.studentCalendarWrites).toBe(true);
+    expect(productFeatures.studentCalendarAvailability).toBe(false);
   });
 });
 describe("authored whiteboard release gate", () => {

@@ -15,17 +15,21 @@ from navox.connectors.builtin.google import ensure_google_connector_connection
 from navox.connectors.sync_state import utc
 from navox.core.settings import Settings
 from navox.db.models import Connection, ConnectionCredential, OAuthAuthorizationAttempt
-from navox.db.student_calendars import StudentCalendarGrant
+from navox.db.student_calendars import StudentCalendarGrant, StudentCalendarWriteGrant
 from navox.student import service as schedule
 from navox.student_calendars import service
 from navox.student_calendars.schemas import (
     AVAILABILITY_SCOPES,
     CONSENT_VERSION,
+    SCHEDULING_CONSENT_VERSION,
+    SCHEDULING_SCOPES,
     CalendarAuthorization,
+    CalendarSchedulingStart,
     CalendarStart,
 )
 
 PURPOSE = "calendar_availability"
+SCHEDULING_PURPOSE = "calendar_scheduling"
 
 
 async def _json_request(
@@ -99,8 +103,10 @@ async def start(
     user_id: UUID,
     workspace_id: UUID,
     session_hash: str,
-    payload: CalendarStart,
+    payload: CalendarStart | CalendarSchedulingStart,
     settings: Settings,
+    *,
+    scheduling: bool = False,
 ) -> CalendarAuthorization:
     from navox.api.connections import (
         GOOGLE_ACCOUNT_BINDING_SCOPES,
@@ -110,21 +116,27 @@ async def start(
         hash_value,
     )
 
+    if scheduling and not getattr(settings, "student_calendar_writes_enabled", False):
+        raise schedule.StudentError(404, "Calendar scheduling is not enabled")
     google_vault(settings)
+    model = StudentCalendarWriteGrant if scheduling else StudentCalendarGrant
+    consent = SCHEDULING_CONSENT_VERSION if scheduling else CONSENT_VERSION
+    if payload.consent_version != consent:
+        raise schedule.StudentError(422, "Confirm the selected calendar purpose")
     current = await service.boundary(database, user_id, workspace_id, session_hash)
     service.check_command(current, payload)
     row = await service.ensure_state(database, current, user_id, workspace_id)
     previous = await database.scalar(
-        select(StudentCalendarGrant.id).where(
-            StudentCalendarGrant.owner_scope_id == row.id,
-            StudentCalendarGrant.request_id == payload.request_id,
+        select(model.id).where(
+            model.owner_scope_id == row.id,
+            model.request_id == payload.request_id,
         )
     )
     if previous is not None:
         raise schedule.StudentError(
             409, "Calendar authorization already started. Refresh before retrying"
         )
-    existing_grants = await service.grants(database, user_id, workspace_id)
+    existing_grants = await service.grants(database, user_id, workspace_id, scheduling=scheduling)
     if len(existing_grants) >= service.MAX_GRANTS:
         raise schedule.StudentError(
             409, "Reset calendar permissions before starting another connection"
@@ -135,18 +147,35 @@ async def start(
         )
         if connection is None or connection.status != "active":
             raise schedule.StudentError(404, "Active Google connection not found")
+    if scheduling:
+        if (
+            payload.connection_id is None
+            or not service.ready(connection)
+            or not any(
+                grant.connection_id == payload.connection_id
+                and grant.status == "active"
+                and grant.generation == current.generation
+                and grant.owner_scope_id == row.id
+                and grant.consent_version == CONSENT_VERSION
+                for grant in await service.grants(database, user_id, workspace_id)
+            )
+        ):
+            raise schedule.StudentError(409, "Connect busy-time access before scheduling")
     # Only one authorization window is current; a failed/abandoned earlier
     # window cannot leave an unknown account in every later availability result.
     for old in existing_grants:
         if old.status == "pending":
             await service.retire(database, old, current.now)
     nonce, verifier = token_urlsafe(32), token_urlsafe(64)
-    scopes = [*GOOGLE_ACCOUNT_BINDING_SCOPES, *AVAILABILITY_SCOPES]
+    scopes = [
+        *GOOGLE_ACCOUNT_BINDING_SCOPES,
+        *(SCHEDULING_SCOPES if scheduling else AVAILABILITY_SCOPES),
+    ]
     attempt = OAuthAuthorizationAttempt(
         user_id=user_id,
         workspace_id=workspace_id,
         provider="google",
-        purpose=PURPOSE,
+        purpose=SCHEDULING_PURPOSE if scheduling else PURPOSE,
         connection_id=payload.connection_id,
         requested_scopes=scopes,
         state_hash=hash_value(nonce),
@@ -155,7 +184,7 @@ async def start(
     )
     database.add(attempt)
     await database.flush()
-    grant = StudentCalendarGrant(
+    grant = model(
         owner_scope_id=row.id,
         user_id=user_id,
         workspace_id=workspace_id,
@@ -166,7 +195,7 @@ async def start(
         generation=current.generation,
         revision=1,
         status="pending",
-        consent_version=CONSENT_VERSION,
+        consent_version=consent,
         accepted_at=current.now,
     )
     database.add(grant)
@@ -197,18 +226,28 @@ async def pending(
     session_hash: str,
     attempt_id: UUID,
     settings: Settings,
-) -> tuple[service.Boundary, StudentCalendarGrant, OAuthAuthorizationAttempt]:
+    *,
+    scheduling: bool = False,
+) -> tuple[
+    service.Boundary, StudentCalendarGrant | StudentCalendarWriteGrant, OAuthAuthorizationAttempt
+]:
     if not settings.student_calendar_availability_enabled:
         raise schedule.StudentError(404, "Calendar availability is not enabled")
+    if scheduling and not getattr(settings, "student_calendar_writes_enabled", False):
+        raise schedule.StudentError(404, "Calendar scheduling is not enabled")
     current = await service.boundary(database, user_id, workspace_id, session_hash)
-    grant = await database.scalar(
-        select(StudentCalendarGrant)
-        .where(
-            StudentCalendarGrant.user_id == user_id,
-            StudentCalendarGrant.workspace_id == workspace_id,
-            StudentCalendarGrant.oauth_attempt_id == attempt_id,
-        )
-        .execution_options(populate_existing=True)
+    model = StudentCalendarWriteGrant if scheduling else StudentCalendarGrant
+    grant = cast(
+        StudentCalendarGrant | StudentCalendarWriteGrant | None,
+        await database.scalar(
+            select(model)
+            .where(
+                model.user_id == user_id,
+                model.workspace_id == workspace_id,
+                model.oauth_attempt_id == attempt_id,
+            )
+            .execution_options(populate_existing=True)
+        ),
     )
     attempt = await database.scalar(
         select(OAuthAuthorizationAttempt)
@@ -216,7 +255,7 @@ async def pending(
             OAuthAuthorizationAttempt.id == attempt_id,
             OAuthAuthorizationAttempt.user_id == user_id,
             OAuthAuthorizationAttempt.workspace_id == workspace_id,
-            OAuthAuthorizationAttempt.purpose == PURPOSE,
+            OAuthAuthorizationAttempt.purpose == (SCHEDULING_PURPOSE if scheduling else PURPOSE),
             OAuthAuthorizationAttempt.provider == "google",
         )
         .execution_options(populate_existing=True)
@@ -228,11 +267,25 @@ async def pending(
         or grant.owner_scope_id != current.state.id
         or grant.generation != current.generation
         or grant.status != "pending"
-        or grant.consent_version != CONSENT_VERSION
+        or grant.consent_version != (SCHEDULING_CONSENT_VERSION if scheduling else CONSENT_VERSION)
         or grant.auth_session_id != current.session.id
         or utc(attempt.expires_at) <= current.now
     ):
         raise schedule.StudentError(409, "Calendar authorization is no longer available")
+    if scheduling:
+        connection = await service.owned_connection(
+            database, user_id, workspace_id, grant.connection_id
+        )
+        if not service.ready(connection) or not any(
+            busy.connection_id == grant.connection_id
+            and busy.status == "active"
+            and busy.generation == current.generation
+            and busy.consent_version == CONSENT_VERSION
+            for busy in await service.grants(database, user_id, workspace_id)
+        ):
+            raise schedule.StudentError(
+                409, "Busy-time permission changed. Review it before scheduling"
+            )
     return current, grant, attempt
 
 
@@ -244,6 +297,8 @@ async def complete(
     attempt_id: UUID,
     token_response: dict[str, Any],
     settings: Settings,
+    *,
+    scheduling: bool = False,
 ) -> str:
     from navox.api.connections import (
         GOOGLE_ACCOUNT_BINDING_SCOPES,
@@ -261,10 +316,15 @@ async def complete(
     ):
         return "scope_mismatch"
     returned = set(scope_text.split())
-    required = {*GOOGLE_ACCOUNT_BINDING_SCOPES, *AVAILABILITY_SCOPES}
+    required = {
+        *GOOGLE_ACCOUNT_BINDING_SCOPES,
+        *(SCHEDULING_SCOPES if scheduling else AVAILABILITY_SCOPES),
+    }
     if not required.issubset(returned) or not returned.issubset(GOOGLE_ALLOWED_SCOPES):
         return "scope_mismatch"
-    await pending(database, user_id, workspace_id, session_hash, attempt_id, settings)
+    await pending(
+        database, user_id, workspace_id, session_hash, attempt_id, settings, scheduling=scheduling
+    )
     await database.commit()  # Never hold native authority locks over provider I/O.
     profile = await fetch_profile(token)
     account_id, email = profile.get("sub"), profile.get("email")
@@ -283,7 +343,7 @@ async def complete(
         return "unverified"
     normalized = email.strip().casefold()
     current, grant, attempt = await pending(
-        database, user_id, workspace_id, session_hash, attempt_id, settings
+        database, user_id, workspace_id, session_hash, attempt_id, settings, scheduling=scheduling
     )
     query = select(Connection).where(
         Connection.user_id == user_id,
@@ -346,7 +406,7 @@ async def complete(
     connection.last_checked_at, connection.last_error = current.now, None
     await database.flush()
     await ensure_google_connector_connection(database, connection)
-    for old in await service.grants(database, user_id, workspace_id):
+    for old in await service.grants(database, user_id, workspace_id, scheduling=scheduling):
         if old.id != grant.id and old.connection_id == connection.id and old.status != "revoked":
             await service.retire(database, old, current.now)
     grant.connection_id, grant.status = connection.id, "active"
@@ -364,4 +424,4 @@ async def complete(
                 await database.delete(previous)
     schedule.audit(database, user_id, workspace_id, "student.calendar.consent.completed", grant.id)
     await database.commit()
-    return "calendar_availability_enabled"
+    return "calendar_scheduling_enabled" if scheduling else "calendar_availability_enabled"

@@ -15,6 +15,7 @@ import {
   selectAvailabilityOptions,
 } from "../lib/student-availability-options";
 import {
+  type AvailabilityPreviewInput,
   type AvailabilitySnapshot,
   createStudentCalendarApi,
   type StudentCalendarApi,
@@ -33,6 +34,7 @@ import {
   studentWeekdays,
 } from "../lib/student-schedule";
 import styles from "./student-calendar.module.css";
+import { StudentCalendarScheduling } from "./student-calendar-scheduling";
 import { useCalendarWorkspace } from "./use-calendar-workspace";
 
 const reasons = {
@@ -111,6 +113,8 @@ function AvailabilityWorkspace({
   );
   const [preferences, setPreferences] = useState<StudyPreferences | null>(null);
   const [snapshot, setSnapshot] = useState<AvailabilitySnapshot | null>(null);
+  const [searchRequest, setSearchRequest] =
+    useState<AvailabilityPreviewInput | null>(null);
   const [options, setOptions] = useState<AvailabilityOption[]>([]);
   const [duration, setDuration] = useState(30);
   const [routine, setRoutine] = useState<"" | "confirmed" | "unknown">("");
@@ -129,6 +133,7 @@ function AvailabilityWorkspace({
   const privateState = useCalendarWorkspace(accountId, api, () => {
     setPreferences(null);
     setSnapshot(null);
+    setSearchRequest(null);
     setOptions([]);
     setRoutine("");
     setTravel("");
@@ -139,6 +144,7 @@ function AvailabilityWorkspace({
   const accessChanged = useCallback(() => {
     cancel();
     setSnapshot(null);
+    setSearchRequest(null);
     setOptions([]);
     setNotice(
       "Calendar access changed. Check openings again before making a plan.",
@@ -147,6 +153,7 @@ function AvailabilityWorkspace({
   useEffect(() => observeCalendarAccessChanges(accessChanged), [accessChanged]);
   const loadPreferences = useCallback(() => {
     setSnapshot(null);
+    setSearchRequest(null);
     setOptions([]);
     setPreferences(null);
     setRoutine("");
@@ -184,6 +191,7 @@ function AvailabilityWorkspace({
     );
     const expire = () => {
       setSnapshot(null);
+      setSearchRequest(null);
       setOptions([]);
       setNotice(
         "These times need a fresh check. Search again before making a plan.",
@@ -200,6 +208,7 @@ function AvailabilityWorkspace({
   const changeSearch = () => {
     privateState.cancel();
     setSnapshot(null);
+    setSearchRequest(null);
     setOptions([]);
     setNotice("");
     privateState.setError("");
@@ -258,6 +267,16 @@ function AvailabilityWorkspace({
           ),
         );
         setSnapshot(current);
+        setSearchRequest({
+          start_at: start,
+          end_at: end,
+          duration_minutes: requestedDuration,
+          include_short_slots: false,
+          routine_confirmed: routine === "confirmed",
+          travel_assumption: travel,
+          preferences_revision: preferences.revision,
+          expected_timezone: preferences.timezone,
+        });
       },
     );
   };
@@ -544,6 +563,11 @@ function AvailabilityWorkspace({
           </p>
         </div>
       )}
+      <StudentCalendarScheduling
+        accountId={accountId}
+        options={options}
+        availability={searchRequest}
+      />
     </section>
   );
 }
