@@ -138,9 +138,7 @@ async def test_same_owner_material_in_another_workspace_is_denied_before_decrypt
         other = Workspace(name="Other personal workspace", workspace_type="personal")
         database.add(other)
         await database.flush()
-        database.add(
-            WorkspaceMembership(workspace_id=other.id, user_id=env.user_id, role="owner")
-        )
+        database.add(WorkspaceMembership(workspace_id=other.id, user_id=env.user_id, role="owner"))
         material = await database.get(CourseMaterial, UUID(saved["entity_id"]))
         material.workspace_id = other.id
         await database.commit()
