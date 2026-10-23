@@ -6,6 +6,7 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from decimal import ROUND_CEILING, Decimal
 from typing import Any, Literal, Protocol
 from uuid import UUID, uuid4
 
@@ -13,6 +14,7 @@ import httpx
 
 from navox.core.settings import Settings
 from navox.vox.inference_config import ProviderRoute, VoxInferenceConfig, route_credential
+from navox.vox.inference_speech import MAX_WIRE_BYTES, decode_speech_events
 from navox.vox.worker import MemoryTurn
 
 MAX_JSON_BYTES = 1_048_576
@@ -63,6 +65,15 @@ def usage_counts(raw: Any) -> dict[str, int]:
     """Whitelist numeric counts only. Never keep response content or provider diagnostics."""
     if not isinstance(raw, dict):
         return {}
+    if raw.get("type") == "duration":
+        seconds = raw.get("seconds")
+        if type(seconds) not in {int, float}:
+            return {}
+        duration = Decimal(str(seconds))
+        if not duration.is_finite() or not 0 <= duration <= 3600:
+            return {}
+        # Provider-reported billing duration, never inferred from local playout.
+        return {"billed_audio_ms": int((duration * 1000).to_integral_value(rounding=ROUND_CEILING))}
     result = {}
     for name in (
         "input_tokens",
@@ -161,7 +172,24 @@ class OpenAICompatiblePipeline:
                     if response.status_code != 200:
                         raise ProviderRejected("The voice provider rejected this request")
                     chunks = bytearray()
-                    limit = MAX_AUDIO_BYTES if path == "/audio/speech" else MAX_JSON_BYTES
+                    speech_events = (
+                        path == "/audio/speech"
+                        and payload is not None
+                        and payload.get("stream_format") == "sse"
+                    )
+                    if (
+                        speech_events
+                        and response.headers.get("content-type", "").split(";")[0]
+                        != "text/event-stream"
+                    ):
+                        raise ProviderRejected("The speech provider returned an invalid stream")
+                    limit = (
+                        MAX_WIRE_BYTES
+                        if speech_events
+                        else MAX_AUDIO_BYTES
+                        if path == "/audio/speech"
+                        else MAX_JSON_BYTES
+                    )
                     async for chunk in response.aiter_bytes():
                         await self.check()
                         if len(chunks) + len(chunk) > limit:
@@ -169,12 +197,28 @@ class OpenAICompatiblePipeline:
                         chunks.extend(chunk)
             await self.check()
             data: dict[str, Any] = {}
+            if speech_events:
+                output, raw_usage = decode_speech_events(bytes(chunks))
+                counts = usage_counts(raw_usage)
+                # This request contains only text and produces only audio.
+                if "input_tokens" in counts:
+                    counts.setdefault("input_text_tokens", counts["input_tokens"])
+                if "output_tokens" in counts:
+                    counts.setdefault("output_audio_tokens", counts["output_tokens"])
+                complete = "input_tokens" in counts and "output_tokens" in counts
+                return output, {}
             if path != "/audio/speech":
                 parsed = json.loads(chunks)
                 if not isinstance(parsed, dict):
                     raise ProviderRejected("The voice provider returned an invalid response")
                 data = parsed
                 counts = usage_counts(data.get("usage"))
+                if path == "/chat/completions":
+                    # Messages and tools above contain text only; no audio/image input.
+                    if "prompt_tokens" in counts:
+                        counts.setdefault("input_text_tokens", counts["prompt_tokens"])
+                    if "completion_tokens" in counts:
+                        counts.setdefault("output_text_tokens", counts["completion_tokens"])
                 complete = bool(counts)
             return bytes(chunks), data
         except (httpx.TransportError, TimeoutError):
@@ -269,6 +313,7 @@ class OpenAICompatiblePipeline:
                     "voice": self.config.tts.voice,
                     "input": answer,
                     "response_format": "mp3",
+                    **({"stream_format": "sse"} if self.config.tts_stream_format == "sse" else {}),
                 },
             )
             if not output:

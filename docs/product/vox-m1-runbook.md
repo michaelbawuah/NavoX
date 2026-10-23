@@ -46,7 +46,7 @@ Quota policy is separate from inference route selection. The current defaults ar
 
 Authenticated operator endpoints are `GET /api/v1/vox/usage/policy`, `PUT /api/v1/vox/usage/policy`, and `GET /api/v1/vox/usage/daily`. All these endpoints require a freshly valid browser cookie and the matching `X-NavoX-Account: <workspace UUID>:<user UUID>` header. Policy PUT also requires the approved same-origin `Origin` header. Do not paste or log session cookies. Read the current revision before updating; PUT accepts `{ "revision": <current>, "policy": <reviewed policy> }` and checks for conflicting updates. Never blindly publish the example's revision zero over an existing policy. Student-owned reads are `GET /api/v1/vox/usage/status` and `GET /api/v1/vox/usage/calls/{call_id}`.
 
-The [pricing example](vox-m1-usage-policy.example.json) contains only the exact `openai` / `gpt-realtime-2.1` token-rate entry. It does not select a model, price the three fallback models, or establish a LiveKit rate. Token modality rates are USD per million tokens; transport is USD per connected minute. Add only reviewed, versioned rates for the exact selected provider/model and supported billing modality. File-STT duration billing and missing provider usage must not be converted into invented token counts. Unknown rates, unknown modality, missing usage, and null transport rates mean an incomplete/unknown total, not free service. Provider estimates remain distinct from reconciled invoices. Unknown failed usage can retain a token reservation; do not delete ledger entries to reset quota. Voice activity uses durable credits of at most one second: lower budgets apply to new grants, while an already-issued credit remains usable until its deadline. Per-frame revocation is still fresh. An uncertain crash hold remains reserved, not actual speech. See [credit accounting](../vox-voice-credit-batching.md) for period attribution, checkpoint fencing and estimate limitations.
+The [pricing example](vox-m1-usage-policy.example.json) contains the exact `openai` / `gpt-realtime-2.1` token-rate entry. It also includes reviewed transcription-duration, fallback text and speech rates. It does not select a model or establish a LiveKit rate. The text rate has a standard-context ceiling; larger requests remain unknown until a matching tier is configured. Token modality rates are USD per million tokens; transport is USD per connected minute. Add only reviewed, versioned rates for the exact selected provider/model and supported billing modality. Provider duration objects are stored as billed_audio_ms and priced using audio_usd_per_minute, never converted into invented tokens. The example selects tts_stream_format=sse to receive completed speech usage. Other providers can select audio; missing usage stays unknown. Unknown rates, unknown modality, missing usage, and null transport rates mean an incomplete/unknown total, not free service. Provider estimates remain distinct from reconciled invoices. Unknown failed usage can retain a token reservation; do not delete ledger entries to reset quota. Voice activity uses durable credits of at most one second: lower budgets apply to new grants, while an already-issued credit remains usable until its deadline. Per-frame revocation is still fresh. An uncertain crash hold remains reserved, not actual speech. See [credit accounting](../vox-voice-credit-batching.md) for period attribution, checkpoint fencing and estimate limitations.
 
 ## Start the existing processes
 
@@ -63,7 +63,7 @@ uv run --no-sync python -m navox.vox.worker_livekit start
 uv run --no-sync python -m navox.vox.worker_reconcile
 ```
 
-The first command registers the named LiveKit AgentServer. The second independently retries durable media cleanup and must remain running while cleanup obligations exist. The ordinary Compose `worker` is the Temporal worker; it does not start either Vox process. There is currently no dedicated Vox worker service in the repository's Compose files: add an explicitly reviewed service/supervisor deployment rather than assuming `compose up` starts voice. Do not run multiple unsupervised copies. The worker admits one active job per process and uses a PostgreSQL epoch lock to reject duplicate job execution. Its health listener binds to `127.0.0.1:8081`; do not expose it publicly or treat that listener as proof of successful audio.
+The first command registers the named LiveKit AgentServer. The second independently retries durable media cleanup and must remain running while cleanup obligations exist. The ordinary Compose `worker` is the Temporal worker; it does not start either Vox process. The isolated docker-compose.vox-test.yml provides dedicated vox-worker and vox-cleanup services with a separate database volume and loopback ports 13000/18000. The ordinary stack still has no Vox services; do not assume `compose up` starts voice. Do not run multiple unsupervised copies. The worker admits one active job per process and uses a PostgreSQL epoch lock to reject duplicate job execution. Its health listener binds to `127.0.0.1:8081`; do not expose it publicly or treat that listener as proof of successful audio.
 
 ## Qualification and normal behavior
 
@@ -89,3 +89,46 @@ The configured worker suppresses long silence locally and uses short preroll/han
 - Heard-prefix tracking uses the local RTC playout estimate and provider truncation result, not physical proof of sound reaching the listener. Real microphone quality, VAD boundaries, naturalness, echo/barge-in, and phone latency require device tests.
 - Wake-command API/queue plumbing does not qualify the browser's local keyword assets/runtime, spoken-question capture, or user-visible completion/retry behavior. Verify those in the actual signed-in browser; do not claim a local wake test from a synthetic text enqueue.
 - Token/transport metering has synthetic server tests. Complete provider usage reconciliation, configured fallback pricing, actual provider failover, LiveKit cleanup/revocation, and cost accuracy still require live qualification. This document does not certify paid audio, locked-screen/native-phone operation, or end-to-end M1 completion.
+
+
+## Live provider checks, 2026-10-23
+
+A realtime session was acknowledged and returned audio. Two generated audio-input
+turns then completed on the same socket with transcription and spoken responses.
+The full transcription → text → speech cascade also completed. These are live
+provider checks with synthetic input, not microphone, browser, LiveKit transport,
+student-schedule or phone acceptance.
+
+The checks exposed missing speech token usage in raw MP3 responses and discarded
+duration-billed transcription usage. Speech SSE now settles provider text/audio
+counts; duration objects settle separately from tokens. Unknown/incomplete
+responses retain their reservations. No transcripts, audio, credentials or raw
+provider errors were retained in evidence.
+
+Pricing/format references (reviewed 2026-10-23):
+- https://developers.openai.com/api/docs/models/gpt-transcribe
+- https://developers.openai.com/api/docs/models/gpt-5.6-luna
+- https://developers.openai.com/api/docs/models/gpt-4o-mini-tts
+- https://developers.openai.com/api/reference/resources/audio/subresources/speech/methods/create
+
+The current documentation labels the configured TTS snapshot deprecated. It
+worked in the live checks; replacement qualification remains open before public
+launch. No model has been silently changed.
+
+## Isolated qualification deployment
+
+Use docker-compose.vox-test.yml with --env-file pointing to the private operator
+file, outside the source tree. That file must define NAVOX_VOX_ENV_FILE (itself),
+NAVOX_VOX_CONFIG_FILE (the private inference JSON), NAVOX_PUBLIC_ORIGIN, and unique
+NAVOX_DATABASE_PASSWORD and TEMPORAL_DATABASE_PASSWORD. Set DATABASE_URL for this
+stack's postgres service, TEMPORAL_TARGET=temporal:7233, WEB_ORIGIN to the test
+HTTPS origin, and STUDENT_VOX_INFERENCE_CONFIG_PATH=/run/navox/vox-inference.json.
+Use only the dedicated test LiveKit/OpenAI credentials, a distinct agent name
+and a new encryption key for the empty test database. Do not copy production
+sessions, connected accounts, credentials, volumes, or encryption keys.
+
+The overlay's public build flags enable mobile-emulation qualification, not
+phone acceptance. Server switches apply only to this isolated test environment.
+Block public registration at the test proxy after creating the named test
+accounts locally; keep phone tests pending until the owner completes them.
+This file does not change the normal production deployment.

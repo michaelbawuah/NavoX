@@ -16,6 +16,8 @@ class ModelPricing(Contract):
     provider: str = Field(pattern=r"^[A-Za-z0-9_.-]{1,64}$")
     model: str = Field(pattern=r"^[A-Za-z0-9_./:-]{1,128}$")
     version: str = Field(pattern=r"^[A-Za-z0-9_.:-]{1,64}$")
+    max_input_tokens: int | None = Field(default=None, ge=1, strict=True)
+    audio_usd_per_minute: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
     input_text: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
     cached_text: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
     output_text: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
@@ -45,6 +47,7 @@ class UsagePolicy(Contract):
 
 
 class UsageCounters(Contract):
+    billed_audio_ms: int = Field(default=0, ge=0, le=2**53, strict=True)
     speaking_ms: int = Field(default=0, ge=0, le=2**53, strict=True)
     idle_ms: int = Field(default=0, ge=0, le=2**53, strict=True)
     connected_ms: int = Field(default=0, ge=0, le=2**53, strict=True)

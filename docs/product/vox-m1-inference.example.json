@@ -37,5 +37,6 @@
   "rollover_seconds": 3300,
   "max_output_tokens": 1000,
   "max_response_audio_seconds": 30,
-  "max_context_characters": 400000
+  "max_context_characters": 400000,
+  "tts_stream_format": "sse"
 }

@@ -79,6 +79,7 @@ class VoxInferenceConfig(BaseModel):
     stt: ProviderRoute = ProviderRoute(model="gpt-transcribe")
     llm: ProviderRoute = ProviderRoute(model="gpt-5.6-luna")
     tts: ProviderRoute = ProviderRoute(model="gpt-4o-mini-tts-2025-12-15", voice="marin")
+    tts_stream_format: Literal["audio", "sse"] = "audio"
     turn_timeout_seconds: float = Field(default=45, ge=5, le=90, allow_inf_nan=False)
     rollover_seconds: float = Field(default=3300, ge=60, le=3300, allow_inf_nan=False)
     max_output_tokens: int = Field(default=1000, strict=True, ge=64, le=4096)

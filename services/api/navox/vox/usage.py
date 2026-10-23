@@ -425,13 +425,17 @@ def estimate(
             if pricing
             else None
         )
-    if counters.total_tokens == 0:
+    if counters.total_tokens == 0 and counters.billed_audio_ms == 0:
         return Decimal(0)
     if counters.unclassified_input or counters.unclassified_output:
         return None
     if pricing is None:
         return None
     rates = ModelPricing.model_validate(pricing)
+    if rates.max_input_tokens is not None and (
+        counters.input_text + counters.input_audio > rates.max_input_tokens
+    ):
+        return None  # Do not apply a standard-context price to another billing tier.
     quantities = {
         "input_text": counters.input_text - counters.cached_text,
         "cached_text": counters.cached_text,
@@ -441,6 +445,10 @@ def estimate(
         "output_audio": counters.output_audio,
     }
     result = Decimal(0)
+    if counters.billed_audio_ms:
+        if rates.audio_usd_per_minute is None:
+            return None
+        result += rates.audio_usd_per_minute * counters.billed_audio_ms / 60_000
     for key, count in quantities.items():
         rate: Decimal | None = getattr(rates, key)
         if count and rate is None:
@@ -502,8 +510,8 @@ async def apply_usage_update(
         # Attribute a request to the local period of its pre-I/O reservation.
         segments = [(utc(row.created_at), delta)]
     else:
-        if after.total_tokens:
-            raise UsageError(422, "Transport meter cannot set provider tokens")
+        if after.total_tokens or after.billed_audio_ms:
+            raise UsageError(422, "Transport meter cannot set provider usage")
         if after.connected_ms > int((now - utc(row.created_at)).total_seconds() * 1000) + 1000:
             raise UsageError(422, "Transport time exceeds the server clock")
         intervals = _segments(utc(row.observed_at), now, user.timezone)

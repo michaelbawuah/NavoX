@@ -35,6 +35,13 @@ def normalize_usage(raw: dict[str, int]) -> tuple[UsageCounters, bool]:
             raise usage.UsageError(422, "Invalid provider usage counters")
         return found[0] if found else None
 
+    if "billed_audio_ms" in raw:
+        duration = count("billed_audio_ms")
+        if set(raw) != {"billed_audio_ms"}:
+            raise usage.UsageError(422, "Mixed token and duration billing")
+        assert duration is not None
+        return UsageCounters(billed_audio_ms=duration), True
+
     input_total = count("input_tokens", "prompt_tokens")
     output_total = count("output_tokens", "completion_tokens")
     complete = input_total is not None and output_total is not None
