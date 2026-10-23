@@ -445,9 +445,10 @@ export function createBrowserVoxAudioCaptureFactory(
                 offset = 0;
               }
             }
-            // Announce quiet on the following zero frame, after the voiced tail
-            // has actually reached the output, rather than disabling its track.
-            if (!voiced && written === 0) notifyQuiet();
+            // Keep the existing VAD end window across short word/phoneme gaps.
+            // Pausing RTP on the first zero frame clips queued speech before
+            // the worklet/encoder can deliver it. Sustained quiet still pauses.
+            if (!voiced && written === 0 && activity.ended) notifyQuiet();
           } catch {
             out?.fill(0);
             stop();
