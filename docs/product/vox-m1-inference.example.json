@@ -1,0 +1,41 @@
+{
+  "schema_version": "vox-inference.v1",
+  "mode": "realtime",
+  "fallback_enabled": true,
+  "allowed_origins": [
+    "https://api.openai.com"
+  ],
+  "realtime": {
+    "provider": "openai",
+    "model": "gpt-realtime-2.1",
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY",
+    "voice": "marin"
+  },
+  "stt": {
+    "provider": "openai",
+    "model": "gpt-transcribe",
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY",
+    "voice": null
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-5.6-luna",
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY",
+    "voice": null
+  },
+  "tts": {
+    "provider": "openai",
+    "model": "gpt-4o-mini-tts-2025-12-15",
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY",
+    "voice": "marin"
+  },
+  "turn_timeout_seconds": 45,
+  "rollover_seconds": 3300,
+  "max_output_tokens": 1000,
+  "max_response_audio_seconds": 30,
+  "max_context_characters": 400000
+}
