@@ -667,3 +667,12 @@ async def test_livekit_job_entrypoint_can_cross_the_process_boundary():
     )
     encoded = ForkingPickler.dumps(server._entrypoint_fnc)
     assert pickle.loads(encoded) is job_entrypoint
+
+
+def test_worker_diagnostics_never_log_exception_content(caplog):
+    from navox.vox.worker_livekit import log_worker_failure
+
+    log_worker_failure("job", ValueError("sensitive-provider-body"))
+    assert "sensitive-provider-body" not in caplog.text
+    assert caplog.records[-1].error_type == "ValueError"
+    assert caplog.records[-1].exc_info is None

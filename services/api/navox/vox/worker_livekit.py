@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import io
 import json
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -41,6 +42,20 @@ from navox.vox.worker import (
 )
 
 MAX_OUTPUT_SAMPLES = 48_000 * 60
+
+
+def log_worker_failure(stage: str, error: Exception) -> None:
+    """Log only code location and type, never provider text, payloads or locals."""
+    trace = error.__traceback__
+    location = "unknown"
+    while trace is not None:
+        if "/navox/" in trace.tb_frame.f_code.co_filename:
+            location = f"{trace.tb_frame.f_code.co_name}:{trace.tb_lineno}"
+        trace = trace.tb_next
+    logging.getLogger(__name__).warning(
+        "Vox worker stopped",
+        extra={"stage": stage, "error_type": type(error).__name__, "failure_site": location},
+    )
 
 
 @asynccontextmanager
@@ -298,7 +313,8 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                     if stopped.is_set() or subscribed_sid != track_sid:
                         break
                     await worker.receive(participant.identity, bytes(event.frame.data))
-            except Exception:
+            except Exception as error:
+                log_worker_failure("audio_receive", error)
                 if subscribed_sid == track_sid:
                     stopped.set()
             finally:
@@ -345,7 +361,8 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                     ):
                         raise WorkerAccessLost("The voice track is outside its assignment")
                     publication.set_subscribed(True)
-            except Exception:
+            except Exception as error:
+                log_worker_failure("subscribe", error)
                 stopped.set()
 
         def participant_connected(participant: rtc.RemoteParticipant) -> None:
@@ -393,7 +410,8 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                             for command in commands:
                                 await worker.text_turn(command.text)
                     await asyncio.sleep(0.25)
-            except Exception:
+            except Exception as error:
+                log_worker_failure("watch", error)
                 stopped.set()
 
         def on(event: str, callback: Callable[..., None]) -> None:
@@ -448,7 +466,8 @@ async def job_entrypoint(ctx: agents.JobContext) -> None:
     try:
         # Resolve private configuration in the child; do not pickle credentials.
         await serve_job(ctx, get_settings())
-    except Exception:
+    except Exception as error:
+        log_worker_failure("job", error)
         # SDK logs must not receive provider exception bodies or media data.
         await ctx.room.disconnect()
     finally:
