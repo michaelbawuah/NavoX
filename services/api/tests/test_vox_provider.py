@@ -65,6 +65,14 @@ def intent(*, status="confirmed"):
     )
 
 
+def invalid_intent(change):
+    value = intent()
+    # Resolve expiry offsets at execution, even after a long collection/shard.
+    if isinstance(change.get("expires_at"), timedelta):
+        change = {**change, "expires_at": value.created_at + change["expires_at"]}
+    return replace(value, **change)
+
+
 def decode(token):
     header, body, signature = token.split(".")
     expected = hmac.new(CONFIG.api_secret.encode(), (header + "." + body).encode(), hashlib.sha256)
@@ -184,13 +192,39 @@ def test_signed_grants_are_audio_only_bound_to_immutable_epoch_without_personal_
         {"status": "preparing"},
         {"status": "revoked"},
         {"room_name": "private-user-email"},
-        {"expires_at": datetime.now(UTC) - timedelta(seconds=1)},
-        {"expires_at": datetime.now(UTC) + timedelta(minutes=10)},
+        {"expires_at": timedelta(seconds=-1)},
+        {"expires_at": timedelta(minutes=10)},
     ],
 )
 def test_no_join_token_for_unconfirmed_or_unbounded_connection(change):
     with pytest.raises(MediaUnavailable):
-        LiveKitCloudProvider(CONFIG).participant_token(replace(intent(), **change))
+        LiveKitCloudProvider(CONFIG).participant_token(invalid_intent(change))
+
+
+def test_invalid_join_expirations_stay_fresh_after_delayed_execution(monkeypatch):
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+
+    class Clock:
+        @staticmethod
+        def now(_timezone):
+            return now
+
+    monkeypatch.setitem(globals(), "datetime", Clock)
+    monkeypatch.setattr("navox.vox.provider.datetime", Clock)
+    for lifetime in (timedelta(seconds=-1), timedelta(minutes=10)):
+        before = invalid_intent({"expires_at": lifetime})
+        now += timedelta(minutes=9)
+        after = invalid_intent({"expires_at": lifetime})
+        assert after.created_at - before.created_at == timedelta(minutes=9)
+        assert after.expires_at - before.expires_at == timedelta(minutes=9)
+        assert after.expires_at - after.created_at == lifetime
+        provider = LiveKitCloudProvider(CONFIG)
+        assert decode(provider.participant_token(intent()))["exp"] > now.timestamp()
+        if lifetime == timedelta(minutes=10):
+            # A collection-time expiry has aged into a legitimate short lease.
+            assert provider.participant_token(replace(after, expires_at=before.expires_at))
+        with pytest.raises(MediaUnavailable):
+            provider.participant_token(after)
 
 
 @pytest.mark.asyncio
