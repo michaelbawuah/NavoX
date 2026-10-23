@@ -260,6 +260,7 @@ async def join_media(
             client_call_id,
             generation=payload.generation,
             request_id=payload.request_id,
+            require_recovery_context=True,
         )
     )
     confirmed = await result(

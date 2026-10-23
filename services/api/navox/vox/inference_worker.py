@@ -281,5 +281,4 @@ class ConfiguredVoiceWorker:
             await self.interrupt()
         finally:
             await self.realtime.close()
-            await self.context.store.delete(self.context.key)
             self.context.close()

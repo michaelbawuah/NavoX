@@ -43,6 +43,7 @@ export class VoxReservationError extends Error {
     readonly code:
       | "unavailable"
       | "temporary"
+      | "cleanup-pending"
       | "scope-changed"
       | "invalid-response"
       | "cancelled",
@@ -395,6 +396,14 @@ export class VoxReservationClient {
         void response.body?.cancel().catch(() => {});
         return null;
       }
+      // Only media admission uses this pre-allocation response. Retrying any
+      // ambiguous join failure could duplicate a room or its provider work.
+      if (
+        response.status === 425 &&
+        method === "POST" &&
+        path.endsWith("/media")
+      )
+        throw new VoxReservationError("cleanup-pending");
       if (response.status === 401 || response.status === 409)
         throw new VoxReservationError("scope-changed");
       if (response.status === 429 || response.status >= 500)

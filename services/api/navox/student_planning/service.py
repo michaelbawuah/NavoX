@@ -531,6 +531,9 @@ async def remove_task(
     if row.revision != revision:
         raise schedule.StudentError(409, "This task changed. Refresh before forgetting it")
     # Remove all derived copies, including old preview/outcome snapshots containing titles.
+    from navox.vox.service import invalidate_active_context
+
+    await invalidate_active_context(database, user_id, workspace_id)
     await invalidate_snapshots(database, user_id, workspace_id)
     await database.execute(
         delete(StudentStudyBlock).where(

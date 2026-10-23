@@ -33,6 +33,7 @@ from navox.ai.store import RoutingSnapshot
 from navox.ai.validation import compile_schema
 from navox.core.settings import Settings
 from navox.db.ai_registry import AIProfileAssignment, AIProviderHealth
+from navox.vox.context_store import checkpoint_cipher
 from navox.vox.conversation import spoken_answer_task
 from navox.vox.inference_config import (
     InferenceConfigurationError,
@@ -42,6 +43,7 @@ from navox.vox.inference_config import (
 from navox.vox.provider import MediaUnavailable
 from navox.vox.service import VoxError
 from navox.vox.usage import budget_status
+from navox.vox.worker import WorkerAccessLost
 
 
 async def _stable_snapshot(
@@ -102,6 +104,7 @@ async def require_voice_models(
     try:
         configured = load_inference_config(settings)
         if configured is not None:
+            checkpoint_cipher(settings)
             routes = []
             if configured.mode == "realtime":
                 routes.append(configured.realtime)
@@ -114,7 +117,7 @@ async def require_voice_models(
             if status.blocked:
                 raise VoxError(429, "Your voice allowance is used up for now")
             return
-    except InferenceConfigurationError:
+    except (InferenceConfigurationError, WorkerAccessLost):
         raise MediaUnavailable("Vox inference is not configured") from None
     try:
         async with asyncio.timeout(5):

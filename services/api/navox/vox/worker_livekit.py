@@ -24,13 +24,14 @@ from navox.ai.configured import build_runtime
 from navox.ai.speech_adapters import MAX_SPEECH_AUDIO_BYTES
 from navox.core.settings import Settings, get_settings
 from navox.db.session import get_database_engine, get_session_factory
+from navox.vox.context_store import DatabaseContextStore
 from navox.vox.inference_config import load_inference_config
 from navox.vox.inference_http import OpenAICompatiblePipeline, UsageHooks
 from navox.vox.inference_realtime import OpenAIRealtimeAdapter
 from navox.vox.inference_worker import ConfiguredVoiceWorker
 from navox.vox.provider import cloud_config
 from navox.vox.schedule_tools import ScheduleTools
-from navox.vox.session_context import CallContextKey, InMemoryContextStore, VoxCallContext
+from navox.vox.session_context import CallContextKey, VoxCallContext
 from navox.vox.worker import (
     DatabaseAuthority,
     PolicyVoiceGateway,
@@ -257,7 +258,13 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             )
             context = await VoxCallContext.load(
                 context_key,
-                InMemoryContextStore(),
+                DatabaseContextStore(
+                    check,
+                    settings,
+                    configuration_id=hashlib.sha256(
+                        inference.model_dump_json().encode()
+                    ).hexdigest(),
+                ),
                 max_characters=inference.max_context_characters,
             )
 

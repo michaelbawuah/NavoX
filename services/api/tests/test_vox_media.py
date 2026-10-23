@@ -348,7 +348,7 @@ async def test_unresolved_cleanup_blocks_replacement_even_after_owned_data_reset
         assert state.id == previous.owner_scope_id
     with pytest.raises(service.VoxError) as error:
         await begin(env, row)
-    assert error.value.status_code == 409
+    assert error.value.status_code == 425
     async with env.factory() as database:
         assert await database.scalar(select(func.count()).select_from(VoxMediaConnection)) == 0
         job = await cleanup_row(database, previous.connection_id)

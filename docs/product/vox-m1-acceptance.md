@@ -8,7 +8,7 @@ This branch is an implementation checkpoint, not a passed milestone. Default cal
 | Interrupt mid-sentence | Immediate local media gating, provider cancel/truncate, heard-prefix handling; synthetic tests | Not done: real speaker/mic/Bluetooth/network latency |
 | Correct real classes and schedule | Read-only owner-scoped existing timetable/plan tool, server clock/student timezone, no guessed facts; timetable tests | Not done: spoken live queries against the student's own account |
 | Two-minute silence, local Hey NavoX, same conversation | Standby/wake lifecycle, supported local ASR, actual lazy Porcupine Web SDK, authenticated connection-bound configuration and private queued wake question | Not done: vendor-approved configuration/keyword/language assets, cold startup and question-onset behavior, phone wake and actual no-upload measurement |
-| Lose/regain network without lost context | Bounded same-room SDK reconnect with account revalidation, unchanged worker/call; synthetic tests | Not done: real network test. Hard disconnect/worker-process death and outages beyond lease are not covered by RAM context |
+| Lose/regain network without lost context | Same-room SDK reconnect plus encrypted active-call checkpoints and fresh replacement-room admission after cleanup; PostgreSQL and synthetic browser tests | Not done: real network/device testing. Expired call leases cannot be revived; a crash before checkpoint commit can lose the last turn |
 | Hang up cleanly | Microphone, wake worker, playback, renewable epoch and durable provider cleanup fenced in tests | Not done: actual phone microphone release and LiveKit participant cleanup |
 | Per-call and daily per-student cost logging | Server-owned ledger, modality counts, durable bounded voice credits, idempotency, versioned estimates, local-day/month totals, private operator API and read-only Settings report | Not done: live event/billing reconciliation; missing usage/prices remain explicitly unknown |
 
@@ -25,7 +25,7 @@ This branch is an implementation checkpoint, not a passed milestone. Default cal
 
 ## Approved scope decisions
 
-Web-open calls only in this part; native locked-phone audio later. Noa artwork comes in Part2. Calendar connection/scheduling and persistent memory follow the user's milestone order. Temporary active-call context is RAM only until disclosed memory work; no raw audio or ordinary conversation history is saved by this checkpoint. Wake question delivery is a short-lived encrypted work queue, erased on consumption/expiry/terminal cleanup, not saved conversation history.
+Web-open calls only in this part; native locked-phone audio later. Noa artwork comes in Part2. Calendar connection/scheduling and persistent memory follow the user's milestone order. Configured Vox now keeps an encrypted temporary checkpoint of completed turns, bound to the owner, web session, call and generation. It expires with the renewable call lease and is purged on terminal call transitions/reset. Source Forget conservatively clears the entire active call because turns have no selective source provenance. This is active-call execution state, not saved memory/history; no raw audio is stored. Expiry cleanup keeps only a content-free tombstone until ordinary call pruning. Historical backups are not a forensic deletion guarantee. Wake question delivery is a short-lived encrypted work queue, erased on consumption/expiry/terminal cleanup, not saved conversation history.
 
 ## Review before activation
 

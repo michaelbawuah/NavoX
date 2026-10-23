@@ -718,6 +718,9 @@ async def delete_material(
     )
     if row.revision != revision:
         raise CourseworkError("The material changed. Refresh before deleting.", 409)
+    from navox.vox.service import invalidate_active_context
+
+    await invalidate_active_context(database, user_id, workspace_id)
     await clear_derived(database, settings, row)
     await database.delete(row)
     result = save_receipt(

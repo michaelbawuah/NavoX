@@ -124,6 +124,9 @@ async def delete_memory(
     memory = await owned_memory(
         database, user_id=user_id, workspace_id=workspace_id, memory_id=memory_id
     )
+    from navox.vox.service import invalidate_active_context
+
+    await invalidate_active_context(database, user_id, workspace_id)
     audit_memory(database, memory, "memory.deleted")
     await database.delete(memory)
     await database.commit()

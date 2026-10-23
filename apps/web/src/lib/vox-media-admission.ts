@@ -1,7 +1,10 @@
 /** Cookie-bound media admission. Construction never opens a room or microphone. */
 import type { VoxTransportRequest } from "./vox-call";
 import type { VoxMediaAdmission, VoxMediaLease } from "./vox-livekit";
-import type { VoxReservationClient } from "./vox-reservations";
+import {
+  type VoxReservationClient,
+  VoxReservationError,
+} from "./vox-reservations";
 
 const uuid =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -100,21 +103,67 @@ export function createVoxMediaAdmission(options: {
       const callId = request.callId;
       const authority = options.reservations.mediaAuthority(owner, callId);
       const requestId = (options.requestId ?? (() => crypto.randomUUID()))();
-      const value = record(
-        await options.reservations.mediaRequest(
-          owner,
-          callId,
-          authority.generation,
-          { action: "join", requestId },
-          request.signal,
-        ),
-        [...bindingKeys, "server_url", "token", "token_expires_at"],
+      // Wait only for an explicit pre-allocation cleanup response. Keep the
+      // same request ID, never retry a timeout or unknown provider side effect.
+      let raw: unknown;
+      const started = now();
+      for (let attempt = 0; ; attempt++) {
+        if (request.signal.aborted) throw unavailable();
+        const current = options.reservations.mediaAuthority(owner, callId);
+        if (
+          current.generation !== authority.generation ||
+          current.expiresAt <= now()
+        )
+          throw unavailable();
+        try {
+          raw = await options.reservations.mediaRequest(
+            owner,
+            callId,
+            authority.generation,
+            { action: "join", requestId },
+            request.signal,
+          );
+          break;
+        } catch (error) {
+          if (
+            !(error instanceof VoxReservationError) ||
+            error.code !== "cleanup-pending" ||
+            attempt >= 19 ||
+            now() - started >= 20_000
+          )
+            throw error;
+          await new Promise<void>((resolve, reject) => {
+            const abort = () => {
+              clearTimeout(timer);
+              request.signal.removeEventListener("abort", abort);
+              reject(unavailable());
+            };
+            const timer = setTimeout(() => {
+              request.signal.removeEventListener("abort", abort);
+              resolve();
+            }, 1_000);
+            request.signal.addEventListener("abort", abort, { once: true });
+            if (request.signal.aborted) abort();
+          });
+        }
+      }
+      const value = record(raw, [
+        ...bindingKeys,
+        "server_url",
+        "token",
+        "token_expires_at",
+      ]);
+      const latestAuthority = options.reservations.mediaAuthority(
+        owner,
+        callId,
       );
+      if (latestAuthority.generation !== authority.generation)
+        throw unavailable();
       const admitted = binding(
         value,
         request,
         authority.generation,
-        authority.expiresAt,
+        latestAuthority.expiresAt,
         now(),
       );
       if (

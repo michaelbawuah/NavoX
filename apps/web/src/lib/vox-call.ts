@@ -362,8 +362,18 @@ export class VoxCallController {
   }
 
   async reconnect(): Promise<void> {
-    if (this.disposed || !this.state.ownerVerified || !this.joined()) return;
-    this.resumeStandby = this.state.phase === "standby";
+    if (
+      this.disposed ||
+      !this.state.ownerVerified ||
+      !(
+        this.joined() ||
+        (this.mediaReconnecting && this.state.phase === "reconnecting")
+      )
+    )
+      return;
+    this.resumeStandby = this.mediaReconnecting
+      ? this.mediaResumeStandby
+      : this.state.phase === "standby";
     await this.join(true);
   }
 
@@ -442,6 +452,11 @@ export class VoxCallController {
           this.finishMediaReconnect();
           return;
         }
+        if (event.type === "disconnected") {
+          if (this.state.ownerVerified) void this.reconnect();
+          else this.reconnectAfterCheck = true;
+          return;
+        }
         if (!this.joined()) return;
         if (event.type === "wake-status") {
           this.state.wakeStatus = event.status;
@@ -453,10 +468,7 @@ export class VoxCallController {
           this.publish();
           return;
         }
-        if (event.type === "disconnected") {
-          if (this.state.ownerVerified) void this.reconnect();
-          else this.reconnectAfterCheck = true;
-        } else if (
+        if (
           event.type === "playback-blocked" ||
           event.type === "playback-ready"
         ) {
@@ -634,11 +646,14 @@ export class VoxCallController {
       if (!checked || this.state.ownerVerified) return;
       this.state.ownerVerified = true;
       this.lastActivityAt = this.moment();
-      if (this.mediaReconnecting && this.mediaReconnected) {
-        this.finishMediaReconnect();
-      } else if (this.reconnectAfterCheck && this.joined()) {
+      if (
+        this.reconnectAfterCheck &&
+        (this.joined() || this.mediaReconnecting)
+      ) {
         this.reconnectAfterCheck = false;
         await this.reconnect();
+      } else if (this.mediaReconnecting && this.mediaReconnected) {
+        this.finishMediaReconnect();
       } else if (this.deferredJoin && this.ongoing()) {
         await this.join(this.state.phase === "reconnecting");
       } else if (this.syncControls()) this.publish();

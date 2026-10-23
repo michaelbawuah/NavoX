@@ -1,20 +1,21 @@
-# Milestone 1 continuity work remaining
+# Milestone 1 continuity checkpoint
 
-The current implementation recovers a bounded transient interruption in the same LiveKit room while its worker survives. It does not recover through terminal room/worker replacement or an expired live authority lease. Acceptance is **not passed**.
+Implemented on the M1 draft branch on 2026-10-23. Real phone/network acceptance is still **not passed**.
 
-## Next implementation boundary
+## Implemented
 
-- Add one bounded encrypted active-call checkpoint per call, using the existing Fernet vault and a domain-bound envelope. Bind owner, workspace, authentication session, call generation, revision and expiry. Store only completed heard turns, no raw audio/tool result dumps or embeddings. This is temporary call execution state, not milestone 4 saved memory/history.
-- Use the same physical database connection that holds the exclusive worker-epoch lock. Serialize access with the existing authority connection lock and repeat the fresh joined authority proof under the User row lock before decrypting/CAS. A new pooled session is not an adequate stale-worker fence.
-- Replace the production in-memory context factory and make generic shutdown clear RAM without deleting an otherwise live checkpoint. Commit only after server playout and fresh authority succeed. Corrupt, expired or undecryptable context must produce an honest failure, not an invented continuation.
-- Tie checkpoint expiry to the call and authentication-session lease. Only extend a still-live checkpoint. Purge transactionally on Hang up, call expiry, logout/session replacement, reset and privacy deletion; add bounded crash/orphan expiry cleanup to the reconciler.
-- Source Forget cannot prove selective redaction from current Q/A pairs, which have no provenance. Conservatively invalidate the owner's active context and media epoch when forgetting email/feed/coursework sources. Show that context was cleared rather than silently retaining stale provider RAM.
-- Add frontend terminal recovery only while the underlying reservation and account remain freshly authorized. Wait for old media cleanup, create a new epoch/request and let the replacement worker restore context. Never revive expired authority or reuse an old JWT.
+- Bounded encrypted completed-turn checkpoint per call, with domain, owner, workspace, web session, call generation, revision and inference-configuration fingerprint binding. A replacement refuses a changed voice/model configuration. No raw audio, tool dumps, embeddings or saved-memory/history endpoint.
+- The same physical PostgreSQL connection holds the exclusive worker-epoch lock and performs short User-serialized checkpoint operations. Fresh joined authority is checked before access and again before commit; a broken physical connection cannot reconnect silently. Concurrent revision updates have one winner.
+- Configured workers restore checkpoints and clear only RAM on generic shutdown. Hang-up, session logout and reset purge storage transactionally. Renewable call expiry extends only still-live checkpoints. Independent cleanup erases expired ciphertext while retaining a content-free tombstone to prevent silent amnesia.
+- Email, feed, material, saved-memory, planner-task, timetable-record and saved-Board erasure invalidate the entire active call and its media epoch because current turns lack source provenance. Content-free cost accounting survives call cleanup.
+- Browser terminal disconnect during SDK recovery now requests a replacement with the same call ID after old resources close. Owner verification, mute/speaker/standby controls and hang-up fences survive. Only explicit HTTP 425 pre-allocation cleanup responses are retried (same request ID; 20 attempts, one second apart); no timeout, unknown side effect or authentication failure is replayed.
+- Real admission refuses replacement when no live checkpoint exists, including legacy RAM-only calls. Old JWTs and expired call authority are never revived.
 
-A database checkpoint alone does not implement reconnect. A crash between physical playback and checkpoint commit can still lose the last turn; server playout is not proof of what a student physically heard. Do not save unheard generated answers as established conversation.
+## Remaining
 
-## Required gates
+- Real LiveKit/OpenAI worker-process crash, terminal room replacement, network loss and device tests. The test suite proves database/browser transitions using synthetic providers, not physical audio continuity.
+- A crash after playout but before commit may lose the last turn; server playout is not proof of physical hearing. A call whose renewable lease has expired must end.
+- Explicit long-context compaction remains unimplemented; the current hard ceiling fails safely. Provider rollover alone does not solve context capacity.
+- Dedicated worker/cleanup test deployment, live cost reconciliation, licensed wake assets and immediate post-keyword speech qualification.
 
-Actual PostgreSQL CAS/revocation races, physical lock-connection loss, encryption/domain binding, expiry/renewal, terminal frontend recovery, source Forget and stale-runtime fencing; then real network/device testing. Long-context compaction also remains a separate unresolved engineering item. No source-retention or off-record wording should promise forensic deletion from historical backups.
-
-No migration number is allocated by this plan. The next available number must be checked against the voice-credit migration before implementation.
+Migration 0056 adds checkpoint storage; its populated downgrade guard refuses silent data loss. See the acceptance checklist and verification record for measured gates. Do not claim forensic erasure from historical backups.

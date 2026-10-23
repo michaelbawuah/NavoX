@@ -439,6 +439,9 @@ async def erase(
     row = await board(database, user_id, workspace_id, board_id)
     if row.revision != payload.revision:
         raise fail("This Board changed. Refresh before erasing")
+    from navox.vox.service import invalidate_active_context
+
+    await invalidate_active_context(database, user_id, workspace_id)
     await invalidate(database, user_id, workspace_id, board_id=board_id)
     remember(database, user_id, workspace_id, payload.request_id, "delete", digest, row)
     await database.delete(row)

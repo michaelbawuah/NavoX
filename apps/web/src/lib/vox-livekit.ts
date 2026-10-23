@@ -747,14 +747,16 @@ export function createLiveKitVoxTransport(options: {
               !lease ||
               !room?.hasParticipant(lease.agentIdentity)
             ) {
-              fail("ended");
+              fail(fresh() && joined ? "disconnected" : "ended");
               return;
             }
             room.subscribeAgent(lease.agentIdentity);
             request.onEvent({ type: "reconnected" });
           },
           disconnected() {
-            fail("ended");
+            // Fresh reservation admission authorizes any replacement room.
+            // The old JWT and audio tracks are always retired first.
+            fail(fresh() ? "disconnected" : "ended");
           },
         });
         await room.connect(lease.serverUrl, lease.token);

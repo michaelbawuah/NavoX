@@ -210,6 +210,7 @@ async def begin_connection(
     *,
     generation: int,
     request_id: UUID,
+    require_recovery_context: bool = False,
 ) -> ConnectionIntent:
     async def operation() -> ConnectionIntent:
         boundary = await reservations._locked(database, user_id, workspace_id, session_token_hash)
@@ -277,7 +278,7 @@ async def begin_connection(
             )
             is not None
         ):
-            raise reservations.VoxError(409, "The earlier media connection is still closing")
+            raise reservations.VoxError(425, "The earlier media connection is still closing")
         recent = list(
             await database.scalars(
                 select(VoxMediaConnection.id)
@@ -287,6 +288,23 @@ async def begin_connection(
         )
         if len(recent) >= MAX_CONNECTIONS_PER_CALL:
             raise reservations.VoxError(429, "The media connection limit was reached")
+        if recent and require_recovery_context:
+            # Real admission must never silently continue a legacy/missing
+            # in-memory conversation as if the replacement remembered it.
+            from navox.db.vox_context import VoxCallCheckpoint
+
+            checkpoint = await database.get(VoxCallCheckpoint, call.id, populate_existing=True)
+            if (
+                checkpoint is None
+                or checkpoint.encrypted_context is None
+                or checkpoint.user_id != user_id
+                or checkpoint.workspace_id != workspace_id
+                or checkpoint.auth_session_id != boundary.session.id
+                or checkpoint.generation != generation
+                or utc(checkpoint.expires_at) <= boundary.now
+            ):
+                raise reservations.VoxError(410, "The Vox conversation cannot be recovered")
+
         epoch = uuid4()
         connection = VoxMediaConnection(
             id=epoch,

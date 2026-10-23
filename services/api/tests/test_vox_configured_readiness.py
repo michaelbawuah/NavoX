@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from cryptography.fernet import Fernet
 from pydantic import SecretStr
 from test_vox_calls import vox_env as shared_vox_fixture
 
@@ -21,6 +22,7 @@ def configure(env, tmp_path):
     path.chmod(0o600)
     env.settings.student_vox_inference_config_path = str(path)
     env.settings.openai_api_key = SecretStr("synthetic-test-key-not-a-real-secret")
+    env.settings.connector_secret_encryption_key = SecretStr(Fernet.generate_key().decode())
     return path
 
 
@@ -92,3 +94,17 @@ async def test_exhausted_configured_budget_rejects_admission(vox_env, tmp_path, 
             user_id=env.user_id,
         )
     assert caught.value.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_missing_recovery_encryption_key_rejects_before_room_or_provider_work(
+    vox_env, tmp_path
+):
+    env = vox_env
+    configure(env, tmp_path)
+    env.settings.connector_secret_encryption_key = None
+    env.settings.google_token_encryption_key = None
+    with pytest.raises(MediaUnavailable, match="not configured"):
+        await readiness.require_voice_models(
+            env.settings, env.factory, workspace_id=env.workspace_id, user_id=env.user_id
+        )

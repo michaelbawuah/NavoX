@@ -775,13 +775,13 @@ describe("qualified LiveKit Vox adapter", () => {
     await active.close();
   });
 
-  it("ends terminal room loss cleanly without pretending a replacement worker retains context", async () => {
+  it("retires terminal room loss before requesting fresh admission for the same call", async () => {
     const env = environment();
     const connection = await env.transport.connect(env.request);
     env.room.events?.disconnected();
     await settle();
     expect(env.request.onEvent).toHaveBeenCalledTimes(1);
-    expect(env.request.onEvent).toHaveBeenCalledWith({ type: "ended" });
+    expect(env.request.onEvent).toHaveBeenCalledWith({ type: "disconnected" });
     expect(env.room.events).toBeNull();
     expect(env.lease.close).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);

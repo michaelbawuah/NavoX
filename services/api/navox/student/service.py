@@ -358,6 +358,9 @@ async def remove_record(
     await owner(database, user_id, workspace_id, lock=True)
     row = await get_owned(database, model, identifier, user_id, workspace_id)
     check_revision(row.revision, revision)
+    from navox.vox.service import invalidate_active_context
+
+    await invalidate_active_context(database, user_id, workspace_id)
     if model is StudentClassMeeting:
         await database.execute(
             delete(StudentMeetingException).where(

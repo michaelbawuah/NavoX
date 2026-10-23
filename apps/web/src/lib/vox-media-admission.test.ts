@@ -308,3 +308,112 @@ describe("native Vox media admission", () => {
     },
   );
 });
+
+describe("replacement room admission", () => {
+  it("waits for confirmed old-room cleanup and reuses one request ID", async () => {
+    vi.useFakeTimers();
+    try {
+      const env = setup();
+      const { VoxReservationError } = await import("./vox-reservations");
+      env.media.mockRejectedValueOnce(
+        new VoxReservationError("cleanup-pending"),
+      );
+      const pending = env.admission.join(env.request);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(env.media).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      const lease = await pending;
+      expect(lease.callId).toBe(callId);
+      expect(env.media).toHaveBeenCalledTimes(2);
+      expect(env.media.mock.calls[1]).toEqual(env.media.mock.calls[0]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels cleanup waiting immediately on hang-up", async () => {
+    vi.useFakeTimers();
+    try {
+      const env = setup();
+      const { VoxReservationError } = await import("./vox-reservations");
+      env.media.mockRejectedValue(new VoxReservationError("cleanup-pending"));
+      const pending = env.admission.join(env.request);
+      const rejected = expect(pending).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(0);
+      env.abort.abort();
+      await rejected;
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(env.media).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds cleanup waiting and never retries an ambiguous network or authorization error", async () => {
+    vi.useFakeTimers();
+    try {
+      const { VoxReservationError } = await import("./vox-reservations");
+      for (const code of [
+        "temporary",
+        "scope-changed",
+        "invalid-response",
+      ] as const) {
+        const env = setup();
+        env.media.mockRejectedValue(new VoxReservationError(code));
+        await expect(env.admission.join(env.request)).rejects.toThrow();
+        expect(env.media).toHaveBeenCalledTimes(1);
+      }
+      const env = setup();
+      env.media.mockRejectedValue(new VoxReservationError("cleanup-pending"));
+      const pending = env.admission.join(env.request);
+      const rejected = expect(pending).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(20_000);
+      await rejected;
+      expect(env.media).toHaveBeenCalledTimes(20);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("checks owner generation again before each cleanup retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const env = setup();
+      const { VoxReservationError } = await import("./vox-reservations");
+      env.media.mockRejectedValue(new VoxReservationError("cleanup-pending"));
+      const pending = env.admission.join(env.request);
+      const rejected = expect(pending).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(0);
+      env.authority.mockReturnValue({
+        generation: 8,
+        expiresAt: now + 120_000,
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await rejected;
+      expect(env.media).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("recognizes cleanup-pending only on the media join endpoint", async () => {
+    const reservations = new VoxReservationClient({
+      fetch: vi.fn(async () => new Response(null, { status: 425 })),
+    });
+    await expect(
+      reservations.mediaRequest(owner, callId, 7, {
+        action: "join",
+        requestId,
+      }),
+    ).rejects.toMatchObject({ code: "cleanup-pending" });
+    await expect(
+      reservations.mediaRequest(owner, callId, 7, {
+        action: "renew",
+        connectionId,
+      }),
+    ).rejects.toMatchObject({ code: "unavailable" });
+  });
+});

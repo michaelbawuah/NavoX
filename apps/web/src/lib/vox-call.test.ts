@@ -1292,3 +1292,71 @@ describe("Vox same-room recovery", () => {
     expect(env.transport.connect).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("terminal loss after SDK reconnect starts", () => {
+  it.each([false, true])(
+    "creates a replacement with the same call and standby=%s after cleanup",
+    async (standby) => {
+      const env = rig();
+      await env.controller.start();
+      if (standby) env.advance(VOX_STANDBY_AFTER_MS);
+      const before = env.controller.current();
+      const old = env.requests[0];
+      const closing = deferred<void>();
+      env.connections[0].close.mockReturnValue(closing.promise);
+      old.onEvent({ type: "reconnecting" });
+      old.onEvent({ type: "disconnected" });
+      expect(old.mayTransmitAudio()).toBe(false);
+      expect(old.mayPlayAudio()).toBe(false);
+      expect(env.transport.connect).toHaveBeenCalledTimes(1);
+      closing.resolve();
+      await vi.waitFor(() => expect(env.requests).toHaveLength(2));
+      await vi.waitFor(() =>
+        expect(env.controller.current().phase).toBe(
+          standby ? "standby" : "active",
+        ),
+      );
+      expect(env.controller.current()).toMatchObject({
+        callId: before.callId,
+        startedAt: before.startedAt,
+      });
+      expect(env.connections[0].close).toHaveBeenCalledTimes(1);
+      old.onEvent({ type: "ended" });
+      expect(env.controller.current().phase).toBe(
+        standby ? "standby" : "active",
+      );
+      await env.controller.hangUp();
+    },
+  );
+
+  it("waits for fresh account verification after terminal loss during SDK recovery", async () => {
+    const env = rig();
+    await env.controller.start();
+    const old = env.requests[0];
+    old.onEvent({ type: "reconnecting" });
+    env.controller.suspendForSessionCheck();
+    old.onEvent({ type: "disconnected" });
+    old.onEvent({ type: "reconnected" });
+    expect(env.transport.connect).toHaveBeenCalledTimes(1);
+    expect(old.mayTransmitAudio()).toBe(false);
+    await env.controller.bindOwner(owner);
+    expect(env.requests).toHaveLength(2);
+    expect(env.requests[1].callId).toBe(old.callId);
+    await env.controller.hangUp();
+  });
+
+  it("hang-up during terminal recovery never creates a replacement", async () => {
+    const env = rig();
+    await env.controller.start();
+    const closing = deferred<void>();
+    env.connections[0].close.mockReturnValue(closing.promise);
+    const old = env.requests[0];
+    old.onEvent({ type: "reconnecting" });
+    old.onEvent({ type: "disconnected" });
+    const ended = env.controller.hangUp();
+    closing.resolve();
+    await ended;
+    expect(env.transport.connect).toHaveBeenCalledTimes(1);
+    expect(env.controller.current().phase).toBe("ended");
+  });
+});
