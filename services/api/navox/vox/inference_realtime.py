@@ -182,7 +182,14 @@ class OpenAIRealtimeAdapter:
                             "output_modalities": ["audio"],
                             "max_output_tokens": self.config.max_output_tokens,
                             "truncation": "disabled",
-                            "tools": self.tools.definitions() if self.tools else [],
+                            # Realtime rejects Chat/Responses' strict tool field.
+                            # The server still validates arguments before execution.
+                            "tools": [
+                                {key: value for key, value in tool.items() if key != "strict"}
+                                for tool in self.tools.definitions()
+                            ]
+                            if self.tools
+                            else [],
                             "tool_choice": "auto" if self.tools else "none",
                             "audio": {
                                 "input": {

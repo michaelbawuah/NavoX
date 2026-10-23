@@ -773,3 +773,27 @@ async def test_call_end_closes_provider_socket_even_when_barge_in_keeps_it_open(
     await worker.close()
     assert realtime.closed
     assert await context.store.load(key) == ContextSnapshot()
+
+
+@pytest.mark.asyncio
+async def test_real_schedule_tools_use_realtime_supported_fields_only():
+    from navox.vox.schedule_tools import ScheduleTools
+
+    socket = Socket()
+    check = Check()
+    tools = ScheduleTools(check)
+
+    async def connect(url, headers):
+        return socket
+
+    adapter = OpenAIRealtimeAdapter(
+        VoxInferenceConfig(), settings(), check, Hooks(), tools, connector=connect
+    )
+    await adapter._connect(())
+    sent = socket.sent[0]["session"]["tools"]
+    assert len(sent) == 1
+    assert set(sent[0]) == {"type", "name", "description", "parameters"}
+    assert sent[0]["parameters"]["additionalProperties"] is False
+    assert sent[0]["parameters"]["required"] == ["mode", "date"]
+    assert tools.definitions()[0]["strict"] is True
+    await adapter.close()
