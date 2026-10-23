@@ -443,6 +443,18 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                 await ctx.room.disconnect()
 
 
+async def job_entrypoint(ctx: agents.JobContext) -> None:
+    """Importable entry point for LiveKit's spawned/forkserver job processes."""
+    try:
+        # Resolve private configuration in the child; do not pickle credentials.
+        await serve_job(ctx, get_settings())
+    except Exception:
+        # SDK logs must not receive provider exception bodies or media data.
+        await ctx.room.disconnect()
+    finally:
+        ctx.shutdown("The bounded NavoX voice session ended")
+
+
 def build_server(settings: Settings) -> agents.AgentServer:
     config = cloud_config(settings)
     server = agents.AgentServer(
@@ -488,15 +500,7 @@ def build_server(settings: Settings) -> agents.AgentServer:
         except Exception:
             await req.reject()
 
-    @server.rtc_session(agent_name=config.agent_name, on_request=request)
-    async def entrypoint(ctx: agents.JobContext) -> None:
-        try:
-            await serve_job(ctx, settings)
-        except Exception:
-            # SDK logs must not receive provider exception bodies or media data.
-            await ctx.room.disconnect()
-        finally:
-            ctx.shutdown("The bounded NavoX voice session ended")
+    server.rtc_session(job_entrypoint, agent_name=config.agent_name, on_request=request)
 
     return server
 
