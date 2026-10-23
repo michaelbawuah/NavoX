@@ -172,3 +172,22 @@ protocol error for this hostname. Phone reachability is not yet verified.
 Picovoice vendor approval and licensed wake assets remain pending, so local
 wake switches remain disabled. Real student schedule answers, phone recordings,
 long calls, provider failover, and student usage targets remain unqualified.
+
+
+### Network recovery check
+
+A separate browser container lost its network attachment for six seconds between
+the two arithmetic questions. Vox showed Reconnecting, paused audio, retired the
+old media binding, waited through HTTP 425 cleanup, and rejoined. The second
+question alone was injected after recovery; the first question was not replayed.
+The checkpoint retained exactly two completed turns, with four followed by seven.
+The UI then showed Call ended; end/close returned 204. Usage settled 1,384 tokens
+with zero remaining token/voice reservations. This verifies one emulated network
+scenario, not mobile Wi-Fi/cellular switching or a long outage.
+
+The configured worker now exposes end_of_turn_silence_ms (400–2,000, default
+1,200) in the operator inference file. The measured 980 ms sentence pause exceeded
+the previous fixed 600 ms cutoff. The longer window allows that pause inside one
+utterance, at the cost of up to 600 ms additional end-of-turn wait. It does not
+change the browser's silence gate, wake timing, or animation timings. Configuration
+changes apply to new calls and require draining existing calls before deployment.

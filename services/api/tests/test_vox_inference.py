@@ -832,3 +832,51 @@ async def test_codec_tail_does_not_cancel_reply_but_confirmed_barge_in_keeps_ons
     assert realtime.frames == [voice] * 6
     assert worker._barge_frames == []
     await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_sentence_pause_keeps_one_turn_and_quiet_uplink_still_finishes():
+    import time
+
+    check, output, realtime = Check(), Output(), RecordingRealtime()
+    key = CallContextKey(check.authority.user_id, check.authority.workspace_id, uuid4(), 0)
+    context = await VoxCallContext.load(key, InMemoryContextStore())
+    connection = uuid4()
+    worker = ConfiguredVoiceWorker(
+        WorkerAssignment(
+            connection, "vx-" + connection.hex, "vc-" + connection.hex, "va-" + connection.hex
+        ),
+        check,
+        output,
+        VoxInferenceConfig(end_of_turn_silence_ms=1200),
+        context,
+        realtime,
+        Pipeline(),
+    )
+    voice, quiet = struct.pack("<h", 2000) * 320, bytes(640)
+    for _ in range(15):
+        await worker.receive(worker.assignment.client_identity, voice)
+    # Measured synthetic sentence boundary was 980 ms.
+    for _ in range(49):
+        await worker.receive(worker.assignment.client_identity, quiet)
+    assert worker._task is None
+    worker._last_voice_at = time.monotonic() - 1.0
+    await worker.flush_idle()
+    assert worker._task is None
+    for _ in range(15):
+        await worker.receive(worker.assignment.client_identity, voice)
+    assert worker._voiced == 30 * 320
+    # Browser may have paused RTP; wall-clock quiet must also finish the turn.
+    worker._last_voice_at = time.monotonic() - 1.3
+    await worker.flush_idle()
+    assert worker._task is not None
+    await worker._task
+    assert len(context.history(connection)) == 1
+    assert not worker.failed
+    await worker.close()
+
+
+@pytest.mark.parametrize("value", [399, 2001, 1200.5, True])
+def test_end_of_turn_window_is_strictly_bounded(value):
+    with pytest.raises(ValueError):
+        VoxInferenceConfig(end_of_turn_silence_ms=value)

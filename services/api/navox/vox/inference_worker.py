@@ -17,7 +17,6 @@ from navox.vox.worker import (
     MAX_TURN_BYTES,
     MIN_VOICE_SAMPLES,
     SAMPLE_WIDTH,
-    SILENCE_SAMPLES,
     AudioOutput,
     AuthorityCheck,
     MemoryTurn,
@@ -155,7 +154,7 @@ class ConfiguredVoiceWorker:
                 await self.usage.note_audio(samples * 1000 // 16000, direction="input")
         else:
             self._silence += samples
-        # Keep consonants and short pauses through a bounded 600ms hangover.
+        # Keep consonants and sentence pauses through the configured bounded hangover.
         if self._primary():
             try:
                 await self.realtime.begin_turn(self._history())
@@ -166,14 +165,20 @@ class ConfiguredVoiceWorker:
                     raise
                 await self.realtime.interrupt()
                 self._fallback_until = time.monotonic() + 30
-        if len(self._pcm) >= MAX_TURN_BYTES or self._silence >= SILENCE_SAMPLES:
+        if (
+            len(self._pcm) >= MAX_TURN_BYTES
+            or self._silence >= self.config.end_of_turn_silence_ms * 16
+        ):
             self._seal_turn()
 
     async def flush_idle(self) -> None:
         if self._closed or not self._pcm or self._last_voice_at is None:
             return
         await self._authority()
-        if self._last_voice_at is not None and time.monotonic() - self._last_voice_at >= 0.6:
+        if (
+            self._last_voice_at is not None
+            and time.monotonic() - self._last_voice_at >= self.config.end_of_turn_silence_ms / 1000
+        ):
             self._seal_turn()
 
     def _seal_turn(self) -> None:
