@@ -55,6 +55,8 @@ class ConfiguredVoiceWorker:
         self.failed = False
         self._closed = False
         self._pcm = bytearray()
+        self._barge_frames: list[bytes] = []
+        self._barge_samples = 0
         self._voiced = self._silence = 0
         self._last_voice_at: float | None = None
         self._task: asyncio.Task[None] | None = None
@@ -114,8 +116,29 @@ class ConfiguredVoiceWorker:
             raise WorkerAccessLost("The voice participant is unavailable")
         voiced = is_voice(pcm)
         await self._authority()
-        if voiced and self._task is not None:
+        if self._task is not None:
+            if not voiced:
+                self._barge_frames.clear()
+                self._barge_samples = 0
+                return
+            # Match the browser's 120 ms speech onset: a lone codec tail or
+            # click must not cancel a response. Keep the onset for real barge-in.
+            self._barge_frames.append(pcm)
+            self._barge_samples += len(pcm) // SAMPLE_WIDTH
+            if self._barge_samples < 16_000 * 120 // 1000:
+                return
+            onset = tuple(self._barge_frames)
             await self.interrupt()
+            for frame in onset:
+                await self.receive(participant_identity, frame)
+            return
+        if self._barge_frames:
+            onset = (*self._barge_frames, pcm)
+            self._barge_frames.clear()
+            self._barge_samples = 0
+            for frame in onset:
+                await self.receive(participant_identity, frame)
+            return
         if not voiced and not self._pcm:
             self._preroll.append(pcm)
             return  # At most 200ms preroll; never continuously upload quiet audio.
@@ -254,6 +277,8 @@ class ConfiguredVoiceWorker:
         self._task = asyncio.create_task(self._respond(None, self._epoch, text))
 
     async def interrupt(self) -> None:
+        self._barge_frames.clear()
+        self._barge_samples = 0
         self._pcm.clear()
         self._preroll.clear()
         self._voiced = self._silence = 0

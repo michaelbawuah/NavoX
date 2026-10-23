@@ -797,3 +797,38 @@ async def test_real_schedule_tools_use_realtime_supported_fields_only():
     assert sent[0]["parameters"]["required"] == ["mode", "date"]
     assert tools.definitions()[0]["strict"] is True
     await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_codec_tail_does_not_cancel_reply_but_confirmed_barge_in_keeps_onset():
+    check, output, realtime = Check(), Output(), RecordingRealtime()
+    key = CallContextKey(check.authority.user_id, check.authority.workspace_id, uuid4(), 0)
+    context = await VoxCallContext.load(key, InMemoryContextStore())
+    connection = uuid4()
+    worker = ConfiguredVoiceWorker(
+        WorkerAssignment(
+            connection, "vx-" + connection.hex, "vc-" + connection.hex, "va-" + connection.hex
+        ),
+        check,
+        output,
+        VoxInferenceConfig(),
+        context,
+        realtime,
+        Pipeline(),
+    )
+    waiting = asyncio.create_task(asyncio.Event().wait())
+    worker._task = waiting
+    voice = struct.pack("<h", 2000) * 320
+    quiet = bytes(640)
+    await worker.receive(worker.assignment.client_identity, voice)
+    await worker.receive(worker.assignment.client_identity, quiet)
+    assert not waiting.done()
+    assert realtime.frames == []
+    for _ in range(5):
+        await worker.receive(worker.assignment.client_identity, voice)
+    assert not waiting.done()
+    await worker.receive(worker.assignment.client_identity, voice)
+    assert waiting.cancelled()
+    assert realtime.frames == [voice] * 6
+    assert worker._barge_frames == []
+    await worker.close()
