@@ -1,0 +1,908 @@
+{
+  "artifacts": [
+    {
+      "archive_sha256": "2af25d2ac45911f6a3838856de0f90c245bf6728381d050d8a1eb1e0a0631188",
+      "artifact_id": 12464814850,
+      "cases": 940,
+      "junit_sha256": "b876ec40941f201b9a481ac987f34b284a09c0fd839a384172aa4bc927d7780c",
+      "manifest_sha256": "234e8090ef52d53529b0d6e3a7148fddb9e0f4a27019cdf1f16a6a0e7433d9fc",
+      "shard": 0
+    },
+    {
+      "archive_sha256": "a0e1138bce155a453d47a999d56d01c0247b8e7fc09130bc50be50281a1c2f17",
+      "artifact_id": 12465387772,
+      "cases": 785,
+      "junit_sha256": "091b917b73d753d3bda9330f298ccdc84c0993580a1fa700c39c6c6403d70329",
+      "manifest_sha256": "06d4755e6f0c699a4630e9bd2a88f91056a4316e6ca13ec039029c6f246f9913",
+      "shard": 1
+    },
+    {
+      "archive_sha256": "c4b6183af45bea00398df0198b9bbb8d2823b89f6d15ab70d685f29019c3590b",
+      "artifact_id": 12464259710,
+      "cases": 635,
+      "junit_sha256": "e842f32ca4cbef7359ce155a9222679e5668fa08af8fea2bbda255f32234efb9",
+      "manifest_sha256": "39c8a3d7e6e75c88daf03a35efff47c69273240a880248d548431c9a27e4037d",
+      "shard": 2
+    },
+    {
+      "archive_sha256": "8e106c81316c8bf77a35e3ea0a8bece242caf1d86977cdaa52be6bb81cf58516",
+      "artifact_id": 12464514377,
+      "cases": 509,
+      "junit_sha256": "f2069f6a24cfeb343d59bf0c97d1b86419ba0fd5ec0984d37352cbdf22d99bc8",
+      "manifest_sha256": "e47d875f809c08947ec62b7e502b2d20c575cbd0f3cfeda371814c6cda5b427c",
+      "shard": 3
+    },
+    {
+      "archive_sha256": "cfcfff57c5d4c5025c0dbcdda182e68e4179429403b0efa9dcae55c15fbf7295",
+      "artifact_id": 12466020261,
+      "cases": 756,
+      "junit_sha256": "9a93255e3a59688fb39e0dbf52f20a84d4abcbf90bde06d3e2f6d221cc885851",
+      "manifest_sha256": "3291ce7d5fecd35b3d99b25bf7304010a21b551f1cc831441b2dd31a6c5a556f",
+      "shard": 4
+    },
+    {
+      "archive_sha256": "5a13a95fafba4abe63c1bfc80b3782cdd9a4090df6d33e76b720f900ecc803b1",
+      "artifact_id": 12465802502,
+      "cases": 878,
+      "junit_sha256": "f8ddda8d5a4fffca0d71624c082e68925c04367f37e506cd7c43ec73079f7fde",
+      "manifest_sha256": "9c6890dd41c85dbf65f44caf5a4af9204ddc6781bb9c06981b407605b771c513",
+      "shard": 5
+    }
+  ],
+  "files": {
+    "tests/test_agent.py": {
+      "cases": 5,
+      "milliseconds": 1527
+    },
+    "tests/test_ai_claude_schema.py": {
+      "cases": 12,
+      "milliseconds": 48
+    },
+    "tests/test_ai_communication_evaluation.py": {
+      "cases": 16,
+      "milliseconds": 4232
+    },
+    "tests/test_ai_context.py": {
+      "cases": 22,
+      "milliseconds": 26125
+    },
+    "tests/test_ai_control.py": {
+      "cases": 6,
+      "milliseconds": 10521
+    },
+    "tests/test_ai_conversation.py": {
+      "cases": 57,
+      "milliseconds": 107978
+    },
+    "tests/test_ai_drafting_versions.py": {
+      "cases": 15,
+      "milliseconds": 3812
+    },
+    "tests/test_ai_embeddings.py": {
+      "cases": 20,
+      "milliseconds": 28
+    },
+    "tests/test_ai_evaluation.py": {
+      "cases": 41,
+      "milliseconds": 8220
+    },
+    "tests/test_ai_factory.py": {
+      "cases": 5,
+      "milliseconds": 15
+    },
+    "tests/test_ai_feature_ingestion.py": {
+      "cases": 5,
+      "milliseconds": 9185
+    },
+    "tests/test_ai_gateway.py": {
+      "cases": 3,
+      "milliseconds": 2
+    },
+    "tests/test_ai_gateway_foundation.py": {
+      "cases": 124,
+      "milliseconds": 96
+    },
+    "tests/test_ai_intent_plan.py": {
+      "cases": 32,
+      "milliseconds": 23420
+    },
+    "tests/test_ai_operational_domains.py": {
+      "cases": 29,
+      "milliseconds": 49489
+    },
+    "tests/test_ai_operational_versions.py": {
+      "cases": 8,
+      "milliseconds": 3379
+    },
+    "tests/test_ai_providers.py": {
+      "cases": 69,
+      "milliseconds": 92
+    },
+    "tests/test_ai_readiness.py": {
+      "cases": 6,
+      "milliseconds": 8014
+    },
+    "tests/test_ai_registry.py": {
+      "cases": 8,
+      "milliseconds": 13538
+    },
+    "tests/test_ai_runtime.py": {
+      "cases": 20,
+      "milliseconds": 54391
+    },
+    "tests/test_ai_scoped_policy.py": {
+      "cases": 10,
+      "milliseconds": 8
+    },
+    "tests/test_ai_sessions_tools.py": {
+      "cases": 19,
+      "milliseconds": 19379
+    },
+    "tests/test_ai_settings.py": {
+      "cases": 5,
+      "milliseconds": 14156
+    },
+    "tests/test_ai_speech_routing.py": {
+      "cases": 38,
+      "milliseconds": 2563
+    },
+    "tests/test_ai_speech_synthesis.py": {
+      "cases": 39,
+      "milliseconds": 44985
+    },
+    "tests/test_ai_speech_transcription.py": {
+      "cases": 63,
+      "milliseconds": 81020
+    },
+    "tests/test_api_ci_contract.py": {
+      "cases": 27,
+      "milliseconds": 414
+    },
+    "tests/test_api_preflight.py": {
+      "cases": 17,
+      "milliseconds": 1494
+    },
+    "tests/test_approvals.py": {
+      "cases": 16,
+      "milliseconds": 7786
+    },
+    "tests/test_auth.py": {
+      "cases": 14,
+      "milliseconds": 4826
+    },
+    "tests/test_board.py": {
+      "cases": 54,
+      "milliseconds": 132136
+    },
+    "tests/test_board_migration.py": {
+      "cases": 2,
+      "milliseconds": 10
+    },
+    "tests/test_board_postgres.py": {
+      "cases": 4,
+      "milliseconds": 7720
+    },
+    "tests/test_canvas_deployments.py": {
+      "cases": 11,
+      "milliseconds": 39
+    },
+    "tests/test_canvas_managed.py": {
+      "cases": 34,
+      "milliseconds": 98101
+    },
+    "tests/test_canvas_outbound.py": {
+      "cases": 33,
+      "milliseconds": 139
+    },
+    "tests/test_commitments.py": {
+      "cases": 10,
+      "milliseconds": 1430
+    },
+    "tests/test_communication_drafts.py": {
+      "cases": 33,
+      "milliseconds": 69844
+    },
+    "tests/test_connection_management.py": {
+      "cases": 92,
+      "milliseconds": 163206
+    },
+    "tests/test_connections.py": {
+      "cases": 7,
+      "milliseconds": 3035
+    },
+    "tests/test_connector_canvas.py": {
+      "cases": 7,
+      "milliseconds": 9
+    },
+    "tests/test_connector_capabilities.py": {
+      "cases": 2,
+      "milliseconds": 1
+    },
+    "tests/test_connector_certification.py": {
+      "cases": 20,
+      "milliseconds": 20
+    },
+    "tests/test_connector_contracts.py": {
+      "cases": 4,
+      "milliseconds": 2
+    },
+    "tests/test_connector_events.py": {
+      "cases": 8,
+      "milliseconds": 23747
+    },
+    "tests/test_connector_generic_api.py": {
+      "cases": 30,
+      "milliseconds": 47
+    },
+    "tests/test_connector_google_bridge.py": {
+      "cases": 4,
+      "milliseconds": 314
+    },
+    "tests/test_connector_imports.py": {
+      "cases": 5,
+      "milliseconds": 3
+    },
+    "tests/test_connector_mcp.py": {
+      "cases": 9,
+      "milliseconds": 12
+    },
+    "tests/test_connector_measurements.py": {
+      "cases": 18,
+      "milliseconds": 1421
+    },
+    "tests/test_connector_portability.py": {
+      "cases": 27,
+      "milliseconds": 45836
+    },
+    "tests/test_connector_public_exports.py": {
+      "cases": 8,
+      "milliseconds": 426
+    },
+    "tests/test_connector_recovery_workflows.py": {
+      "cases": 18,
+      "milliseconds": 48
+    },
+    "tests/test_connector_runtime.py": {
+      "cases": 4,
+      "milliseconds": 1538
+    },
+    "tests/test_connector_secret_broker.py": {
+      "cases": 53,
+      "milliseconds": 47105
+    },
+    "tests/test_connector_secret_lifecycle.py": {
+      "cases": 13,
+      "milliseconds": 12051
+    },
+    "tests/test_connector_subscriptions.py": {
+      "cases": 6,
+      "milliseconds": 7042
+    },
+    "tests/test_connector_sync_recovery.py": {
+      "cases": 63,
+      "milliseconds": 131029
+    },
+    "tests/test_coursework.py": {
+      "cases": 36,
+      "milliseconds": 57663
+    },
+    "tests/test_coursework_material_page.py": {
+      "cases": 20,
+      "milliseconds": 57831
+    },
+    "tests/test_evaluation.py": {
+      "cases": 3,
+      "milliseconds": 9
+    },
+    "tests/test_events.py": {
+      "cases": 8,
+      "milliseconds": 2886
+    },
+    "tests/test_gmail_replies.py": {
+      "cases": 11,
+      "milliseconds": 17
+    },
+    "tests/test_gmail_sync_resume.py": {
+      "cases": 13,
+      "milliseconds": 4971
+    },
+    "tests/test_google_availability.py": {
+      "cases": 39,
+      "milliseconds": 59
+    },
+    "tests/test_google_calendar_connector.py": {
+      "cases": 34,
+      "milliseconds": 53439
+    },
+    "tests/test_google_gmail_connector.py": {
+      "cases": 49,
+      "milliseconds": 121458
+    },
+    "tests/test_google_quota_reason.py": {
+      "cases": 20,
+      "milliseconds": 22
+    },
+    "tests/test_google_source_backoff.py": {
+      "cases": 36,
+      "milliseconds": 40
+    },
+    "tests/test_google_source_diagnostics.py": {
+      "cases": 32,
+      "milliseconds": 294
+    },
+    "tests/test_google_thread_watch.py": {
+      "cases": 67,
+      "milliseconds": 62
+    },
+    "tests/test_hardening.py": {
+      "cases": 9,
+      "milliseconds": 49
+    },
+    "tests/test_health.py": {
+      "cases": 3,
+      "milliseconds": 8
+    },
+    "tests/test_intelligence_attention.py": {
+      "cases": 11,
+      "milliseconds": 2231
+    },
+    "tests/test_intelligence_contracts.py": {
+      "cases": 7,
+      "milliseconds": 3
+    },
+    "tests/test_intelligence_demos.py": {
+      "cases": 4,
+      "milliseconds": 1373
+    },
+    "tests/test_intelligence_email_focus.py": {
+      "cases": 15,
+      "milliseconds": 1872
+    },
+    "tests/test_intelligence_email_relevance.py": {
+      "cases": 42,
+      "milliseconds": 6265
+    },
+    "tests/test_intelligence_evidence.py": {
+      "cases": 28,
+      "milliseconds": 12980
+    },
+    "tests/test_intelligence_extraction.py": {
+      "cases": 36,
+      "milliseconds": 33
+    },
+    "tests/test_intelligence_gmail_html.py": {
+      "cases": 4,
+      "milliseconds": 2
+    },
+    "tests/test_intelligence_gmail_recheck.py": {
+      "cases": 52,
+      "milliseconds": 22468
+    },
+    "tests/test_intelligence_ingestion.py": {
+      "cases": 38,
+      "milliseconds": 11539
+    },
+    "tests/test_intelligence_readiness.py": {
+      "cases": 18,
+      "milliseconds": 56182
+    },
+    "tests/test_intelligence_report.py": {
+      "cases": 5,
+      "milliseconds": 7
+    },
+    "tests/test_intelligence_resolution.py": {
+      "cases": 56,
+      "milliseconds": 8970
+    },
+    "tests/test_intelligence_runtime.py": {
+      "cases": 38,
+      "milliseconds": 2979
+    },
+    "tests/test_intelligence_smoke.py": {
+      "cases": 28,
+      "milliseconds": 57
+    },
+    "tests/test_intelligence_source_cooldown.py": {
+      "cases": 28,
+      "milliseconds": 9772
+    },
+    "tests/test_intelligence_sync_status.py": {
+      "cases": 15,
+      "milliseconds": 5112
+    },
+    "tests/test_intelligence_workflow_hardening.py": {
+      "cases": 8,
+      "milliseconds": 434
+    },
+    "tests/test_knowledge_api.py": {
+      "cases": 12,
+      "milliseconds": 25533
+    },
+    "tests/test_knowledge_ask.py": {
+      "cases": 38,
+      "milliseconds": 79502
+    },
+    "tests/test_knowledge_class_schedule.py": {
+      "cases": 4,
+      "milliseconds": 4
+    },
+    "tests/test_knowledge_conflicts.py": {
+      "cases": 18,
+      "milliseconds": 23779
+    },
+    "tests/test_knowledge_contracts.py": {
+      "cases": 37,
+      "milliseconds": 20
+    },
+    "tests/test_knowledge_email_drafts.py": {
+      "cases": 24,
+      "milliseconds": 46251
+    },
+    "tests/test_knowledge_email_drafts_migration.py": {
+      "cases": 6,
+      "milliseconds": 61
+    },
+    "tests/test_knowledge_entities.py": {
+      "cases": 14,
+      "milliseconds": 44947
+    },
+    "tests/test_knowledge_foundation.py": {
+      "cases": 61,
+      "milliseconds": 158969
+    },
+    "tests/test_knowledge_graph.py": {
+      "cases": 16,
+      "milliseconds": 48493
+    },
+    "tests/test_knowledge_indexing.py": {
+      "cases": 18,
+      "milliseconds": 35881
+    },
+    "tests/test_knowledge_lifecycle.py": {
+      "cases": 12,
+      "milliseconds": 21680
+    },
+    "tests/test_knowledge_live_search.py": {
+      "cases": 10,
+      "milliseconds": 20300
+    },
+    "tests/test_knowledge_migration.py": {
+      "cases": 16,
+      "milliseconds": 1352
+    },
+    "tests/test_knowledge_privacy.py": {
+      "cases": 8,
+      "milliseconds": 14720
+    },
+    "tests/test_knowledge_rrf.py": {
+      "cases": 6,
+      "milliseconds": 0
+    },
+    "tests/test_knowledge_search.py": {
+      "cases": 24,
+      "milliseconds": 65118
+    },
+    "tests/test_knowledge_search_contracts.py": {
+      "cases": 9,
+      "milliseconds": 3
+    },
+    "tests/test_knowledge_semantic.py": {
+      "cases": 37,
+      "milliseconds": 97892
+    },
+    "tests/test_knowledge_source_health.py": {
+      "cases": 1,
+      "milliseconds": 2624
+    },
+    "tests/test_knowledge_temporal.py": {
+      "cases": 1,
+      "milliseconds": 4244
+    },
+    "tests/test_lms_feed.py": {
+      "cases": 50,
+      "milliseconds": 80494
+    },
+    "tests/test_managed_imports.py": {
+      "cases": 38,
+      "milliseconds": 43872
+    },
+    "tests/test_mcp_management.py": {
+      "cases": 2,
+      "milliseconds": 3674
+    },
+    "tests/test_models.py": {
+      "cases": 13,
+      "milliseconds": 0
+    },
+    "tests/test_news_adversarial.py": {
+      "cases": 13,
+      "milliseconds": 33761
+    },
+    "tests/test_news_api.py": {
+      "cases": 12,
+      "milliseconds": 32199
+    },
+    "tests/test_news_api_feeds.py": {
+      "cases": 22,
+      "milliseconds": 25905
+    },
+    "tests/test_news_article_images.py": {
+      "cases": 19,
+      "milliseconds": 7631
+    },
+    "tests/test_news_cluster_evaluation.py": {
+      "cases": 26,
+      "milliseconds": 603
+    },
+    "tests/test_news_conversation_api.py": {
+      "cases": 2,
+      "milliseconds": 1879
+    },
+    "tests/test_news_conversation_refresh_workflow.py": {
+      "cases": 7,
+      "milliseconds": 17
+    },
+    "tests/test_news_conversations.py": {
+      "cases": 4,
+      "milliseconds": 7341
+    },
+    "tests/test_news_extraction_evaluation.py": {
+      "cases": 21,
+      "milliseconds": 5606
+    },
+    "tests/test_news_following.py": {
+      "cases": 32,
+      "milliseconds": 51384
+    },
+    "tests/test_news_following_api.py": {
+      "cases": 6,
+      "milliseconds": 16512
+    },
+    "tests/test_news_foundation.py": {
+      "cases": 17,
+      "milliseconds": 12791
+    },
+    "tests/test_news_importance.py": {
+      "cases": 5,
+      "milliseconds": 8099
+    },
+    "tests/test_news_intelligence.py": {
+      "cases": 21,
+      "milliseconds": 37650
+    },
+    "tests/test_news_jobs.py": {
+      "cases": 7,
+      "milliseconds": 8861
+    },
+    "tests/test_news_openai_schema.py": {
+      "cases": 2,
+      "milliseconds": 6
+    },
+    "tests/test_news_provider_evaluation.py": {
+      "cases": 8,
+      "milliseconds": 122
+    },
+    "tests/test_news_public_sources.py": {
+      "cases": 14,
+      "milliseconds": 1843
+    },
+    "tests/test_news_question_planning.py": {
+      "cases": 14,
+      "milliseconds": 5051
+    },
+    "tests/test_news_ranking.py": {
+      "cases": 4,
+      "milliseconds": 5217
+    },
+    "tests/test_news_relations.py": {
+      "cases": 15,
+      "milliseconds": 13683
+    },
+    "tests/test_news_research.py": {
+      "cases": 6,
+      "milliseconds": 15791
+    },
+    "tests/test_news_research_planning.py": {
+      "cases": 12,
+      "milliseconds": 8128
+    },
+    "tests/test_news_retrieval.py": {
+      "cases": 45,
+      "milliseconds": 58557
+    },
+    "tests/test_news_semantic_clustering.py": {
+      "cases": 43,
+      "milliseconds": 61755
+    },
+    "tests/test_news_span_options.py": {
+      "cases": 3,
+      "milliseconds": 8
+    },
+    "tests/test_news_stories.py": {
+      "cases": 7,
+      "milliseconds": 13146
+    },
+    "tests/test_news_story_api.py": {
+      "cases": 5,
+      "milliseconds": 14892
+    },
+    "tests/test_news_story_related.py": {
+      "cases": 6,
+      "milliseconds": 18820
+    },
+    "tests/test_openai_provider.py": {
+      "cases": 42,
+      "milliseconds": 78
+    },
+    "tests/test_owner_memory.py": {
+      "cases": 33,
+      "milliseconds": 62918
+    },
+    "tests/test_owner_memory_migration.py": {
+      "cases": 2,
+      "milliseconds": 5
+    },
+    "tests/test_personal_followthrough_cleanup.py": {
+      "cases": 3,
+      "milliseconds": 10817
+    },
+    "tests/test_proactive.py": {
+      "cases": 7,
+      "milliseconds": 2456
+    },
+    "tests/test_routines.py": {
+      "cases": 23,
+      "milliseconds": 30759
+    },
+    "tests/test_stripe_sandbox.py": {
+      "cases": 43,
+      "milliseconds": 50594
+    },
+    "tests/test_student_agent_materials.py": {
+      "cases": 26,
+      "milliseconds": 31
+    },
+    "tests/test_student_agent_selector.py": {
+      "cases": 50,
+      "milliseconds": 87338
+    },
+    "tests/test_student_alerts.py": {
+      "cases": 34,
+      "milliseconds": 52005
+    },
+    "tests/test_student_availability.py": {
+      "cases": 69,
+      "milliseconds": 75
+    },
+    "tests/test_student_availability_service.py": {
+      "cases": 35,
+      "milliseconds": 96995
+    },
+    "tests/test_student_calendar_consent.py": {
+      "cases": 16,
+      "milliseconds": 46395
+    },
+    "tests/test_student_calendar_event_claims.py": {
+      "cases": 10,
+      "milliseconds": 37197
+    },
+    "tests/test_student_calendar_event_migration.py": {
+      "cases": 4,
+      "milliseconds": 2228
+    },
+    "tests/test_student_calendar_event_recovery.py": {
+      "cases": 8,
+      "milliseconds": 26174
+    },
+    "tests/test_student_calendar_events.py": {
+      "cases": 30,
+      "milliseconds": 75009
+    },
+    "tests/test_student_calendar_migration.py": {
+      "cases": 4,
+      "milliseconds": 2044
+    },
+    "tests/test_student_calendar_scheduling_consent.py": {
+      "cases": 22,
+      "milliseconds": 44357
+    },
+    "tests/test_student_calendar_write_provider.py": {
+      "cases": 79,
+      "milliseconds": 75
+    },
+    "tests/test_student_coach.py": {
+      "cases": 38,
+      "milliseconds": 83582
+    },
+    "tests/test_student_email.py": {
+      "cases": 28,
+      "milliseconds": 64106
+    },
+    "tests/test_student_email_api.py": {
+      "cases": 26,
+      "milliseconds": 47799
+    },
+    "tests/test_student_email_classifier.py": {
+      "cases": 55,
+      "milliseconds": 43
+    },
+    "tests/test_student_email_postgres.py": {
+      "cases": 3,
+      "milliseconds": 6063
+    },
+    "tests/test_student_email_wiring.py": {
+      "cases": 7,
+      "milliseconds": 3181
+    },
+    "tests/test_student_goals.py": {
+      "cases": 25,
+      "milliseconds": 72176
+    },
+    "tests/test_student_goals_migration.py": {
+      "cases": 2,
+      "milliseconds": 9
+    },
+    "tests/test_student_ics.py": {
+      "cases": 16,
+      "milliseconds": 8562
+    },
+    "tests/test_student_occurrences.py": {
+      "cases": 1,
+      "milliseconds": 205
+    },
+    "tests/test_student_planning.py": {
+      "cases": 45,
+      "milliseconds": 83685
+    },
+    "tests/test_student_planning_migration.py": {
+      "cases": 2,
+      "milliseconds": 8
+    },
+    "tests/test_student_recovery.py": {
+      "cases": 40,
+      "milliseconds": 110985
+    },
+    "tests/test_student_recovery_email.py": {
+      "cases": 1,
+      "milliseconds": 1885
+    },
+    "tests/test_student_recovery_migration.py": {
+      "cases": 2,
+      "milliseconds": 5
+    },
+    "tests/test_student_screenshot.py": {
+      "cases": 26,
+      "milliseconds": 1557
+    },
+    "tests/test_student_selector_adapter.py": {
+      "cases": 38,
+      "milliseconds": 9110
+    },
+    "tests/test_student_selector_evaluation.py": {
+      "cases": 35,
+      "milliseconds": 6286
+    },
+    "tests/test_student_timetable.py": {
+      "cases": 24,
+      "milliseconds": 45640
+    },
+    "tests/test_student_work_export.py": {
+      "cases": 29,
+      "milliseconds": 38014
+    },
+    "tests/test_subscription_cancellation.py": {
+      "cases": 20,
+      "milliseconds": 41719
+    },
+    "tests/test_subscription_lifecycle.py": {
+      "cases": 12,
+      "milliseconds": 28041
+    },
+    "tests/test_subscription_provenance.py": {
+      "cases": 5,
+      "milliseconds": 15395
+    },
+    "tests/test_subscription_provider_capability.py": {
+      "cases": 40,
+      "milliseconds": 59902
+    },
+    "tests/test_subscriptions_api.py": {
+      "cases": 4,
+      "milliseconds": 7703
+    },
+    "tests/test_subscriptions_discovery.py": {
+      "cases": 22,
+      "milliseconds": 22016
+    },
+    "tests/test_subscriptions_registry.py": {
+      "cases": 26,
+      "milliseconds": 19352
+    },
+    "tests/test_thread_watch_workflows.py": {
+      "cases": 4,
+      "milliseconds": 22
+    },
+    "tests/test_thread_watches.py": {
+      "cases": 33,
+      "milliseconds": 58766
+    },
+    "tests/test_today.py": {
+      "cases": 3,
+      "milliseconds": 1160
+    },
+    "tests/test_vox_auth.py": {
+      "cases": 14,
+      "milliseconds": 31014
+    },
+    "tests/test_vox_calls.py": {
+      "cases": 26,
+      "milliseconds": 74081
+    },
+    "tests/test_vox_media.py": {
+      "cases": 40,
+      "milliseconds": 82691
+    },
+    "tests/test_vox_media_migration.py": {
+      "cases": 44,
+      "milliseconds": 11166
+    },
+    "tests/test_vox_media_postgres.py": {
+      "cases": 15,
+      "milliseconds": 38457
+    },
+    "tests/test_vox_media_reconcile.py": {
+      "cases": 16,
+      "milliseconds": 30419
+    },
+    "tests/test_vox_media_reconcile_postgres.py": {
+      "cases": 2,
+      "milliseconds": 5068
+    },
+    "tests/test_vox_migration.py": {
+      "cases": 23,
+      "milliseconds": 200
+    },
+    "tests/test_vox_postgres.py": {
+      "cases": 9,
+      "milliseconds": 28784
+    },
+    "tests/test_vox_provider.py": {
+      "cases": 43,
+      "milliseconds": 29149
+    },
+    "tests/test_vox_provision_attempts_migration.py": {
+      "cases": 21,
+      "milliseconds": 11767
+    },
+    "tests/test_vox_provision_attempts_postgres.py": {
+      "cases": 6,
+      "milliseconds": 17311
+    },
+    "tests/test_vox_readiness.py": {
+      "cases": 24,
+      "milliseconds": 81001
+    },
+    "tests/test_vox_spoken_contract.py": {
+      "cases": 16,
+      "milliseconds": 26
+    },
+    "tests/test_vox_worker.py": {
+      "cases": 33,
+      "milliseconds": 45655
+    },
+    "tests/test_vox_worker_postgres.py": {
+      "cases": 3,
+      "milliseconds": 8205
+    }
+  },
+  "schema": "navox-api-file-timings.v1",
+  "source": {
+    "checkout_sha": "b9bbb4b5bfe4bbbd3cd98bc04db54f2d51185521",
+    "collected_tests": 4503,
+    "collection_sha256": "f158928da4731d4fcacfd046fce6514fb5c5328df3f3f45077d7b9a942f74757",
+    "measurement": "Sum of JUnit testcase time, including setup/call/teardown, in integer milliseconds.",
+    "purpose": "Frozen scheduling estimates only; these values are not pass/fail thresholds or measured predictions for a new run.",
+    "repository": "michaelbawuah/NavoX",
+    "workflow_run_id": 39867875715
+  }
+}
