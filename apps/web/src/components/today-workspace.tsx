@@ -44,6 +44,7 @@ import { StudentRecoveryCard } from "./student-recovery";
 import { ThreadWatchPanel } from "./thread-watch-panel";
 import styles from "./today-workspace.module.css";
 import { VoxHomeLauncher } from "./vox-call-controls";
+import { VoxUsageReport } from "./vox-usage-report";
 import { WorkspaceShell } from "./workspace-shell";
 
 interface Account {
@@ -1587,6 +1588,10 @@ export function TodayWorkspace({
                 accountId={`${account.workspace.id}:${account.id}`}
               />
               <AISettings />
+              <VoxUsageReport
+                key={`${account.workspace.id}:${account.id}`}
+                accountId={`${account.workspace.id}:${account.id}`}
+              />
             </div>
             <div className={styles.focusColumn}>
               <WorkspaceContext

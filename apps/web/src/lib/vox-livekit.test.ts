@@ -17,6 +17,7 @@ import {
 } from "./vox-livekit";
 import type { VoxWakeFactory } from "./vox-local-wake";
 import { VoxReservationError } from "./vox-reservations";
+import type { VoxWakeBinding } from "./vox-runtime-wake";
 
 const owner = {
   userId: "11111111-1111-4111-8111-111111111111",
@@ -1299,5 +1300,44 @@ describe("bounded Vox provider grants", () => {
     await expect(env.transport.connect(env.request)).rejects.toThrow();
     expect(env.loadSdk).not.toHaveBeenCalled();
     expect(env.lease.close).toHaveBeenCalledTimes(1);
+  });
+  it("constructs wake for one admitted lease and reads its configuration only after standby begins", async () => {
+    let captured: VoxWakeBinding | null = null;
+    let active = false;
+    const wakeFactory = vi.fn<VoxWakeFactory>((binding) => {
+      captured = binding;
+      return {
+        id: "configured-local",
+        supported: true,
+        get active() {
+          return active;
+        },
+        start: async () => {
+          await binding.loadConfig(new AbortController().signal);
+          active = true;
+        },
+        stop: async () => {
+          active = false;
+        },
+      };
+    });
+    const env = environment({ wakeFactory });
+    const load = vi.fn(async () => null);
+    env.lease.loadWakeConfig = load;
+    expect(wakeFactory).not.toHaveBeenCalled();
+    const connection = await env.transport.connect(env.request);
+    expect(wakeFactory).toHaveBeenCalledTimes(1);
+    expect(load).not.toHaveBeenCalled();
+    env.request.mayListenForWake = () => true;
+    connection.setWakeEnabled(true);
+    await settle();
+    expect(load).toHaveBeenCalledTimes(1);
+    await connection.close();
+    await expect(
+      (captured as VoxWakeBinding | null)?.loadConfig(
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("unavailable");
+    expect(load).toHaveBeenCalledTimes(1);
   });
 });

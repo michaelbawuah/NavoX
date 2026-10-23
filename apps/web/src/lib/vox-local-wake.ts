@@ -3,8 +3,10 @@ import type {
   WakeWordEvent,
 } from "@navox/assistant-runtime/voice";
 
-/** Factories construct inert, on-device adapters; start alone may open local audio. */
-export type VoxWakeFactory = () => WakeWordAdapter;
+import type { VoxWakeBinding } from "./vox-runtime-wake";
+
+/** One admitted connection receives an inert adapter; start alone may open local audio. */
+export type VoxWakeFactory = (binding: VoxWakeBinding) => WakeWordAdapter;
 export type VoxWakeStatus = "off" | "starting" | "listening" | "unavailable";
 
 /** One admitted connection owns this listener; no audio or text is retained here. */

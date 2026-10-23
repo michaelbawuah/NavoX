@@ -54,6 +54,7 @@ from navox.api.today import router as today_router
 from navox.api.vox import router as vox_router
 from navox.api.vox_commands import router as vox_commands_router
 from navox.api.vox_usage import router as vox_usage_router
+from navox.api.vox_wake import router as vox_wake_router
 from navox.api.workspace import router as workspace_router
 from navox.core.settings import get_settings
 
@@ -122,6 +123,7 @@ def create_app() -> FastAPI:
     app.include_router(vox_router, prefix="/api/v1")
     app.include_router(vox_commands_router, prefix="/api/v1")
     app.include_router(vox_usage_router, prefix="/api/v1")
+    app.include_router(vox_wake_router, prefix="/api/v1")
     app.include_router(student_coach_router, prefix="/api/v1")
     app.include_router(student_work_export_router, prefix="/api/v1")
     app.include_router(lms_feed_router, prefix="/api/v1")

@@ -11,6 +11,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@picovoice/porcupine-web": "4.0.1",
+    "@picovoice/web-voice-processor": "4.0.10",
     "katex": "0.19.0",
     "livekit-client": "2.23.0",
     "next": "16.4.2",

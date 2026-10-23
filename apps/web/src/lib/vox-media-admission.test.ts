@@ -203,4 +203,108 @@ describe("native Vox media admission", () => {
     expect(lease.close()).toBe(close);
     expect(env.media).toHaveBeenCalledTimes(2);
   });
+  function configResponse() {
+    return {
+      client_call_id: callId,
+      connection_id: connectionId,
+      generation: 7,
+      expires_at: new Date(now + 120_000).toISOString(),
+      engine: "porcupine",
+      label: "Hey NavoX",
+      access_key: "fixture-only-browser-key",
+      keyword_public_path: "/wake/hey-navox-v1.ppn",
+      model_public_path: "/wake/porcupine-en-v4.pv",
+    };
+  }
+
+  it("reads licensed configuration only in standby through the captured media epoch", async () => {
+    const env = setup();
+    const lease = await env.admission.join(env.request);
+    const signal = new AbortController().signal;
+    expect(env.media).toHaveBeenCalledTimes(1);
+    await expect(lease.loadWakeConfig?.(signal)).rejects.toThrow();
+    expect(env.media).toHaveBeenCalledTimes(1);
+    env.request.mayListenForWake = () => true;
+    env.media.mockResolvedValue(configResponse());
+    await expect(lease.loadWakeConfig?.(signal)).resolves.toEqual({
+      accessKey: "fixture-only-browser-key",
+      keywordPublicPath: "/wake/hey-navox-v1.ppn",
+      modelPublicPath: "/wake/porcupine-en-v4.pv",
+      label: "Hey NavoX",
+    });
+    expect(env.media).toHaveBeenLastCalledWith(
+      owner,
+      callId,
+      7,
+      { action: "wake-config", connectionId },
+      signal,
+    );
+    env.media.mockResolvedValue(null);
+    await expect(lease.loadWakeConfig?.(signal)).resolves.toBeNull();
+  });
+
+  it.each([
+    ["call", { client_call_id: requestId }],
+    ["connection", { connection_id: requestId }],
+    ["generation", { generation: 8 }],
+    ["engine", { engine: "remote-asr" }],
+    ["label", { label: "another word" }],
+    ["expiry", { expires_at: new Date(now).toISOString() }],
+    [
+      "extended deadline",
+      { expires_at: new Date(now + 121_000).toISOString() },
+    ],
+    [
+      "external model",
+      { model_public_path: "https://other.example/engine.pv" },
+    ],
+    ["traversal", { keyword_public_path: "/wake/../model.ppn" }],
+    ["query", { keyword_public_path: "/wake/model.ppn?token=x" }],
+    ["empty key", { access_key: "" }],
+    ["unexpected field", { other: true }],
+  ])(
+    "rejects mismatched or malformed wake configuration: %s",
+    async (_label, change) => {
+      const env = setup();
+      const lease = await env.admission.join(env.request);
+      env.request.mayListenForWake = () => true;
+      env.media.mockResolvedValue({
+        ...configResponse(),
+        ...(change as Record<string, unknown>),
+      });
+      await expect(
+        lease.loadWakeConfig?.(new AbortController().signal),
+      ).rejects.toThrow("unavailable");
+    },
+  );
+
+  it.each(["generation", "abort", "resume", "close"] as const)(
+    "drops a private configuration response after %s",
+    async (reason) => {
+      const env = setup();
+      const lease = await env.admission.join(env.request);
+      env.request.mayListenForWake = () => true;
+      let resolve!: (value: unknown) => void;
+      env.media.mockReturnValueOnce(
+        new Promise((yes) => {
+          resolve = yes;
+        }),
+      );
+      const loading = lease.loadWakeConfig?.(new AbortController().signal);
+      const rejected = expect(loading).rejects.toThrow("unavailable");
+      if (reason === "generation")
+        env.authority.mockReturnValue({
+          generation: 8,
+          expiresAt: now + 120_000,
+        });
+      if (reason === "abort") env.abort.abort();
+      if (reason === "resume") env.request.mayListenForWake = () => false;
+      if (reason === "close") {
+        env.media.mockResolvedValue(null);
+        await lease.close();
+      }
+      resolve(configResponse());
+      await rejected;
+    },
+  );
 });

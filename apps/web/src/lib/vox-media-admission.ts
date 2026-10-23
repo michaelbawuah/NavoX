@@ -204,6 +204,95 @@ export function createVoxMediaAdmission(options: {
             expiresAt: nextExpiresAt,
           };
         },
+        async loadWakeConfig(signal) {
+          const current = options.reservations.mediaAuthority(owner, callId);
+          if (
+            closing ||
+            signal.aborted ||
+            request.signal.aborted ||
+            liveExpiresAt <= now() ||
+            !request.mayListenForWake() ||
+            current.generation !== admitted.generation
+          )
+            throw unavailable();
+          const raw = await options.reservations.mediaRequest(
+            owner,
+            callId,
+            admitted.generation,
+            { action: "wake-config", connectionId: admitted.connection_id },
+            signal,
+          );
+          const latest = options.reservations.mediaAuthority(owner, callId);
+          if (
+            closing ||
+            signal.aborted ||
+            request.signal.aborted ||
+            liveExpiresAt <= now() ||
+            !request.mayListenForWake() ||
+            latest.generation !== admitted.generation
+          )
+            throw unavailable();
+          if (raw === null) return null;
+          const config = record(raw, [
+            "client_call_id",
+            "connection_id",
+            "generation",
+            "expires_at",
+            "engine",
+            "access_key",
+            "keyword_public_path",
+            "model_public_path",
+            "label",
+          ]);
+          const expiry =
+            typeof config.expires_at === "string" &&
+            date.test(config.expires_at)
+              ? Date.parse(config.expires_at)
+              : NaN;
+          const asset = (value: unknown, suffix: string) => {
+            if (
+              typeof value !== "string" ||
+              value.length > 512 ||
+              !/^\/[A-Za-z0-9_./-]+$/.test(value) ||
+              value.includes("//") ||
+              !value.endsWith(suffix)
+            )
+              return false;
+            const parts = value.slice(1).split("/");
+            return (
+              parts.every((part) => !["", ".", ".."].includes(part)) &&
+              /^[A-Za-z0-9]/.test(parts[parts.length - 1] ?? "") &&
+              parts.some((part) =>
+                /(?:^|[._-])v[1-9][0-9]*(?:[._-]|$)/.test(part),
+              )
+            );
+          };
+          if (
+            config.client_call_id !== callId ||
+            config.connection_id !== admitted.connection_id ||
+            config.generation !== admitted.generation ||
+            config.engine !== "porcupine" ||
+            config.label !== "Hey NavoX" ||
+            !Number.isFinite(expiry) ||
+            expiry <= now() ||
+            expiry > liveExpiresAt ||
+            expiry > latest.expiresAt ||
+            expiry > now() + 120_000 ||
+            typeof config.access_key !== "string" ||
+            !config.access_key.trim() ||
+            config.access_key.length > 1024 ||
+            /[\r\n]/.test(config.access_key) ||
+            !asset(config.keyword_public_path, ".ppn") ||
+            !asset(config.model_public_path, ".pv")
+          )
+            throw unavailable();
+          return {
+            accessKey: config.access_key,
+            keywordPublicPath: config.keyword_public_path as string,
+            modelPublicPath: config.model_public_path as string,
+            label: "Hey NavoX",
+          };
+        },
         async submitWakeText(text, signal) {
           if (
             closing ||

@@ -8,6 +8,7 @@ import type {
   VoxTransportRequest,
 } from "./vox-call";
 import { VoxStandbyWake, type VoxWakeFactory } from "./vox-local-wake";
+import type { PorcupineWakeConfig } from "./vox-porcupine-wake";
 import { VoxReservationError } from "./vox-reservations";
 
 export interface VoxMediaAdmission {
@@ -32,6 +33,8 @@ export interface VoxMediaLease extends VoxMediaProof {
   /** Initial join JWT lifetime; renewal never creates another JWT. */
   tokenExpiresAt?: number;
   renew(signal: AbortSignal): Promise<VoxMediaProof>;
+  /** Private licensed configuration is read only when this connection enters standby. */
+  loadWakeConfig?(signal: AbortSignal): Promise<PorcupineWakeConfig | null>;
   /** Explicit local wake suffix, scoped to the same owned connection and conversation. */
   submitWakeText?(text: string, signal: AbortSignal): Promise<void>;
   /** Retire this media connection only; the app owner ends its reservation. */
@@ -311,11 +314,6 @@ export function createLiveKitVoxTransport(options: {
   // A rejected join must not permit a replacement if its resource teardown was
   // uncertain. The app must replace this adapter only after resolving cleanup.
   let wakeAdapter: WakeWordAdapter | null = null;
-  try {
-    wakeAdapter = options.wakeFactory?.() ?? null;
-  } catch {
-    /* Unsupported local engine. */
-  }
   let wakeUnavailable = false;
   let cleanupBlocked = false;
   let pendingCleanup = 0;
@@ -666,6 +664,24 @@ export function createLiveKitVoxTransport(options: {
         lease = await options.admission.join(request);
         if (!fresh() || !visible()) throw unavailable();
         validLease(lease, request, now());
+        const admittedLease = lease;
+        try {
+          wakeAdapter =
+            options.wakeFactory?.({
+              loadConfig: async (signal) => {
+                if (!fresh() || signal.aborted || !request.mayListenForWake())
+                  throw unavailable();
+                const config =
+                  (await admittedLease.loadWakeConfig?.(signal)) ?? null;
+                if (!fresh() || signal.aborted || !request.mayListenForWake())
+                  throw unavailable();
+                return config;
+              },
+            }) ?? null;
+          wakeUnavailable = false;
+        } catch {
+          wakeAdapter = null;
+        }
         const sdk = await (options.loadSdk ?? loadLiveKit)();
         if (!fresh() || !visible()) throw unavailable();
         room = sdk.room();

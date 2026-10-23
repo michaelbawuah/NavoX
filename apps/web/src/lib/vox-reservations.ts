@@ -261,7 +261,7 @@ export class VoxReservationClient {
     capturedGeneration: number,
     operation:
       | { action: "join"; requestId: string }
-      | { action: "renew" | "close"; connectionId: string }
+      | { action: "renew" | "close" | "wake-config"; connectionId: string }
       | {
           action: "wake";
           connectionId: string;
@@ -299,6 +299,7 @@ export class VoxReservationClient {
           : { generation: gen },
       operation.action === "close" ? 204 : 200,
       signal,
+      operation.action === "wake-config",
     );
   }
 
@@ -347,6 +348,7 @@ export class VoxReservationClient {
     payload: unknown,
     expectedStatus: number,
     signal?: AbortSignal,
+    missingAsNull = false,
   ): Promise<unknown> {
     const timeout = new AbortController();
     const timer = setTimeout(() => timeout.abort(), VOX_RESERVATION_TIMEOUT_MS);
@@ -389,6 +391,10 @@ export class VoxReservationClient {
           }),
         combined,
       );
+      if (response.status === 404 && missingAsNull) {
+        void response.body?.cancel().catch(() => {});
+        return null;
+      }
       if (response.status === 401 || response.status === 409)
         throw new VoxReservationError("scope-changed");
       if (response.status === 429 || response.status >= 500)

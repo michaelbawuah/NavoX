@@ -34,9 +34,9 @@ export interface PorcupineWakeSDK {
 
 export interface PorcupineWakeOptions {
   /** Caller must authenticate and authorize this lazy configuration request. */
-  loadConfig(): Promise<PorcupineWakeConfig>;
+  loadConfig(signal: AbortSignal): Promise<PorcupineWakeConfig>;
   /** Inject the installed official SDKs; construction never imports or loads them. */
-  loadSdk(): Promise<PorcupineWakeSDK>;
+  loadSdk?(): Promise<PorcupineWakeSDK>;
   supported?: boolean;
   now?: () => Date;
   onError?: (message: string) => void;
@@ -193,7 +193,10 @@ export class PorcupineWakeWordAdapter implements WakeWordAdapter {
       await waitFor(this.cleanup, operation.signal);
       if (this.poisoned) throw new Error(CLEANUP_ERROR);
       if (!current()) throw cancelled();
-      const config = await waitFor(this.options.loadConfig(), operation.signal);
+      const config = await waitFor(
+        this.options.loadConfig(operation.signal),
+        operation.signal,
+      );
       if (!current()) throw cancelled();
       const label = config.label?.trim() || "Hey NavoX";
       if (
@@ -202,7 +205,10 @@ export class PorcupineWakeWordAdapter implements WakeWordAdapter {
         !config.modelPublicPath?.trim()
       )
         throw new Error(START_ERROR);
-      const sdk = await waitFor(this.options.loadSdk(), operation.signal);
+      const sdk = await waitFor(
+        (this.options.loadSdk ?? loadPorcupineWakeSdk)(),
+        operation.signal,
+      );
       if (!current()) throw cancelled();
       const detect = (detection: { label: string }) => {
         if (!current() || !this.active || detection?.label !== label) return;
@@ -300,4 +306,30 @@ export function createPorcupineWakeWordAdapter(
   options: PorcupineWakeOptions,
 ): PorcupineWakeWordAdapter {
   return new PorcupineWakeWordAdapter(options);
+}
+
+let sdkPromise: Promise<PorcupineWakeSDK> | null = null;
+
+/** Lazy official browser packages; only SDK constructors are cached, never configuration. */
+export function loadPorcupineWakeSdk(): Promise<PorcupineWakeSDK> {
+  sdkPromise ??= Promise.all([
+    import("@picovoice/porcupine-web/dist/esm/index.js"),
+    import("@picovoice/web-voice-processor/dist/esm/index.js"),
+  ]).then(([porcupine, voice]) => ({
+    PorcupineWorker: {
+      create: (key, keywords, detection, model, options) =>
+        porcupine.PorcupineWorker.create(
+          key,
+          keywords,
+          detection,
+          model,
+          options,
+        ),
+    },
+    WebVoiceProcessor: {
+      subscribe: (worker) => voice.WebVoiceProcessor.subscribe(worker),
+      unsubscribe: (worker) => voice.WebVoiceProcessor.unsubscribe(worker),
+    },
+  }));
+  return sdkPromise;
 }
