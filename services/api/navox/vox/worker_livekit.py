@@ -26,6 +26,7 @@ from navox.ai.configured import build_runtime
 from navox.ai.speech_adapters import MAX_SPEECH_AUDIO_BYTES
 from navox.core.settings import Settings, get_settings
 from navox.db.session import get_database_engine, get_session_factory
+from navox.vox.audio_input import AudioInputBuffer
 from navox.vox.context_store import DatabaseContextStore
 from navox.vox.inference_config import load_inference_config
 from navox.vox.inference_http import OpenAICompatiblePipeline, UsageHooks
@@ -304,42 +305,44 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
         subscribed_sid: str | None = None
         seen_client = False
 
+        audio_input = AudioInputBuffer()
+        frames = voiced_frames = slow_frames = 0
+        receive_seconds = max_receive_seconds = 0.0
+
+        async def receive_frame(pcm: bytes) -> None:
+            nonlocal frames, voiced_frames, slow_frames, receive_seconds, max_receive_seconds
+            frames += 1
+            voiced_frames += int(is_voice(pcm))
+            started = time.monotonic()
+            await worker.receive(assignment.client_identity, pcm)
+            elapsed = time.monotonic() - started
+            receive_seconds += elapsed
+            max_receive_seconds = max(max_receive_seconds, elapsed)
+            slow_frames += int(elapsed > 0.1)
+
+        async def interrupt_input() -> None:
+            audio_input.discard()
+            async with audio_input.lock:
+                audio_input.discard()
+                await worker.interrupt()
+
         async def pump(
             track: rtc.Track, participant: rtc.RemoteParticipant, track_sid: str
         ) -> None:
             stream = rtc.AudioStream(
                 track, capacity=5, sample_rate=16_000, num_channels=1, frame_size_ms=20
             )
-            frames = voiced_frames = slow_frames = 0
-            receive_seconds = max_receive_seconds = 0.0
             try:
                 async for event in stream:
                     if stopped.is_set() or subscribed_sid != track_sid:
                         break
-                    pcm = bytes(event.frame.data)
-                    frames += 1
-                    voiced_frames += int(is_voice(pcm))
-                    started = time.monotonic()
-                    await worker.receive(participant.identity, pcm)
-                    elapsed = time.monotonic() - started
-                    receive_seconds += elapsed
-                    max_receive_seconds = max(max_receive_seconds, elapsed)
-                    slow_frames += int(elapsed > 0.1)
+                    # Drain RTC promptly; DB and provider admission run separately.
+                    audio_input.put(bytes(event.frame.data))
             except Exception as error:
                 log_worker_failure("audio_receive", error)
                 if subscribed_sid == track_sid:
                     stopped.set()
             finally:
-                logging.getLogger(__name__).info(
-                    "Vox input processing totals",
-                    extra={
-                        "frames": frames,
-                        "voiced_frames": voiced_frames,
-                        "slow_frames": slow_frames,
-                        "receive_ms": round(receive_seconds * 1000),
-                        "max_receive_ms": round(max_receive_seconds * 1000),
-                    },
-                )
                 await stream.aclose()
 
         def completed(task: asyncio.Task[None]) -> None:
@@ -411,10 +414,10 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                 return
             subscribed_sid = None
             # Same-call SDK reconnect may resume only while fresh DB authority survives.
-            spawn(worker.interrupt())
+            spawn(interrupt_input())
 
         def reconnecting(*args: object) -> None:
-            spawn(worker.interrupt())
+            spawn(interrupt_input())
 
         def metadata_changed(previous: str, participant: rtc.Participant) -> None:
             stopped.set()
@@ -430,7 +433,7 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                         return
                     cloud_config(get_settings())
                     await check()
-                    await worker.flush_idle()
+                    await audio_input.flush_idle(worker.flush_idle)
                     if isinstance(worker, ConfiguredVoiceWorker):
                         await worker.maintain()
                         from navox.vox.commands import take_wake_commands
@@ -439,7 +442,8 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                         if worker._task is None:
                             commands = await take_wake_commands(check, settings)
                             for command in commands:
-                                await worker.text_turn(command.text)
+                                async with audio_input.lock:
+                                    await worker.text_turn(command.text)
                     await asyncio.sleep(0.25)
             except Exception as error:
                 log_worker_failure("watch", error)
@@ -466,6 +470,7 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             )
             for participant in ctx.room.remote_participants.values():
                 participant_connected(participant)
+            spawn(audio_input.consume(receive_frame))
             spawn(watch())
             if isinstance(worker, ConfiguredVoiceWorker):
                 spawn(usage.heartbeat())
@@ -480,6 +485,20 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             stopped.set()
             for event, callback in handlers:
                 ctx.room.off(event, callback)  # type: ignore[arg-type]
+            for task in tuple(streams):
+                task.cancel()
+            await asyncio.gather(*streams, return_exceptions=True)
+            audio_input.discard()
+            logging.getLogger(__name__).info(
+                "Vox input processing totals",
+                extra={
+                    "frames": frames,
+                    "voiced_frames": voiced_frames,
+                    "slow_frames": slow_frames,
+                    "receive_ms": round(receive_seconds * 1000),
+                    "max_receive_ms": round(max_receive_seconds * 1000),
+                },
+            )
             try:
                 await worker.close()
                 if isinstance(worker, ConfiguredVoiceWorker):
