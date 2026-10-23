@@ -1,6 +1,6 @@
 # Vox M1 operator runbook
 
-This is an operator setup and qualification guide, not evidence of a working live call. No credentials, production activation, paid provider requests, or physical-device qualification are supplied by this change. See [accounts](vox-m1-accounts.md), [decisions](vox-m1-decisions.md), and the milestone verification record for the current release status.
+This is an operator setup and qualification guide. The dated records below distinguish live provider and isolated browser checks from unfinished phone acceptance. Credentials are never included, and production Vox activation remains pending. See [accounts](vox-m1-accounts.md), [decisions](vox-m1-decisions.md), and the milestone verification record for the current release status.
 
 ## Configuration and secrets
 
@@ -132,3 +132,43 @@ phone acceptance. Server switches apply only to this isolated test environment.
 Block public registration at the test proxy after creating the named test
 accounts locally; keep phone tests pending until the owner completes them.
 This file does not change the normal production deployment.
+
+
+## Browser audio qualification, 2026-10-23
+
+The isolated HTTPS deployment returned spoken audio through LiveKit to Chromium
+with a 390 × 844 mobile viewport and generated microphone input. A two-turn
+check answered 2 + 2 with four, then adding three with seven. The encrypted
+active-call checkpoint was checked in memory for those expected results; no
+transcripts or raw audio were written to diagnostic evidence. Browser audio
+energy was nonzero, both turns completed, and no page/capture faults occurred.
+This is mobile emulation, not a phone recording or phone acceptance.
+
+The successful two-turn call recorded 58,837 ms connected, 8,400 ms speaking,
+50,437 ms idle, 1,434 provider tokens, and zero remaining token reservations.
+Known model cost was estimated at USD 0.0146808. Total estimated cost remains
+unknown because the LiveKit transport rate is unconfigured; invoice
+reconciliation remains pending. End and media-close requests returned HTTP 204.
+
+Real browser testing exposed and corrected an unpicklable worker entry point,
+an unsupported realtime tool-schema field, finite browser audio peaks outside
+[-1, 1], premature uplink pausing between words, and input loss while provider
+admission stalled. One measured receive operation took 2,559 ms while the old
+RTC queue retained only 100 ms. RTC ingestion now drains into a separate,
+transient five-second queue. Overflow terminates explicitly instead of silently
+losing words. Idle sealing cannot run during input processing or pending frames;
+disconnect discards queued frames, and shutdown stops input before closing the
+provider. Fresh per-frame authority and budget checks remain in place.
+
+The longer, multi-sentence synthetic prompt still split into separate turns and
+did not pass the expected-answer assertions. Natural end-of-turn behavior and
+physical-device barge-in therefore remain open. The smaller two-turn success
+must not be used to mark all conversational acceptance tests complete.
+
+The test origin is https://vox-test.66.175.235.169.sslip.io/ and public sign-up is
+blocked. Named test credentials are stored privately outside the repository.
+The server-hosted browser accepted HTTPS; the connected Mac encountered a TLS
+protocol error for this hostname. Phone reachability is not yet verified.
+Picovoice vendor approval and licensed wake assets remain pending, so local
+wake switches remain disabled. Real student schedule answers, phone recordings,
+long calls, provider failover, and student usage targets remain unqualified.

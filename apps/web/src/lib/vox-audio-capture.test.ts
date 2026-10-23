@@ -269,7 +269,10 @@ describe("Vox local processed microphone capture", () => {
     fake.emit(0.1);
     fake.emit(0.2);
     for (let index = 0; index < 6; index += 1) fake.emit();
-    expect(vi.mocked(options.onVoiceActivity).mock.calls).toEqual([[false], [true]]);
+    expect(vi.mocked(options.onVoiceActivity).mock.calls).toEqual([
+      [false],
+      [true],
+    ]);
     fake.emit(0.3);
     fake.emit(0.2);
     for (let index = 0; index < 16; index += 1) fake.emit();
