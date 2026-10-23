@@ -34,7 +34,14 @@ from navox.ai.validation import compile_schema
 from navox.core.settings import Settings
 from navox.db.ai_registry import AIProfileAssignment, AIProviderHealth
 from navox.vox.conversation import spoken_answer_task
+from navox.vox.inference_config import (
+    InferenceConfigurationError,
+    load_inference_config,
+    route_credential,
+)
 from navox.vox.provider import MediaUnavailable
+from navox.vox.service import VoxError
+from navox.vox.usage import budget_status
 
 
 async def _stable_snapshot(
@@ -89,6 +96,26 @@ async def require_voice_models(
     It does not execute prompts, reserve provider health probes, consume speech
     attempts, create traces or publish/qualify any registry entry.
     """
+    # An explicit operator-owned live-call configuration is the approved route
+    # for realtime/cascade inference. An absent configuration retains the legacy
+    # gateway policy below; a malformed configuration never falls through to it.
+    try:
+        configured = load_inference_config(settings)
+        if configured is not None:
+            routes = []
+            if configured.mode == "realtime":
+                routes.append(configured.realtime)
+            if configured.mode == "cascade" or configured.fallback_enabled:
+                routes.extend((configured.stt, configured.llm, configured.tts))
+            for route in routes:
+                route_credential(route, settings)
+            async with factory() as database:
+                status = await budget_status(database, user_id, workspace_id)
+            if status.blocked:
+                raise VoxError(429, "Your voice allowance is used up for now")
+            return
+    except InferenceConfigurationError:
+        raise MediaUnavailable("Vox inference is not configured") from None
     try:
         async with asyncio.timeout(5):
             runtime = await build_runtime(settings, factory)

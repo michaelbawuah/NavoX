@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -1397,6 +1397,7 @@ dependencies = [
     { name = "reportlab" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "temporalio" },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -1434,6 +1435,7 @@ requires-dist = [
     { name = "reportlab", specifier = "==5.0.1" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.54,<2.1" },
     { name = "temporalio", specifier = ">=1.16,<2" },
+    { name = "websockets", specifier = ">=17.1,<18" },
 ]
 
 [package.metadata.requires-dev]

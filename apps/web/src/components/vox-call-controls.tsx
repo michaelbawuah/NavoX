@@ -103,7 +103,13 @@ function phaseDetail(state: VoxCallState) {
     case "reconnecting":
       return "Audio is paused while the connection returns.";
     case "standby":
-      return "Audio transmission is paused. Tap to continue.";
+      if (state.microphoneMuted)
+        return "Microphone muted. Tap to resume when you are ready.";
+      if (state.wakeStatus === "listening")
+        return "Audio transmission is paused. Say “Hey NavoX” or tap to continue. Keep NavoX open.";
+      if (state.wakeStatus === "starting")
+        return "Preparing local wake listening. You can tap to continue.";
+      return "Audio transmission is paused. Local wake is unavailable in this browser. Tap to continue.";
     case "ended":
       if (state.endReason === "cleanup-incomplete")
         return "The call ended, but cleanup could not be confirmed. Reload NavoX before starting another call.";
@@ -122,6 +128,7 @@ function CallDialog({
   onMinimize,
   onDone,
   onStart,
+  usageNotice,
 }: {
   controller: VoxCallController;
   state: VoxCallState;
@@ -129,6 +136,7 @@ function CallDialog({
   onMinimize: () => void;
   onDone: () => void;
   onStart: () => void;
+  usageNotice?: string;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const returnTarget = useRef<HTMLElement | null>(null);
@@ -240,6 +248,18 @@ function CallDialog({
           {phaseDetail(state)}
         </p>
       </div>
+      {usageNotice && (
+        <p role="status" data-vox-usage="true" className={styles.hint}>
+          {usageNotice}
+        </p>
+      )}
+      {state.wakeInputStatus && (
+        <p role="status" className={styles.hint}>
+          {state.wakeInputStatus === "queued"
+            ? "Your question is queued in this conversation."
+            : "Conversation resumed. Your question could not be queued; please say it again."}
+        </p>
+      )}
       {!ended ? (
         <>
           {state.phase === "standby" && (
@@ -596,6 +616,11 @@ export function VoxCallControls({
           The call could not be started. Please try again.
         </p>
       )}
+      {!open && call.usageNotice?.message && (
+        <p role="status" data-vox-usage="true" className={styles.hint}>
+          {call.usageNotice.message}
+        </p>
+      )}
       {open && (
         <CallDialog
           controller={controller}
@@ -604,6 +629,7 @@ export function VoxCallControls({
           onMinimize={minimize}
           onDone={done}
           onStart={() => void start()}
+          usageNotice={call.usageNotice?.message}
         />
       )}
     </section>

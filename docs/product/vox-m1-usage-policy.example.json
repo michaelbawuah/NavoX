@@ -1,0 +1,25 @@
+{
+  "revision": 0,
+  "policy": {
+    "daily_voice_minutes": 60,
+    "monthly_voice_minutes": 600,
+    "daily_tokens": 300000,
+    "monthly_tokens": 3000000,
+    "notice_fraction": "0.8",
+    "model_pricing": [
+      {
+        "provider": "openai",
+        "model": "gpt-realtime-2.1",
+        "version": "openai-2026-10-23",
+        "input_text": "4",
+        "cached_text": "0.40",
+        "output_text": "24",
+        "input_audio": "32",
+        "cached_audio": "0.40",
+        "output_audio": "64"
+      }
+    ],
+    "transport_usd_per_minute": null,
+    "transport_pricing_version": null
+  }
+}

@@ -94,7 +94,9 @@ router = APIRouter(
 )
 
 
-async def bounded_json[T: BaseModel](request: Request, model: type[T]) -> T:
+async def bounded_json[T: BaseModel](
+    request: Request, model: type[T], *, max_bytes: int = MAX_JSON_BYTES
+) -> T:
     if (
         request.headers.get("content-type", "").split(";", 1)[0].strip().casefold()
         != "application/json"
@@ -102,12 +104,12 @@ async def bounded_json[T: BaseModel](request: Request, model: type[T]) -> T:
         raise HTTPException(415, "Use application/json for Vox requests", headers=PRIVATE)
     try:
         declared = request.headers.get("content-length")
-        if declared is not None and not 0 <= int(declared) <= MAX_JSON_BYTES:
+        if declared is not None and not 0 <= int(declared) <= max_bytes:
             raise HTTPException(413, "The Vox request exceeds the size limit", headers=PRIVATE)
         content = bytearray()
         async with asyncio.timeout(JSON_DEADLINE_SECONDS):
             async for chunk in request.stream():
-                if len(content) + len(chunk) > MAX_JSON_BYTES:
+                if len(content) + len(chunk) > max_bytes:
                     raise HTTPException(
                         413, "The Vox request exceeds the size limit", headers=PRIVATE
                     )
@@ -279,7 +281,10 @@ async def join_media(
         )
         raise HTTPException(503, "Vox media is temporarily unavailable", headers=PRIVATE) from None
     return MediaGrant(
-        **media_binding(confirmed).model_dump(), server_url=provider.config.server_url, token=token
+        **media_binding(confirmed).model_dump(),
+        token_expires_at=provider.participant_token_expires_at(confirmed),
+        server_url=provider.config.server_url,
+        token=token,
     )
 
 
@@ -305,8 +310,13 @@ async def renew_media(
         )
     )
     intent = await result(
-        media.confirm_connection(
-            database, account.user.id, account.workspace.id, session_token_hash, connection_id
+        media.renew_connection(
+            database,
+            account.user.id,
+            account.workspace.id,
+            session_token_hash,
+            connection_id,
+            generation=payload.generation,
         )
     )
     return media_binding(intent)

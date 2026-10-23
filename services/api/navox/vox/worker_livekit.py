@@ -24,7 +24,13 @@ from navox.ai.configured import build_runtime
 from navox.ai.speech_adapters import MAX_SPEECH_AUDIO_BYTES
 from navox.core.settings import Settings, get_settings
 from navox.db.session import get_database_engine, get_session_factory
+from navox.vox.inference_config import load_inference_config
+from navox.vox.inference_http import OpenAICompatiblePipeline, UsageHooks
+from navox.vox.inference_realtime import OpenAIRealtimeAdapter
+from navox.vox.inference_worker import ConfiguredVoiceWorker
 from navox.vox.provider import cloud_config
+from navox.vox.schedule_tools import ScheduleTools
+from navox.vox.session_context import CallContextKey, InMemoryContextStore, VoxCallContext
 from navox.vox.worker import (
     DatabaseAuthority,
     PolicyVoiceGateway,
@@ -40,7 +46,7 @@ MAX_OUTPUT_SAMPLES = 48_000 * 60
 async def exclusive_epoch(
     engine: AsyncEngine, assignment: WorkerAssignment
 ) -> AsyncIterator[AsyncConnection]:
-    """One physical PG connection, one epoch, at most the immutable 120 s lease.
+    """One physical PG connection, one epoch, while the bounded renewable authority lease survives.
 
     No transaction or row lock spans RTC/provider I/O. A process crash releases
     the session lock. A duplicate dispatch cannot connect and replace the agent.
@@ -83,9 +89,17 @@ async def exclusive_epoch(
 class LiveKitAudioOutput:
     def __init__(self, source: rtc.AudioSource):
         self.source = source
+        self._pcm_resampler: av.AudioResampler | None = None
+        self._pcm_samples = 0
+        self.usage: UsageHooks | None = None
+
+    def played_pcm_ms(self) -> int:
+        return max(0, int(self._pcm_samples / 48 - self.source.queued_duration * 1000))
 
     async def clear(self) -> None:
         self.source.clear_queue()
+        self._pcm_resampler = None
+        self._pcm_samples = 0
 
     async def play(self, mp3: bytes, check: Callable[[], Awaitable[None]]) -> None:
         if not isinstance(mp3, bytes) or not 0 < len(mp3) <= MAX_SPEECH_AUDIO_BYTES:
@@ -104,6 +118,8 @@ class LiveKitAudioOutput:
                     for start in range(0, len(raw), 1920):  # At most 20 ms queued per fresh proof.
                         await check()
                         data = raw[start : start + 1920]
+                        if self.usage:
+                            await self.usage.note_audio(max(1, len(data) * 1000 // 96000))
                         await self.source.capture_frame(
                             rtc.AudioFrame(
                                 data=data,
@@ -113,6 +129,47 @@ class LiveKitAudioOutput:
                             )
                         )
         await self.source.wait_for_playout()
+
+    async def _capture_pcm(
+        self, frames: list[av.AudioFrame], check: Callable[[], Awaitable[None]]
+    ) -> None:
+        for frame in frames:
+            self._pcm_samples += frame.samples
+            if self._pcm_samples > MAX_OUTPUT_SAMPLES:
+                raise ValueError("The voice response exceeds the playback duration bound")
+            raw = bytes(frame.planes[0])[: frame.samples * 2]
+            for start in range(0, len(raw), 1920):
+                await check()
+                data = raw[start : start + 1920]
+                if self.usage:
+                    await self.usage.note_audio(max(1, len(data) * 1000 // 96000))
+                await self.source.capture_frame(
+                    rtc.AudioFrame(
+                        data=data,
+                        sample_rate=48_000,
+                        num_channels=1,
+                        samples_per_channel=len(data) // 2,
+                    )
+                )
+
+    async def play_pcm(self, pcm: bytes, check: Callable[[], Awaitable[None]]) -> None:
+        if not pcm or len(pcm) % 2 or len(pcm) > 1_048_576:
+            raise ValueError("The realtime audio frame is outside its bound")
+        if self._pcm_resampler is None:
+            self._pcm_resampler = av.AudioResampler(format="s16", layout="mono", rate=48_000)
+            self._pcm_samples = 0
+        frame = av.AudioFrame(format="s16", layout="mono", samples=len(pcm) // 2)
+        frame.sample_rate = 24_000
+        frame.planes[0].update(pcm)
+        await self._capture_pcm(self._pcm_resampler.resample(frame), check)
+
+    async def finish_pcm(self, check: Callable[[], Awaitable[None]]) -> None:
+        if self._pcm_resampler is not None:
+            await self._capture_pcm(self._pcm_resampler.resample(None), check)
+        await self.source.wait_for_playout()
+        await check()
+        self._pcm_resampler = None
+        self._pcm_samples = 0
 
 
 def participant_metadata(value: str, assignment: WorkerAssignment, generation: int) -> bool:
@@ -166,7 +223,7 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
     cloud_config(settings)  # Runtime kill switch/config remains authoritative.
     check = DatabaseAuthority(get_session_factory(), assignment)
     await _confirmed(check)
-    async with _active_epoch(check, assignment) as check, asyncio.timeout(125):
+    async with _active_epoch(check, assignment) as check:
         _, intent = await check.intent()
         await ctx.connect(auto_subscribe=agents.AutoSubscribe.SUBSCRIBE_NONE)
         if (ctx.room.name, ctx.room.local_participant.identity) != (
@@ -179,27 +236,60 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
         await check()
         source = rtc.AudioSource(48_000, 1, queue_size_ms=20)
         output = LiveKitAudioOutput(source)
-        runtime = await build_runtime(settings, get_session_factory())
-        worker = VoiceTurnWorker(
-            assignment, check, PolicyVoiceGateway(runtime, settings, check), output
-        )
+        inference = load_inference_config(settings)
+        worker: VoiceTurnWorker | ConfiguredVoiceWorker
+        if inference is None:
+            runtime = await build_runtime(settings, get_session_factory())
+            worker = VoiceTurnWorker(
+                assignment, check, PolicyVoiceGateway(runtime, settings, check), output
+            )
+        else:
+            # New routes are operator-owned and remain behind the same exact DB proof.
+            from navox.vox.worker_usage import WorkerUsageHooks
+
+            authority = await check()
+            context_key = CallContextKey(
+                authority.user_id, authority.workspace_id, intent.reservation_id, intent.generation
+            )
+            context = await VoxCallContext.load(
+                context_key,
+                InMemoryContextStore(),
+                max_characters=inference.max_context_characters,
+            )
+
+            async def inference_check() -> None:
+                current = await check()
+                if current != authority:
+                    raise WorkerAccessLost("The voice call owner changed")
+
+            usage = WorkerUsageHooks(check)
+            output.usage = usage
+            tools = ScheduleTools(check)
+            realtime = OpenAIRealtimeAdapter(inference, settings, inference_check, usage, tools)
+            pipeline = OpenAICompatiblePipeline(inference, settings, inference_check, usage, tools)
+            worker = ConfiguredVoiceWorker(
+                assignment, check, output, inference, context, realtime, pipeline, usage=usage
+            )
         stopped = asyncio.Event()
         streams: set[asyncio.Task[None]] = set()
         handlers: list[tuple[str, Callable[..., None]]] = []
         subscribed_sid: str | None = None
         seen_client = False
 
-        async def pump(track: rtc.Track, participant: rtc.RemoteParticipant) -> None:
+        async def pump(
+            track: rtc.Track, participant: rtc.RemoteParticipant, track_sid: str
+        ) -> None:
             stream = rtc.AudioStream(
                 track, capacity=5, sample_rate=16_000, num_channels=1, frame_size_ms=20
             )
             try:
                 async for event in stream:
-                    if stopped.is_set():
+                    if stopped.is_set() or subscribed_sid != track_sid:
                         break
                     await worker.receive(participant.identity, bytes(event.frame.data))
             except Exception:
-                stopped.set()
+                if subscribed_sid == track_sid:
+                    stopped.set()
             finally:
                 await stream.aclose()
 
@@ -214,6 +304,8 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             participant: rtc.RemoteParticipant,
         ) -> None:
             nonlocal subscribed_sid
+            if subscribed_sid == publication.sid:
+                return
             if (
                 participant.identity != assignment.client_identity
                 or track.kind != rtc.TrackKind.KIND_AUDIO
@@ -224,7 +316,7 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                 stopped.set()
                 return
             subscribed_sid = publication.sid
-            spawn(pump(track, participant))
+            spawn(pump(track, participant, publication.sid))
 
         async def subscribe(participant: rtc.RemoteParticipant) -> None:
             nonlocal seen_client
@@ -254,7 +346,16 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             participant_connected(participant)
 
         def participant_disconnected(participant: rtc.RemoteParticipant) -> None:
-            stopped.set()
+            nonlocal subscribed_sid
+            if participant.identity != assignment.client_identity:
+                stopped.set()
+                return
+            subscribed_sid = None
+            # Same-call SDK reconnect may resume only while fresh DB authority survives.
+            spawn(worker.interrupt())
+
+        def reconnecting(*args: object) -> None:
+            spawn(worker.interrupt())
 
         def metadata_changed(previous: str, participant: rtc.Participant) -> None:
             stopped.set()
@@ -271,6 +372,15 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                     cloud_config(get_settings())
                     await check()
                     await worker.flush_idle()
+                    if isinstance(worker, ConfiguredVoiceWorker):
+                        await worker.maintain()
+                        from navox.vox.commands import take_wake_commands
+
+                        # Serialize accepted commands; never overwrite a prior accepted question.
+                        if worker._task is None:
+                            commands = await take_wake_commands(check, settings)
+                            for command in commands:
+                                await worker.text_turn(command.text)
                     await asyncio.sleep(0.25)
             except Exception:
                 stopped.set()
@@ -280,12 +390,14 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             handlers.append((event, callback))
 
         try:
+            if isinstance(worker, ConfiguredVoiceWorker):
+                await worker.warm()
             on("track_subscribed", subscribed)
             on("participant_connected", participant_connected)
             on("track_published", track_published)
             on("participant_disconnected", participant_disconnected)
             on("participant_metadata_changed", metadata_changed)
-            on("reconnecting", disconnected)
+            on("reconnecting", reconnecting)
             on("disconnected", disconnected)
             track = rtc.LocalAudioTrack.create_audio_track("navox-vox", source)
             await check()
@@ -295,6 +407,8 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             for participant in ctx.room.remote_participants.values():
                 participant_connected(participant)
             spawn(watch())
+            if isinstance(worker, ConfiguredVoiceWorker):
+                spawn(usage.heartbeat())
             # An unused dispatch must not occupy the single worker indefinitely.
             try:
                 await asyncio.wait_for(stopped.wait(), timeout=20)
@@ -308,6 +422,8 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                 ctx.room.off(event, callback)  # type: ignore[arg-type]
             try:
                 await worker.close()
+                if isinstance(worker, ConfiguredVoiceWorker):
+                    await usage.close()
             finally:
                 for task in tuple(streams):
                     task.cancel()

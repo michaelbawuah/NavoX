@@ -37,6 +37,8 @@ export interface VoxCallState {
   speakerEnabled: boolean;
   /** Browser playback needs another user gesture; microphone authority is separate. */
   speakerBlocked: boolean;
+  wakeStatus?: "off" | "starting" | "listening" | "unavailable";
+  wakeInputStatus?: "queued" | "failed" | null;
   captionsEnabled: boolean;
   minimized: boolean;
   startedAt: number | null;
@@ -47,8 +49,15 @@ export interface VoxCallState {
 export type VoxTransportEvent =
   | { type: "activity"; activity: VoxActivity }
   | { type: "disconnected" }
+  | { type: "reconnecting" }
+  | { type: "reconnected" }
   | { type: "playback-blocked" }
   | { type: "playback-ready" }
+  | {
+      type: "wake-status";
+      status: "off" | "starting" | "listening" | "unavailable";
+    }
+  | { type: "wake-input"; status: "queued" | "failed" }
   | { type: "ended" };
 
 export interface VoxTransportRequest {
@@ -134,6 +143,9 @@ export class VoxCallController {
   private resumeStandby = false;
   private deferredJoin = false;
   private reconnectAfterCheck = false;
+  private mediaReconnecting = false;
+  private mediaReconnected = false;
+  private mediaResumeStandby = false;
   private cleanupIncomplete = false;
   private callIntent: {
     owner: Readonly<VoxOwner>;
@@ -340,6 +352,8 @@ export class VoxCallController {
       elapsedMs: 0,
       endReason: null,
       speakerBlocked: false,
+      wakeStatus: "off",
+      wakeInputStatus: null,
     };
     this.resumeStandby = false;
     this.deferredJoin = false;
@@ -358,6 +372,7 @@ export class VoxCallController {
     const callId = this.state.callId;
     if (!scope || !callId) return;
     this.deferredJoin = false;
+    this.mediaReconnecting = this.mediaReconnected = false;
     const epoch = ++this.epoch;
     const previousAbort = this.abort;
     const controller = new AbortController();
@@ -411,7 +426,33 @@ export class VoxCallController {
           void this.hangUp("transport-ended");
           return;
         }
+        if (event.type === "reconnecting") {
+          if (this.mediaReconnecting || !this.joined()) return;
+          this.mediaResumeStandby = this.state.phase === "standby";
+          this.mediaReconnecting = true;
+          this.mediaReconnected = false;
+          this.state.phase = "reconnecting";
+          this.state.activity = "quiet";
+          if (this.syncControls()) this.publish();
+          return;
+        }
+        if (event.type === "reconnected") {
+          if (!this.mediaReconnecting) return;
+          this.mediaReconnected = true;
+          this.finishMediaReconnect();
+          return;
+        }
         if (!this.joined()) return;
+        if (event.type === "wake-status") {
+          this.state.wakeStatus = event.status;
+          this.publish();
+          return;
+        }
+        if (event.type === "wake-input") {
+          this.state.wakeInputStatus = event.status;
+          this.publish();
+          return;
+        }
         if (event.type === "disconnected") {
           if (this.state.ownerVerified) void this.reconnect();
           else this.reconnectAfterCheck = true;
@@ -434,6 +475,7 @@ export class VoxCallController {
           if (activity !== "quiet" || this.state.activity !== "quiet")
             this.lastActivityAt = this.moment();
           this.state.activity = activity;
+          if (activity !== "quiet") this.state.wakeInputStatus = null;
           this.publish();
         }
       },
@@ -470,6 +512,21 @@ export class VoxCallController {
     } finally {
       completeJoin(safelyReleased);
     }
+  }
+
+  private finishMediaReconnect(): void {
+    if (
+      !this.mediaReconnecting ||
+      !this.mediaReconnected ||
+      !this.state.ownerVerified ||
+      this.state.phase !== "reconnecting"
+    )
+      return;
+    this.mediaReconnecting = this.mediaReconnected = false;
+    this.state.phase = this.mediaResumeStandby ? "standby" : "active";
+    this.state.activity = "quiet";
+    this.lastActivityAt = this.moment();
+    if (this.syncControls()) this.publish();
   }
 
   setMicrophoneMuted(muted: boolean): void {
@@ -577,7 +634,9 @@ export class VoxCallController {
       if (!checked || this.state.ownerVerified) return;
       this.state.ownerVerified = true;
       this.lastActivityAt = this.moment();
-      if (this.reconnectAfterCheck && this.joined()) {
+      if (this.mediaReconnecting && this.mediaReconnected) {
+        this.finishMediaReconnect();
+      } else if (this.reconnectAfterCheck && this.joined()) {
         this.reconnectAfterCheck = false;
         await this.reconnect();
       } else if (this.deferredJoin && this.ongoing()) {
@@ -617,6 +676,7 @@ export class VoxCallController {
     const terminalEpoch = ++this.epoch;
     this.deferredJoin = false;
     this.reconnectAfterCheck = false;
+    this.mediaReconnecting = this.mediaReconnected = false;
     const previousAbort = this.abort;
     this.abort = null;
     const connection = this.connection;
@@ -631,6 +691,8 @@ export class VoxCallController {
       this.state.activity = "quiet";
       this.state.minimized = false;
       this.state.speakerBlocked = false;
+      this.state.wakeStatus = "off";
+      this.state.wakeInputStatus = null;
       this.state.endReason = reason;
     }
     if (rebind) {

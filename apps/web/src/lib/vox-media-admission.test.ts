@@ -11,7 +11,7 @@ const callId = "33333333-3333-4333-8333-333333333333";
 const connectionId = "44444444-4444-4444-8444-444444444444";
 const requestId = "55555555-5555-4555-8555-555555555555";
 const now = Date.parse("2026-10-22T12:00:00Z");
-function setup(qualified = true) {
+function setup(qualified = true, clock = () => now) {
   const reservations = new VoxReservationClient();
   const authority = vi
     .spyOn(reservations, "mediaAuthority")
@@ -27,6 +27,7 @@ function setup(qualified = true) {
   };
   const grant = {
     ...binding,
+    token_expires_at: new Date(now + 120_000).toISOString(),
     server_url: "wss://project.livekit.cloud",
     token: "e30.e30.c2ln",
   };
@@ -45,7 +46,7 @@ function setup(qualified = true) {
   const admission = createVoxMediaAdmission({
     reservations,
     qualified,
-    now: () => now,
+    now: clock,
     requestId: () => requestId,
   });
   return { authority, binding, grant, media, abort, request, admission };
@@ -90,6 +91,8 @@ describe("native Vox media admission", () => {
     { server_url: "https://project.livekit.cloud" },
     { server_url: "wss://project.livekit.cloud?secret=x" },
     { token: "raw-secret" },
+    { token_expires_at: new Date(now).toISOString() },
+    { token_expires_at: new Date(now + 121_000).toISOString() },
     { unexpected: true },
   ])("rejects malformed or mismatched admission %j", async (change) => {
     const env = setup();
@@ -110,6 +113,72 @@ describe("native Vox media admission", () => {
     env.media.mockResolvedValue({ ...env.binding, ...change });
     await expect(lease.renew(new AbortController().signal)).rejects.toThrow();
   });
+  it("extends only the same live media epoch within the current reservation while keeping the original JWT expiry", async () => {
+    let clock = now;
+    const env = setup(true, () => clock);
+    const lease = await env.admission.join(env.request);
+    clock += 30_000;
+    env.authority.mockReturnValue({
+      generation: 7,
+      expiresAt: clock + 120_000,
+    });
+    env.media.mockResolvedValue({
+      ...env.binding,
+      expires_at: new Date(clock + 120_000).toISOString(),
+    });
+    await expect(lease.renew(new AbortController().signal)).resolves.toEqual({
+      connectionId,
+      generation: 7,
+      expiresAt: clock + 120_000,
+    });
+    expect(lease.tokenExpiresAt).toBe(now + 120_000);
+    env.media.mockResolvedValue({
+      ...env.binding,
+      expires_at: new Date(clock + 119_000).toISOString(),
+    });
+    await expect(lease.renew(new AbortController().signal)).rejects.toThrow();
+    clock += 120_000;
+    await expect(lease.renew(new AbortController().signal)).rejects.toThrow();
+    expect(env.media).toHaveBeenCalledTimes(3);
+  });
+
+  it("submits a full local wake question through the same owned media epoch and checks the queue acknowledgement", async () => {
+    const env = setup();
+    const lease = await env.admission.join(env.request);
+    env.media.mockResolvedValue({
+      request_id: requestId,
+      status: "accepted",
+      delivery: "queued",
+    });
+    const signal = new AbortController().signal;
+    await lease.submitWakeText?.("What were we discussing?", signal);
+    expect(env.media).toHaveBeenLastCalledWith(
+      owner,
+      callId,
+      7,
+      {
+        action: "wake",
+        connectionId,
+        requestId,
+        text: "What were we discussing?",
+      },
+      signal,
+    );
+    env.media.mockResolvedValue({
+      request_id: connectionId,
+      status: "accepted",
+      delivery: "queued",
+    });
+    await expect(
+      lease.submitWakeText?.("Another question", signal),
+    ).rejects.toThrow();
+    const calls = env.media.mock.calls.length;
+    await expect(
+      lease.submitWakeText?.("x".repeat(4001), signal),
+    ).rejects.toThrow();
+    expect(env.media).toHaveBeenCalledTimes(calls);
+  });
+
   it("closes an epoch once after caller abort independently of reservation removal", async () => {
     const env = setup();
     const lease = await env.admission.join(env.request);

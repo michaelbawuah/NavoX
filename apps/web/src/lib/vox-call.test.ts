@@ -1215,3 +1215,80 @@ describe("Vox reconnect and terminal resource fences", () => {
     expect(current.transport.connect).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("Vox same-room recovery", () => {
+  it("does not carry a queued wake question or listening claim into an ended or replacement call", async () => {
+    const env = rig();
+    await env.controller.start();
+    env.requests[0].onEvent({ type: "wake-input", status: "queued" });
+    expect(env.controller.current().wakeInputStatus).toBe("queued");
+    await env.controller.hangUp();
+    expect(env.controller.current()).toMatchObject({
+      wakeInputStatus: null,
+      wakeStatus: "off",
+    });
+    await env.controller.start();
+    expect(env.controller.current()).toMatchObject({
+      wakeInputStatus: null,
+      wakeStatus: "off",
+    });
+    await env.controller.hangUp();
+  });
+
+  it("retains the call and connection while the SDK recovers, and waits for fresh owner verification", async () => {
+    const env = rig();
+    await env.controller.start();
+    const request = env.requests[0];
+    const before = env.controller.current();
+    request.onEvent({ type: "reconnecting" });
+    expect(env.controller.current()).toMatchObject({
+      phase: "reconnecting",
+      callId: before.callId,
+    });
+    expect(request.mayTransmitAudio()).toBe(false);
+    expect(request.mayPlayAudio()).toBe(false);
+    expect(request.mayRenewReservation?.()).toBe(true);
+    expect(env.connections[0].close).not.toHaveBeenCalled();
+    env.controller.suspendForSessionCheck();
+    request.onEvent({ type: "reconnected" });
+    expect(env.controller.current().phase).toBe("reconnecting");
+    await env.controller.bindOwner(owner);
+    expect(env.controller.current()).toMatchObject({
+      phase: "active",
+      callId: before.callId,
+      startedAt: before.startedAt,
+    });
+    expect(request.mayTransmitAudio()).toBe(true);
+    expect(env.transport.connect).toHaveBeenCalledTimes(1);
+    await env.controller.hangUp();
+  });
+
+  it("restores standby after SDK recovery without sending audio or creating another conversation", async () => {
+    const env = rig();
+    await env.controller.start();
+    env.advance(VOX_STANDBY_AFTER_MS);
+    const request = env.requests[0];
+    request.onEvent({ type: "reconnecting" });
+    request.onEvent({ type: "reconnected" });
+    expect(env.controller.current().phase).toBe("standby");
+    expect(request.mayTransmitAudio()).toBe(false);
+    expect(request.mayListenForWake()).toBe(true);
+    expect(env.transport.connect).toHaveBeenCalledTimes(1);
+    await env.controller.hangUp();
+  });
+
+  it("cannot reconnect or restore media after hang-up or an owner change during recovery", async () => {
+    const env = rig();
+    await env.controller.start();
+    const request = env.requests[0];
+    request.onEvent({ type: "reconnecting" });
+    await env.controller.bindOwner(anotherOwner);
+    request.onEvent({ type: "reconnected" });
+    expect(env.controller.current()).toMatchObject({
+      phase: "ended",
+      owner: anotherOwner,
+    });
+    expect(request.mayTransmitAudio()).toBe(false);
+    expect(env.transport.connect).toHaveBeenCalledTimes(1);
+  });
+});

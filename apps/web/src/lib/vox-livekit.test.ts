@@ -2,7 +2,11 @@
 
 import type { LocalAudioTrack } from "livekit-client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { VoxTransportRequest } from "./vox-call";
+import {
+  VOX_STANDBY_AFTER_MS,
+  VoxCallController,
+  type VoxTransportRequest,
+} from "./vox-call";
 import {
   createLiveKitVoxTransport,
   type VoxAudioCapture,
@@ -11,6 +15,8 @@ import {
   type VoxMediaLease,
   type VoxRoomEvents,
 } from "./vox-livekit";
+import type { VoxWakeFactory } from "./vox-local-wake";
+import { VoxReservationError } from "./vox-reservations";
 
 const owner = {
   userId: "11111111-1111-4111-8111-111111111111",
@@ -79,7 +85,7 @@ class FakeRoom implements VoxLiveKitRoom {
   unpublishAudio = vi.fn(async (_track: LocalAudioTrack) => {});
 }
 
-function environment() {
+function environment(options: { wakeFactory?: VoxWakeFactory } = {}) {
   const abort = new AbortController();
   const request: VoxTransportRequest = {
     owner: { ...owner },
@@ -152,6 +158,7 @@ function environment() {
     admission,
     capture: factory,
     loadSdk,
+    ...options,
   });
   const voice = async (speech: boolean) => {
     const create = vi.mocked(factory.create);
@@ -332,7 +339,7 @@ describe("qualified LiveKit Vox adapter", () => {
     { connectionId: callId },
     { generation: generation + 1 },
     { generation: String(generation) },
-    { expiresAt: 1_800_000_121_000 },
+    { expiresAt: 1_800_000_151_000 },
   ])(
     "retires the exact active epoch and microphone for a swapped renewal proof: %j",
     async (change) => {
@@ -362,6 +369,190 @@ describe("qualified LiveKit Vox adapter", () => {
       expect(env.lease.close).toHaveBeenCalledTimes(1);
     },
   );
+
+  it("checks the initial JWT against its separate admission-token expiry", async () => {
+    const env = environment();
+    env.lease.tokenExpiresAt = Date.now() + 60_000;
+    await expect(env.transport.connect(env.request)).rejects.toThrow(
+      "unavailable",
+    );
+    expect(env.loadSdk).not.toHaveBeenCalled();
+  });
+
+  it("extends the live lease without changing the room, epoch or original join token", async () => {
+    const env = environment();
+    const originalToken = env.lease.token;
+    const deadline = env.lease.expiresAt + 30_000;
+    vi.mocked(env.lease.renew).mockResolvedValue({
+      connectionId,
+      generation,
+      expiresAt: deadline,
+    });
+    const connection = await env.transport.connect(env.request);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(env.lease.expiresAt).toBe(deadline);
+    expect(env.lease.token).toBe(originalToken);
+    expect(env.admission.join).toHaveBeenCalledTimes(1);
+    expect(env.request.onEvent).not.toHaveBeenCalledWith({ type: "ended" });
+    await connection.close();
+  });
+
+  it("keeps an admitted agent's audible reply active past two minutes and starts standby only after it stops", async () => {
+    const env = environment();
+    vi.mocked(env.lease.renew).mockImplementation(async () => ({
+      connectionId,
+      generation,
+      expiresAt: Date.now() + 120_000,
+    }));
+    const controller = new VoxCallController({
+      owner,
+      transport: env.transport,
+      newCallId: () => callId,
+      now: () => Date.now(),
+    });
+    await controller.start();
+    const remote = remoteAudio();
+    env.room.events?.trackSubscribed(remote.track, agent);
+    env.room.events?.speakersChanged([agent]);
+    await settle();
+    expect(controller.current().activity).toBe("speaking");
+    await vi.advanceTimersByTimeAsync(VOX_STANDBY_AFTER_MS + 1_000);
+    controller.tick();
+    expect(controller.current().phase).toBe("active");
+    env.room.events?.speakersChanged([]);
+    expect(controller.current().activity).toBe("quiet");
+    await vi.advanceTimersByTimeAsync(VOX_STANDBY_AFTER_MS - 1);
+    controller.tick();
+    expect(controller.current().phase).toBe("active");
+    await vi.advanceTimersByTimeAsync(1);
+    controller.tick();
+    expect(controller.current().phase).toBe("standby");
+    await controller.hangUp();
+  });
+
+  it("wakes the same conversation and queues the complete local question without publishing standby audio", async () => {
+    let listener:
+      | ((
+          event: import("@navox/assistant-runtime/voice").WakeWordEvent,
+        ) => void)
+      | null = null;
+    let wakeActive = false;
+    const wakeAdapter = {
+      id: "local-test",
+      supported: true,
+      get active() {
+        return wakeActive;
+      },
+      start: vi.fn(
+        async (
+          notify: (
+            event: import("@navox/assistant-runtime/voice").WakeWordEvent,
+          ) => void,
+        ) => {
+          listener = notify;
+          wakeActive = true;
+        },
+      ),
+      stop: vi.fn(async () => {
+        wakeActive = false;
+      }),
+    };
+    const env = environment({ wakeFactory: () => wakeAdapter });
+    env.lease.submitWakeText = vi.fn(async () => {});
+    const resumedTrack = {
+      ...env.media,
+      enabled: false,
+      readyState: "live",
+      stop: vi.fn(),
+    };
+    const resumedCapture = {
+      ...env.capture,
+      track: resumedTrack as unknown as MediaStreamTrack,
+    };
+    vi.mocked(env.factory.create)
+      .mockResolvedValueOnce(env.capture)
+      .mockResolvedValueOnce(resumedCapture);
+    env.sdk.audioTrack
+      .mockReturnValueOnce(env.local as unknown as LocalAudioTrack)
+      .mockReturnValueOnce({
+        ...env.local,
+        mediaStreamTrack: resumedCapture.track,
+      } as unknown as LocalAudioTrack);
+    vi.mocked(env.lease.renew).mockImplementation(async () => ({
+      connectionId,
+      generation,
+      expiresAt: Date.now() + 120_000,
+    }));
+    const controller = new VoxCallController({
+      owner,
+      transport: env.transport,
+      newCallId: () => callId,
+      now: () => Date.now(),
+    });
+    await controller.start();
+    await vi.advanceTimersByTimeAsync(VOX_STANDBY_AFTER_MS);
+    controller.tick();
+    await settle();
+    expect(controller.current().phase).toBe("standby");
+    expect(controller.current().wakeStatus).toBe("listening");
+    expect(env.media.enabled).toBe(false);
+    expect(env.capture.stop).toHaveBeenCalled();
+    if (!listener) throw new Error("Local standby listener missing");
+    const notify = listener as (
+      event: import("@navox/assistant-runtime/voice").WakeWordEvent,
+    ) => void;
+    notify({
+      type: "wake",
+      confidence: 0.99,
+      detected_at: new Date().toISOString(),
+      device_id: "local-test",
+      request_text: "What were we discussing?",
+    });
+    await settle();
+    expect(controller.current()).toMatchObject({
+      phase: "active",
+      callId,
+      wakeInputStatus: "queued",
+    });
+    expect(env.lease.submitWakeText).toHaveBeenCalledExactlyOnceWith(
+      "What were we discussing?",
+      expect.any(AbortSignal),
+    );
+    expect(env.admission.join).toHaveBeenCalledTimes(1);
+    expect(wakeActive).toBe(false);
+    await controller.hangUp();
+    notify({
+      type: "wake",
+      confidence: 0.99,
+      detected_at: new Date().toISOString(),
+      device_id: "local-test",
+    });
+    expect(controller.current().phase).toBe("ended");
+  });
+
+  it("keeps a valid live epoch through a temporary heartbeat failure but closes on a rejected authority", async () => {
+    const env = environment();
+    vi.mocked(env.lease.renew)
+      .mockRejectedValueOnce(new VoxReservationError("temporary"))
+      .mockResolvedValueOnce({
+        connectionId,
+        generation,
+        expiresAt: Date.now() + 150_000,
+      });
+    const connection = await env.transport.connect(env.request);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(env.lease.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(env.lease.renew).toHaveBeenCalledTimes(2);
+    expect(env.lease.expiresAt).toBe(Date.now() + 118_000);
+    vi.mocked(env.lease.renew).mockRejectedValue(
+      new VoxReservationError("scope-changed"),
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(env.lease.close).toHaveBeenCalledTimes(1);
+    expect(env.request.onEvent).toHaveBeenCalledWith({ type: "ended" });
+    await connection.close();
+  });
 
   it("cannot revive a retired epoch when its in-flight renewal returns late", async () => {
     const env = environment();
@@ -583,13 +774,13 @@ describe("qualified LiveKit Vox adapter", () => {
     await active.close();
   });
 
-  it("hands reconnection to the controller and cleans listeners without ending the reservation", async () => {
+  it("ends terminal room loss cleanly without pretending a replacement worker retains context", async () => {
     const env = environment();
     const connection = await env.transport.connect(env.request);
     env.room.events?.disconnected();
     await settle();
     expect(env.request.onEvent).toHaveBeenCalledTimes(1);
-    expect(env.request.onEvent).toHaveBeenCalledWith({ type: "disconnected" });
+    expect(env.request.onEvent).toHaveBeenCalledWith({ type: "ended" });
     expect(env.room.events).toBeNull();
     expect(env.lease.close).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
@@ -995,7 +1186,7 @@ describe("qualified LiveKit Vox adapter", () => {
     },
   );
 
-  it("binds actual SDK signal reconnects to synchronous controller-owned cleanup", async () => {
+  it("retains the same SDK room through bounded signal reconnect and cleans it only on close", async () => {
     const env = environment();
     const listeners = new Map<string, (...args: unknown[]) => void>();
     const connect = vi.fn(async () => {});
@@ -1003,7 +1194,11 @@ describe("qualified LiveKit Vox adapter", () => {
     const Room = vi.fn(
       class {
         constructor(
-          readonly options: { reconnectPolicy: { nextRetryDelayInMs(): null } },
+          readonly options: {
+            reconnectPolicy: {
+              nextRetryDelayInMs(context: { elapsedMs: number }): number | null;
+            };
+          },
         ) {}
         name = "navox-room";
         localParticipant = { identity: participant };
@@ -1038,6 +1233,8 @@ describe("qualified LiveKit Vox adapter", () => {
         Disconnected: "disconnected",
         Reconnecting: "reconnecting",
         SignalReconnecting: "signalReconnecting",
+        Reconnected: "reconnected",
+        ActiveSpeakersChanged: "activeSpeakersChanged",
         AudioPlaybackStatusChanged: "audioPlaybackChanged",
       },
     }));
@@ -1053,17 +1250,28 @@ describe("qualified LiveKit Vox adapter", () => {
         { autoSubscribe: false },
       );
       expect(
-        Room.mock.calls[0][0].reconnectPolicy.nextRetryDelayInMs(),
+        Room.mock.calls[0][0].reconnectPolicy.nextRetryDelayInMs({
+          elapsedMs: 0,
+        }),
+      ).toBe(250);
+      expect(
+        Room.mock.calls[0][0].reconnectPolicy.nextRetryDelayInMs({
+          elapsedMs: 90_000,
+        }),
       ).toBeNull();
       expect(listeners.has("signalReconnecting")).toBe(true);
       listeners.get("signalReconnecting")?.();
       await settle();
       expect(env.request.onEvent).toHaveBeenCalledWith({
-        type: "disconnected",
+        type: "reconnecting",
       });
-      expect(disconnect).toHaveBeenCalled();
-      expect(listeners.size).toBe(0);
+      expect(disconnect).not.toHaveBeenCalled();
+      listeners.get("reconnected")?.();
+      expect(env.request.onEvent).toHaveBeenCalledWith({ type: "reconnected" });
+      expect(connect).toHaveBeenCalledTimes(1);
       await connection.close();
+      expect(disconnect).toHaveBeenCalledTimes(1);
+      expect(listeners.size).toBe(0);
     } finally {
       vi.doUnmock("livekit-client");
     }

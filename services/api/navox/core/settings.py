@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     student_vox_livekit_api_key: SecretStr | None = None
     student_vox_livekit_api_secret: SecretStr | None = None
     student_vox_livekit_agent_name: str = "navox-vox"
+    # Operator-owned JSON is reloaded for new calls; credentials remain in secret storage.
+    student_vox_inference_config_path: str = ""
+    # Account IDs permitted to inspect aggregate usage and edit runtime budgets.
+    student_vox_operator_user_ids: list[str] = Field(default_factory=list, repr=False)
     student_recovery_enabled: bool = False
     student_email_enabled: bool = False
     student_goals_enabled: bool = False

@@ -122,25 +122,31 @@ class LiveKitCloudProvider:
         signature = hmac.new(self.config.api_secret.encode(), message.encode(), hashlib.sha256)
         return message + "." + _encoded(signature.digest())
 
+    @staticmethod
+    def participant_token_expires_at(intent: ConnectionIntent) -> datetime:
+        """An initial admission JWT never inherits the renewable live lease."""
+        return min(intent.expires_at, intent.created_at + timedelta(seconds=120))
+
     def participant_token(
         self, intent: ConnectionIntent, *, role: Literal["client", "agent"] = "client"
     ) -> str:
         _locators(intent.room_name, intent.client_identity, intent.agent_identity)
         now = datetime.now(UTC)
+        admission_expires_at = self.participant_token_expires_at(intent)
         if (
             role not in {"client", "agent"}
             or intent.status != "confirmed"
             or intent.created_at.tzinfo is None
             or intent.expires_at.tzinfo is None
             or not 0 < (intent.expires_at - now).total_seconds() <= 120
-            or not 0 < (intent.expires_at - intent.created_at).total_seconds() <= 120
+            or not 0 < (admission_expires_at - now).total_seconds() <= 120
         ):
             raise MediaUnavailable("The Vox connection has ended")
         return self._jwt(
             {
                 "sub": intent.client_identity if role == "client" else intent.agent_identity,
                 "nbf": math.floor(min(intent.created_at, now).timestamp()) - 1,
-                "exp": math.floor(intent.expires_at.timestamp()),
+                "exp": math.floor(admission_expires_at.timestamp()),
                 "metadata": json.dumps(
                     {"connection_id": str(intent.connection_id), "generation": intent.generation},
                     separators=(",", ":"),

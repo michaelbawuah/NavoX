@@ -28,5 +28,6 @@ class MediaBinding(BaseModel):
 
 
 class MediaGrant(MediaBinding):
+    token_expires_at: datetime
     server_url: str
     token: str = Field(repr=False)

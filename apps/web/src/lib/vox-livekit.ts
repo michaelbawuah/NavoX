@@ -1,10 +1,14 @@
+import type { WakeWordAdapter } from "@navox/assistant-runtime/voice";
 import type { LocalAudioTrack, RemoteTrack } from "livekit-client";
+import { VoxActivityTracker } from "./vox-activity";
 import type {
   VoxConnection,
   VoxOwner,
   VoxTransport,
   VoxTransportRequest,
 } from "./vox-call";
+import { VoxStandbyWake, type VoxWakeFactory } from "./vox-local-wake";
+import { VoxReservationError } from "./vox-reservations";
 
 export interface VoxMediaAdmission {
   available: boolean;
@@ -25,7 +29,11 @@ export interface VoxMediaLease extends VoxMediaProof {
   agentIdentity: string;
   serverUrl: string;
   token: string;
+  /** Initial join JWT lifetime; renewal never creates another JWT. */
+  tokenExpiresAt?: number;
   renew(signal: AbortSignal): Promise<VoxMediaProof>;
+  /** Explicit local wake suffix, scoped to the same owned connection and conversation. */
+  submitWakeText?(text: string, signal: AbortSignal): Promise<void>;
   /** Retire this media connection only; the app owner ends its reservation. */
   close(): Promise<void>;
 }
@@ -62,6 +70,9 @@ export interface VoxRoomEvents {
   trackSubscribed(track: VoxRemoteAudio, identity: string): void;
   trackUnsubscribed(track: VoxRemoteAudio): void;
   playbackChanged(allowed: boolean): void;
+  speakersChanged(identities: readonly string[]): void;
+  reconnecting(): void;
+  reconnected(): void;
   disconnected(): void;
 }
 
@@ -95,7 +106,12 @@ async function loadLiveKit(): Promise<VoxLiveKitSDK> {
       const room = new sdk.Room({
         adaptiveStream: false,
         dynacast: false,
-        reconnectPolicy: { nextRetryDelayInMs: () => null },
+        reconnectPolicy: {
+          nextRetryDelayInMs: ({ elapsedMs }: { elapsedMs: number }) =>
+            elapsedMs >= 90_000
+              ? null
+              : Math.min(5_000, Math.max(250, elapsedMs / 4)),
+        },
       });
       const tracks = new WeakMap<RemoteTrack, VoxRemoteAudio>();
       const remote = (track: RemoteTrack): VoxRemoteAudio => {
@@ -150,27 +166,35 @@ async function loadLiveKit(): Promise<VoxLiveKitSDK> {
           ) => events.trackSubscribed(remote(track), participant.identity);
           const unsubscribed = (track: RemoteTrack) =>
             events.trackUnsubscribed(remote(track));
+          const speakers = (participants: readonly { identity: string }[]) =>
+            events.speakersChanged(
+              participants.map((participant) => participant.identity),
+            );
+          room.on(sdk.RoomEvent.ActiveSpeakersChanged, speakers);
           room.on(sdk.RoomEvent.ParticipantConnected, joined);
           room.on(sdk.RoomEvent.ParticipantDisconnected, left);
           room.on(sdk.RoomEvent.TrackPublished, published);
           room.on(sdk.RoomEvent.TrackSubscribed, subscribed);
           room.on(sdk.RoomEvent.TrackUnsubscribed, unsubscribed);
           room.on(sdk.RoomEvent.Disconnected, events.disconnected);
-          room.on(sdk.RoomEvent.Reconnecting, events.disconnected);
-          room.on(sdk.RoomEvent.SignalReconnecting, events.disconnected);
+          room.on(sdk.RoomEvent.Reconnecting, events.reconnecting);
+          room.on(sdk.RoomEvent.SignalReconnecting, events.reconnecting);
+          room.on(sdk.RoomEvent.Reconnected, events.reconnected);
           room.on(
             sdk.RoomEvent.AudioPlaybackStatusChanged,
             events.playbackChanged,
           );
           return () => {
+            room.off(sdk.RoomEvent.ActiveSpeakersChanged, speakers);
             room.off(sdk.RoomEvent.ParticipantConnected, joined);
             room.off(sdk.RoomEvent.ParticipantDisconnected, left);
             room.off(sdk.RoomEvent.TrackPublished, published);
             room.off(sdk.RoomEvent.TrackSubscribed, subscribed);
             room.off(sdk.RoomEvent.TrackUnsubscribed, unsubscribed);
             room.off(sdk.RoomEvent.Disconnected, events.disconnected);
-            room.off(sdk.RoomEvent.Reconnecting, events.disconnected);
-            room.off(sdk.RoomEvent.SignalReconnecting, events.disconnected);
+            room.off(sdk.RoomEvent.Reconnecting, events.reconnecting);
+            room.off(sdk.RoomEvent.SignalReconnecting, events.reconnecting);
+            room.off(sdk.RoomEvent.Reconnected, events.reconnected);
             room.off(
               sdk.RoomEvent.AudioPlaybackStatusChanged,
               events.playbackChanged,
@@ -219,7 +243,10 @@ function validLease(
     !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(lease.token) ||
     !Number.isFinite(lease.expiresAt) ||
     lease.expiresAt <= now ||
-    lease.expiresAt > now + 300_000 ||
+    lease.expiresAt > now + 120_000 ||
+    !Number.isFinite(lease.tokenExpiresAt ?? lease.expiresAt) ||
+    (lease.tokenExpiresAt ?? lease.expiresAt) <= now ||
+    (lease.tokenExpiresAt ?? lease.expiresAt) > now + 120_000 ||
     typeof lease.renew !== "function" ||
     typeof lease.close !== "function"
   )
@@ -244,7 +271,7 @@ function validLease(
     typeof value.exp !== "number" ||
     !Number.isFinite(value.exp) ||
     value.exp * 1000 <= now ||
-    value.exp * 1000 > lease.expiresAt ||
+    value.exp * 1000 > (lease.tokenExpiresAt ?? lease.expiresAt) ||
     typeof value.nbf !== "number" ||
     !Number.isFinite(value.nbf) ||
     value.nbf * 1000 > now ||
@@ -278,10 +305,18 @@ export function createLiveKitVoxTransport(options: {
   admission: VoxMediaAdmission;
   capture?: VoxAudioCaptureFactory;
   loadSdk?: () => Promise<VoxLiveKitSDK>;
+  wakeFactory?: VoxWakeFactory;
   now?: () => number;
 }): VoxTransport {
   // A rejected join must not permit a replacement if its resource teardown was
   // uncertain. The app must replace this adapter only after resolving cleanup.
+  let wakeAdapter: WakeWordAdapter | null = null;
+  try {
+    wakeAdapter = options.wakeFactory?.() ?? null;
+  } catch {
+    /* Unsupported local engine. */
+  }
+  let wakeUnavailable = false;
   let cleanupBlocked = false;
   let pendingCleanup = 0;
   let pendingConnections = 0;
@@ -294,7 +329,9 @@ export function createLiveKitVoxTransport(options: {
         options.capture?.qualified === true
       );
     },
-    localWakeAvailable: false,
+    get localWakeAvailable() {
+      return wakeAdapter?.supported === true && !wakeUnavailable;
+    },
     async connect(request): Promise<VoxConnection> {
       const captureFactory = options.capture;
       if (
@@ -320,6 +357,9 @@ export function createLiveKitVoxTransport(options: {
       let microphone = false;
       let speaker = false;
       let speech = false;
+      let agentSpeaking = false;
+      let wake: VoxStandbyWake | null = null;
+      let activity: VoxActivityTracker | null = null;
       let capture: VoxAudioCapture | null = null;
       let local: LocalAudioTrack | null = null;
       let captureEpoch = 0;
@@ -338,7 +378,11 @@ export function createLiveKitVoxTransport(options: {
       let renewing = false;
       let renewedAt = now();
       const remoteTracks = new Set<VoxRemoteAudio>();
-      type Attachment = { element: HTMLMediaElement; epoch: number };
+      type Attachment = {
+        element: HTMLMediaElement;
+        epoch: number;
+        playing: boolean;
+      };
       const elements = new Map<VoxRemoteAudio, Attachment>();
       let playbackEpoch = 0;
       const cleanup = (operation: () => void) => {
@@ -438,6 +482,9 @@ export function createLiveKitVoxTransport(options: {
         const attachment = elements.get(track);
         if (expected && attachment !== expected) return;
         elements.delete(track);
+        activity?.playback(
+          [...elements.values()].some((attached) => attached.playing),
+        );
         const element = attachment?.element;
         const stop = (attached: HTMLMediaElement) => {
           cleanup(() => {
@@ -476,6 +523,8 @@ export function createLiveKitVoxTransport(options: {
         cleanup(() => abort.abort());
         cleanup(silence);
         cleanup(stopPlayback);
+        cleanup(() => wake?.setEnabled(false));
+        cleanup(() => activity?.reset());
         remoteTracks.clear();
         cleanup(unlisten);
         cleanup(() => request.signal.removeEventListener("abort", aborted));
@@ -496,6 +545,7 @@ export function createLiveKitVoxTransport(options: {
           creating,
           upstream,
           retiring,
+          attempt(() => wake?.close()),
         ]).then((results) => {
           --pendingCleanup;
           if (
@@ -530,11 +580,13 @@ export function createLiveKitVoxTransport(options: {
       const hidden = () => {
         if (visible()) return;
         microphone = speaker = speech = false;
+        wake?.setEnabled(false);
         silence();
         stopPlayback();
         syncUpstream();
       };
       const syncUpstream = () => {
+        activity?.local(speech && mayCapture());
         if (!mayCapture()) silence();
         else if (!mayPublish()) disableOutbound();
         upstream = upstream
@@ -568,7 +620,7 @@ export function createLiveKitVoxTransport(options: {
           return;
         const element = track.attach();
         const epoch = playbackEpoch;
-        const attachment = { element, epoch };
+        const attachment = { element, epoch, playing: false };
         element.muted = true;
         element.autoplay = false;
         elements.set(track, attachment);
@@ -593,6 +645,8 @@ export function createLiveKitVoxTransport(options: {
               detach(track, attachment);
               return;
             }
+            attachment.playing = true;
+            activity?.playback(true);
             request.onEvent({ type: "playback-ready" });
           })
           .catch(() => {
@@ -655,8 +709,36 @@ export function createLiveKitVoxTransport(options: {
               for (const track of remoteTracks) play(track);
             }
           },
+          speakersChanged(identities) {
+            if (lease) {
+              agentSpeaking = identities.includes(lease.agentIdentity);
+              activity?.remote(lease.agentIdentity, agentSpeaking);
+            }
+          },
+          reconnecting() {
+            if (!fresh() || !joined) return;
+            microphone = speaker = speech = false;
+            wake?.setEnabled(false);
+            silence();
+            stopPlayback();
+            activity?.reset();
+            request.onEvent({ type: "reconnecting" });
+          },
+          reconnected() {
+            if (
+              !fresh() ||
+              !joined ||
+              !lease ||
+              !room?.hasParticipant(lease.agentIdentity)
+            ) {
+              fail("ended");
+              return;
+            }
+            room.subscribeAgent(lease.agentIdentity);
+            request.onEvent({ type: "reconnected" });
+          },
           disconnected() {
-            fail("disconnected");
+            fail("ended");
           },
         });
         await room.connect(lease.serverUrl, lease.token);
@@ -679,9 +761,55 @@ export function createLiveKitVoxTransport(options: {
         if (agentTimer !== null) clearTimeout(agentTimer);
         agentReady = agentFailed = null;
         joined = true;
+        activity = new VoxActivityTracker({
+          agentIdentity: lease.agentIdentity,
+          mayTransmitAudio: mayCapture,
+          mayPlayAudio: () =>
+            fresh() && joined && speaker && visible() && request.mayPlayAudio(),
+          onChange: (value) =>
+            request.onEvent({ type: "activity", activity: value }),
+        });
+        activity.remote(lease.agentIdentity, agentSpeaking);
+        wake = new VoxStandbyWake({
+          adapter: wakeAdapter,
+          mayListen: () =>
+            fresh() && joined && visible() && request.mayListenForWake(),
+          onStatus: (status) => {
+            if (status === "unavailable") wakeUnavailable = true;
+            if (fresh() && joined)
+              request.onEvent({ type: "wake-status", status });
+          },
+          onUnsafe: () => fail("ended"),
+          onWake: (event) => {
+            request.onWake();
+            const text = event.request_text?.trim();
+            if (!text) return;
+            if (
+              !lease?.submitWakeText ||
+              text.length > 4000 ||
+              !fresh() ||
+              !request.mayTransmitAudio()
+            ) {
+              request.onEvent({ type: "wake-input", status: "failed" });
+              return;
+            }
+            void lease
+              .submitWakeText(text, abort.signal)
+              .then(() => {
+                if (fresh() && request.mayTransmitAudio())
+                  request.onEvent({ type: "wake-input", status: "queued" });
+              })
+              .catch(() => {
+                if (fresh())
+                  request.onEvent({ type: "wake-input", status: "failed" });
+              });
+          },
+        });
         room.subscribeAgent(lease.agentIdentity);
         if (!fresh() || !joined) throw unavailable();
         timer = setInterval(() => {
+          wake?.refresh();
+          activity?.refresh();
           if (!fresh()) {
             fail("ended");
             return;
@@ -695,7 +823,13 @@ export function createLiveKitVoxTransport(options: {
             syncUpstream();
           }
           if (!speaker || !visible() || !request.mayPlayAudio()) stopPlayback();
-          if (renewing || now() - renewedAt < 30_000) return;
+          const renewAfter = Math.min(
+            30_000,
+            Math.max(1_000, ((lease?.expiresAt ?? now()) - now()) / 2),
+          );
+          if (request.mayRenewReservation && !request.mayRenewReservation())
+            return;
+          if (renewing || now() - renewedAt < renewAfter) return;
           renewing = true;
           void lease
             ?.renew(abort.signal)
@@ -707,16 +841,28 @@ export function createLiveKitVoxTransport(options: {
               if (
                 value.connectionId !== lease?.connectionId ||
                 value.generation !== lease?.generation ||
-                value.expiresAt !== lease?.expiresAt ||
+                !lease ||
+                value.expiresAt < lease.expiresAt ||
                 !Number.isFinite(value.expiresAt) ||
                 value.expiresAt <= now() ||
-                value.expiresAt > now() + 300_000
+                value.expiresAt > now() + 120_000
               )
                 throw unavailable();
               if (lease) lease.expiresAt = value.expiresAt;
               renewedAt = now();
             })
-            .catch(() => fail("ended"))
+            .catch((error: unknown) => {
+              // Retry only a typed transport failure, never a rejected or malformed proof.
+              if (
+                !(
+                  error instanceof VoxReservationError &&
+                  error.code === "temporary" &&
+                  fresh()
+                )
+              )
+                fail("ended");
+              else renewedAt = now() - renewAfter + 2_000;
+            })
             .finally(() => {
               renewing = false;
             });
@@ -735,11 +881,7 @@ export function createLiveKitVoxTransport(options: {
                 if (epoch !== captureEpoch) return;
                 speech = value === true && mayCapture();
                 const ready = syncUpstream();
-                if (fresh() && joined)
-                  request.onEvent({
-                    type: "activity",
-                    activity: speech ? "listening" : "quiet",
-                  });
+                activity?.local(speech);
                 return ready;
               },
             });
@@ -788,6 +930,7 @@ export function createLiveKitVoxTransport(options: {
           owner,
           callId,
           setMicrophoneEnabled(enabled) {
+            if (enabled) wake?.setEnabled(false);
             microphone = enabled === true;
             if (!mayCapture()) {
               speech = false;
@@ -827,7 +970,9 @@ export function createLiveKitVoxTransport(options: {
               for (const track of remoteTracks) play(track);
             }
           },
-          setWakeEnabled() {},
+          setWakeEnabled(enabled) {
+            wake?.setEnabled(enabled);
+          },
           stopPlayback,
           close,
         };

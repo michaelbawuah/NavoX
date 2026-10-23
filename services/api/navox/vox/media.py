@@ -2,14 +2,15 @@
 
 An intent is not media admission. Its immutable locators are committed before a
 future adapter may perform external work. Confirmation rereads authority after
-that work and never extends a deadline or restores a revoked connection.
+that work and never extends a deadline or restores a revoked connection. Only a
+fresh authorized heartbeat renews a live confirmed connection and its ledger.
 """
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import exists, or_, select
+from sqlalchemy import delete, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.connectors.sync_state import database_now, utc
@@ -89,6 +90,11 @@ async def _revoke(
         connection.status = "revoked"
         connection.revoked_at = now
         connection.reason = reason
+    from navox.db.vox_commands import VoxWakeCommand
+
+    await database.execute(
+        delete(VoxWakeCommand).where(VoxWakeCommand.connection_id == connection.id)
+    )
     cleanup = await _cleanup(database, connection)
     _request_cleanup(cleanup, now, late_completion=late_completion)
     await database.flush()
@@ -239,6 +245,12 @@ async def begin_connection(
             if reason is not None or cleanup.status != "armed":
                 await _revoke(database, previous, fresh_now, reason or "authority-lost")
                 raise reservations.VoxError(410, "This media connection has ended")
+            if previous.status == "confirmed" and fresh_now >= utc(previous.created_at) + timedelta(
+                seconds=reservations.LEASE_SECONDS
+            ):
+                # Admission retries must not mint new tokens indefinitely. Keep a
+                # healthy renewed epoch alive rather than retiring it for this retry.
+                raise reservations.VoxError(409, "This media connection is already active")
             return _intent(previous, call)
         current = await database.scalar(
             select(VoxMediaConnection)
@@ -299,6 +311,63 @@ async def begin_connection(
         database.add(connection)
         await database.flush()
         await _cleanup(database, connection)
+        await database.flush()
+        return _intent(connection, call)
+
+    return await reservations._complete(database, operation())
+
+
+async def renew_connection(
+    database: AsyncSession,
+    user_id: UUID,
+    workspace_id: UUID,
+    session_token_hash: str,
+    connection_id: UUID,
+    *,
+    generation: int,
+) -> ConnectionIntent:
+    """Renew one live epoch, never its initial join-token window or ended authority."""
+
+    async def operation() -> ConnectionIntent:
+        boundary = await reservations._locked(database, user_id, workspace_id, session_token_hash)
+        connection = await _owned_connection(
+            database, boundary, user_id, workspace_id, connection_id
+        )
+        cleanup = await database.scalar(
+            select(VoxMediaCleanup)
+            .where(VoxMediaCleanup.connection_id == connection.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        now = await database_now(database)
+        reason = await _invalid_reason(database, connection, boundary.user, now)
+        if (
+            connection.status == "revoked"
+            or reason is not None
+            or cleanup is None
+            or cleanup.status != "armed"
+            or utc(cleanup.connection_expires_at) != utc(connection.expires_at)
+        ):
+            await _revoke(database, connection, now, reason or "authority-lost")
+            raise reservations.VoxError(410, "This media connection has ended")
+        if connection.status != "confirmed":
+            raise reservations.VoxError(409, "This media connection is still being prepared")
+        if type(generation) is not int or not 0 <= generation < reservations.MAX_GENERATION:
+            raise reservations.VoxError(422, "The media request is invalid")
+        reservations._admission(boundary, generation)
+        if connection.generation != generation:
+            raise reservations.VoxError(409, "This media connection belongs to an earlier state")
+        call = await _call(database, connection)
+        assert call is not None  # Fresh authority was checked while retaining the User lock.
+        deadline = min(
+            now + timedelta(seconds=reservations.LEASE_SECONDS),
+            utc(call.expires_at),
+            utc(boundary.session.expires_at),
+        )
+        # Both deadlines move together under User + cleanup locks. A stale
+        # response or concurrent cleaner can neither shorten nor rearm this epoch.
+        connection.expires_at = max(utc(connection.expires_at), deadline)
+        cleanup.connection_expires_at = connection.expires_at
         await database.flush()
         return _intent(connection, call)
 
@@ -385,7 +454,7 @@ async def finalize_provision(database: AsyncSession, intent: ConnectionIntent) -
             or cleanup.client_identity != intent.client_identity
             or cleanup.agent_identity != intent.agent_identity
             or utc(cleanup.created_at) != intent.created_at
-            or utc(cleanup.connection_expires_at) != intent.expires_at
+            or utc(cleanup.connection_expires_at) < intent.expires_at
         ):
             raise reservations.VoxError(422, "The provision completion is invalid")
         fresh_now = await database_now(database)
@@ -401,7 +470,8 @@ async def finalize_provision(database: AsyncSession, intent: ConnectionIntent) -
             or connection.client_identity != intent.client_identity
             or connection.agent_identity != intent.agent_identity
             or utc(connection.created_at) != intent.created_at
-            or utc(connection.expires_at) != intent.expires_at
+            or utc(connection.expires_at) < intent.expires_at
+            or utc(cleanup.connection_expires_at) != utc(connection.expires_at)
         ):
             raise reservations.VoxError(422, "The provision completion is invalid")
         reason = await _invalid_reason(database, connection, user, fresh_now)

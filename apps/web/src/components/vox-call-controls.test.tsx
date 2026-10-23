@@ -651,6 +651,78 @@ describe("Vox call interface with real provider and controller", () => {
     expect(test.transport.connect).toHaveBeenCalledOnce();
   });
 
+  it("offers Hey NavoX only after local listening is confirmed and describes wake input as queued", async () => {
+    vi.useFakeTimers();
+    const test = rig();
+    await test.mount();
+    await click("Talk with NavoX");
+    test.setNow(120_000);
+    await act(async () => vi.advanceTimersByTime(1_000));
+    await act(async () =>
+      test.requests[0].onEvent({ type: "wake-status", status: "starting" }),
+    );
+    expect(dialog().textContent).toContain("Preparing local wake listening");
+    expect(dialog().textContent).not.toContain("Hey NavoX");
+    await act(async () =>
+      test.requests[0].onEvent({ type: "wake-status", status: "listening" }),
+    );
+    expect(dialog().textContent).toContain("Say “Hey NavoX”");
+    expect(dialog().textContent).toContain("Keep NavoX open");
+    await act(async () =>
+      test.requests[0].onEvent({ type: "wake-status", status: "unavailable" }),
+    );
+    expect(dialog().textContent).not.toContain("Hey NavoX");
+    expect(dialog().textContent).toContain("Local wake is unavailable");
+    await click("Resume conversation");
+    await act(async () =>
+      test.requests[0].onEvent({ type: "wake-input", status: "queued" }),
+    );
+    expect(dialog().textContent).toContain(
+      "Your question is queued in this conversation",
+    );
+    await act(async () =>
+      test.requests[0].onEvent({ type: "wake-input", status: "failed" }),
+    );
+    expect(dialog().textContent).toContain("please say it again");
+  });
+
+  it("shows one quiet server allowance notice in the call and while minimized", async () => {
+    vi.useFakeTimers();
+    const notice = "You have used at least 80% of your daily voice allowance.";
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      Response.json({ notices: [notice], blocked: false, policy_revision: 3 }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    const test = rig();
+    await test.mount();
+    await click("Talk with NavoX");
+    expect(dialog().querySelector("[data-vox-usage]")?.textContent).toBe(
+      notice,
+    );
+    expect(host.querySelectorAll("[data-vox-usage]")).toHaveLength(1);
+    const originalNotice = dialog().querySelector("[data-vox-usage]");
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(dialog().querySelector("[data-vox-usage]")).toBe(originalNotice);
+    await click("Minimize call");
+    expect(host.querySelectorAll("[data-vox-usage]")).toHaveLength(1);
+    expect(host.querySelector("[data-vox-usage]")?.textContent).toBe(notice);
+    fetcher.mockResolvedValue(
+      Response.json({ notices: [notice], blocked: true, policy_revision: 3 }),
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(host.querySelector("[data-vox-usage]")?.textContent).toContain(
+      "allowance has been reached",
+    );
+    expect(host.querySelector("[data-vox-usage]")?.textContent).toContain(
+      "after your allowance resets",
+    );
+    expect(
+      fetcher.mock.calls.every(
+        ([, init]) => init?.method === "GET" && init?.body === undefined,
+      ),
+    ).toBe(true);
+  });
+
   it("reconnecting is visible while the old lease cannot send or play audio", async () => {
     const test = rig();
     await test.mount();

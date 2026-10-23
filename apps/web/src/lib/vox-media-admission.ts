@@ -108,7 +108,7 @@ export function createVoxMediaAdmission(options: {
           { action: "join", requestId },
           request.signal,
         ),
-        [...bindingKeys, "server_url", "token"],
+        [...bindingKeys, "server_url", "token", "token_expires_at"],
       );
       const admitted = binding(
         value,
@@ -135,8 +135,20 @@ export function createVoxMediaAdmission(options: {
         url.hash
       )
         throw unavailable();
-      // Keep this snapshot immutable even when the enclosing reservation renews.
       const expiresAt = Date.parse(admitted.expires_at);
+      const tokenExpiresAt =
+        typeof value.token_expires_at === "string" &&
+        date.test(value.token_expires_at)
+          ? Date.parse(value.token_expires_at)
+          : NaN;
+      if (
+        !Number.isFinite(tokenExpiresAt) ||
+        tokenExpiresAt <= now() ||
+        tokenExpiresAt > now() + 120_000 ||
+        tokenExpiresAt > expiresAt
+      )
+        throw unavailable();
+      let liveExpiresAt = expiresAt;
       let closing: Promise<void> | null = null;
       const lease: VoxMediaLease = {
         owner,
@@ -148,9 +160,13 @@ export function createVoxMediaAdmission(options: {
         agentIdentity: admitted.agent_identity,
         serverUrl: value.server_url,
         token: value.token,
+        tokenExpiresAt,
         expiresAt,
         async renew(signal) {
-          if (closing || signal.aborted) throw unavailable();
+          if (closing || signal.aborted || liveExpiresAt <= now())
+            throw unavailable();
+          const current = options.reservations.mediaAuthority(owner, callId);
+          if (current.generation !== admitted.generation) throw unavailable();
           const renewed = binding(
             record(
               await options.reservations.mediaRequest(
@@ -164,20 +180,68 @@ export function createVoxMediaAdmission(options: {
             ),
             request,
             admitted.generation,
-            expiresAt,
+            current.expiresAt,
             now(),
+          );
+          const nextExpiresAt = Date.parse(renewed.expires_at);
+          const latest = options.reservations.mediaAuthority(owner, callId);
+          if (
+            closing ||
+            signal.aborted ||
+            liveExpiresAt <= now() ||
+            latest.generation !== admitted.generation ||
+            nextExpiresAt < liveExpiresAt ||
+            nextExpiresAt > latest.expiresAt ||
+            bindingKeys.some(
+              (key) => key !== "expires_at" && renewed[key] !== admitted[key],
+            )
+          )
+            throw unavailable();
+          liveExpiresAt = nextExpiresAt;
+          return {
+            connectionId: admitted.connection_id,
+            generation: admitted.generation,
+            expiresAt: nextExpiresAt,
+          };
+        },
+        async submitWakeText(text, signal) {
+          if (
+            closing ||
+            signal.aborted ||
+            liveExpiresAt <= now() ||
+            !request.mayTransmitAudio() ||
+            !text.trim() ||
+            text.length > 4000
+          )
+            throw unavailable();
+          const current = options.reservations.mediaAuthority(owner, callId);
+          if (current.generation !== admitted.generation) throw unavailable();
+          const requestId = (
+            options.requestId ?? (() => crypto.randomUUID())
+          )();
+          const result = record(
+            await options.reservations.mediaRequest(
+              owner,
+              callId,
+              admitted.generation,
+              {
+                action: "wake",
+                connectionId: admitted.connection_id,
+                requestId,
+                text,
+              },
+              signal,
+            ),
+            ["request_id", "status", "delivery"],
           );
           if (
             closing ||
             signal.aborted ||
-            bindingKeys.some((key) => renewed[key] !== admitted[key])
+            result.request_id !== requestId ||
+            result.status !== "accepted" ||
+            result.delivery !== "queued"
           )
             throw unavailable();
-          return {
-            connectionId: admitted.connection_id,
-            generation: admitted.generation,
-            expiresAt,
-          };
         },
         close() {
           // Cleanup has an independent bounded lifetime, including after the
