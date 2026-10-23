@@ -127,6 +127,13 @@ class ConfiguredVoiceWorker:
             if self._barge_samples < 16_000 * 120 // 1000:
                 return
             onset = tuple(self._barge_frames)
+            logging.getLogger(__name__).info(
+                "Vox confirmed speech interruption",
+                extra={
+                    "output_started": self.realtime.output_started,
+                    "played_audio_ms": getattr(self.output, "played_pcm_ms", lambda: 0)(),
+                },
+            )
             await self.interrupt()
             for frame in onset:
                 await self.receive(participant_identity, frame)

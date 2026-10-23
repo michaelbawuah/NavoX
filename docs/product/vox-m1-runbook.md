@@ -160,10 +160,12 @@ losing words. Idle sealing cannot run during input processing or pending frames;
 disconnect discards queued frames, and shutdown stops input before closing the
 provider. Fresh per-frame authority and budget checks remain in place.
 
-The longer, multi-sentence synthetic prompt still split into separate turns and
-did not pass the expected-answer assertions. Natural end-of-turn behavior and
-physical-device barge-in therefore remain open. The smaller two-turn success
-must not be used to mark all conversational acceptance tests complete.
+The longer, multi-sentence synthetic prompt initially split into separate turns
+and failed the expected-answer assertions. After the configured 1,200 ms turn
+window was introduced, it completed as exactly two turns with four followed by
+seven. All provider reservations settled, with 1,492 tokens and USD 0.017691 in
+known estimated model cost. Physical-device turn timing and barge-in remain open;
+these emulated checks do not complete all conversational acceptance tests.
 
 The test origin is https://vox-test.66.175.235.169.sslip.io/ and public sign-up is
 blocked. Named test credentials are stored privately outside the repository.
