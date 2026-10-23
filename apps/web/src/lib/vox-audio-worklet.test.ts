@@ -167,12 +167,36 @@ describe("Vox AudioWorklet PCM bridge", () => {
     expect(fake.emit().running).toBe(false);
   });
 
+  it.each([1.25, -1.25])(
+    "keeps finite microphone peaks at %s alive and gated",
+    (peak) => {
+      const fake = bridge();
+      fake.send({ type: "enabled" });
+      for (let index = 0; index < 8; index += 1) {
+        const result = fake.emit(peak);
+        expect(result.running).toBe(true);
+        expect(silent(result.output)).toBe(true);
+      }
+      expect(fake.frames()).toHaveLength(1);
+      expect(
+        fake.frames()[0].frame?.every((value) => value === Math.sign(peak)),
+      ).toBe(true);
+      expect(fake.messages.some((message) => message.type === "fault")).toBe(
+        false,
+      );
+    },
+  );
+
   it("fails silent for corrupt input and unsupported channel layouts", () => {
-    for (const invalid of ["nan", "clipped", "stereo", "missing"]) {
+    for (const invalid of ["nan", "infinite", "stereo", "missing"]) {
       const fake = bridge();
       fake.send({ type: "enabled" });
       const input = new Float32Array(128).fill(
-        invalid === "nan" ? Number.NaN : invalid === "clipped" ? 1.1 : 0.25,
+        invalid === "nan"
+          ? Number.NaN
+          : invalid === "infinite"
+            ? Infinity
+            : 0.25,
       );
       const output = new Float32Array(128).fill(1);
       const channels =

@@ -91,11 +91,13 @@ class VoxPcmProcessor extends AudioWorkletProcessor {
       return false;
     }
     for (const value of input) {
-      if (!Number.isFinite(value) || Math.abs(value) > 1) {
+      if (!Number.isFinite(value)) {
         this.fail("invalid-input");
         return false;
       }
-      this.input[this.inputOffset++] = value;
+      // Web Audio gain/processing can produce finite peaks beyond full scale.
+      // Saturate those peaks before the PCM gate; never publish raw input.
+      this.input[this.inputOffset++] = Math.max(-1, Math.min(1, value));
       if (this.inputOffset === this.input.length) {
         const frame = this.input;
         const id = this.sequence++;
