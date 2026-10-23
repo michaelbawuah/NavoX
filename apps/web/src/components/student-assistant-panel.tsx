@@ -107,7 +107,9 @@ function StudentAssistantAccount({
     "What class do I have next?",
     "List my tasks",
     "Preview my daily plan",
-    "Find “flip-flop” in my course materials",
+    ...(toolContextConsentAvailable
+      ? ["Find “flip-flop” in my course materials"]
+      : []),
     "Explain a flip-flop",
   ];
   return (
@@ -120,8 +122,9 @@ function StudentAssistantAccount({
         <span className={styles.private}>Private question</span>
       </div>
       <p className={styles.intro}>
-        Find your next class, check your tasks, find a passage in your course
-        materials, or work through an idea.
+        {toolContextConsentAvailable
+          ? "Find your next class, check your tasks, find a passage in your course materials, or work through an idea."
+          : "Find your next class, check your tasks, preview a daily plan, or work through an idea."}
       </p>
       <div className={styles.examples}>
         {examples.map((example) => (

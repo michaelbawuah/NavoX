@@ -47,6 +47,38 @@ describe("student assistant text panel", () => {
       "Matching passages from course materials are shown only to you",
     );
   });
+  it.each([false, true])(
+    "matches the examples and introduction to tool-context availability (%s)",
+    (toolContextConsentAvailable) => {
+      const html = renderToStaticMarkup(
+        createElement(StudentAssistantPanel, {
+          accountId: "workspace:user",
+          toolContextConsentAvailable,
+        }),
+      );
+      for (const example of [
+        "What class do I have next?",
+        "List my tasks",
+        "Preview my daily plan",
+        "Explain a flip-flop",
+      ]) {
+        expect(html).toContain(example);
+      }
+      expect(html.includes("Find “flip-flop” in my course materials")).toBe(
+        toolContextConsentAvailable,
+      );
+      expect(html.includes("find a passage in your course materials")).toBe(
+        toolContextConsentAvailable,
+      );
+      expect(html.includes('type="checkbox"')).toBe(
+        toolContextConsentAvailable,
+      );
+      if (!toolContextConsentAvailable) {
+        expect(html).toContain("preview a daily plan");
+        expect(html).not.toContain("course materials");
+      }
+    },
+  );
   it("offers review links without rendering tool data or implying a saved plan", () => {
     const reply: StudentAssistantReply = {
       status: "review",
