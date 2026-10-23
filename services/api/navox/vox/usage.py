@@ -4,6 +4,11 @@ Never mount UsageUpdate as a browser request schema. Worker authority is checked
 by the media worker before receiving/speaking; this ledger grants no media access.
 Provider streams reserve a conservative total-token ceiling before paid I/O.
 Unknown failed usage retains that ceiling, rather than granting free quota.
+
+Voice credit is committed for at most one second before audio. Operator limit
+reductions apply to new grants; an issued grant is honored until its deadline.
+Logout, reset and authority pause still fence every media frame immediately.
+Expired unsettled credit stays explicit uncertain quota, never inferred speech.
 """
 
 from datetime import UTC, date, datetime, time, timedelta
@@ -18,7 +23,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from navox.connectors.sync_state import database_now, utc
 from navox.db.models import User, UserSession
 from navox.db.vox import VoxCall, VoxState
-from navox.db.vox_usage import VoxUsageDelta, VoxUsageEvent, VoxUsagePolicy, VoxUsageStream
+from navox.db.vox_usage import (
+    VoxUsageDelta,
+    VoxUsageEvent,
+    VoxUsagePolicy,
+    VoxUsageStream,
+    VoxVoiceCredit,
+)
 from navox.student.service import owner
 from navox.vox.usage_schemas import (
     BudgetStatus,
@@ -28,6 +39,7 @@ from navox.vox.usage_schemas import (
     UsageStreamView,
     UsageTotals,
     UsageUpdate,
+    VoiceCreditGrant,
 )
 
 COUNTERS = tuple(UsageCounters.model_fields)
@@ -107,7 +119,12 @@ def _view(row: VoxUsageStream) -> UsageStreamView:
 
 
 async def _totals(
-    database: AsyncSession, user_id: UUID, start: datetime, end: datetime
+    database: AsyncSession,
+    user_id: UUID,
+    start: datetime,
+    end: datetime,
+    *,
+    now: datetime | None = None,
 ) -> UsageTotals:
     values = (
         await database.execute(
@@ -142,6 +159,20 @@ async def _totals(
     unknown = int(values[5]) + sum(
         s.status != "complete" and s.reserved_tokens > _counter(s).total_tokens for s in streams
     )
+    now = now or await database_now(database)
+    credits = list(
+        await database.scalars(
+            select(VoxVoiceCredit).where(
+                VoxVoiceCredit.user_id == user_id,
+                VoxVoiceCredit.granted_at >= start,
+                VoxVoiceCredit.granted_at < end,
+                VoxVoiceCredit.settled_at.is_(None),
+            )
+        )
+    )
+    reserved_voice = sum(c.granted_ms for c in credits)
+    uncertain_voice = sum(c.granted_ms for c in credits if utc(c.expires_at) <= now)
+    unknown += sum(utc(c.expires_at) <= now for c in credits)
     known = Decimal(values[4])
     # Reconciled invoices are exact per stream/call. A cross-period stream cannot
     # honestly be called a reconciled daily amount without invoice allocation.
@@ -154,6 +185,8 @@ async def _totals(
         connected_ms=int(values[2]),
         tokens=int(values[3]),
         reserved_tokens=reserved,
+        reserved_voice_ms=reserved_voice,
+        uncertain_voice_ms=uncertain_voice,
         estimated_cost_usd=None if unknown else known,
         known_estimated_cost_usd=known,
         unknown_cost_components=unknown,
@@ -167,11 +200,19 @@ async def budget_status(database: AsyncSession, user_id: UUID, workspace_id: UUI
     now = await database_now(database)
     revision, policy = await get_policy(database)
     day_start, day_end, month_start, month_end = local_bounds(now, user.timezone)
-    daily = await _totals(database, user_id, day_start, day_end)
-    monthly = await _totals(database, user_id, month_start, month_end)
+    daily = await _totals(database, user_id, day_start, day_end, now=now)
+    monthly = await _totals(database, user_id, month_start, month_end, now=now)
     limits = (
-        ("daily voice", daily.speaking_ms, policy.daily_voice_minutes * 60_000),
-        ("monthly voice", monthly.speaking_ms, policy.monthly_voice_minutes * 60_000),
+        (
+            "daily voice",
+            daily.speaking_ms + daily.reserved_voice_ms,
+            policy.daily_voice_minutes * 60_000,
+        ),
+        (
+            "monthly voice",
+            monthly.speaking_ms + monthly.reserved_voice_ms,
+            policy.monthly_voice_minutes * 60_000,
+        ),
         ("daily tokens", daily.tokens + daily.reserved_tokens, policy.daily_tokens),
         ("monthly tokens", monthly.tokens + monthly.reserved_tokens, policy.monthly_tokens),
     )
@@ -239,6 +280,9 @@ async def start_usage_stream(
     provider: str | None = None,
     model: str | None = None,
     token_ceiling: int = 0,
+    voice_credit: VoiceCreditGrant | None = None,
+    voice_connection_id: UUID | None = None,
+    voice_worker_nonce: UUID | None = None,
 ) -> UsageStreamView:
     """Server UUID only; provider ceiling bounds total input+output, not output alone."""
     await _active_call(database, user_id, workspace_id, call_id)
@@ -261,7 +305,37 @@ async def start_usage_stream(
             raise UsageError(409, "This provider attempt has already ended")
         return _view(existing)
     status = await budget_status(database, user_id, workspace_id)
-    if status.blocked or token_ceiling > status.remaining_tokens:
+    own_voice = False
+    if voice_credit is not None:
+        credit = await _credit_row(database, voice_credit)
+        transport = await database.get(VoxUsageStream, credit.stream_id, populate_existing=True)
+        if (
+            transport is None
+            or transport.kind != "transport"
+            or transport.status != "open"
+            or (transport.user_id, transport.workspace_id, transport.call_id)
+            != (user_id, workspace_id, call_id)
+            or transport.sequence != voice_credit.base_sequence
+            or _counter(transport) != voice_credit.base_cumulative
+        ):
+            raise UsageError(409, "Voice transport checkpoint changed")
+        now = await database_now(database)
+        own_voice = (
+            kind == "provider"
+            and credit.settled_at is None
+            and utc(credit.expires_at) > now
+            and (credit.connection_id, credit.worker_nonce)
+            == (voice_connection_id, voice_worker_nonce)
+            and (credit.user_id, credit.workspace_id, credit.call_id)
+            == (user_id, workspace_id, call_id)
+        )
+        if not own_voice:
+            raise UsageError(409, "Voice credit does not belong to this provider call")
+    if (
+        (status.remaining_voice_ms == 0 and not own_voice)
+        or status.remaining_tokens == 0
+        or token_ceiling > status.remaining_tokens
+    ):
         raise UsageError(429, "Your voice allowance has been reached")
     _, policy = await get_policy(database)
     pricing: dict[str, object] | None = None
@@ -320,6 +394,9 @@ async def admit_provider_stream(
     provider: str,
     model: str,
     token_ceiling: int,
+    voice_credit: VoiceCreditGrant | None = None,
+    voice_connection_id: UUID | None = None,
+    voice_worker_nonce: UUID | None = None,
 ) -> UsageStreamView:
     return await start_usage_stream(
         database,
@@ -331,6 +408,9 @@ async def admit_provider_stream(
         provider=provider,
         model=model,
         token_ceiling=token_ceiling,
+        voice_credit=voice_credit,
+        voice_connection_id=voice_connection_id,
+        voice_worker_nonce=voice_worker_nonce,
     )
 
 
@@ -391,7 +471,11 @@ async def _locked_stream(database: AsyncSession, stream_id: UUID) -> tuple[VoxUs
 
 
 async def apply_usage_update(
-    database: AsyncSession, stream_id: UUID, update: UsageUpdate
+    database: AsyncSession,
+    stream_id: UUID,
+    update: UsageUpdate,
+    *,
+    _voice_at: datetime | None = None,
 ) -> UsageStreamView:
     row, user = await _locked_stream(database, stream_id)
     digest = sha256(update.model_dump_json().encode()).hexdigest()
@@ -431,7 +515,9 @@ async def apply_usage_update(
         for index, (start, end) in enumerate(intervals):
             weight = int((end - start).total_seconds() * 1_000_000)
             speaking = (
-                left_speaking
+                0
+                if _voice_at is not None
+                else left_speaking
                 if index == len(intervals) - 1
                 else delta.speaking_ms * weight // duration
             )
@@ -442,6 +528,13 @@ async def apply_usage_update(
                 (
                     start,
                     UsageCounters(speaking_ms=speaking, idle_ms=idle, connected_ms=speaking + idle),
+                )
+            )
+        if _voice_at is not None and delta.speaking_ms:
+            segments.append(
+                (
+                    utc(_voice_at),
+                    UsageCounters(speaking_ms=delta.speaking_ms, connected_ms=delta.speaking_ms),
                 )
             )
     database.add(
@@ -531,6 +624,20 @@ async def call_totals(
             result.unknown_cost_components += 1
         else:
             result.known_estimated_cost_usd += cost
+    now = await database_now(database)
+    credits = list(
+        await database.scalars(
+            select(VoxVoiceCredit).where(
+                VoxVoiceCredit.user_id == user_id,
+                VoxVoiceCredit.workspace_id == workspace_id,
+                VoxVoiceCredit.call_id == call_id,
+                VoxVoiceCredit.settled_at.is_(None),
+            )
+        )
+    )
+    result.reserved_voice_ms = sum(c.granted_ms for c in credits)
+    result.uncertain_voice_ms = sum(c.granted_ms for c in credits if utc(c.expires_at) <= now)
+    result.unknown_cost_components += sum(utc(c.expires_at) <= now for c in credits)
     result.estimated_cost_usd = (
         None if result.unknown_cost_components else result.known_estimated_cost_usd
     )
@@ -576,3 +683,178 @@ async def admin_daily_totals(
             }
         )
     return result
+
+
+def _credit_view(row: VoxVoiceCredit) -> VoiceCreditGrant:
+    return VoiceCreditGrant.model_validate(
+        {
+            name: utc(getattr(row, name))
+            if name in {"granted_at", "expires_at", "day_end", "month_end"}
+            else getattr(row, name)
+            for name in VoiceCreditGrant.model_fields
+        }
+    )
+
+
+async def _credit_row(database: AsyncSession, grant: VoiceCreditGrant) -> VoxVoiceCredit:
+    row = await database.get(VoxVoiceCredit, grant.id, populate_existing=True)
+    if row is None or _credit_view(row) != grant:
+        raise UsageError(409, "Voice credit identity changed")
+    return row
+
+
+async def reserve_voice_credit(
+    database: AsyncSession,
+    user_id: UUID,
+    workspace_id: UUID,
+    call_id: UUID,
+    *,
+    stream_id: UUID,
+    connection_id: UUID,
+    generation: int,
+    worker_nonce: UUID,
+    grant_id: UUID,
+) -> VoiceCreditGrant:
+    """Commit before audio. Issued credit survives prospective policy reductions.
+
+    Expiration stops new audio but never refunds possibly spent, unreported credit.
+    A crashed grant remains an explicit uncertain quota hold, not actual speech.
+    """
+    from navox.db.vox_media import VoxMediaCleanup, VoxMediaConnection
+    from navox.vox import media
+
+    call = await _active_call(database, user_id, workspace_id, call_id)
+    if database.get_bind().dialect.name == "postgresql":
+        # Same order as operator PUT: User, then the singleton policy fence.
+        await database.execute(text("SELECT pg_advisory_xact_lock_shared(762490530)"))
+    user = await database.get(User, user_id)
+    assert user is not None  # _active_call retains this fresh owner's row lock.
+    now = await database_now(database)
+    connection = await database.get(VoxMediaConnection, connection_id, populate_existing=True)
+    if (
+        type(generation) is not int
+        or connection is None
+        or connection.user_id != user_id
+        or connection.workspace_id != workspace_id
+        or connection.call_id != call_id
+        or connection.generation != generation
+        or connection.status != "confirmed"
+        or await media._invalid_reason(database, connection, user, now) is not None
+    ):
+        raise UsageError(409, "Voice credit authority ended")
+    # Cleanup's primary key is independent of connection_id.
+    cleanup = await database.scalar(
+        select(VoxMediaCleanup)
+        .where(VoxMediaCleanup.connection_id == connection_id)
+        .execution_options(populate_existing=True)
+    )
+    if (
+        cleanup is None
+        or cleanup.status != "armed"
+        or utc(cleanup.connection_expires_at) != utc(connection.expires_at)
+        or cleanup.owner_scope_id != connection.owner_scope_id
+        or cleanup.room_name != connection.room_name
+        or cleanup.client_identity != connection.client_identity
+        or cleanup.agent_identity != connection.agent_identity
+        or utc(cleanup.created_at) != utc(connection.created_at)
+    ):
+        raise UsageError(409, "Voice credit authority ended")
+    stream = await database.get(VoxUsageStream, stream_id, populate_existing=True)
+    if stream is None or (
+        stream.user_id,
+        stream.workspace_id,
+        stream.call_id,
+        stream.kind,
+        stream.status,
+    ) != (user_id, workspace_id, call_id, "transport", "open"):
+        raise UsageError(409, "Voice transport meter ended")
+    existing = await database.get(VoxVoiceCredit, grant_id, populate_existing=True)
+    identity = (stream_id, user_id, workspace_id, call_id, connection_id, generation, worker_nonce)
+    if existing is not None:
+        if (
+            tuple(
+                getattr(existing, key)
+                for key in (
+                    "stream_id",
+                    "user_id",
+                    "workspace_id",
+                    "call_id",
+                    "connection_id",
+                    "generation",
+                    "worker_nonce",
+                )
+            )
+            != identity
+        ):
+            raise UsageError(409, "Voice credit identity changed")
+        if existing.settled_at is not None or utc(existing.expires_at) <= now:
+            raise UsageError(409, "Voice credit has ended")
+        if stream.sequence != existing.base_sequence or _counter(
+            stream
+        ) != UsageCounters.model_validate(existing.base_cumulative):
+            raise UsageError(409, "Voice transport checkpoint changed")
+        return _credit_view(existing)
+    status = await budget_status(database, user_id, workspace_id)
+    if status.blocked:
+        raise UsageError(429, "Your voice allowance has been reached")
+    _, day_end, _, month_end = local_bounds(now, user.timezone)
+    expires = min(
+        now + timedelta(seconds=1),
+        day_end,
+        month_end,
+        utc(connection.expires_at),
+        utc(call.expires_at),
+    )
+    granted_ms = min(1000, status.remaining_voice_ms, int((expires - now).total_seconds() * 1000))
+    if granted_ms < 1:
+        raise UsageError(429, "Your voice allowance has been reached")
+    row = VoxVoiceCredit(
+        id=grant_id,
+        stream_id=stream_id,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        call_id=call_id,
+        connection_id=connection_id,
+        generation=generation,
+        worker_nonce=worker_nonce,
+        base_sequence=stream.sequence,
+        base_cumulative=_counter(stream).model_dump(),
+        policy_revision=status.policy_revision,
+        granted_ms=granted_ms,
+        granted_at=now,
+        expires_at=expires,
+        day_end=day_end,
+        month_end=month_end,
+    )
+    database.add(row)
+    await database.flush()
+    return _credit_view(row)
+
+
+async def settle_voice_credit(
+    database: AsyncSession, grant: VoiceCreditGrant, *, cumulative: UsageCounters
+) -> UsageStreamView:
+    """Record only observed usage, including after revocation; exact replay is safe."""
+    row, _ = await _locked_stream(database, grant.stream_id)
+    credit = await _credit_row(database, grant)
+    digest = sha256((grant.model_dump_json() + cumulative.model_dump_json()).encode()).hexdigest()
+    if credit.settled_at is not None:
+        if credit.settlement_digest != digest:
+            raise UsageError(409, "Voice credit settlement changed")
+        return _view(row)
+    if row.sequence != grant.base_sequence or _counter(row) != grant.base_cumulative:
+        raise UsageError(409, "Voice transport checkpoint changed")
+    delta = cumulative.speaking_ms - grant.base_cumulative.speaking_ms
+    if not 0 <= delta <= credit.granted_ms:
+        raise UsageError(409, "Observed speech exceeds its reserved voice credit")
+    view = await apply_usage_update(
+        database,
+        grant.stream_id,
+        UsageUpdate(event_id=grant.id, sequence=row.sequence + 1, cumulative=cumulative),
+        _voice_at=grant.granted_at,
+    )
+    credit.settled_at = await database_now(database)
+    credit.settled_speaking_ms = delta
+    credit.settlement_digest = digest
+    await database.flush()
+    return view

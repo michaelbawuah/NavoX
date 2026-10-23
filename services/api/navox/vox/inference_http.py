@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from uuid import UUID, uuid4
 
 import httpx
@@ -28,7 +28,9 @@ class ProviderRejected(RuntimeError):
 
 
 class UsageHooks(Protocol):
-    async def note_audio(self, duration_ms: int) -> None: ...
+    async def note_audio(
+        self, duration_ms: int, *, direction: Literal["input", "output"] = "input"
+    ) -> None: ...
     async def begin(
         self, stream_id: UUID, provider: str, model: str, token_ceiling: int
     ) -> None: ...

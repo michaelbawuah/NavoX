@@ -119,7 +119,9 @@ class LiveKitAudioOutput:
                         await check()
                         data = raw[start : start + 1920]
                         if self.usage:
-                            await self.usage.note_audio(max(1, len(data) * 1000 // 96000))
+                            await self.usage.note_audio(
+                                max(1, len(data) * 1000 // 96000), direction="output"
+                            )
                         await self.source.capture_frame(
                             rtc.AudioFrame(
                                 data=data,
@@ -142,7 +144,9 @@ class LiveKitAudioOutput:
                 await check()
                 data = raw[start : start + 1920]
                 if self.usage:
-                    await self.usage.note_audio(max(1, len(data) * 1000 // 96000))
+                    await self.usage.note_audio(
+                        max(1, len(data) * 1000 // 96000), direction="output"
+                    )
                 await self.source.capture_frame(
                     rtc.AudioFrame(
                         data=data,

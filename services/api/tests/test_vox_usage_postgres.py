@@ -118,7 +118,7 @@ async def test_actual_alembic_0053_0054_upgrade_downgrade_and_history_refusal(mo
             head = (
                 await connection.execute(text("SELECT version_num FROM alembic_version"))
             ).scalar_one()
-            assert head.startswith("0054_")
+            assert head == "0055_vox_voice_credit"
             tables = await connection.run_sync(
                 lambda c: set(inspect(c).get_table_names(schema=schema))
             )
@@ -128,6 +128,7 @@ async def test_actual_alembic_0053_0054_upgrade_downgrade_and_history_refusal(mo
                 "vox_usage_events",
                 "vox_usage_deltas",
                 "vox_wake_commands",
+                "vox_voice_credits",
             } <= tables - baseline
             await connection.execute(
                 text(

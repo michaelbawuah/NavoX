@@ -1,5 +1,6 @@
 """Content-free internal usage contracts; never browser-submitted metering."""
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal, Self
 from uuid import UUID
@@ -99,6 +100,8 @@ class UsageTotals(Contract):
     connected_ms: int = 0
     tokens: int = 0
     reserved_tokens: int = 0
+    reserved_voice_ms: int = 0
+    uncertain_voice_ms: int = 0
     estimated_cost_usd: Decimal | None = None
     known_estimated_cost_usd: Decimal = Decimal(0)
     unknown_cost_components: int = 0
@@ -118,3 +121,24 @@ class BudgetStatus(Contract):
     blocked: bool
     notices: list[str]
     policy_revision: int
+
+
+class VoiceCreditGrant(Contract):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: UUID
+    stream_id: UUID
+    user_id: UUID
+    workspace_id: UUID
+    call_id: UUID
+    connection_id: UUID
+    generation: int = Field(ge=0, strict=True)
+    worker_nonce: UUID
+    base_sequence: int = Field(ge=0, strict=True)
+    base_cumulative: UsageCounters
+    policy_revision: int = Field(ge=0, strict=True)
+    granted_ms: int = Field(ge=1, le=1000, strict=True)
+    granted_at: datetime
+    expires_at: datetime
+    day_end: datetime
+    month_end: datetime

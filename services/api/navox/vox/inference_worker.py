@@ -128,7 +128,7 @@ class ConfiguredVoiceWorker:
             self._voiced += samples
             self._last_voice_at = time.monotonic()
             if self.usage:
-                await self.usage.note_audio(samples * 1000 // 16000)
+                await self.usage.note_audio(samples * 1000 // 16000, direction="input")
         else:
             self._silence += samples
         # Keep consonants and short pauses through a bounded 600ms hangover.

@@ -6,8 +6,8 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import func, select
-from test_vox_calls import start
 from test_vox_calls import vox_env as _shared_vox_env
+from test_vox_media import begin, confirm
 
 from navox.db.vox_usage import VoxUsageEvent
 from navox.vox import usage, worker_usage
@@ -50,7 +50,8 @@ async def test_worker_hook_reserves_before_attempt_and_records_idempotent_final_
     vox_env, monkeypatch
 ):
     env = vox_env
-    call, _ = await start(env)
+    call, intent = await begin(env)
+    intent = await confirm(env, intent)
     authority = SimpleNamespace(user_id=env.user_id, workspace_id=env.workspace_id)
 
     class Check:
@@ -60,7 +61,7 @@ async def test_worker_hook_reserves_before_attempt_and_records_idempotent_final_
             return authority
 
         async def intent(self):
-            return authority, SimpleNamespace(reservation_id=UUID(call["id"]))
+            return authority, intent
 
     hooks = worker_usage.WorkerUsageHooks(Check())
     stream = uuid4()
@@ -92,7 +93,8 @@ async def test_server_activity_clock_unions_overlap_and_records_room_idle_separa
     vox_env, monkeypatch
 ):
     env = vox_env
-    call, _ = await start(env)
+    call, intent = await begin(env)
+    intent = await confirm(env, intent)
     clock = [1000.0]
     created = datetime.fromisoformat(call["created_at"].replace("Z", "+00:00"))
 
@@ -110,12 +112,12 @@ async def test_server_activity_clock_unions_overlap_and_records_room_idle_separa
             return authority
 
         async def intent(self):
-            return authority, SimpleNamespace(reservation_id=UUID(call["id"]))
+            return authority, intent
 
     hooks = worker_usage.WorkerUsageHooks(Check())
     await hooks.check_budget()
     await hooks.note_audio(100)
-    await hooks.note_audio(100)  # Simultaneous input/output share the same interval.
+    await hooks.note_audio(100, direction="output")  # Duplex shares the same interval.
     clock[0] += 1
     await hooks.check_budget()
     async with env.factory() as database:

@@ -664,7 +664,7 @@ async def test_realtime_pcm_bridge_resamples_24k_to_48k_and_reports_only_actual_
         def __init__(self):
             self.durations = []
 
-        async def note_audio(self, duration):
+        async def note_audio(self, duration, *, direction="input"):
             self.durations.append(duration)
 
     source, usage = Source(), Usage()

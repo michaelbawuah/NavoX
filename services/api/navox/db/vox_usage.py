@@ -124,3 +124,46 @@ class VoxUsageDelta(Base):
     tokens: Mapped[int] = mapped_column(BigInteger)
     estimated_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(20, 10), nullable=True)
     pricing_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class VoxVoiceCredit(Base):
+    """One bounded pre-audio grant; expired unsettled grants remain quota held."""
+
+    __tablename__ = "vox_voice_credits"
+    __table_args__ = (
+        CheckConstraint("granted_ms >= 1 AND granted_ms <= 1000", name="ck_vox_voice_credit_bound"),
+        CheckConstraint(
+            "generation >= 0 AND policy_revision >= 0 AND base_sequence >= 0",
+            name="ck_vox_voice_credit_epoch",
+        ),
+        CheckConstraint("expires_at > granted_at", name="ck_vox_voice_credit_clock"),
+        CheckConstraint(
+            "(settled_at IS NULL AND settled_speaking_ms IS NULL AND settlement_digest IS NULL) OR "
+            "(settled_at IS NOT NULL AND settled_speaking_ms IS NOT NULL AND "
+            "settled_speaking_ms >= 0 AND "
+            "settled_speaking_ms <= granted_ms AND settlement_digest IS NOT NULL)",
+            name="ck_vox_voice_credit_settlement",
+        ),
+        Index("ix_vox_voice_credit_owner_time", "user_id", "granted_at"),
+        Index("ix_vox_voice_credit_stream", "stream_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    stream_id: Mapped[UUID] = mapped_column(ForeignKey("vox_usage_streams.id", ondelete="CASCADE"))
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    workspace_id: Mapped[UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"))
+    call_id: Mapped[UUID] = mapped_column(Uuid)
+    connection_id: Mapped[UUID] = mapped_column(Uuid)
+    generation: Mapped[int] = mapped_column(BigInteger)
+    worker_nonce: Mapped[UUID] = mapped_column(Uuid)
+    base_sequence: Mapped[int] = mapped_column(Integer)
+    base_cumulative: Mapped[dict[str, int]] = mapped_column(JSON)
+    policy_revision: Mapped[int] = mapped_column(Integer)
+    granted_ms: Mapped[int] = mapped_column(Integer)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    day_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    month_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    settled_speaking_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    settlement_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
