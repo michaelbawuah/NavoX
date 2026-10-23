@@ -13,6 +13,7 @@ import hashlib
 import io
 import json
 import logging
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -39,6 +40,7 @@ from navox.vox.worker import (
     VoiceTurnWorker,
     WorkerAccessLost,
     WorkerAssignment,
+    is_voice,
 )
 
 MAX_OUTPUT_SAMPLES = 48_000 * 60
@@ -308,16 +310,36 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             stream = rtc.AudioStream(
                 track, capacity=5, sample_rate=16_000, num_channels=1, frame_size_ms=20
             )
+            frames = voiced_frames = slow_frames = 0
+            receive_seconds = max_receive_seconds = 0.0
             try:
                 async for event in stream:
                     if stopped.is_set() or subscribed_sid != track_sid:
                         break
-                    await worker.receive(participant.identity, bytes(event.frame.data))
+                    pcm = bytes(event.frame.data)
+                    frames += 1
+                    voiced_frames += int(is_voice(pcm))
+                    started = time.monotonic()
+                    await worker.receive(participant.identity, pcm)
+                    elapsed = time.monotonic() - started
+                    receive_seconds += elapsed
+                    max_receive_seconds = max(max_receive_seconds, elapsed)
+                    slow_frames += int(elapsed > 0.1)
             except Exception as error:
                 log_worker_failure("audio_receive", error)
                 if subscribed_sid == track_sid:
                     stopped.set()
             finally:
+                logging.getLogger(__name__).info(
+                    "Vox input processing totals",
+                    extra={
+                        "frames": frames,
+                        "voiced_frames": voiced_frames,
+                        "slow_frames": slow_frames,
+                        "receive_ms": round(receive_seconds * 1000),
+                        "max_receive_ms": round(max_receive_seconds * 1000),
+                    },
+                )
                 await stream.aclose()
 
         def completed(task: asyncio.Task[None]) -> None:
