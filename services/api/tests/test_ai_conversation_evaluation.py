@@ -68,7 +68,7 @@ from navox.db.ai_registry import AIEvaluationRun, AIProfileAssignment
 CAPABILITIES = frozenset({Capability.TEXT, Capability.STRUCTURED_OUTPUT})
 
 
-def postgres_test_address(dsn, *, allow_database):
+def postgres_test_addresses(dsn, *, allow_database):
     if not allow_database:
         return None
     try:
@@ -76,19 +76,26 @@ def postgres_test_address(dsn, *, allow_database):
         host = parsed.hostname
         if parsed.scheme.split("+")[0] != "postgresql" or host is None:
             return None
+        port = parsed.port if parsed.port is not None else 5432
+        if port == 0:
+            return None
+        if host == "localhost":
+            # No DNS expansion: only these literal loopback addresses may reach
+            # the configured test database port, regardless of resolver output.
+            return frozenset({("127.0.0.1", port), ("::1", port)})
         if not ip_address(host).is_loopback:
             return None
-        return host, parsed.port or 5432
+        return frozenset({(host, port)})
     except ValueError:
         return None
 
 
-def guarded_connect(connect, database_address):
+def guarded_connect(connect, database_addresses):
     def guarded(sock, address):
         if (
-            database_address is not None
+            database_addresses is not None
             and isinstance(address, tuple)
-            and address[:2] == database_address
+            and address[:2] in database_addresses
         ):
             return connect(sock, address)
         pytest.fail("Conversation evaluation tests must not connect to a network")
@@ -99,50 +106,138 @@ def guarded_connect(connect, database_address):
 @pytest.fixture(autouse=True)
 def forbid_live_network(monkeypatch, request):
     # Only the ingestion test's database fixture may use its explicitly configured
-    # numeric loopback PostgreSQL endpoint. Provider calls remain MockTransport-only.
-    database_address = postgres_test_address(
+    # loopback PostgreSQL endpoint. Explicit localhost permits both literal
+    # loopback families; numeric hosts remain exact. Providers stay MockTransport-only.
+    database_addresses = postgres_test_addresses(
         os.environ.get("NAVOX_CONNECTOR_TEST_DSN", ""),
         allow_database="ai_database" in request.fixturenames,
     )
     for method in ("connect", "connect_ex"):
         monkeypatch.setattr(
-            socket.socket, method, guarded_connect(getattr(socket.socket, method), database_address)
+            socket.socket,
+            method,
+            guarded_connect(getattr(socket.socket, method), database_addresses),
         )
 
 
 @pytest.mark.parametrize(
     ("dsn", "allow_database", "expected"),
     [
-        ("postgresql+asyncpg://fixture@127.0.0.1:58500/test", True, ("127.0.0.1", 58500)),
-        ("postgresql+asyncpg://fixture@[::1]:58500/test", True, ("::1", 58500)),
+        (
+            "postgresql+asyncpg://fixture@127.0.0.1:58500/test",
+            True,
+            frozenset({("127.0.0.1", 58500)}),
+        ),
+        (
+            "postgresql+asyncpg://fixture@[::1]:58500/test",
+            True,
+            frozenset({("::1", 58500)}),
+        ),
+        (
+            "postgresql+asyncpg://fixture@localhost:58500/test",
+            True,
+            frozenset({("127.0.0.1", 58500), ("::1", 58500)}),
+        ),
+        (
+            "postgresql+asyncpg://fixture@localhost/test",
+            True,
+            frozenset({("127.0.0.1", 5432), ("::1", 5432)}),
+        ),
         ("postgresql+asyncpg://fixture@127.0.0.1:58500/test", False, None),
+        ("postgresql+asyncpg://fixture@localhost:58500/test", False, None),
         ("postgresql+asyncpg://fixture@192.0.2.1:58500/test", True, None),
-        ("postgresql+asyncpg://fixture@localhost:58500/test", True, None),
+        ("postgresql+asyncpg://fixture@[2001:db8::1]:58500/test", True, None),
+        ("postgresql+asyncpg://fixture@database.example:58500/test", True, None),
+        ("postgresql+asyncpg://fixture@localhost.:58500/test", True, None),
+        ("postgresql+asyncpg://fixture@localhost:0/test", True, None),
+        ("postgresql+asyncpg://fixture@127.0.0.1:0/test", True, None),
         ("postgresql+asyncpg://fixture@127.0.0.1:bad/test", True, None),
         ("https://127.0.0.1:58500/test", True, None),
         ("sqlite+aiosqlite://", True, None),
     ],
 )
-def test_network_exception_requires_database_fixture_and_numeric_loopback(
+def test_network_exception_requires_database_fixture_and_explicit_loopback(
     dsn, allow_database, expected
 ):
-    assert postgres_test_address(dsn, allow_database=allow_database) == expected
+    assert postgres_test_addresses(dsn, allow_database=allow_database) == expected
 
 
-def test_network_guard_allows_only_exact_database_endpoint():
+@pytest.mark.parametrize(
+    ("database_address", "permitted_address", "other_family_address"),
+    [
+        (("127.0.0.1", 58500), ("127.0.0.1", 58500), ("::1", 58500, 0, 0)),
+        (("::1", 58500), ("::1", 58500, 0, 0), ("127.0.0.1", 58500)),
+    ],
+)
+def test_network_guard_allows_only_exact_numeric_database_endpoint(
+    database_address, permitted_address, other_family_address
+):
     calls = []
 
     def connect(sock, address):
         calls.append((sock, address))
         return "test-connect-result"
 
-    guard = guarded_connect(connect, ("127.0.0.1", 58500))
-    assert guard(None, ("127.0.0.1", 58500)) == "test-connect-result"
-    assert calls == [(None, ("127.0.0.1", 58500))]
-    for address in (("127.0.0.1", 58501), ("::1", 58500), ("api.openai.com", 443)):
+    guard = guarded_connect(connect, frozenset({database_address}))
+    assert guard(None, permitted_address) == "test-connect-result"
+    assert calls == [(None, permitted_address)]
+    for address in (
+        (database_address[0], 58501),
+        other_family_address,
+        ("api.openai.com", 443),
+    ):
         with pytest.raises(pytest.fail.Exception, match="must not connect to a network"):
             guard(None, address)
-    assert calls == [(None, ("127.0.0.1", 58500))]
+    assert calls == [(None, permitted_address)]
+
+
+@pytest.mark.parametrize("method", ["connect", "connect_ex"])
+def test_localhost_database_guard_admits_only_both_literal_loopbacks_at_configured_port(method):
+    calls = []
+
+    def original(sock, address):
+        calls.append((method, sock, address))
+        return "test-connect-result"
+
+    addresses = postgres_test_addresses(
+        "postgresql+asyncpg://fixture@localhost:58500/test", allow_database=True
+    )
+    guard = guarded_connect(original, addresses)
+    for address in (("127.0.0.1", 58500), ("::1", 58500, 0, 0)):
+        assert guard(None, address) == "test-connect-result"
+    assert calls == [
+        (method, None, ("127.0.0.1", 58500)),
+        (method, None, ("::1", 58500, 0, 0)),
+    ]
+    for address in (
+        ("127.0.0.1", 58501),
+        ("::1", 58501, 0, 0),
+        ("127.0.0.2", 58500),
+        ("192.0.2.1", 58500),
+        ("2001:db8::1", 58500, 0, 0),
+        ("localhost", 58500),
+        ("database.example", 58500),
+        ("api.openai.com", 443),
+    ):
+        with pytest.raises(pytest.fail.Exception, match="must not connect to a network"):
+            guard(None, address)
+    assert len(calls) == 2
+
+
+def test_postgres_test_addresses_never_resolves_hostname_to_expand_network_exception(monkeypatch):
+    def forbidden_resolution(*_args, **_kwargs):
+        pytest.fail("Network exception must not resolve hostnames")
+
+    monkeypatch.setattr(socket, "getaddrinfo", forbidden_resolution)
+    assert postgres_test_addresses(
+        "postgresql+asyncpg://fixture@localhost:58500/test", allow_database=True
+    ) == frozenset({("127.0.0.1", 58500), ("::1", 58500)})
+    assert (
+        postgres_test_addresses(
+            "postgresql+asyncpg://fixture@database.example:58500/test", allow_database=True
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize("method", ["connect", "connect_ex"])
