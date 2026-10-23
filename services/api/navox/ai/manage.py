@@ -23,6 +23,7 @@ from navox.ai.communication_evaluation import DraftingEvaluationReport, evaluate
 from navox.ai.configured import configured_adapters
 from navox.ai.context import reject_credentials
 from navox.ai.control import record_evaluation, record_healthy_probe, set_rollout, set_weights
+from navox.ai.conversation_evaluation import ConversationEvaluationReport
 from navox.ai.domain_evaluation import DomainEvaluationReport, evaluate_domain
 from navox.ai.domains import DOMAIN_TASKS, Domain
 from navox.ai.evaluation import (
@@ -179,11 +180,17 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 ],
             }
         if args.command == "record-evaluation":
-            report: EvaluationReport | DraftingEvaluationReport | DomainEvaluationReport = (
-                TypeAdapter(
-                    EvaluationReport | DraftingEvaluationReport | DomainEvaluationReport
-                ).validate_json(read_file(args.file))
-            )
+            report: (
+                EvaluationReport
+                | DraftingEvaluationReport
+                | DomainEvaluationReport
+                | ConversationEvaluationReport
+            ) = TypeAdapter(
+                EvaluationReport
+                | DraftingEvaluationReport
+                | DomainEvaluationReport
+                | ConversationEvaluationReport
+            ).validate_json(read_file(args.file))
             row = await record_evaluation(
                 database,
                 model_id=report.model_id,
