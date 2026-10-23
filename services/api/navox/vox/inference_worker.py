@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -155,6 +156,10 @@ class ConfiguredVoiceWorker:
     def _seal_turn(self) -> None:
         pcm = bytes(self._pcm[:MAX_TURN_BYTES])
         enough = self._voiced >= MIN_VOICE_SAMPLES
+        logging.getLogger(__name__).info(
+            "Vox input turn sealed",
+            extra={"voiced_ms": self._voiced // 16, "pcm_ms": len(pcm) // 32, "eligible": enough},
+        )
         self._pcm.clear()
         self._voiced = self._silence = 0
         self._last_voice_at = None
@@ -224,12 +229,16 @@ class ConfiguredVoiceWorker:
                 await self.context.commit(self.assignment.connection_id, turn.question, turn.answer)
                 if hasattr(self.realtime, "mark_played"):
                     self.realtime.mark_played()
+                logging.getLogger(__name__).info("Vox spoken turn completed")
         except asyncio.CancelledError:
             raise
         except WorkerAccessLost:
             self.failed = not self._closed and epoch == self._epoch
             await self.output.clear()
-        except Exception:
+        except Exception as error:
+            logging.getLogger(__name__).warning(
+                "Vox spoken turn failed", extra={"error_type": type(error).__name__}
+            )
             # No raw provider exception, transcript, tool result or credential is logged.
             self.failed = True
             await self.output.clear()

@@ -44,7 +44,7 @@ from navox.vox.worker import (
 MAX_OUTPUT_SAMPLES = 48_000 * 60
 
 
-def log_worker_failure(stage: str, error: Exception) -> None:
+def log_worker_failure(stage: str, error: BaseException) -> None:
     """Log only code location and type, never provider text, payloads or locals."""
     trace = error.__traceback__
     location = "unknown"
@@ -320,10 +320,19 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             finally:
                 await stream.aclose()
 
+        def completed(task: asyncio.Task[None]) -> None:
+            streams.discard(task)
+            if task.cancelled():
+                return
+            error = task.exception()
+            if error is not None:
+                log_worker_failure("background", error)
+                stopped.set()
+
         def spawn(coroutine: Awaitable[None]) -> None:
             task = asyncio.ensure_future(coroutine)
             streams.add(task)
-            task.add_done_callback(streams.discard)
+            task.add_done_callback(completed)
 
         def subscribed(
             track: rtc.Track,
