@@ -6,6 +6,7 @@ interface PcmMessage {
   type: string;
   id?: number;
   frame?: Float32Array;
+  reason?: string;
 }
 
 interface Processor {
@@ -119,7 +120,7 @@ describe("Vox AudioWorklet PCM bridge", () => {
     expect(stoppedAt).toBeGreaterThan(0);
     // The oldest complete 1024-sample input is retained for at most 350 ms.
     expect(stoppedAt).toBeLessThanOrEqual(1024 + 16_000 * 0.35 + 128);
-    expect(fake.messages.at(-1)).toEqual({ type: "fault" });
+    expect(fake.messages.at(-1)).toMatchObject({ type: "fault" });
     expect(fake.emit().running).toBe(false);
   });
 
@@ -146,7 +147,7 @@ describe("Vox AudioWorklet PCM bridge", () => {
           invalid === "nan" ? Number.NaN : 0.75,
         ),
       });
-      expect(fake.messages.at(-1)).toEqual({ type: "fault" });
+      expect(fake.messages.at(-1)).toMatchObject({ type: "fault" });
       expect(fake.emit().running).toBe(false);
       expect(silent(fake.emit().output)).toBe(true);
     }
@@ -182,7 +183,7 @@ describe("Vox AudioWorklet PCM bridge", () => {
             : [input];
       expect(fake.processor.process([channels], [[output]])).toBe(false);
       expect(silent(output)).toBe(true);
-      expect(fake.messages.at(-1)).toEqual({ type: "fault" });
+      expect(fake.messages.at(-1)).toMatchObject({ type: "fault" });
     }
   });
 });

@@ -35,13 +35,13 @@ class VoxPcmProcessor extends AudioWorkletProcessor {
         data.frame.length !== 1024 ||
         this.buffered + data.frame.length > this.limit
       ) {
-        this.fail();
+        this.fail("invalid-response");
         return;
       }
       for (const value of data.frame) {
         if (!Number.isFinite(value) || Math.abs(value) > 1) {
           data.frame.fill(0);
-          this.fail();
+          this.fail("invalid-output");
           return;
         }
       }
@@ -62,9 +62,9 @@ class VoxPcmProcessor extends AudioWorkletProcessor {
     this.inputOffset = this.outputOffset = 0;
   }
 
-  fail() {
+  fail(reason) {
     this.clear();
-    this.port.postMessage({ type: "fault" });
+    this.port.postMessage({ type: "fault", reason });
   }
 
   process(inputs, outputs) {
@@ -82,17 +82,17 @@ class VoxPcmProcessor extends AudioWorkletProcessor {
       input.length === 0 ||
       input.length > 8192
     ) {
-      this.fail();
+      this.fail("input-layout");
       return false;
     }
     this.clock += input.length;
     if (this.pending.length && this.clock - this.pending[0].at > this.limit) {
-      this.fail();
+      this.fail("gate-timeout");
       return false;
     }
     for (const value of input) {
       if (!Number.isFinite(value) || Math.abs(value) > 1) {
-        this.fail();
+        this.fail("invalid-input");
         return false;
       }
       this.input[this.inputOffset++] = value;
