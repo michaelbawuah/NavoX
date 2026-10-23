@@ -256,7 +256,7 @@ class OpenAIAdapter(HTTPAdapter):
 
     def payload(self, request: ProviderRequest) -> dict[str, Any]:
         name = re.sub(r"[^A-Za-z0-9_-]", "_", request.schema_ref.name)[:64]
-        return {
+        payload: dict[str, Any] = {
             "model": request.model,
             "instructions": request.instructions,
             "input": request.context.text,
@@ -271,6 +271,12 @@ class OpenAIAdapter(HTTPAdapter):
                 }
             },
         }
+        model = self._models.get(request.model)
+        if model is not None and model.openai_service_tier is not None:
+            if self.provider != Provider.OPENAI or model.openai_service_tier != "default":
+                raise AdapterFailure(ErrorCode.INVALID_REQUEST)
+            payload["service_tier"] = model.openai_service_tier
+        return payload
 
     def decode(self, body: Mapping[str, Any]) -> ProviderResponse:
         incomplete = body.get("incomplete_details")

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
@@ -45,11 +45,18 @@ class ModelDefinition(Contract):
     synthesis_cost_per_1000_characters: AudioUnitPrice | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    # An explicit Responses tier is model configuration, never a task/user option.
+    # Omission preserves historical model JSON/digests and project tier behavior.
+    openai_service_tier: Literal["default"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def check_token_limits(self) -> Self:
         if self.max_output_tokens > self.context_window:
             raise ValueError("Output token limit exceeds configured context window")
+        if self.openai_service_tier is not None and self.reference.provider != Provider.OPENAI:
+            raise ValueError("OpenAI service tier belongs only to an OpenAI model")
         return self
 
 
