@@ -1,0 +1,19 @@
+{
+  "release": "c18329ee4eef35c48dac1a072926efee0d3843f7",
+  "scope": "isolated-test",
+  "steps": [
+    "compose-validation",
+    "build",
+    "api-migrate",
+    "assistant-migrate",
+    "activate"
+  ],
+  "previous_images": [
+    "/navox-vox-test-api-1 sha256:f1fa51607c3ed17e3d2c4e7a0f9763e47f3528e58c4da57aa0b03d226682fe8e",
+    "/navox-vox-test-web-1 sha256:5e34c60cdc1c076750c02bbc98331e7945f3f4b68e7efdfab09ca1169d37e06c"
+  ],
+  "test_database_backed_up": true,
+  "ready": true,
+  "public_production_changed": false,
+  "passed": true
+}

@@ -1,0 +1,15 @@
+{
+  "release": "c18329ee4eef35c48dac1a072926efee0d3843f7",
+  "broad_checkpoint_release": "3244a9139159275d194c8799c1ad59eebf7cc1dc",
+  "broad_checkpoint_tests": 247,
+  "changed_files_since_broad_checkpoint": [
+    "services/api/navox/vox/capture_tools.py",
+    "services/api/navox/vox/inference_http.py",
+    "services/api/navox/vox/inference_worker.py",
+    "services/api/tests/test_vox_capture_tools.py",
+    "services/api/tests/test_vox_inference.py"
+  ],
+  "unchanged_outlook_planning_privacy_schema_and_runtime_dependencies": true,
+  "final_image_vox_tests": "linux-vox-qualification.json",
+  "note": "The 247-test Linux/PostgreSQL run remains attached to its actual earlier revision. Only the listed Vox files changed afterward; the final image receives focused Vox qualification."
+}

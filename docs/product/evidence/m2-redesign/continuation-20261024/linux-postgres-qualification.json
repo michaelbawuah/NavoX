@@ -1,0 +1,22 @@
+{
+  "release": "3244a9139159275d194c8799c1ad59eebf7cc1dc",
+  "environment": "Linux/Python3.12/PostgreSQL17",
+  "provider_responses": "synthetic fixtures",
+  "external_mail_sent": false,
+  "test_files": [
+    "tests/test_outlook_mail.py",
+    "tests/test_microsoft_mail.py",
+    "tests/test_outlook_privacy.py",
+    "tests/test_outlook_cleanup_flows.py",
+    "tests/test_student_screenshot.py",
+    "tests/test_noa_streak.py",
+    "tests/test_student_planning.py",
+    "tests/test_outlook_tasks.py",
+    "tests/test_outlook_replies.py",
+    "tests/test_student_placement.py",
+    "tests/test_student_email_postgres.py"
+  ],
+  "passed": true,
+  "summary": "247 passed in 749.03s (0:12:29)",
+  "temporary_database_removed": true
+}

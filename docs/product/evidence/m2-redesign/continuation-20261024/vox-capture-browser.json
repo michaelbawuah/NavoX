@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "release": "c18329ee4eef35c48dac1a072926efee0d3843f7",
+  "realProvider": true,
+  "syntheticMicrophone": true,
+  "textInputWithinLiveCall": true,
+  "exactTranscriptCheckpoints": true,
+  "recordingFilename": "vox-review-navigation-mobile-emulation.webm",
+  "taskReview": true,
+  "classReview": true,
+  "samePageClassHandoff": true,
+  "privateDataUnchanged": true,
+  "oneAdmission": 1,
+  "clientRoutes": 3,
+  "cleanHangup": true,
+  "transcriptExpired": true,
+  "browserEmulation375": true,
+  "physicalPhoneAcceptance": false
+}

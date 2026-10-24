@@ -1,0 +1,141 @@
+{
+  "release": "c18329ee4eef35c48dac1a072926efee0d3843f7",
+  "passed": true,
+  "target": "https://vox-test.66-175-235-169.nip.io",
+  "mode": "read-only entry QA",
+  "output_dir": "/Users/mba_steins/NavoX-vox-m1-20261023/docs/product/evidence/m2-redesign/continuation-20261024",
+  "steps": [
+    {
+      "name": "Fresh Today",
+      "status": "passed",
+      "saved_zone_verified": true,
+      "displayed": "Sat, Oct 24 · 2:25 PM"
+    },
+    {
+      "name": "Add your classes",
+      "status": "passed",
+      "route": "/classes",
+      "manual_editor_opened": true,
+      "saved": false,
+      "saved_zone_verified": true,
+      "displayed": "Sat, Oct 24 · 2:25 PM"
+    },
+    {
+      "name": "Connect your calendar",
+      "status": "passed",
+      "route": "/connections",
+      "provider_status_checked_by_get": true,
+      "consent_completed": false,
+      "saved_zone_verified": true,
+      "displayed": "Sat, Oct 24 · 2:25 PM"
+    },
+    {
+      "name": "Connect your email",
+      "status": "passed",
+      "route": "/connections",
+      "inbox_welcome_verified": true,
+      "consent_completed": false,
+      "outlook_configured": false,
+      "saved_zone_verified": true,
+      "displayed": "Sat, Oct 24 · 2:25 PM"
+    },
+    {
+      "name": "Add one thing that’s due",
+      "status": "passed",
+      "route": "/planner#add-task",
+      "task_editor_opened": true,
+      "saved": false,
+      "saved_zone_verified": true,
+      "displayed": "Sat, Oct 24 · 2:25 PM"
+    },
+    {
+      "name": "Try Vox",
+      "status": "passed",
+      "launcher_visible": true,
+      "overlay_opened": true,
+      "live_admission": "intentionally blocked by read-only guard",
+      "standby_verified": false,
+      "qualification": "entry UI only; blocked-start overlay is not successful standby",
+      "blocked_attempts": [],
+      "saved_zone_verified": true,
+      "displayed": "Sat, Oct 24 · 2:26 PM"
+    }
+  ],
+  "blocked_requests": [
+    {
+      "method": "POST",
+      "path": "/api/v1/vox/calls/:id/end",
+      "reason": "read-only guard"
+    }
+  ],
+  "providers": {
+    "calendar": [
+      {
+        "id": "google",
+        "availability": "setup_pending",
+        "configured": false,
+        "consent_completed": false
+      },
+      {
+        "id": "outlook",
+        "availability": "unavailable",
+        "configured": false,
+        "consent_completed": false
+      },
+      {
+        "id": "icloud",
+        "availability": "unavailable",
+        "configured": false,
+        "consent_completed": false
+      }
+    ],
+    "outlook": {
+      "configured": false,
+      "consent_completed": false,
+      "qualification": "unconfigured; consent cannot be qualified"
+    },
+    "google": {
+      "availability": "setup_pending",
+      "configured": false,
+      "consent_completed": false
+    }
+  },
+  "screenshots": [
+    "/Users/mba_steins/NavoX-vox-m1-20261023/docs/product/evidence/m2-redesign/continuation-20261024/00-enter-navox-gate.png",
+    "/Users/mba_steins/NavoX-vox-m1-20261023/docs/product/evidence/m2-redesign/continuation-20261024/01-today-fresh.png",
+    "/Users/mba_steins/NavoX-vox-m1-20261023/docs/product/evidence/m2-redesign/continuation-20261024/02-classes-fresh.png",
+    "/Users/mba_steins/NavoX-vox-m1-20261023/docs/product/evidence/m2-redesign/continuation-20261024/03-calendar-entry.png",
+    "/Users/mba_steins/NavoX-vox-m1-20261023/docs/product/evidence/m2-redesign/continuation-20261024/04-email-entry.png",
+    "/Users/mba_steins/NavoX-vox-m1-20261023/docs/product/evidence/m2-redesign/continuation-20261024/05-inbox-fresh.png",
+    "/Users/mba_steins/NavoX-vox-m1-20261023/docs/product/evidence/m2-redesign/continuation-20261024/06-new-task-entry.png",
+    "/Users/mba_steins/NavoX-vox-m1-20261023/docs/product/evidence/m2-redesign/continuation-20261024/07-vox-guarded-entry.png",
+    "/Users/mba_steins/NavoX-vox-m1-20261023/docs/product/evidence/m2-redesign/continuation-20261024/08-today-preserved.png"
+  ],
+  "saved_timezone": "America/New_York",
+  "browser_timezone": "Pacific/Honolulu",
+  "auth": {
+    "login_status": 200,
+    "response_shape": "AccountResponse",
+    "cookie_session_verified": true
+  },
+  "initial_state": {
+    "empty_classes": true,
+    "empty_tasks": true,
+    "empty_plan": true,
+    "no_connections": true
+  },
+  "api_routes_verified": [
+    "/api/v1/auth/login",
+    "/api/v1/auth/me",
+    "/api/v1/connections",
+    "/api/v1/connectors"
+  ],
+  "welcome_gate": {
+    "passed": true,
+    "entry": "Enter NavoX",
+    "login_form_opened": true,
+    "credentials_entered": false
+  },
+  "saved_state_unchanged": true,
+  "live_provider_qualification": "Separate authenticated-provider QA required; this run verifies entry routing only."
+}

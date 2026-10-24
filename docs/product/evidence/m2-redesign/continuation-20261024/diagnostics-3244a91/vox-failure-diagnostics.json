@@ -1,0 +1,22 @@
+{
+  "release": "3244a9139159275d194c8799c1ad59eebf7cc1dc",
+  "sendNumber": 2,
+  "error": "TimeoutError",
+  "details": {
+    "inputs": [
+      {
+        "id": "vox-message",
+        "disabled": true,
+        "valueLength": 194
+      }
+    ],
+    "buttons": [],
+    "notices": [],
+    "peers": [
+      {
+        "connection": "closed",
+        "ice": "closed"
+      }
+    ]
+  }
+}

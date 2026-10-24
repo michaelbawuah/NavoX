@@ -1,0 +1,1681 @@
+{
+  "schema": "navox.inbox.route-fixture-qa.v1",
+  "label": "QA fixture — simulated provider responses",
+  "base_url": "https://vox-test.66-175-235-169.nip.io",
+  "release": "c18329ee4eef35c48dac1a072926efee0d3843f7",
+  "started_at": "2026-10-24T18:25:04.535Z",
+  "completed_at": "2026-10-24T18:25:11.694Z",
+  "status": "passed",
+  "fixture_scope": {
+    "account": "Synthetic browser response; no account created or authenticated on the server.",
+    "providers": "Outlook connection, two source messages and one saved review are synthetic route responses only.",
+    "calendars": "Routine, owned class conflict, source coverage and two openings are synthetic contract responses only.",
+    "source_ids": [
+      "qa-meeting/opaque+source=",
+      "qa-project/opaque+source="
+    ],
+    "owner_key": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+    "saved_timezone": "America/New_York",
+    "source_meeting_local": "2026-10-26T14:00",
+    "provider_scan_limit": 50,
+    "actual_provider_accounts_used": false,
+    "database_mutations": false,
+    "provider_reads": false,
+    "provider_send": false,
+    "provider_oauth": false,
+    "ai_generation": false,
+    "verified_by_this_run": [
+      "Connected Inbox master/detail rendering",
+      "Exact opened-email evidence and proposed date",
+      "Explicit review before checking",
+      "Clash and two contract-valid checked alternatives",
+      "Saved draft rendering with Send disabled before approval",
+      "Desktop/mobile and dark/light layouts"
+    ],
+    "not_verified_by_this_run": [
+      "Real Google or Microsoft OAuth consent",
+      "Real mailbox reads",
+      "Real provider busy-time availability",
+      "Real email delivery or Sent receipt",
+      "General ongoing Inbox triage"
+    ]
+  },
+  "cases": [
+    {
+      "name": "desktop-dark",
+      "viewport": {
+        "name": "desktop",
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "dark",
+      "screenshots": [
+        {
+          "file": "desktop-dark-master-detail-QA-FIXTURE-full.png",
+          "state": "master-detail",
+          "full_page": true,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 1440,
+            "page": 1440,
+            "theme": "dark",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": null
+        },
+        {
+          "file": "desktop-dark-master-detail-QA-FIXTURE-viewport.png",
+          "state": "master-detail",
+          "full_page": false,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 1440,
+            "page": 1440,
+            "theme": "dark",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": {
+            "target": {
+              "top": 145,
+              "bottom": 172,
+              "left": 315,
+              "right": 378.453125,
+              "width": 63.453125,
+              "height": 27
+            },
+            "unobscured": {
+              "top": 52.890625,
+              "bottom": 896
+            },
+            "intersection": {
+              "top": 145,
+              "bottom": 172,
+              "left": 315,
+              "right": 378.453125
+            },
+            "scroll_y": 0,
+            "target_visible": true,
+            "alternatives_visible": true,
+            "alternatives": []
+          }
+        },
+        {
+          "file": "desktop-dark-source-review-QA-FIXTURE-full.png",
+          "state": "source-review",
+          "full_page": true,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 1440,
+            "page": 1440,
+            "theme": "dark",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": null
+        },
+        {
+          "file": "desktop-dark-source-review-QA-FIXTURE-viewport.png",
+          "state": "source-review",
+          "full_page": false,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 1440,
+            "page": 1440,
+            "theme": "dark",
+            "scroll_x": 0,
+            "scroll_y": 755
+          },
+          "framing": {
+            "target": {
+              "top": 365.390625,
+              "bottom": 583.5,
+              "left": 721.8125,
+              "right": 1327.984375,
+              "width": 606.171875,
+              "height": 218.109375
+            },
+            "unobscured": {
+              "top": 52.890625,
+              "bottom": 896
+            },
+            "intersection": {
+              "top": 365.390625,
+              "bottom": 583.5,
+              "left": 721.8125,
+              "right": 1327.984375
+            },
+            "scroll_y": 755,
+            "target_visible": true,
+            "alternatives_visible": true,
+            "alternatives": []
+          }
+        },
+        {
+          "file": "desktop-dark-meeting-clash-QA-FIXTURE-full.png",
+          "state": "meeting-clash",
+          "full_page": true,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 1440,
+            "page": 1440,
+            "theme": "dark",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": null
+        },
+        {
+          "file": "desktop-dark-meeting-clash-QA-FIXTURE-viewport.png",
+          "state": "meeting-clash",
+          "full_page": false,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 1440,
+            "page": 1440,
+            "theme": "dark",
+            "scroll_x": 0,
+            "scroll_y": 1454
+          },
+          "framing": {
+            "target": {
+              "top": 379.765625,
+              "bottom": 568.515625,
+              "left": 721.8125,
+              "right": 1327.984375,
+              "width": 606.171875,
+              "height": 188.75
+            },
+            "unobscured": {
+              "top": 52.890625,
+              "bottom": 896
+            },
+            "intersection": {
+              "top": 379.765625,
+              "bottom": 568.515625,
+              "left": 721.8125,
+              "right": 1327.984375
+            },
+            "scroll_y": 1454,
+            "target_visible": true,
+            "alternatives_visible": true,
+            "alternatives": [
+              {
+                "top": 441.265625,
+                "bottom": 463.765625,
+                "left": 761.8125,
+                "right": 1327.984375,
+                "width": 566.171875,
+                "height": 22.5
+              },
+              {
+                "top": 463.765625,
+                "bottom": 486.265625,
+                "left": 761.8125,
+                "right": 1327.984375,
+                "width": 566.171875,
+                "height": 22.5
+              }
+            ]
+          }
+        },
+        {
+          "file": "desktop-dark-saved-draft-QA-FIXTURE-full.png",
+          "state": "saved-draft",
+          "full_page": true,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 1440,
+            "page": 1440,
+            "theme": "dark",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": null
+        },
+        {
+          "file": "desktop-dark-saved-draft-QA-FIXTURE-viewport.png",
+          "state": "saved-draft",
+          "full_page": false,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 1440,
+            "page": 1440,
+            "theme": "dark",
+            "scroll_x": 0,
+            "scroll_y": 1093
+          },
+          "framing": {
+            "target": {
+              "top": 380.03125,
+              "bottom": 569.03125,
+              "left": 704.8125,
+              "right": 1344.984375,
+              "width": 640.171875,
+              "height": 189
+            },
+            "unobscured": {
+              "top": 52.890625,
+              "bottom": 896
+            },
+            "intersection": {
+              "top": 380.03125,
+              "bottom": 569.03125,
+              "left": 704.8125,
+              "right": 1344.984375
+            },
+            "scroll_y": 1093,
+            "target_visible": true,
+            "alternatives_visible": true,
+            "alternatives": []
+          }
+        }
+      ],
+      "checks": [
+        "Opened-email evidence matched source; no automatic availability check; explicit review returned clash and exactly two confirmed alternatives.",
+        "Reply instructions retained both exact checked alternative labels, the displayed saved timezone and the no-invention/no-booking safeguards.",
+        "Second synthetic source reopened its saved revision; content matched; Send remained disabled and was never clicked."
+      ],
+      "status": "passed"
+    },
+    {
+      "name": "desktop-light",
+      "viewport": {
+        "name": "desktop",
+        "width": 1440,
+        "height": 1000
+      },
+      "theme": "light",
+      "screenshots": [
+        {
+          "file": "desktop-light-master-detail-QA-FIXTURE-full.png",
+          "state": "master-detail",
+          "full_page": true,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 1440,
+            "page": 1440,
+            "theme": "light",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": null
+        },
+        {
+          "file": "desktop-light-master-detail-QA-FIXTURE-viewport.png",
+          "state": "master-detail",
+          "full_page": false,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 1440,
+            "page": 1440,
+            "theme": "light",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": {
+            "target": {
+              "top": 145,
+              "bottom": 172,
+              "left": 315,
+              "right": 378.453125,
+              "width": 63.453125,
+              "height": 27
+            },
+            "unobscured": {
+              "top": 52.890625,
+              "bottom": 896
+            },
+            "intersection": {
+              "top": 145,
+              "bottom": 172,
+              "left": 315,
+              "right": 378.453125
+            },
+            "scroll_y": 0,
+            "target_visible": true,
+            "alternatives_visible": true,
+            "alternatives": []
+          }
+        },
+        {
+          "file": "desktop-light-source-review-QA-FIXTURE-full.png",
+          "state": "source-review",
+          "full_page": true,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 1440,
+            "page": 1440,
+            "theme": "light",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": null
+        },
+        {
+          "file": "desktop-light-source-review-QA-FIXTURE-viewport.png",
+          "state": "source-review",
+          "full_page": false,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 1440,
+            "page": 1440,
+            "theme": "light",
+            "scroll_x": 0,
+            "scroll_y": 755
+          },
+          "framing": {
+            "target": {
+              "top": 365.390625,
+              "bottom": 583.5,
+              "left": 721.8125,
+              "right": 1327.984375,
+              "width": 606.171875,
+              "height": 218.109375
+            },
+            "unobscured": {
+              "top": 52.890625,
+              "bottom": 896
+            },
+            "intersection": {
+              "top": 365.390625,
+              "bottom": 583.5,
+              "left": 721.8125,
+              "right": 1327.984375
+            },
+            "scroll_y": 755,
+            "target_visible": true,
+            "alternatives_visible": true,
+            "alternatives": []
+          }
+        },
+        {
+          "file": "desktop-light-meeting-clash-QA-FIXTURE-full.png",
+          "state": "meeting-clash",
+          "full_page": true,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 1440,
+            "page": 1440,
+            "theme": "light",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": null
+        },
+        {
+          "file": "desktop-light-meeting-clash-QA-FIXTURE-viewport.png",
+          "state": "meeting-clash",
+          "full_page": false,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 1440,
+            "page": 1440,
+            "theme": "light",
+            "scroll_x": 0,
+            "scroll_y": 1454
+          },
+          "framing": {
+            "target": {
+              "top": 379.765625,
+              "bottom": 568.515625,
+              "left": 721.8125,
+              "right": 1327.984375,
+              "width": 606.171875,
+              "height": 188.75
+            },
+            "unobscured": {
+              "top": 52.890625,
+              "bottom": 896
+            },
+            "intersection": {
+              "top": 379.765625,
+              "bottom": 568.515625,
+              "left": 721.8125,
+              "right": 1327.984375
+            },
+            "scroll_y": 1454,
+            "target_visible": true,
+            "alternatives_visible": true,
+            "alternatives": [
+              {
+                "top": 441.265625,
+                "bottom": 463.765625,
+                "left": 761.8125,
+                "right": 1327.984375,
+                "width": 566.171875,
+                "height": 22.5
+              },
+              {
+                "top": 463.765625,
+                "bottom": 486.265625,
+                "left": 761.8125,
+                "right": 1327.984375,
+                "width": 566.171875,
+                "height": 22.5
+              }
+            ]
+          }
+        },
+        {
+          "file": "desktop-light-saved-draft-QA-FIXTURE-full.png",
+          "state": "saved-draft",
+          "full_page": true,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 1440,
+            "page": 1440,
+            "theme": "light",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": null
+        },
+        {
+          "file": "desktop-light-saved-draft-QA-FIXTURE-viewport.png",
+          "state": "saved-draft",
+          "full_page": false,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 1440,
+            "page": 1440,
+            "theme": "light",
+            "scroll_x": 0,
+            "scroll_y": 1093
+          },
+          "framing": {
+            "target": {
+              "top": 380.03125,
+              "bottom": 569.03125,
+              "left": 704.8125,
+              "right": 1344.984375,
+              "width": 640.171875,
+              "height": 189
+            },
+            "unobscured": {
+              "top": 52.890625,
+              "bottom": 896
+            },
+            "intersection": {
+              "top": 380.03125,
+              "bottom": 569.03125,
+              "left": 704.8125,
+              "right": 1344.984375
+            },
+            "scroll_y": 1093,
+            "target_visible": true,
+            "alternatives_visible": true,
+            "alternatives": []
+          }
+        }
+      ],
+      "checks": [
+        "Opened-email evidence matched source; no automatic availability check; explicit review returned clash and exactly two confirmed alternatives.",
+        "Reply instructions retained both exact checked alternative labels, the displayed saved timezone and the no-invention/no-booking safeguards.",
+        "Second synthetic source reopened its saved revision; content matched; Send remained disabled and was never clicked."
+      ],
+      "status": "passed"
+    },
+    {
+      "name": "mobile-dark",
+      "viewport": {
+        "name": "mobile",
+        "width": 375,
+        "height": 812
+      },
+      "theme": "dark",
+      "screenshots": [
+        {
+          "file": "mobile-dark-master-detail-QA-FIXTURE-full.png",
+          "state": "master-detail",
+          "full_page": true,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 375,
+            "page": 375,
+            "theme": "dark",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": null
+        },
+        {
+          "file": "mobile-dark-master-detail-QA-FIXTURE-viewport.png",
+          "state": "master-detail",
+          "full_page": false,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 375,
+            "page": 375,
+            "theme": "dark",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": {
+            "target": {
+              "top": 131,
+              "bottom": 158,
+              "left": 35,
+              "right": 98.453125,
+              "width": 63.453125,
+              "height": 27
+            },
+            "unobscured": {
+              "top": 72,
+              "bottom": 724
+            },
+            "intersection": {
+              "top": 131,
+              "bottom": 158,
+              "left": 35,
+              "right": 98.453125
+            },
+            "scroll_y": 0,
+            "target_visible": true,
+            "alternatives_visible": true,
+            "alternatives": []
+          }
+        },
+        {
+          "file": "mobile-dark-source-review-QA-FIXTURE-full.png",
+          "state": "source-review",
+          "full_page": true,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 375,
+            "page": 375,
+            "theme": "dark",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": null
+        },
+        {
+          "file": "mobile-dark-source-review-QA-FIXTURE-viewport.png",
+          "state": "source-review",
+          "full_page": false,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 375,
+            "page": 375,
+            "theme": "dark",
+            "scroll_x": 0,
+            "scroll_y": 1562
+          },
+          "framing": {
+            "target": {
+              "top": 220.25,
+              "bottom": 574.859375,
+              "left": 52,
+              "right": 323,
+              "width": 271,
+              "height": 354.609375
+            },
+            "unobscured": {
+              "top": 72,
+              "bottom": 724
+            },
+            "intersection": {
+              "top": 220.25,
+              "bottom": 574.859375,
+              "left": 52,
+              "right": 323
+            },
+            "scroll_y": 1562,
+            "target_visible": true,
+            "alternatives_visible": true,
+            "alternatives": []
+          }
+        },
+        {
+          "file": "mobile-dark-meeting-clash-QA-FIXTURE-full.png",
+          "state": "meeting-clash",
+          "full_page": true,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 375,
+            "page": 375,
+            "theme": "dark",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": null
+        },
+        {
+          "file": "mobile-dark-meeting-clash-QA-FIXTURE-viewport.png",
+          "state": "meeting-clash",
+          "full_page": false,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 375,
+            "page": 375,
+            "theme": "dark",
+            "scroll_x": 0,
+            "scroll_y": 2548
+          },
+          "framing": {
+            "target": {
+              "top": 259.15625,
+              "bottom": 536.65625,
+              "left": 52,
+              "right": 323,
+              "width": 271,
+              "height": 277.5
+            },
+            "unobscured": {
+              "top": 72,
+              "bottom": 724
+            },
+            "intersection": {
+              "top": 259.15625,
+              "bottom": 536.65625,
+              "left": 52,
+              "right": 323
+            },
+            "scroll_y": 2548,
+            "target_visible": true,
+            "alternatives_visible": true,
+            "alternatives": [
+              {
+                "top": 343.90625,
+                "bottom": 366.40625,
+                "left": 92,
+                "right": 323,
+                "width": 231,
+                "height": 22.5
+              },
+              {
+                "top": 366.40625,
+                "bottom": 388.90625,
+                "left": 92,
+                "right": 323,
+                "width": 231,
+                "height": 22.5
+              }
+            ]
+          }
+        },
+        {
+          "file": "mobile-dark-saved-draft-QA-FIXTURE-full.png",
+          "state": "saved-draft",
+          "full_page": true,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 375,
+            "page": 375,
+            "theme": "dark",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": null
+        },
+        {
+          "file": "mobile-dark-saved-draft-QA-FIXTURE-viewport.png",
+          "state": "saved-draft",
+          "full_page": false,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 375,
+            "page": 375,
+            "theme": "dark",
+            "scroll_x": 0,
+            "scroll_y": 1638
+          },
+          "framing": {
+            "target": {
+              "top": 303.890625,
+              "bottom": 492.890625,
+              "left": 35,
+              "right": 340,
+              "width": 305,
+              "height": 189
+            },
+            "unobscured": {
+              "top": 72,
+              "bottom": 724
+            },
+            "intersection": {
+              "top": 303.890625,
+              "bottom": 492.890625,
+              "left": 35,
+              "right": 340
+            },
+            "scroll_y": 1638,
+            "target_visible": true,
+            "alternatives_visible": true,
+            "alternatives": []
+          }
+        }
+      ],
+      "checks": [
+        "Opened-email evidence matched source; no automatic availability check; explicit review returned clash and exactly two confirmed alternatives.",
+        "Reply instructions retained both exact checked alternative labels, the displayed saved timezone and the no-invention/no-booking safeguards.",
+        "Second synthetic source reopened its saved revision; content matched; Send remained disabled and was never clicked."
+      ],
+      "status": "passed"
+    },
+    {
+      "name": "mobile-light",
+      "viewport": {
+        "name": "mobile",
+        "width": 375,
+        "height": 812
+      },
+      "theme": "light",
+      "screenshots": [
+        {
+          "file": "mobile-light-master-detail-QA-FIXTURE-full.png",
+          "state": "master-detail",
+          "full_page": true,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 375,
+            "page": 375,
+            "theme": "light",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": null
+        },
+        {
+          "file": "mobile-light-master-detail-QA-FIXTURE-viewport.png",
+          "state": "master-detail",
+          "full_page": false,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 375,
+            "page": 375,
+            "theme": "light",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": {
+            "target": {
+              "top": 131,
+              "bottom": 158,
+              "left": 35,
+              "right": 98.453125,
+              "width": 63.453125,
+              "height": 27
+            },
+            "unobscured": {
+              "top": 72,
+              "bottom": 724
+            },
+            "intersection": {
+              "top": 131,
+              "bottom": 158,
+              "left": 35,
+              "right": 98.453125
+            },
+            "scroll_y": 0,
+            "target_visible": true,
+            "alternatives_visible": true,
+            "alternatives": []
+          }
+        },
+        {
+          "file": "mobile-light-source-review-QA-FIXTURE-full.png",
+          "state": "source-review",
+          "full_page": true,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 375,
+            "page": 375,
+            "theme": "light",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": null
+        },
+        {
+          "file": "mobile-light-source-review-QA-FIXTURE-viewport.png",
+          "state": "source-review",
+          "full_page": false,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 375,
+            "page": 375,
+            "theme": "light",
+            "scroll_x": 0,
+            "scroll_y": 1562
+          },
+          "framing": {
+            "target": {
+              "top": 220.25,
+              "bottom": 574.859375,
+              "left": 52,
+              "right": 323,
+              "width": 271,
+              "height": 354.609375
+            },
+            "unobscured": {
+              "top": 72,
+              "bottom": 724
+            },
+            "intersection": {
+              "top": 220.25,
+              "bottom": 574.859375,
+              "left": 52,
+              "right": 323
+            },
+            "scroll_y": 1562,
+            "target_visible": true,
+            "alternatives_visible": true,
+            "alternatives": []
+          }
+        },
+        {
+          "file": "mobile-light-meeting-clash-QA-FIXTURE-full.png",
+          "state": "meeting-clash",
+          "full_page": true,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 375,
+            "page": 375,
+            "theme": "light",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": null
+        },
+        {
+          "file": "mobile-light-meeting-clash-QA-FIXTURE-viewport.png",
+          "state": "meeting-clash",
+          "full_page": false,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 375,
+            "page": 375,
+            "theme": "light",
+            "scroll_x": 0,
+            "scroll_y": 2548
+          },
+          "framing": {
+            "target": {
+              "top": 259.15625,
+              "bottom": 536.65625,
+              "left": 52,
+              "right": 323,
+              "width": 271,
+              "height": 277.5
+            },
+            "unobscured": {
+              "top": 72,
+              "bottom": 724
+            },
+            "intersection": {
+              "top": 259.15625,
+              "bottom": 536.65625,
+              "left": 52,
+              "right": 323
+            },
+            "scroll_y": 2548,
+            "target_visible": true,
+            "alternatives_visible": true,
+            "alternatives": [
+              {
+                "top": 343.90625,
+                "bottom": 366.40625,
+                "left": 92,
+                "right": 323,
+                "width": 231,
+                "height": 22.5
+              },
+              {
+                "top": 366.40625,
+                "bottom": 388.90625,
+                "left": 92,
+                "right": 323,
+                "width": 231,
+                "height": 22.5
+              }
+            ]
+          }
+        },
+        {
+          "file": "mobile-light-saved-draft-QA-FIXTURE-full.png",
+          "state": "saved-draft",
+          "full_page": true,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 375,
+            "page": 375,
+            "theme": "light",
+            "scroll_x": 0,
+            "scroll_y": 0
+          },
+          "framing": null
+        },
+        {
+          "file": "mobile-light-saved-draft-QA-FIXTURE-viewport.png",
+          "state": "saved-draft",
+          "full_page": false,
+          "visible_label": "QA fixture — simulated provider responses",
+          "dimensions": {
+            "viewport": 375,
+            "page": 375,
+            "theme": "light",
+            "scroll_x": 0,
+            "scroll_y": 1638
+          },
+          "framing": {
+            "target": {
+              "top": 303.890625,
+              "bottom": 492.890625,
+              "left": 35,
+              "right": 340,
+              "width": 305,
+              "height": 189
+            },
+            "unobscured": {
+              "top": 72,
+              "bottom": 724
+            },
+            "intersection": {
+              "top": 303.890625,
+              "bottom": 492.890625,
+              "left": 35,
+              "right": 340
+            },
+            "scroll_y": 1638,
+            "target_visible": true,
+            "alternatives_visible": true,
+            "alternatives": []
+          }
+        }
+      ],
+      "checks": [
+        "Opened-email evidence matched source; no automatic availability check; explicit review returned clash and exactly two confirmed alternatives.",
+        "Reply instructions retained both exact checked alternative labels, the displayed saved timezone and the no-invention/no-booking safeguards.",
+        "Second synthetic source reopened its saved revision; content matched; Send remained disabled and was never clicked."
+      ],
+      "status": "passed"
+    }
+  ],
+  "requests": [
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/outlook/status",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/today",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/outlook/status",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/student/profile",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/outlook/connections/33333333-3333-4333-8333-333333333333/messages",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/outlook/connections/33333333-3333-4333-8333-333333333333/messages",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/outlook/drafts",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/outlook/status",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/outlook/connections/33333333-3333-4333-8333-333333333333/messages/qa-meeting%2Fopaque%2Bsource%3D",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/student/availability/routine",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "POST",
+      "endpoint": "/student/availability/preview",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/outlook/connections/33333333-3333-4333-8333-333333333333/messages/qa-project%2Fopaque%2Bsource%3D",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-dark",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/outlook/status",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/today",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/outlook/status",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/student/profile",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/outlook/connections/33333333-3333-4333-8333-333333333333/messages",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/outlook/connections/33333333-3333-4333-8333-333333333333/messages",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/outlook/drafts",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/outlook/status",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/outlook/connections/33333333-3333-4333-8333-333333333333/messages/qa-meeting%2Fopaque%2Bsource%3D",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/student/availability/routine",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "POST",
+      "endpoint": "/student/availability/preview",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/outlook/connections/33333333-3333-4333-8333-333333333333/messages/qa-project%2Fopaque%2Bsource%3D",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "desktop-light",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/outlook/status",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/today",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/outlook/status",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/student/profile",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/outlook/connections/33333333-3333-4333-8333-333333333333/messages",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/outlook/connections/33333333-3333-4333-8333-333333333333/messages",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/outlook/drafts",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/outlook/status",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/outlook/connections/33333333-3333-4333-8333-333333333333/messages/qa-meeting%2Fopaque%2Bsource%3D",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/student/availability/routine",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "POST",
+      "endpoint": "/student/availability/preview",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/outlook/connections/33333333-3333-4333-8333-333333333333/messages/qa-project%2Fopaque%2Bsource%3D",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-dark",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/outlook/status",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/today",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/outlook/status",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/student/profile",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/outlook/connections/33333333-3333-4333-8333-333333333333/messages",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/outlook/connections/33333333-3333-4333-8333-333333333333/messages",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/outlook/drafts",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/outlook/status",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/outlook/connections/33333333-3333-4333-8333-333333333333/messages/qa-meeting%2Fopaque%2Bsource%3D",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/student/availability/routine",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "POST",
+      "endpoint": "/student/availability/preview",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/outlook/connections/33333333-3333-4333-8333-333333333333/messages/qa-project%2Fopaque%2Bsource%3D",
+      "owner": "22222222-2222-4222-8222-222222222222:11111111-1111-4111-8111-111111111111",
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/auth/me",
+      "owner": null,
+      "handled": "synthetic route response"
+    },
+    {
+      "case": "mobile-light",
+      "method": "GET",
+      "endpoint": "/connections/google",
+      "owner": null,
+      "handled": "synthetic route response"
+    }
+  ],
+  "blocked_requests": [],
+  "page_errors": [],
+  "failures": []
+}

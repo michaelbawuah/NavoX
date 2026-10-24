@@ -1,0 +1,9 @@
+{
+  "environment": "temporary PostgreSQL 17 database",
+  "real_database_tests_passed": 2,
+  "synthetic_inputs_only": true,
+  "tests": [
+    "concurrent_progress_uses_fresh_owner_lock",
+    "reset_racing_progress_cannot_resurrect_private_history"
+  ]
+}

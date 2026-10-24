@@ -1,3 +1,5 @@
+> Current continuation: [October 24 evidence and comparison](continuation-20261024/README.md), runtime `c18329e`. The records below are earlier checkpoints.
+
 # 24 October redesign evidence
 
 ## Timezone correction — test release 6171872

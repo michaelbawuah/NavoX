@@ -1,0 +1,50 @@
+{
+  "release": "c18329ee4eef35c48dac1a072926efee0d3843f7",
+  "passed": true,
+  "checks": [
+    {
+      "name": "browser-layouts",
+      "exit_code": 0,
+      "seconds": 28.93
+    },
+    {
+      "name": "today-clocks",
+      "exit_code": 0,
+      "seconds": 7.55
+    },
+    {
+      "name": "five-step-entry",
+      "exit_code": 0,
+      "seconds": 23.18
+    },
+    {
+      "name": "vox-recording",
+      "exit_code": 0,
+      "seconds": 53.85
+    },
+    {
+      "name": "inbox-fixtures",
+      "exit_code": 0,
+      "seconds": 7.2
+    },
+    {
+      "name": "linux-postgres",
+      "exit_code": 0,
+      "seconds": 97.09
+    }
+  ],
+  "current_reports": [
+    "engineering-checks.json",
+    "deployment-checks.json",
+    "browser-checks.json",
+    "today-controlled-clock-checks.json",
+    "five-step-entry-checks.json",
+    "vox-capture-browser.json",
+    "linux-vox-qualification.json",
+    "inbox-route-fixtures/fixture-scope-and-results.json"
+  ],
+  "broader_backend_checkpoint": "linux-postgres-qualification.json",
+  "physical_phone_acceptance": false,
+  "real_google_microsoft_qualification": false,
+  "external_email_sent": false
+}

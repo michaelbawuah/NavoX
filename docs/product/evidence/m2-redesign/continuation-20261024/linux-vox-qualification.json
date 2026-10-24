@@ -1,0 +1,14 @@
+{
+  "release": "c18329ee4eef35c48dac1a072926efee0d3843f7",
+  "environment": "Linux/Python3.12/PostgreSQL17",
+  "provider_responses": "synthetic fixtures",
+  "external_mail_sent": false,
+  "test_files": [
+    "tests/test_vox_capture_tools.py",
+    "tests/test_vox_inference.py",
+    "tests/test_vox_planning_tools.py"
+  ],
+  "passed": true,
+  "summary": "45 passed in 84.00s (0:01:24)",
+  "temporary_database_removed": true
+}
