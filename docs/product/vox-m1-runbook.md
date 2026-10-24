@@ -167,10 +167,13 @@ seven. All provider reservations settled, with 1,492 tokens and USD 0.017691 in
 known estimated model cost. Physical-device turn timing and barge-in remain open;
 these emulated checks do not complete all conversational acceptance tests.
 
-The test origin is https://vox-test.66.175.235.169.sslip.io/ and public sign-up is
+The test origin is https://vox-test.66-175-235-169.nip.io/ and public sign-up is
 blocked. Named test credentials are stored privately outside the repository.
-The server-hosted browser accepted HTTPS; the connected Mac encountered a TLS
-protocol error for this hostname. Phone reachability is not yet verified.
+The previous dotted sslip.io hostname failed TLS from the connected Mac despite
+working from the server. The replacement hostname passes normal certificate
+validation, browser secure-context checks, and sign-in from the Mac. The web
+bundle and isolated API origin configuration were updated together; production
+routes remain unchanged. Physical-phone reachability is not yet verified.
 Picovoice vendor approval and licensed wake assets remain pending, so local
 wake switches remain disabled. Real student schedule answers, phone recordings,
 long calls, provider failover, and student usage targets remain unqualified.

@@ -20,7 +20,7 @@ This branch is an implementation checkpoint, not a passed milestone. Production 
 - Supply vendor-approved browser credential handling and licensed Web keyword/language models. Actual SDK and authenticated runtime configuration are implemented but remain disabled pending this setup and device qualification.
 - The server-owned 80-percent notice is now shown once in the dialog or minimized dock. Qualify quota enforcement and the notice against actual paid calls; synthetic UI/status tests do not establish live enforcement.
 - Select/test stock voices on real devices. Custom Noa voice follows milestone1.
-- Isolated test link: https://vox-test.66.175.235.169.sslip.io/. The server-hosted browser accepts HTTPS; the connected Mac encountered a TLS protocol error for this hostname. Verify phone reachability. Credentials remain in the private local login file, never in this document.
+- Isolated test link: https://vox-test.66-175-235-169.nip.io/. HTTPS and sign-in now pass from the connected Mac after replacing the failing temporary hostname and rebuilding the app with the new origin. Physical-phone reachability remains unverified. Credentials remain in the private local login file, never in this document.
 - Instrument200-question voice corpus and the specified usage metrics; student/cohort thresholds remain Waiting on real usage.
 
 ## Approved scope decisions

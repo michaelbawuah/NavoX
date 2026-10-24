@@ -132,3 +132,24 @@ Both production and isolated test roots returned HTTP 200 from the server.
 The original primary route was restored. Private Mac credential/login files
 retained mode 0600, and a common-secret-pattern scan of the branch diff found no
 matches (a heuristic, not a guarantee). No physical-phone pass is inferred.
+
+
+### Test-link access correction
+
+The original temporary hostname failed TLS on the connected Mac. The replacement
+https://vox-test.66-175-235-169.nip.io/ passes HTTPS without certificate bypass,
+reports a secure browser context, and permits authenticated sign-in from that
+Mac. The isolated web bundle and API configuration now use the replacement
+origin. The private login file was updated without changing its credentials.
+Physical-phone testing remains pending.
+
+GitHub Actions run 40043920683 passed all jobs at commit 039c8ab, including all
+six API test shards, web quality, static checks, dependency security, evaluation
+and hardening, extension quality, and Compose integration.
+
+The replacement-origin mobile-emulation check on the connected Mac also received
+nonzero remote speech energy (35,436 inbound audio bytes), reported no page errors
+and no API requests to the old origin, and completed both hang-up/close requests
+with HTTP 204. Production and test roots returned HTTP 200; public registration
+on the private test deployment remains HTTP 403. No certificate checks were
+disabled. This is browser emulation, not physical-phone acceptance.
