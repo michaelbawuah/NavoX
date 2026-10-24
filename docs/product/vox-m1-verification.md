@@ -153,3 +153,26 @@ and no API requests to the old origin, and completed both hang-up/close requests
 with HTTP 204. Production and test roots returned HTTP 200; public registration
 on the private test deployment remains HTTP 403. No certificate checks were
 disabled. This is browser emulation, not physical-phone acceptance.
+
+
+### Speech continuity correction
+
+A user reported broken, scratchy speech in Safari on the replacement test site.
+The worker queued only 20 ms of output while fresh authority and usage checks ran
+before every <=20 ms frame. A local probe using the actual LiveKit AudioSource,
+a two-second synthetic tone, and an 80 ms proof delay every 25 checks reproduced
+four underruns totaling 263.04 ms (largest 71.05 ms). At 200 ms queue capacity,
+the identical probe delivered all 96,000 output samples with zero underruns.
+
+The output queue is now bounded at 200 ms. This adds at most 180 ms of queue
+capacity; it is not a mandatory startup delay. Every frame still needs fresh
+proof and committed usage credit. Interruption clears queued speech immediately.
+Played-audio accounting now excludes samples still waiting for submission, so
+interrupted context does not include the unplayed remainder of a provider chunk.
+Content-free per-turn diagnostics report output frames, source starvation and
+proof timing without logging audio, transcript text, or credentials.
+
+69 focused backend tests passed. New deterministic tests reproduce the old
+starvation, preserve exact resampled waveform samples across chunk boundaries,
+bound the new queue, and verify interruption/revocation cleanup. Scoped lint and
+mypy passed. Live deployment and Safari listening confirmation are still pending.

@@ -45,6 +45,8 @@ from navox.vox.worker import (
 )
 
 MAX_OUTPUT_SAMPLES = 48_000 * 60
+# Absorb short provider/DB scheduling stalls; interruption still clears immediately.
+OUTPUT_QUEUE_MS = 200
 
 
 def log_worker_failure(stage: str, error: BaseException) -> None:
@@ -110,15 +112,65 @@ class LiveKitAudioOutput:
         self.source = source
         self._pcm_resampler: av.AudioResampler | None = None
         self._pcm_samples = 0
+        self._pcm_decoded_samples = 0
+        self._output_frames = 0
+        self._starvations = 0
+        self._starvation_seconds = 0.0
+        self._max_proof_seconds = 0.0
+        self._queued_until: float | None = None
         self.usage: UsageHooks | None = None
 
     def played_pcm_ms(self) -> int:
         return max(0, int(self._pcm_samples / 48 - self.source.queued_duration * 1000))
 
+    def _report_playout(self) -> None:
+        if self._output_frames:
+            logging.getLogger(__name__).info(
+                "Vox audio playout totals",
+                extra={
+                    "output_frames": self._output_frames,
+                    "starvations": self._starvations,
+                    "starvation_ms": round(self._starvation_seconds * 1000),
+                    "max_proof_ms": round(self._max_proof_seconds * 1000),
+                },
+            )
+        self._output_frames = self._starvations = 0
+        self._starvation_seconds = self._max_proof_seconds = 0.0
+        self._queued_until = None
+
     async def clear(self) -> None:
         self.source.clear_queue()
+        self._report_playout()
         self._pcm_resampler = None
-        self._pcm_samples = 0
+        self._pcm_samples = self._pcm_decoded_samples = 0
+
+    async def _capture_raw(self, raw: bytes, check: Callable[[], Awaitable[None]]) -> None:
+        for start in range(0, len(raw), 1920):
+            # Each <=20 ms frame still needs fresh authorization and committed
+            # usage credit before entering the bounded, interruptible RTC queue.
+            began = time.monotonic()
+            await check()
+            data = raw[start : start + 1920]
+            if self.usage:
+                await self.usage.note_audio(max(1, len(data) * 1000 // 96000), direction="output")
+            now = time.monotonic()
+            self._max_proof_seconds = max(self._max_proof_seconds, now - began)
+            if self._queued_until is not None and now - self._queued_until > 0.002:
+                self._starvations += 1
+                self._starvation_seconds += now - self._queued_until
+            await self.source.capture_frame(
+                rtc.AudioFrame(
+                    data=data,
+                    sample_rate=48_000,
+                    num_channels=1,
+                    samples_per_channel=len(data) // 2,
+                )
+            )
+            # Count only submitted samples, not the rest of a provider chunk
+            # which may still be waiting for proof when the student interrupts.
+            self._pcm_samples += len(data) // 2
+            self._output_frames += 1
+            self._queued_until = time.monotonic() + getattr(self.source, "queued_duration", 0.0)
 
     async def play(self, mp3: bytes, check: Callable[[], Awaitable[None]]) -> None:
         if not isinstance(mp3, bytes) or not 0 < len(mp3) <= MAX_SPEECH_AUDIO_BYTES:
@@ -134,53 +186,27 @@ class LiveKitAudioOutput:
                     if produced > MAX_OUTPUT_SAMPLES:
                         raise ValueError("The voice response exceeds the playback duration bound")
                     raw = bytes(frame.planes[0])[: frame.samples * 2]
-                    for start in range(0, len(raw), 1920):  # At most 20 ms queued per fresh proof.
-                        await check()
-                        data = raw[start : start + 1920]
-                        if self.usage:
-                            await self.usage.note_audio(
-                                max(1, len(data) * 1000 // 96000), direction="output"
-                            )
-                        await self.source.capture_frame(
-                            rtc.AudioFrame(
-                                data=data,
-                                sample_rate=48_000,
-                                num_channels=1,
-                                samples_per_channel=len(data) // 2,
-                            )
-                        )
+                    await self._capture_raw(raw, check)
         await self.source.wait_for_playout()
+        self._report_playout()
+        self._pcm_samples = 0
 
     async def _capture_pcm(
         self, frames: list[av.AudioFrame], check: Callable[[], Awaitable[None]]
     ) -> None:
         for frame in frames:
-            self._pcm_samples += frame.samples
-            if self._pcm_samples > MAX_OUTPUT_SAMPLES:
+            self._pcm_decoded_samples += frame.samples
+            if self._pcm_decoded_samples > MAX_OUTPUT_SAMPLES:
                 raise ValueError("The voice response exceeds the playback duration bound")
             raw = bytes(frame.planes[0])[: frame.samples * 2]
-            for start in range(0, len(raw), 1920):
-                await check()
-                data = raw[start : start + 1920]
-                if self.usage:
-                    await self.usage.note_audio(
-                        max(1, len(data) * 1000 // 96000), direction="output"
-                    )
-                await self.source.capture_frame(
-                    rtc.AudioFrame(
-                        data=data,
-                        sample_rate=48_000,
-                        num_channels=1,
-                        samples_per_channel=len(data) // 2,
-                    )
-                )
+            await self._capture_raw(raw, check)
 
     async def play_pcm(self, pcm: bytes, check: Callable[[], Awaitable[None]]) -> None:
         if not pcm or len(pcm) % 2 or len(pcm) > 1_048_576:
             raise ValueError("The realtime audio frame is outside its bound")
         if self._pcm_resampler is None:
             self._pcm_resampler = av.AudioResampler(format="s16", layout="mono", rate=48_000)
-            self._pcm_samples = 0
+            self._pcm_samples = self._pcm_decoded_samples = 0
         frame = av.AudioFrame(format="s16", layout="mono", samples=len(pcm) // 2)
         frame.sample_rate = 24_000
         frame.planes[0].update(pcm)
@@ -191,8 +217,9 @@ class LiveKitAudioOutput:
             await self._capture_pcm(self._pcm_resampler.resample(None), check)
         await self.source.wait_for_playout()
         await check()
+        self._report_playout()
         self._pcm_resampler = None
-        self._pcm_samples = 0
+        self._pcm_samples = self._pcm_decoded_samples = 0
 
 
 def participant_metadata(value: str, assignment: WorkerAssignment, generation: int) -> bool:
@@ -257,7 +284,7 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
         ):
             raise WorkerAccessLost("The voice participant binding changed")
         await check()
-        source = rtc.AudioSource(48_000, 1, queue_size_ms=20)
+        source = rtc.AudioSource(48_000, 1, queue_size_ms=OUTPUT_QUEUE_MS)
         output = LiveKitAudioOutput(source)
         inference = load_inference_config(settings)
         worker: VoiceTurnWorker | ConfiguredVoiceWorker
