@@ -318,11 +318,7 @@
   .topbarActions {
     gap: 4px;
   }
-  .search kbd,
   .search {
-    width: auto;
-  }
-  .search span {
     display: none;
   }
   .mobileInbox {

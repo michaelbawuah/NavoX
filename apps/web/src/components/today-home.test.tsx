@@ -96,7 +96,7 @@ describe("Today home", () => {
       "Your daily focus",
       "Refresh",
       "Due soon",
-      "Today’s plan",
+      "Your day",
       "Needs a reply",
     ])
       expect(host.textContent).not.toContain(removed);
@@ -177,9 +177,10 @@ describe("Today home", () => {
       ],
     });
     await render();
-    expect(host.textContent).toContain("Next: Library shift");
+    expect(host.textContent).toContain("Library shift");
+    expect(host.querySelector('[aria-label="Next up"]')).not.toBeNull();
     expect(host.textContent).not.toContain("Let’s set up NavoX");
-    expect(host.textContent).toContain("Today’s plan");
+    expect(host.textContent).toContain("Your day");
     expect(host.textContent).not.toContain("Due soon");
   });
   it("does not call a day complete when connection status is unavailable", async () => {

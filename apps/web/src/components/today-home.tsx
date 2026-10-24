@@ -43,6 +43,7 @@ import {
 } from "../lib/today-home";
 import { NoaArtwork } from "./noa-artwork";
 import styles from "./today-home.module.css";
+import { TodayNext } from "./today-next";
 import {
   type ProgressReceipt,
   TodayProgressReceipt,
@@ -329,6 +330,7 @@ function TodayHomeAccount({
             {welcoming && (
               <div className={styles.heroActions}>
                 <Button
+                  variant="primary"
                   disabled={!call?.available}
                   onClick={() => void openVox()}
                 >
@@ -402,38 +404,7 @@ function TodayHomeAccount({
             }}
           />
         )}
-        {next && (
-          <details className={styles.next}>
-            <summary>
-              <strong>
-                Next: {next.title}
-                {next.detail && ` · ${next.detail}`}
-              </strong>
-              <span>
-                {relativeTime(next.start, now, zone)}
-                {next.walkMinutes !== null &&
-                  ` · leave by ${studentClock(new Date(Date.parse(next.start) - next.walkMinutes * 60000).toISOString(), zone)}`}
-              </span>
-            </summary>
-            <p>
-              {new Intl.DateTimeFormat("en", {
-                dateStyle: "medium",
-                timeStyle: "short",
-                timeZone: zone,
-              }).format(new Date(next.start))}
-              {next.end && ` – ${studentClock(next.end, zone)}`}
-            </p>
-            <Link href={next.href}>
-              Open{" "}
-              {next.study
-                ? "Planner"
-                : next.detail === "Meeting"
-                  ? "Planner"
-                  : "Classes"}{" "}
-              →
-            </Link>
-          </details>
-        )}
+        {next && <TodayNext row={next} now={now} timezone={zone} />}
         {data &&
           !showSetup &&
           hasClasses &&
@@ -459,7 +430,9 @@ function TodayHomeAccount({
                   aria-labelledby="today-plan"
                 >
                   <div className={styles.heading}>
-                    <h2 id="today-plan">Today’s plan</h2>
+                    <h2 id="today-plan">
+                      Your day <small>{rows.length} things</small>
+                    </h2>
                   </div>
                   <ol className={styles.list}>
                     {rows.map((row) => {
@@ -477,21 +450,24 @@ function TodayHomeAccount({
                           className={styles.row}
                           data-past={past}
                           data-current={current}
+                          data-shift={row.detail === "Shift"}
                         >
                           <Link href={row.href} className={styles.rowTop}>
+                            <time dateTime={row.start}>
+                              {studentClock(row.start, zone)}
+                            </time>
                             <span
                               className="nx-dot"
                               style={
                                 {
                                   "--nx-course": row.courseId
                                     ? courseColor(row.courseId)
-                                    : undefined,
+                                    : row.detail === "Shift"
+                                      ? "var(--nx-warning)"
+                                      : undefined,
                                 } as CSSProperties
                               }
                             />
-                            <time dateTime={row.start}>
-                              {studentClock(row.start, zone)}
-                            </time>
                             <span className={styles.rowText}>
                               <strong className={styles.rowTitle}>
                                 {row.title}
@@ -499,6 +475,8 @@ function TodayHomeAccount({
                               {row.detail && (
                                 <span className={styles.rowDetail}>
                                   {row.detail}
+                                  {row.end &&
+                                    ` · ${studentClock(row.start, zone)} – ${studentClock(row.end, zone)}`}
                                 </span>
                               )}
                             </span>
@@ -574,7 +552,7 @@ function TodayHomeAccount({
             </div>
             <div className={styles.column}>
               {due.length > 0 && (
-                <section className={styles.section}>
+                <section className={`${styles.section} ${styles.sideCard}`}>
                   <div className={styles.heading}>
                     <h2>Due soon</h2>
                     <Link href="/planner">See all</Link>
@@ -595,7 +573,21 @@ function TodayHomeAccount({
                           )}
                           <span>
                             <strong>{item.title}</strong>
-                            <small>{relativeTime(item.due, now, zone)}</small>
+                            <small>
+                              {
+                                data?.timetable?.courses.find(
+                                  (c) => c.id === item.courseId,
+                                )?.code
+                              }
+                            </small>
+                          </span>
+                          <span
+                            className={styles.dueChip}
+                            data-urgent={
+                              Date.parse(item.due) - now <= 2 * 86400000
+                            }
+                          >
+                            {relativeTime(item.due, now, zone)}
                           </span>
                         </Link>
                       </li>
@@ -604,7 +596,7 @@ function TodayHomeAccount({
                 </section>
               )}
               {replies.length > 0 && (
-                <section className={styles.section}>
+                <section className={`${styles.section} ${styles.sideCard}`}>
                   <div className={styles.heading}>
                     <h2>Needs a reply</h2>
                   </div>
@@ -623,7 +615,7 @@ function TodayHomeAccount({
                               </small>
                             )}
                           </span>
-                          <span aria-hidden="true">→</span>
+                          <span className={styles.draftReply}>Draft reply</span>
                         </Link>
                       </li>
                     ))}
@@ -633,11 +625,11 @@ function TodayHomeAccount({
               {goals.length > 0 && (
                 <section className={styles.section}>
                   <div className={styles.heading}>
-                    <h2>Goals</h2>
+                    <h2>This week’s goals</h2>
                   </div>
-                  <div className={styles.chips}>
+                  <div className={styles.goalList}>
                     {goals.map((goal) => (
-                      <Link key={goal.id} className="nx-chip" href="/goals">
+                      <Link key={goal.id} className={styles.goal} href="/goals">
                         <span>{goal.title}</span>
                         <span>
                           {goal.tracking === "count"
@@ -650,6 +642,18 @@ function TodayHomeAccount({
                                 ? "✓"
                                 : "Not yet"}
                         </span>
+                        {goal.tracking === "count" &&
+                          goal.progress.reported_count !== null &&
+                          goal.progress.target !== null && (
+                            <progress
+                              aria-label={goal.title}
+                              value={Math.min(
+                                goal.progress.reported_count,
+                                goal.progress.target,
+                              )}
+                              max={goal.progress.target}
+                            />
+                          )}
                       </Link>
                     ))}
                   </div>

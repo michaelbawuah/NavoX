@@ -11,7 +11,10 @@ import { useAppearance } from "../lib/appearance";
 import { useInboxReplyCount } from "../lib/inbox-reply-count";
 import { productFeatures } from "../lib/product-features";
 import { readStudentProfile, studentRequest } from "../lib/student-schedule";
-import { studentLocalTime } from "../lib/student-time";
+import {
+  STUDENT_TIMEZONE_CHANGED,
+  studentLocalTime,
+} from "../lib/student-time";
 import { useVoxCall } from "./vox-call-provider";
 import styles from "./workspace-shell.module.css";
 
@@ -135,19 +138,33 @@ export function WorkspaceShell({
   const profile = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     let live = true;
-    if (verifiedKey)
-      void studentRequest("/profile", readStudentProfile)
-        .then((value) => {
-          if (live)
-            setStudentProfile({
-              owner: verifiedKey,
-              timezone: value.timezone,
-              school: value.school_name,
-            });
-        })
-        .catch(() => {});
+    let request = 0;
+    const refresh = () => {
+      const turn = ++request;
+      if (verifiedKey)
+        void studentRequest("/profile", readStudentProfile)
+          .then((value) => {
+            if (live && turn === request)
+              setStudentProfile({
+                owner: verifiedKey,
+                timezone: value.timezone,
+                school: value.school_name,
+              });
+          })
+          .catch(() => {});
+    };
+    const changed = (event: Event) => {
+      if (
+        (event as CustomEvent<{ accountKey: string }>).detail?.accountKey ===
+        verifiedKey
+      )
+        refresh();
+    };
+    refresh();
+    window.addEventListener(STUDENT_TIMEZONE_CHANGED, changed);
     return () => {
       live = false;
+      window.removeEventListener(STUDENT_TIMEZONE_CHANGED, changed);
     };
   }, [verifiedKey]);
   useEffect(() => {

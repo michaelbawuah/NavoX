@@ -107,7 +107,7 @@ describe("Today data projection", () => {
       dueSoon([task], [item("source"), item("other")], now).map((i) => i.id),
     ).toEqual(["task", "other"]);
   });
-  it("caps due work at three eligible items and excludes overdue or distant dates", () => {
+  it("caps due work at the three soonest items and excludes overdue dates", () => {
     const rows = [
       item("a"),
       item("b"),
@@ -117,6 +117,10 @@ describe("Today data projection", () => {
       { ...item("future"), due_at: "2026-11-03T00:00:00Z" },
     ];
     expect(dueSoon([], rows, now).map((i) => i.id)).toEqual(["a", "b", "c"]);
+  });
+  it("keeps the next deadline visible even when it is more than three days away", () => {
+    const future = { ...item("future"), due_at: "2026-11-03T00:00:00Z" };
+    expect(dueSoon([], [future], now).map((row) => row.id)).toEqual(["future"]);
   });
   it("uses plain local time and never a UTC label", () => {
     expect(relativeTime("2026-10-24T00:15:00Z", now, zone)).toBe("in 15 min");

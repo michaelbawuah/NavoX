@@ -84,12 +84,14 @@ export function dayRows(
     if (!c.cancelled)
       rows.push({
         id: c.id,
-        title: `${c.course_code || c.course_name} · ${c.kind}`,
+        title: c.course_code
+          ? `${c.course_code} · ${c.course_name}`
+          : c.course_name,
         start: c.start_at,
         end: c.end_at,
         courseId: c.course_id,
         detail: [c.building, c.room].filter(Boolean).join(" · "),
-        href: "/classes",
+        href: `/classes/${c.course_id}`,
         walkMinutes: c.walk_minutes,
       });
   for (const c of timetable?.fixed_occurrences ?? [])
@@ -172,10 +174,7 @@ export function dueSoon(tasks: StudyTask[], items: HomeItem[], now: number) {
         title: string;
         due: string;
         courseId: string | null;
-      } =>
-        i.due !== null &&
-        Date.parse(i.due) >= now &&
-        Date.parse(i.due) <= now + 3 * 86400000,
+      } => i.due !== null && Date.parse(i.due) >= now,
     )
     .sort((a, b) => Date.parse(a.due) - Date.parse(b.due))
     .slice(0, 3);
