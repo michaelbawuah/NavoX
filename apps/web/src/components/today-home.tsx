@@ -496,7 +496,8 @@ function TodayHomeAccount({
                                     : ""}
                             </span>
                           </Link>
-                          {row.study?.status === "planned" &&
+                          {current &&
+                            row.study?.status === "planned" &&
                             !data?.plan?.needs_review &&
                             (() => {
                               const block = row.study;

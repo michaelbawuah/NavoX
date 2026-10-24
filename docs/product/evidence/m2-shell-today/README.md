@@ -1,3 +1,5 @@
+> Superseded where it conflicts with the 24 October redesign spec. M2 is not accepted. See `docs/product/m2-redesign-20261024.md` for the active checklist.
+
 # M2 shell, Today and Vox conversation
 
 Test link: https://vox-test.66-175-235-169.nip.io/

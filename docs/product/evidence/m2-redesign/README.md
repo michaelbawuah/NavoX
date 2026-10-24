@@ -42,3 +42,19 @@ need side-by-side review against the 19-page source. See ../../m2-redesign-20261
 - Noa on Today is the supplied static vector illustration. No simulated talking
   animation was introduced. Vox's existing visual remains pending Part 2.
 - Physical-phone and real-student usage checks remain waiting on the user.
+
+## Populated Today — test release 8c90643
+- 2,531 web tests passed; touched-component follow-up tests, TypeScript and lint passed.
+- Retained QA fixture: three classes with walk times, a recurring shift, three
+  assignments and three weekly goals with synthetic check-ins. Study plan accepted
+  through the normal preview/confirm API; no external calendar writes.
+- Captured 9 AM, 3 PM and 3 AM New York on desktop and 375px dark/light. These use
+  real saved fixture data with an explicitly controlled client/server-display clock.
+  All three greetings were correct; no overflow or page errors.
+- The 3 AM image is an unfinished baseline: it does not yet match the alarm/night
+  design. Do not count it as passed.
+- A separate fresh private account verifies the welcome page and starts at 0/5.
+  Public test-site registration remains closed. Credentials stay in the private
+  backup folder, outside the repository and evidence.
+- Follow-up: show outcome actions on the current Today study block; other blocks
+  remain reachable in Planner, matching the specified compact timeline.

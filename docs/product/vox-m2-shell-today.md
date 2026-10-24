@@ -1,3 +1,5 @@
+> Superseded where it conflicts with the 24 October redesign spec. M2 is not accepted. See `docs/product/m2-redesign-20261024.md` for the active checklist.
+
 # Milestone 2: app shell and Today
 
 Status: M2 implementation deployed to the test site and browser-verified.
