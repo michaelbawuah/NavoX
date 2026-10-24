@@ -13,6 +13,7 @@ import {
   createSavedBoardsApi,
   type SavedBoardSummary,
 } from "../lib/saved-boards";
+import { createStudentCalendarApi } from "../lib/student-calendar-api";
 import {
   goalsRequest,
   readStudentGoalsBoard,
@@ -40,11 +41,13 @@ import {
   relativeTime,
   replyItems,
 } from "../lib/today-home";
+import { NoaArtwork } from "./noa-artwork";
 import styles from "./today-home.module.css";
 import {
   type ProgressReceipt,
   TodayProgressReceipt,
 } from "./today-progress-receipt";
+import { TodaySetup } from "./today-setup";
 import { TodayStudyActions } from "./today-study-actions";
 import type { TodayWorkspaceProps } from "./today-workspace";
 import { useVoxCall } from "./vox-call-provider";
@@ -59,6 +62,7 @@ type Data = {
   items: HomeItem[];
   goals: StudentGoal[];
   boards: SavedBoardSummary[];
+  calendarConnected: boolean;
   complete: boolean;
   receivedAt: number;
 };
@@ -152,9 +156,14 @@ function TodayHomeAccount({
       productFeatures.studentWhiteboard
         ? createSavedBoardsApi(accountKey).list(controller.signal)
         : Promise.resolve(null),
+      productFeatures.studentCalendarAvailability
+        ? createStudentCalendarApi(accountKey).calendars(
+            AbortSignal.timeout(12000),
+          )
+        : Promise.resolve(null),
     ] as const);
     if (turn !== epoch.current) return;
-    const [timetable, plan, tasks, items, goals, boards] = results;
+    const [timetable, plan, tasks, items, goals, boards, calendar] = results;
     const value: Data = {
       timetable: timetable.status === "fulfilled" ? timetable.value : null,
       plan: plan.status === "fulfilled" ? plan.value : null,
@@ -162,6 +171,9 @@ function TodayHomeAccount({
       items: items.status === "fulfilled" ? items.value : [],
       goals: goals.status === "fulfilled" ? (goals.value?.goals ?? []) : [],
       boards: boards.status === "fulfilled" ? (boards.value?.boards ?? []) : [],
+      calendarConnected:
+        calendar.status === "fulfilled" &&
+        !!calendar.value?.grants.some((g) => g.status === "connected"),
       complete: results.every((r) => r.status === "fulfilled"),
       receivedAt: Date.now(),
     };
@@ -224,24 +236,54 @@ function TodayHomeAccount({
     .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0];
   const hasClasses = !!data?.timetable?.courses.some((c) => !c.archived);
   const hasCalendar =
+    data?.calendarConnected ||
+    (!connectionsUnavailable &&
+      connections.some(
+        (c) =>
+          c.status === "active" &&
+          c.granted_scopes.some((s) =>
+            [
+              "https://www.googleapis.com/auth/calendar.readonly",
+              "https://www.googleapis.com/auth/calendar.events.readonly",
+              "https://www.googleapis.com/auth/calendar.events",
+            ].includes(s),
+          ),
+      ));
+  const hasEmail =
     !connectionsUnavailable &&
     connections.some(
       (c) =>
         c.status === "active" &&
         c.granted_scopes.some((s) =>
           [
-            "https://www.googleapis.com/auth/calendar.readonly",
-            "https://www.googleapis.com/auth/calendar.events.readonly",
-            "https://www.googleapis.com/auth/calendar.events",
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.modify",
           ].includes(s),
         ),
     );
   const hasTask =
     !!data?.tasks.length ||
     !!data?.items.some((i) => ["task", "deadline"].includes(i.type));
-  const steps = [hasClasses, hasCalendar, hasTask, triedVox],
+  const steps = [hasClasses, !!hasCalendar, hasEmail, hasTask, triedVox],
     done = steps.filter(Boolean).length;
-  const showSetup = !!data && setupStarted && !dismissed && done < 4;
+  const showSetup = !!data && setupStarted && !dismissed && done < 5;
+  const welcoming = !!data && !hasClasses && !rows.length && !hasTask && !error;
+  const local = clock ? studentLocalTime(now, zone) : null;
+  const classesLeft = rows.filter(
+    (r) => r.courseId && !r.study && Date.parse(r.end || r.start) > now,
+  ).length;
+  const summary = !data
+    ? ""
+    : `${classesLeft ? `${classesLeft} ${classesLeft === 1 ? "class" : "classes"} left today` : "No more classes on your timetable today"}${due.length ? `, and ${due.length} ${due.length === 1 ? "thing" : "things"} due soon` : ""}.`;
+  const sticker = welcoming
+    ? "hi :)"
+    : local?.period === "late-night"
+      ? "it’s 3am fr"
+      : local?.period === "morning"
+        ? "rise & grind"
+        : local?.period === "afternoon"
+          ? "chillin"
+          : "winding down";
   async function openVox() {
     if (!call?.available || !call.state.ownerVerified) return;
     if (
@@ -262,9 +304,60 @@ function TodayHomeAccount({
       inboxCount={replies.length}
     >
       <div className={styles.home}>
-        <h2 className={styles.greeting}>
-          {greeting}, {firstName}
-        </h2>
+        <header className={styles.todayHero}>
+          <div className={styles.heroWords}>
+            {clock && (
+              <p className={styles.dayLabel}>
+                {new Intl.DateTimeFormat("en-US", {
+                  timeZone: zone,
+                  weekday: "long",
+                  month: "long",
+                  day: "numeric",
+                }).format(new Date(now))}
+              </p>
+            )}
+            <h2 className={styles.greeting}>
+              {welcoming
+                ? `Hey ${firstName}, welcome to NavoX.`
+                : `${greeting}, ${firstName}${local?.period === "late-night" ? "?" : "."}`}
+            </h2>
+            <p className={styles.heroSummary}>
+              {welcoming
+                ? "I’m Noa. Give me about 3 minutes and I’ll know your week: your classes, what’s due, and when you’re actually free."
+                : summary}
+            </p>
+            {welcoming && (
+              <div className={styles.heroActions}>
+                <Button
+                  disabled={!call?.available}
+                  onClick={() => void openVox()}
+                >
+                  Set up by talking
+                </Button>
+                <Link className="nx-button" href="/classes">
+                  Set up by typing
+                </Link>
+                <span>
+                  Just say: “I have CS 2110 Monday, Wednesday, Friday at 10:10”
+                </span>
+              </div>
+            )}
+          </div>
+          <div className={styles.heroNoa}>
+            <span className={styles.noaSticker}>{sticker}</span>
+            <NoaArtwork
+              size={200}
+              mood={
+                welcoming
+                  ? "happy"
+                  : local?.period === "late-night"
+                    ? "sleepy"
+                    : "idle"
+              }
+              mug={!welcoming && local?.period === "morning"}
+            />
+          </div>
+        </header>
         {(error || connectionsUnavailable) && (
           <div className={styles.failure} role="alert">
             <span>Some of your day couldn’t load.</span>
@@ -299,60 +392,15 @@ function TodayHomeAccount({
           />
         )}
         {showSetup && (
-          <section className={styles.setup} aria-label="Set up NavoX">
-            <div className={styles.setupHeader}>
-              <div>
-                <h2>Let’s set up NavoX</h2>
-                <small>{done} of 4 done</small>
-              </div>
-              <Button
-                variant="quiet"
-                aria-label="Close setup checklist"
-                onClick={() => {
-                  setDismissed(true);
-                  setFlag(`${setupKey}:dismissed`, true);
-                }}
-              >
-                ×
-              </Button>
-            </div>
-            <ul>
-              <li data-done={hasClasses}>
-                <Link href="/classes">
-                  <span className={styles.check}>{hasClasses ? "✓" : ""}</span>
-                  <span>
-                    Add your classes <small>or import a schedule file</small>
-                  </span>
-                  <span aria-hidden="true">→</span>
-                </Link>
-              </li>
-              <li data-done={hasCalendar}>
-                <Link href="/connections">
-                  <span className={styles.check}>{hasCalendar ? "✓" : ""}</span>
-                  <span>Connect your calendar</span>
-                  <span aria-hidden="true">→</span>
-                </Link>
-              </li>
-              <li data-done={hasTask}>
-                <Link href="/planner#add-task">
-                  <span className={styles.check}>{hasTask ? "✓" : ""}</span>
-                  <span>Add one task or assignment</span>
-                  <span aria-hidden="true">→</span>
-                </Link>
-              </li>
-              <li data-done={triedVox}>
-                <button
-                  type="button"
-                  disabled={!call?.available}
-                  onClick={() => void openVox()}
-                >
-                  <span className={styles.check}>{triedVox ? "✓" : ""}</span>
-                  <span>Try Vox: say “What’s next?”</span>
-                  <span aria-hidden="true">→</span>
-                </button>
-              </li>
-            </ul>
-          </section>
+          <TodaySetup
+            completed={steps}
+            canTalk={!!call?.available}
+            openVox={() => void openVox()}
+            onHide={() => {
+              setDismissed(true);
+              setFlag(`${setupKey}:dismissed`, true);
+            }}
+          />
         )}
         {next && (
           <details className={styles.next}>
@@ -388,6 +436,7 @@ function TodayHomeAccount({
         )}
         {data &&
           !showSetup &&
+          hasClasses &&
           !rows.length &&
           !due.length &&
           !replies.length &&

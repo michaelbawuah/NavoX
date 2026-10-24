@@ -85,9 +85,9 @@ async function render(next = props) {
   await act(async () => root.render(<TodayHome {...next} />));
 }
 describe("Today home", () => {
-  it("shows one four-step setup checklist and no empty dashboard cards", async () => {
+  it("shows one five-step setup checklist and no empty dashboard cards", async () => {
     await render();
-    expect(host.textContent).toContain("0 of 4 done");
+    expect(host.textContent).toContain("0 of 5 done");
     expect(host.querySelectorAll('[aria-label="Set up NavoX"]')).toHaveLength(
       1,
     );
@@ -116,7 +116,44 @@ describe("Today home", () => {
         new MouseEvent("click", { bubbles: true, cancelable: true }),
       ),
     );
-    expect(host.textContent).toContain("0 of 4 done");
+    expect(host.textContent).toContain("0 of 5 done");
+  });
+  it("never declares an empty account done after hiding setup", async () => {
+    await render();
+    const hide = host.querySelector<HTMLButtonElement>(
+      '[aria-label="Close setup checklist"]',
+    );
+    if (!hide) throw Error("Missing hide action");
+    act(() => hide.click());
+    expect(host.textContent).not.toContain("Done for today");
+    expect(host.textContent).toContain("Show setup checklist");
+  });
+  it("does not count calendar read permission as email access", async () => {
+    await act(async () =>
+      root.render(
+        <TodayHome
+          {...props}
+          connections={[
+            {
+              id: "google",
+              provider: "google",
+              external_email: null,
+              status: "active",
+              granted_scopes: [
+                "https://www.googleapis.com/auth/calendar.readonly",
+              ],
+              last_checked_at: null,
+              last_error: null,
+            },
+          ]}
+        />,
+      ),
+    );
+    const rows = [...host.querySelectorAll('[aria-label="Set up NavoX"] li')];
+    expect(rows).toHaveLength(5);
+    expect(rows[1].getAttribute("data-done")).toBe("true");
+    expect(rows[2].getAttribute("data-done")).toBe("false");
+    expect(host.textContent).toContain("1 of 5 done");
   });
   it("does not present a failed schedule lookup as an empty completed day", async () => {
     vi.mocked(studentRequest).mockRejectedValue(Error("internal details"));

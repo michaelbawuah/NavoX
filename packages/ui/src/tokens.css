@@ -22,7 +22,9 @@
 	--nx-radius: 12px;
 	--nx-control-radius: 8px;
 	--nx-content-width: 1080px;
-	--nx-title-size: 28px;
+	--nx-title-size: 18px;
+	--nx-greeting-size: 36px;
+	--nx-late-night-accent: #b69cff;
 	--nx-section-size: 18px;
 	--nx-body-size: 15px;
 	--nx-small-size: 13px;
@@ -78,6 +80,7 @@
 	outline-offset: 4px;
 }
 .nx-card {
+	border: 1px solid var(--nx-border);
 	padding: 24px;
 	border-radius: var(--nx-radius);
 	background: var(--nx-surface);

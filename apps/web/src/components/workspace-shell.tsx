@@ -119,7 +119,14 @@ export function WorkspaceShell({
   const [error, setError] = useState("");
   const [help, setHelp] = useState(false);
   const [clock, setClock] = useState<Date | null>(null);
-  const [savedZone, setSavedZone] = useState<string | null>(null);
+  const [studentProfile, setStudentProfile] = useState<{
+    owner: string;
+    timezone: string;
+    school: string | null;
+  } | null>(null);
+  const savedProfile =
+    studentProfile?.owner === verifiedKey ? studentProfile : null;
+  const savedZone = savedProfile?.timezone;
   const inboxCount = useInboxReplyCount(
     verifiedKey,
     suppliedInboxCount,
@@ -128,17 +135,21 @@ export function WorkspaceShell({
   const profile = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     let live = true;
-    setSavedZone(null);
-    if (!timezone && accountKey)
+    if (verifiedKey)
       void studentRequest("/profile", readStudentProfile)
         .then((value) => {
-          if (live) setSavedZone(value.timezone);
+          if (live)
+            setStudentProfile({
+              owner: verifiedKey,
+              timezone: value.timezone,
+              school: value.school_name,
+            });
         })
         .catch(() => {});
     return () => {
       live = false;
     };
-  }, [accountKey, timezone]);
+  }, [verifiedKey]);
   useEffect(() => {
     const tick = () => setClock(new Date());
     tick();
@@ -262,7 +273,10 @@ export function WorkspaceShell({
               <span className={styles.avatar} aria-hidden="true">
                 {accountName?.trim().slice(0, 1).toUpperCase() || "N"}
               </span>
-              <span>{accountName || "Your account"}</span>
+              <span className={styles.accountName}>
+                <strong>{accountName || "Your account"}</strong>
+                {savedProfile?.school && <small>{savedProfile.school}</small>}
+              </span>
               <Icon name="More" />
             </summary>
             <div className={styles.profileMenu}>

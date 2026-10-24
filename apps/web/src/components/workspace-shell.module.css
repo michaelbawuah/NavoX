@@ -190,7 +190,7 @@
   border-bottom: 1px solid var(--nx-border);
 }
 .location {
-  font-size: 28px;
+  font-size: 18px;
   font-weight: 600;
   margin: 0;
   max-width: none;
@@ -209,17 +209,26 @@
   white-space: nowrap;
 }
 .search {
+  border: 1px solid var(--nx-border);
+  background: var(--nx-surface);
+  border-radius: 8px;
+  padding: 0 12px;
+  width: 260px;
+  justify-content: flex-start;
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 12px;
-  min-height: 44px;
+  min-height: 40px;
   min-width: 44px;
   text-decoration: none;
   color: var(--nx-muted);
   font-size: 13px;
 }
 .search kbd {
+  margin-left: auto;
+  padding: 0 4px;
+  border: 1px solid var(--nx-border);
+  border-radius: 4px;
   font: inherit;
 }
 .content {
@@ -235,6 +244,9 @@
 @media (max-width: 1000px) {
   .topbarActions {
     gap: 12px;
+  }
+  .search {
+    width: auto;
   }
   .search span {
     display: none;
@@ -278,7 +290,7 @@
     gap: 8px;
   }
   .location {
-    font-size: 28px;
+    font-size: 18px;
     line-height: 30px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -307,6 +319,9 @@
     gap: 4px;
   }
   .search kbd,
+  .search {
+    width: auto;
+  }
   .search span {
     display: none;
   }
@@ -377,4 +392,20 @@
 }
 .brandMark i:nth-child(3) {
   height: 18px;
+}
+
+.accountName strong,
+.accountName small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.accountName strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.accountName small {
+  font-size: 12px;
+  color: var(--nx-muted);
 }
