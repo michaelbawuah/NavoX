@@ -1,6 +1,6 @@
 # Milestone 2: app shell and Today
 
-Status: first implementation slice; browser verification and remaining panel work pending.
+Status: first preview deployed and browser-tested; remaining panel work pending.
 No full M2 acceptance claimed.
 Source of truth: Michael's `NavoX-UI-Redesign-Brief.pdf`, dated October 22, 2026,
 14 pages (Library file `libfile_6ad06fb9f7e48191adef16516adf16a5`). Full extracted
@@ -18,7 +18,7 @@ milestone 4; do not represent the temporary active-call checkpoint as that featu
 
 ### Shared styles and components (brief pages 3–5)
 
-- [ ] Put named dark/light colors, type, spacing and radii in `packages/ui`.
+- [x] Put named dark/light colors, type, spacing and radii in `packages/ui`.
   Dark: bg #0B0D10, surface #14171C, raised #1B1F26, border #262B33,
   text #F2F4F7, muted #A3ACB8, accent #4FD1B5, warning #F5B14C,
   danger #F07178, success #5BD38C. Light equivalents follow the brief.
@@ -73,7 +73,7 @@ milestone 4; do not represent the temporary active-call checkpoint as that featu
 - [ ] New-student setup: Add classes/import, Connect calendar, Add task,
   Try Vox. Derive completion from real state, show count/checkmarks, allow
   dismissal, disappear when complete; never mark a step complete from a click alone.
-- [ ] Remove clock, renewals, daily focus, duplicate shortcuts, Activity,
+- [x] Remove clock, renewals, daily focus, duplicate shortcuts, Activity,
   checked-at text and manual refresh buttons from Today. Auto-refresh and use
   one friendly retry line when needed. Do not erase their underlying user data.
 - [ ] All display times use the student's timezone and the brief's relative
@@ -110,7 +110,10 @@ items, goals, saved lesson continuation and real-state onboarding.
 Local verification: 2,498 web tests pass; web/UI TypeScript checks pass; web lint
 passes. Tests include failed-load handling, account-response isolation, local day
 and DST projections, plus the existing voice lifecycle and cleanup suite.
-Browser screenshots and live navigation/call checks are still pending.
+Browser screenshots and live navigation/call checks passed for this slice. See
+[evidence and per-item acceptance](evidence/m2-shell-today/README.md).
+The preview runs release `09e177b` with planning/goals flags paired across frontend
+and backend. Screenshots use only synthetic QA data; phone tests remain pending.
 
 Remaining before M2 acceptance: combined typed/transcript Vox conversation,
 empty-state suggestions/settings, 8,000-character typed-message contract audit,
