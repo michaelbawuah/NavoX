@@ -127,6 +127,9 @@ function sameOwner(left: VoxOwner | null, right: VoxOwner | null): boolean {
  * account loss/change, reset, or logout must call bindOwner(null) or hangUp first.
  * No browser storage, durable session, provider grant or memory consent is created.
  */
+const MAX_TERMINAL_RECOVERIES = 3;
+const TERMINAL_RECOVERY_WINDOW_MS = 120_000;
+
 export class VoxCallController {
   private state: VoxCallState;
   private epoch = 0;
@@ -147,6 +150,7 @@ export class VoxCallController {
   private mediaReconnected = false;
   private mediaResumeStandby = false;
   private cleanupIncomplete = false;
+  private terminalRecoveries: number[] = [];
   private callIntent: {
     owner: Readonly<VoxOwner>;
     callId: string;
@@ -358,6 +362,7 @@ export class VoxCallController {
     this.resumeStandby = false;
     this.deferredJoin = false;
     this.reconnectAfterCheck = false;
+    this.terminalRecoveries = [];
     await this.join(false);
   }
 
@@ -371,6 +376,16 @@ export class VoxCallController {
       )
     )
       return;
+    const now = this.moment();
+    this.terminalRecoveries = this.terminalRecoveries.filter(
+      (at) => now - at < TERMINAL_RECOVERY_WINDOW_MS,
+    );
+    if (this.terminalRecoveries.length >= MAX_TERMINAL_RECOVERIES) {
+      // Persistent worker/provider failures must not create an endless paid loop.
+      await this.hangUp("connection-failed");
+      return;
+    }
+    this.terminalRecoveries.push(now);
     this.resumeStandby = this.mediaReconnecting
       ? this.mediaResumeStandby
       : this.state.phase === "standby";

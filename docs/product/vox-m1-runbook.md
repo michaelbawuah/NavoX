@@ -223,3 +223,11 @@ changed. Full browser fallback requalification is still required for this fix.
 Official references reviewed 2026-10-23:
 - https://developers.openai.com/api/docs/guides/function-calling
 - https://developers.openai.com/api/docs/models/gpt-5.6-luna
+
+
+Repeated terminal connection replacement is now bounded to three recoveries in
+two minutes. A fourth failure ends the call through the existing cleanup path
+and offers a fresh call, preventing a persistent provider fault from producing
+an endless reconnect loop. Ordinary same-room SDK recovery does not consume
+this allowance. A new call resets it; old recoveries expire from the window.
+This changes failure handling, not layout or the normal successful call flow.

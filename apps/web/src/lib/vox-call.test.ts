@@ -1360,3 +1360,53 @@ describe("terminal loss after SDK reconnect starts", () => {
     expect(env.controller.current().phase).toBe("ended");
   });
 });
+
+describe("bounded terminal recovery", () => {
+  it("ends repeated worker failures, releases audio, and requires a fresh call", async () => {
+    const env = rig();
+    await env.controller.start();
+    const firstCallId = env.controller.current().callId;
+    for (let index = 0; index < 3; index += 1) {
+      env.requests[index].onEvent({ type: "disconnected" });
+      await vi.waitFor(() => {
+        expect(env.requests).toHaveLength(index + 2);
+        expect(env.controller.current().phase).toBe("active");
+      });
+    }
+    env.requests[3].onEvent({ type: "disconnected" });
+    await vi.waitFor(() =>
+      expect(env.controller.current()).toMatchObject({
+        phase: "ended",
+        endReason: "connection-failed",
+      }),
+    );
+    expect(env.transport.connect).toHaveBeenCalledTimes(4);
+    for (const request of env.requests) {
+      expect(request.mayTransmitAudio()).toBe(false);
+      expect(request.mayPlayAudio()).toBe(false);
+    }
+    for (const joined of env.connections) {
+      expect(joined.close).toHaveBeenCalledTimes(1);
+    }
+    await env.controller.start();
+    expect(env.controller.current().callId).not.toBe(firstCallId);
+    await env.controller.reconnect();
+    expect(env.transport.connect).toHaveBeenCalledTimes(6);
+    await env.controller.dispose();
+  });
+
+  it("allows later network recovery after the failure window has elapsed", async () => {
+    const env = rig();
+    await env.controller.start();
+    const firstCallId = env.controller.current().callId;
+    for (let index = 0; index < 5; index += 1) {
+      await env.controller.reconnect();
+      expect(env.controller.current().callId).toBe(firstCallId);
+      env.advance(120_001);
+      env.controller.resume();
+    }
+    expect(env.controller.current().phase).toBe("active");
+    expect(env.transport.connect).toHaveBeenCalledTimes(6);
+    await env.controller.dispose();
+  });
+});
