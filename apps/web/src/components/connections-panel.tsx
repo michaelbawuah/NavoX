@@ -72,6 +72,10 @@ export function ConnectionsPanel({
   const [catalog, setCatalog] = useState<ConnectorEntry[]>([]);
   const [connections, setConnections] = useState<ManagedConnection[]>([]);
   const [tab, setTab] = useState<"connected" | "browse">("connected");
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("source") === "gmail")
+      setTab("browse");
+  }, []);
   const [query, setQuery] = useState("");
   const [showImport, setShowImport] = useState(false);
   const [showRest, setShowRest] = useState(false);

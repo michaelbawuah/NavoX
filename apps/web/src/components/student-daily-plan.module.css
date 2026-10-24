@@ -1,16 +1,16 @@
 .panel {
-  color: #edf5f7;
+  color: var(--nx-text);
   display: grid;
   gap: 1rem;
   min-width: 0;
-  --plan-border: #344e5b;
-  --plan-muted: #b1c3cc;
+  --plan-border: var(--nx-border);
+  --plan-muted: var(--nx-muted);
 }
 .card {
   border: 1px solid var(--plan-border);
   border-radius: 1rem;
   padding: clamp(1rem, 2vw, 1.5rem);
-  background: #12232f;
+  background: var(--nx-surface);
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -29,7 +29,7 @@
   letter-spacing: 0.14em;
   font-size: 0.7rem;
   font-weight: 700;
-  color: #a9dfca;
+  color: var(--nx-accent-text);
 }
 .panel h2 {
   font-size: 1.5rem;
@@ -116,7 +116,7 @@
   outline-offset: 3px;
 }
 .tabs {
-  border-bottom: 1px solid #344e5b;
+  border-bottom: 1px solid var(--nx-border);
   padding-bottom: 0.65rem;
 }
 .tabs button {
@@ -161,7 +161,7 @@
   grid-column: 1 / -1;
 }
 .form {
-  border-top: 1px solid #344e5b;
+  border-top: 1px solid var(--nx-border);
   margin-top: 1rem;
   padding-top: 1rem;
   display: grid;
@@ -350,7 +350,7 @@
 .disclosure {
   margin-top: 1rem;
   padding-top: 1rem;
-  border-top: 1px solid #344e5b;
+  border-top: 1px solid var(--nx-border);
 }
 .disclosure summary {
   color: #c6e0e7;
@@ -411,4 +411,19 @@
     padding: 0.8rem;
     gap: 0.6rem;
   }
+}
+
+.planCanvas {
+  min-width: 0;
+}
+.panel :is(input, select, textarea) {
+  background: var(--nx-bg);
+  color: var(--nx-text);
+  border-color: var(--nx-border);
+  min-height: 44px;
+}
+.panel .primary {
+  background: var(--nx-accent);
+  color: var(--nx-on-accent);
+  border-color: var(--nx-accent);
 }

@@ -1,0 +1,505 @@
+.overview,
+.welcome {
+  display: grid;
+  gap: 24px;
+  color: var(--nx-text);
+  min-width: 0;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.toolbar nav {
+  display: flex;
+  padding: 4px;
+  background: var(--nx-surface);
+  border: 1px solid var(--nx-border);
+  border-radius: 10px;
+}
+.toolbar p {
+  flex: 1;
+  min-width: 180px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--nx-muted);
+  margin: 0;
+}
+.toolbar strong {
+  color: var(--nx-text);
+}
+.overview button,
+.welcome button,
+.goals a {
+  font: 600 14px / 1.4 var(--nx-font);
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+  background: var(--nx-surface);
+  color: var(--nx-text);
+  padding: 8px 14px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.overview button:disabled,
+.welcome button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.overview .primary,
+.welcome .primary {
+  background: var(--nx-accent);
+  color: var(--nx-on-accent);
+  border-color: var(--nx-accent);
+}
+.planColumns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.9fr) minmax(240px, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.planColumns > div {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+.schedule {
+  padding: 16px;
+  border: 1px solid var(--nx-border);
+  border-radius: 14px;
+  min-width: 0;
+}
+.scheduleScroll {
+  overflow-x: auto;
+}
+.scheduleInner {
+  min-width: 600px;
+}
+.axis {
+  height: 28px;
+  position: relative;
+  color: var(--nx-muted);
+  font-size: 12px;
+}
+.axis span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+.dayRow {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  border-top: 1px solid var(--nx-border);
+  height: 68px;
+  align-items: center;
+}
+.dayRow > time {
+  font-size: 13px;
+  color: var(--nx-muted);
+}
+.dayRow:where([data-today="true"]) > time {
+  color: var(--nx-accent-text);
+  font-weight: 600;
+}
+.track {
+  position: relative;
+  height: 100%;
+}
+.track .planBlock {
+  position: absolute;
+  top: 12px;
+  min-width: 8px;
+  height: 44px;
+  min-height: 44px;
+  padding: 6px;
+  border: 1px solid var(--nx-raised);
+  background: var(--nx-raised);
+  color: var(--nx-muted);
+  border-radius: 7px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  text-align: left;
+}
+.track .planBlock[data-study="true"] {
+  border-color: var(--nx-accent);
+  background: color-mix(in srgb, var(--nx-accent) 15%, var(--nx-bg));
+  color: var(--nx-text);
+}
+.track .planBlock[data-shift="true"] {
+  border: 1px dashed var(--nx-warning);
+  background: transparent;
+  color: var(--nx-warning);
+}
+.track .planBlock[data-done="true"] {
+  opacity: 0.45;
+}
+.track .planBlock[aria-pressed="true"] {
+  outline: 1px solid var(--nx-accent);
+  outline-offset: 1px;
+}
+.now {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--nx-danger);
+  pointer-events: none;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--nx-muted);
+}
+.legend span:first-child {
+  color: var(--nx-accent-text);
+}
+.legend span:nth-child(3) {
+  color: var(--nx-warning);
+}
+.tasks,
+.nextStudy,
+.card {
+  border: 1px solid var(--nx-border);
+  border-radius: 14px;
+  padding: 20px;
+  background: var(--nx-surface);
+}
+.tasks h2 {
+  font-size: 18px;
+  margin: 0 0 24px;
+}
+.tasks h3 {
+  font-size: 12px;
+  text-transform: uppercase;
+  color: var(--nx-muted);
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--nx-border);
+  padding-bottom: 8px;
+  margin: 24px 0 0;
+}
+.tasks .task {
+  display: flex;
+  align-items: start;
+  gap: 10px;
+  border: 0;
+  padding: 14px 0;
+  text-align: left;
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+}
+.task > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.task strong {
+  font-size: 14px;
+  display: block;
+  overflow-wrap: anywhere;
+}
+.task small {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.6;
+  color: var(--nx-muted);
+}
+.task small i {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+.taskCircle {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--nx-muted);
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.task time {
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 4px 7px;
+  background: var(--nx-raised);
+  flex: 0 0 auto;
+  max-width: 78px;
+  text-align: center;
+}
+.task time[data-urgent="true"] {
+  background: color-mix(in srgb, var(--nx-warning) 15%, var(--nx-surface));
+  color: var(--nx-warning);
+}
+.nextStudy > p {
+  font-size: 13px;
+  color: var(--nx-muted);
+  margin: 4px 0 12px;
+}
+.nextStudy > p:first-child {
+  color: var(--nx-accent-text);
+  font-weight: 600;
+}
+.nextStudy h3 {
+  font-size: 17px;
+  margin: 0;
+}
+.goals {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 14px;
+}
+.goals a {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 400;
+  border-radius: 999px;
+  font-size: 13px;
+}
+.goals b {
+  color: var(--nx-accent-text);
+}
+.hero {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  padding: 24px 0;
+}
+.hero h2 {
+  font: 700 32px / 1.2 var(--nx-font);
+  margin: 0 0 16px;
+}
+.hero p {
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--nx-muted);
+  margin: 0;
+}
+.noa {
+  position: relative;
+  flex: 0 0 160px;
+}
+.noa svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.noa > span {
+  position: absolute;
+  left: 0;
+  top: 8px;
+  z-index: 1;
+  transform: rotate(-7deg);
+  background: var(--nx-accent);
+  color: var(--nx-on-accent);
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.capture {
+  padding: 20px;
+  border: 1px solid var(--nx-accent);
+  border-radius: 16px;
+  background: var(--nx-surface);
+}
+.capture > label {
+  font-size: 14px;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 12px;
+}
+.capture > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.capture input {
+  min-width: 0;
+  flex: 1;
+  background: var(--nx-bg);
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+  color: var(--nx-text);
+  min-height: 48px;
+  padding: 12px;
+  font: 14px var(--nx-font);
+}
+.capture .shortcuts {
+  flex-wrap: wrap;
+  margin-top: 14px;
+  color: var(--nx-muted);
+  font-size: 13px;
+  gap: 8px;
+}
+.shortcuts button {
+  border-radius: 999px;
+  font-size: 13px;
+}
+.welcomeColumns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+.welcomeColumns h3 {
+  font-size: 18px;
+  margin: 0;
+}
+.welcomeColumns p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--nx-muted);
+}
+.card label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--nx-border);
+  font-size: 14px;
+}
+.card input,
+.card select {
+  min-height: 44px;
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+  background: var(--nx-bg);
+  color: var(--nx-text);
+  font: 14px var(--nx-font);
+  padding: 8px;
+  max-width: 170px;
+}
+.example {
+  padding: 20px;
+  border: 1px dashed var(--nx-border);
+  border-radius: 16px;
+}
+.exampleTask {
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--nx-surface);
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+}
+.exampleTask span {
+  color: var(--nx-muted);
+}
+.example .arrow {
+  text-align: center;
+  font-size: 28px;
+  margin: 12px;
+}
+.exampleBlocks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.exampleBlocks span {
+  padding: 8px;
+  border: 1px solid var(--nx-accent);
+  border-radius: 6px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--nx-accent) 12%, var(--nx-bg));
+}
+.classPrompt {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  border: 1px solid var(--nx-border);
+  border-radius: 12px;
+  background: var(--nx-surface);
+  font-size: 14px;
+  color: var(--nx-muted);
+}
+.classPrompt a {
+  text-decoration: none;
+  white-space: nowrap;
+}
+@media (max-width: 1100px) {
+  .planColumns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 767px) {
+  .hero {
+    gap: 12px;
+    padding: 0;
+  }
+  .noa {
+    flex-basis: 84px;
+  }
+  .noa > span {
+    font-size: 10px;
+  }
+  .hero h2 {
+    font-size: 26px;
+  }
+  .hero p {
+    font-size: 14px;
+  }
+  .welcomeColumns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .capture {
+    padding: 16px;
+  }
+  .capture > div {
+    flex-wrap: wrap;
+  }
+  .capture input {
+    flex-basis: 100%;
+  }
+  .capture button {
+    flex-grow: 1;
+  }
+  .toolbar {
+    gap: 8px;
+  }
+  .toolbar nav {
+    width: 100%;
+  }
+  .toolbar nav button {
+    flex: 1;
+    padding: 8px;
+  }
+  .toolbar p {
+    flex-basis: 100%;
+  }
+  .schedule {
+    padding: 12px;
+  }
+  .classPrompt {
+    align-items: start;
+    flex-direction: column;
+  }
+  .card label {
+    flex-wrap: wrap;
+  }
+  .task time {
+    max-width: 60px;
+  }
+}
+
+.toolbar nav button {
+  border: 0;
+  background: transparent;
+  color: var(--nx-muted);
+}
+.toolbar nav [aria-pressed="true"] {
+  background: var(--nx-raised);
+  color: var(--nx-text);
+}

@@ -25,12 +25,26 @@ const account = {
   },
 };
 
-function renderView(view: TodayWorkspaceView = "today") {
+function renderView(view: TodayWorkspaceView = "today", connected = false) {
   return renderToStaticMarkup(
     createElement(TodayWorkspace, {
       view,
       account,
-      connections: [],
+      connections: connected
+        ? [
+            {
+              id: "google-1",
+              provider: "google",
+              external_email: "student@example.test",
+              status: "active",
+              granted_scopes: [
+                "https://www.googleapis.com/auth/gmail.readonly",
+              ],
+              last_checked_at: null,
+              last_error: null,
+            },
+          ]
+        : [],
       message: "",
       onConnectionsChanged: vi.fn(async () => {}),
       onSignOut: vi.fn(async () => {}),
@@ -59,6 +73,16 @@ describe("Home Vox feature entry", () => {
 });
 
 describe("workspace destinations", () => {
+  it("shows honest examples and connection setup before email access, without draft forms", () => {
+    const markup = renderView("inbox");
+    expect(markup).toContain("Never miss an email that needs you");
+    expect(markup).toContain("Example emails, not your inbox");
+    expect(markup).toContain("Connect Gmail");
+    expect(markup).not.toContain('id="drafts"');
+    expect(markup).not.toContain("Generate draft");
+    expect(markup).not.toContain("Refresh");
+  });
+
   it("does not advertise an empty connection list when its state is unavailable", () => {
     const markup = renderToStaticMarkup(
       createElement(TodayWorkspace, {
@@ -94,7 +118,7 @@ describe("workspace destinations", () => {
   });
 
   it("puts draft and approval controls in the Inbox without a hidden email-actions accordion", () => {
-    const markup = renderView("inbox");
+    const markup = renderView("inbox", true);
     expect(markup).toContain('id="drafts"');
     expect(markup).toContain('id="approvals"');
     expect(markup).toContain("Generate draft");

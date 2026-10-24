@@ -35,8 +35,8 @@ import { StudentCourseWorkspace } from "./student-course-workspace";
 import { StudentDailyPlan } from "./student-daily-plan";
 import { StudentDayReview } from "./student-day-review";
 import { StudentEmailActions } from "./student-email-actions";
-import { StudentGoals, StudentGoalsCard } from "./student-goals";
-import { StudentRecovery, StudentRecoveryCard } from "./student-recovery";
+import { StudentGoals } from "./student-goals";
+import { StudentRecovery } from "./student-recovery";
 import { TodayWorkspace, type TodayWorkspaceView } from "./today-workspace";
 import { WorkspaceShell } from "./workspace-shell";
 
@@ -444,8 +444,6 @@ export function AccountWorkspace({
               accountName={account.display_name ?? account.email}
               onSignOut={signOut}
             >
-              {productFeatures.studentRecovery && <StudentRecoveryCard />}
-              {productFeatures.studentGoals && <StudentGoalsCard />}
               {productFeatures.studentCalendarAvailability && (
                 <StudentAvailability
                   key={`availability:${account.workspace.id}:${account.id}`}

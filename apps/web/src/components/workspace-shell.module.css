@@ -81,7 +81,7 @@
   color: var(--nx-text);
   font-weight: 600;
 }
-.navigation [aria-current="page"] svg {
+.navigation :where([aria-current="page"]) svg {
   color: var(--nx-accent);
 }
 .navigation > button:disabled {
@@ -123,9 +123,9 @@
 .account summary > span:nth-child(2) {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+.account summary > svg {
+  flex: 0 0 20px;
 }
 .avatar {
   display: grid;
@@ -393,9 +393,23 @@
 .accountName strong,
 .accountName small {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  line-height: 1.4;
+}
+.profileIdentity {
+  padding: 8px 12px 12px;
+  border-bottom: 1px solid var(--nx-border);
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
+.profileIdentity strong,
+.profileIdentity small {
+  display: block;
+}
+.profileIdentity small {
+  color: var(--nx-muted);
+  font-size: 12px;
 }
 .accountName strong {
   font-size: 14px;

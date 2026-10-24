@@ -297,6 +297,10 @@ export function WorkspaceShell({
               <Icon name="More" />
             </summary>
             <div className={styles.profileMenu}>
+              <div className={styles.profileIdentity}>
+                <strong>{accountName || "Your account"}</strong>
+                {savedProfile?.school && <small>{savedProfile.school}</small>}
+              </div>
               <Link
                 href="/connections"
                 aria-current={current === "Connections" ? "page" : undefined}

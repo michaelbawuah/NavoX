@@ -738,3 +738,30 @@
 .goal:nth-child(3) {
   --goal-color: #7aa2f7;
 }
+
+.voxChip,
+.progressChip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--nx-border);
+  background: var(--nx-surface);
+  font: 13px var(--nx-font);
+  color: var(--nx-muted);
+}
+.voxChip {
+  border-color: var(--nx-accent);
+  color: var(--nx-accent-text);
+  cursor: pointer;
+}
+.voxChip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.chips [role="status"] {
+  flex-basis: 100%;
+  font-size: 13px;
+  color: var(--nx-muted);
+}

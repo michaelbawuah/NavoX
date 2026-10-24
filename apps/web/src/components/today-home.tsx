@@ -51,6 +51,7 @@ import {
 import { TodaySetup } from "./today-setup";
 import { TodayStudyActions } from "./today-study-actions";
 import type { TodayWorkspaceProps } from "./today-workspace";
+import { useVoxRequest } from "./use-vox-request";
 import { useVoxCall } from "./vox-call-provider";
 import { WorkspaceShell } from "./workspace-shell";
 
@@ -105,6 +106,7 @@ function TodayHomeAccount({
     [triedVox, setTriedVox] = useState(false);
   const [setupStarted, setSetupStarted] = useState(false);
   const call = useVoxCall();
+  const voxRequest = useVoxRequest();
   const epoch = useRef(0);
   const setupKey = `navox:setup:${accountKey}`,
     voxKey = `navox:tried-vox:${accountKey}`;
@@ -327,6 +329,50 @@ function TodayHomeAccount({
                 ? "I’m Noa. Give me about 3 minutes and I’ll know your week: your classes, what’s due, and when you’re actually free."
                 : summary}
             </p>
+            {!welcoming && data && (
+              <div className={styles.chips}>
+                <button
+                  type="button"
+                  className={styles.voxChip}
+                  disabled={!voxRequest.available || voxRequest.busy}
+                  onClick={() =>
+                    void voxRequest.ask(
+                      local?.hour !== undefined && local.hour < 17
+                        ? "Plan my afternoon around my real classes, shifts and deadlines. Read back every proposed change and wait for my approval before saving it."
+                        : "Help me plan tomorrow around my real classes, shifts and deadlines. Read back every proposed change and wait for my approval before saving it.",
+                    )
+                  }
+                >
+                  Ask Vox:{" "}
+                  {local?.hour !== undefined && local.hour < 17
+                    ? "plan my afternoon"
+                    : "plan tomorrow"}
+                </button>
+                {rows.some((row) => row.study) && (
+                  <span className={styles.progressChip}>
+                    {
+                      rows.filter(
+                        (row) =>
+                          row.study &&
+                          ["done", "took_longer"].includes(row.study.status),
+                      ).length
+                    }{" "}
+                    of{" "}
+                    {
+                      rows.filter(
+                        (row) =>
+                          row.study &&
+                          !["superseded", "skipped"].includes(row.study.status),
+                      ).length
+                    }{" "}
+                    study blocks done today
+                  </span>
+                )}
+                {voxRequest.notice && (
+                  <span role="status">{voxRequest.notice}</span>
+                )}
+              </div>
+            )}
             {welcoming && (
               <div className={styles.heroActions}>
                 <Button

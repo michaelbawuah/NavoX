@@ -24,6 +24,7 @@ import { ApprovalPanel } from "./approval-panel";
 import { CommunicationDrafts } from "./communication-drafts";
 import { ConnectionsPanel } from "./connections-panel";
 import { DismissCommitment } from "./dismiss-commitment";
+import { InboxWelcome } from "./inbox-welcome";
 import {
   IntelligenceControls,
   IntelligenceFeedback,
@@ -36,6 +37,7 @@ import { PersonalRoutines } from "./personal-routines";
 import { ProactivePanel } from "./proactive-panel";
 import { SourceReferences } from "./source-references";
 import { StudentCalendarConnections } from "./student-calendar-connections";
+import { StudentClassesWorkspace } from "./student-classes";
 import { StudentEmailCard } from "./student-email-actions";
 import { StudentGoalsCard } from "./student-goals";
 import { StudentLmsFeeds } from "./student-lms-feeds";
@@ -258,6 +260,31 @@ function greeting(timezone: string): string {
 
 export function TodayWorkspace(props: TodayWorkspaceProps) {
   if (!props.view || props.view === "today") return <TodayHome {...props} />;
+  if (
+    props.view === "inbox" &&
+    !props.connectionsUnavailable &&
+    !props.connections.some(
+      (c) =>
+        c.status === "active" &&
+        c.granted_scopes.some((scope) =>
+          [
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.modify",
+          ].includes(scope),
+        ),
+    )
+  )
+    return (
+      <WorkspaceShell
+        current="Inbox"
+        accountName={props.account.display_name ?? props.account.email}
+        accountKey={`${props.account.workspace.id}:${props.account.id}`}
+        timezone={props.account.timezone}
+        onSignOut={props.onSignOut}
+      >
+        <InboxWelcome />
+      </WorkspaceShell>
+    );
   return <LegacyTodayWorkspace {...props} />;
 }
 
@@ -1390,14 +1417,22 @@ function LegacyTodayWorkspace({
                     <dt>Email</dt>
                     <dd>{account.email}</dd>
                   </div>
-                  <div>
-                    <dt>Workspace</dt>
-                    <dd>{account.workspace.name}</dd>
-                  </div>
                 </dl>
                 <Link className={styles.textLink} href="/connections">
                   Manage connected apps
                 </Link>
+              </section>
+              <section id="school-term" aria-label="School and term">
+                <StudentClassesWorkspace
+                  settingsOnly
+                  accountId={`${account.workspace.id}:${account.id}`}
+                  onTimezoneChange={(zone) =>
+                    notifyStudentTimezoneChanged(
+                      `${account.workspace.id}:${account.id}`,
+                      zone,
+                    )
+                  }
+                />
               </section>
               <AppearanceSettings
                 accountKey={`${account.workspace.id}:${account.id}`}

@@ -1,7 +1,7 @@
 .workspace {
-  --student-border: #30424f;
-  --student-muted: #afbfca;
-  --student-ink: #f4f7fa;
+  --student-border: var(--nx-border);
+  --student-muted: var(--nx-muted);
+  --student-ink: var(--nx-text);
   color: var(--student-ink);
   display: grid;
   gap: 1.25rem;
@@ -23,7 +23,7 @@
 }
 .hero p {
   margin: 0;
-  color: #afbfca;
+  color: var(--nx-muted);
   max-width: 39rem;
   line-height: 1.6;
 }
@@ -44,7 +44,7 @@
   font-size: 1rem;
 }
 .eyebrow {
-  color: #a4e0d1;
+  color: var(--nx-accent-text);
   text-transform: uppercase;
   letter-spacing: 0.15em;
   font-size: 0.7rem;
@@ -60,7 +60,7 @@
 }
 .heading p:not(.eyebrow) {
   margin: 0;
-  color: #afbfca;
+  color: var(--nx-muted);
   font-size: 0.9rem;
   line-height: 1.6;
   max-width: 43rem;
@@ -68,11 +68,11 @@
 .panel,
 .dayPanel {
   min-width: 0;
-  border: 1px solid #30424f;
+  border: 1px solid var(--nx-border);
   border-radius: 1.1rem;
   padding: clamp(1rem, 2vw, 1.5rem);
-  background: #111e2a;
-  color: #f4f7fa;
+  background: var(--nx-surface);
+  color: var(--nx-text);
   overflow-wrap: anywhere;
 }
 .dayPanel {
@@ -89,11 +89,11 @@
   list-style: none;
   padding: 0;
   margin: 0 0 1.5rem;
-  color: #a9bbc7;
+  color: var(--nx-muted);
   font-size: 0.85rem;
 }
 .setupSteps li[aria-current="step"] {
-  color: #c3f4e7;
+  color: var(--nx-accent-text);
   font-weight: 650;
 }
 .setupSteps span {
@@ -213,7 +213,7 @@
 .form {
   margin-top: 1rem;
   padding-top: 1.1rem;
-  border-top: 1px solid #30424f;
+  border-top: 1px solid var(--nx-border);
   display: grid;
   gap: 1rem;
 }
@@ -268,7 +268,7 @@
   display: flex;
   gap: 0.3rem;
   flex-wrap: wrap;
-  border-bottom: 1px solid #30424f;
+  border-bottom: 1px solid var(--nx-border);
   padding-bottom: 0.6rem;
 }
 .tabs button {
@@ -413,7 +413,7 @@
   display: flex;
   gap: 0.6rem;
   align-items: center;
-  color: #afbfca;
+  color: var(--nx-muted);
   font-size: 0.8rem;
 }
 .dateNav input {
@@ -575,7 +575,7 @@
   line-height: 1.5;
   font-size: 0.8rem;
 }
-.section .actions button {
+.section :where(.actions) button {
   min-height: 2.2rem;
   padding: 0.35rem 0.6rem;
   font-size: 0.8rem;
@@ -635,7 +635,7 @@
   gap: 0.6rem;
   align-items: center;
   padding: 0.9rem 0;
-  border-bottom: 1px solid #30424f;
+  border-bottom: 1px solid var(--nx-border);
 }
 .breakRow p {
   margin: 0;
@@ -682,4 +682,87 @@
     scroll-behavior: auto;
     transition: none;
   }
+}
+
+.classesToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.classesToolbar p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--nx-muted);
+}
+.addMenu {
+  position: relative;
+  z-index: 5;
+}
+.addMenu summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 8px 18px;
+  border-radius: 8px;
+  background: var(--nx-accent);
+  color: var(--nx-on-accent);
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+.addMenu summary::-webkit-details-marker {
+  display: none;
+}
+.addMenu > div {
+  position: absolute;
+  right: 0;
+  top: 50px;
+  display: grid;
+  min-width: 180px;
+  padding: 8px;
+  border: 1px solid var(--nx-border);
+  border-radius: 12px;
+  background: var(--nx-surface);
+}
+.addMenu button {
+  text-align: left;
+  border: 0;
+  min-height: 44px;
+  background: transparent;
+  color: var(--nx-text);
+  cursor: pointer;
+}
+.weekPanel {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.workspace .tabs {
+  border-bottom: 0;
+}
+.workspace .tabs button {
+  border-radius: 8px;
+  min-height: 44px;
+}
+.workspace .tabs button[aria-pressed="true"] {
+  background: var(--nx-raised);
+  color: var(--nx-text);
+  border-color: var(--nx-border);
+}
+.workspace :is(input, select, textarea) {
+  background: var(--nx-bg);
+  color: var(--nx-text);
+  border-color: var(--nx-border);
+  min-height: 44px;
+}
+.workspace :is(button, summary, a):focus-visible {
+  outline: 2px solid var(--nx-accent);
+  outline-offset: 3px;
+}
+.workspace .primary {
+  background: var(--nx-accent);
+  color: var(--nx-on-accent);
+  border-color: var(--nx-accent);
 }

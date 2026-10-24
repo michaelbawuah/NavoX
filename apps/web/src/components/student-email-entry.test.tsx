@@ -12,7 +12,7 @@ const original = productFeatures.studentEmail;
 afterEach(() => {
   productFeatures.studentEmail = original;
 });
-function render(view: TodayWorkspaceView) {
+function render(view: TodayWorkspaceView, connected = false) {
   return renderToStaticMarkup(
     createElement(TodayWorkspace, {
       view,
@@ -27,7 +27,21 @@ function render(view: TodayWorkspaceView) {
           workspace_type: "personal",
         },
       },
-      connections: [],
+      connections: connected
+        ? [
+            {
+              id: "google-1",
+              provider: "google",
+              external_email: "student@example.test",
+              status: "active",
+              granted_scopes: [
+                "https://www.googleapis.com/auth/gmail.readonly",
+              ],
+              last_checked_at: null,
+              last_error: null,
+            },
+          ]
+        : [],
       message: "",
       onConnectionsChanged: vi.fn(),
       onSignOut: vi.fn(),
@@ -43,7 +57,7 @@ describe("email review entry points", () => {
   it("adds explicit review links without reading a message when enabled", () => {
     productFeatures.studentEmail = true;
     const today = render("today"),
-      inbox = render("inbox");
+      inbox = render("inbox", true);
     expect(today).not.toContain("One email, one next step");
     expect(today).toContain("Loading your day…");
     expect(today).not.toContain('href="/email-actions"');
