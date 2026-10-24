@@ -131,6 +131,17 @@ def available_slots(
                 "A routine window crosses a clock change; that window was left unscheduled."
             )
         day += timedelta(days=1)
+    # Per-day wake times and smart alarms can overlap a preceding overnight
+    # routine. Count each real minute once before subtracting events or reserving
+    # the deadline buffer, while preserving local-day boundaries.
+    distinct: list[Slot] = []
+    for slot in sorted(slots, key=lambda item: (item.start, item.end)):
+        if distinct and slot.day == distinct[-1].day and slot.start <= distinct[-1].end:
+            previous = distinct[-1]
+            distinct[-1] = Slot(previous.start, max(previous.end, slot.end), previous.day)
+        else:
+            distinct.append(slot)
+    slots = distinct
     for start, end in busy:
         slots = subtract(slots, utc(start), utc(end))
     day = first_day - timedelta(days=1)
