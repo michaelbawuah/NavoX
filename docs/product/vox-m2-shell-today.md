@@ -112,7 +112,7 @@ passes. Tests include failed-load handling, account-response isolation, local da
 and DST projections, plus the existing voice lifecycle and cleanup suite.
 Browser screenshots and live navigation/call checks passed for this slice. See
 [evidence and per-item acceptance](evidence/m2-shell-today/README.md).
-The preview runs release `09e177b` with planning/goals flags paired across frontend
+The preview runs release `79cf83c` with planning/goals flags paired across frontend
 and backend. Screenshots use only synthetic QA data; phone tests remain pending.
 
 Remaining before M2 acceptance: combined typed/transcript Vox conversation,

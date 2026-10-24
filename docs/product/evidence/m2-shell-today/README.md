@@ -2,7 +2,7 @@
 
 Preview: https://vox-test.66-175-235-169.nip.io/
 
-Application release: \`09e177b\`. This is a first slice, not full milestone acceptance.
+Application release: \`79cf83c\`. This is a first slice, not full milestone acceptance.
 All screenshots use the isolated synthetic QA account. The populated screens use
 records saved through the real APIs, not intercepted or hard-coded responses.
 
@@ -12,7 +12,9 @@ records saved through the real APIs, not intercepted or hard-coded responses.
 - [x] Production web build and isolated test deployment.
 - [x] Desktop sidebar, profile menu, local date/time and Cmd/Ctrl+K search.
 - [x] 375 px Chromium touch emulation: tabs, profile menu, scrolling, Planner tap;
-      no horizontal overflow. Physical-phone verification is not included.
+      no horizontal overflow. After scrolling, the goal chip sits above the tab bar,
+      can be tapped, and opens Goals; the header/profile remain aligned.
+      Physical-phone verification is not included.
 - [x] Persistent Vox through Today → Classes → Planner → Today, mobile minimize,
       navigation and reopen: exactly one call admission.
 - [x] Desktop call panel 400 px and modeless; mobile panel 375 px and modal.
@@ -74,7 +76,7 @@ Existing Vox call visual in the new full-screen placement:
 - [ ] Saved Board resume link live check. Board remains behind its existing release
       flag; Part 3 is not being marked complete.
 - [ ] All four onboarding steps completing together against real integrations.
-- [ ] Full source screenshot comparison, long-name handling, consistent course
+- [ ] Full source screenshot comparison, consistent course
       colors across later screens, light-theme interaction and reduced-motion audit.
 
 The header uses a compact 18 px page label while the Today greeting uses 28 px.
@@ -84,3 +86,6 @@ own slot. These differences remain reviewable and are not treated as an exact
 match to every supplied screen. Existing Classes/Planner/Inbox content keeps its
 working behavior pending the later redesign milestone. Noa's artwork and states
 remain Part 2; the current Vox visual is preserved.
+
+GitHub Actions returned no pull-request workflow runs for this stacked draft head;
+local checks and live preview evidence above are the available validation.
