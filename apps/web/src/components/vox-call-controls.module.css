@@ -454,6 +454,10 @@
   overflow-wrap: anywhere;
 }
 
+.webResult p {
+  white-space: pre-wrap;
+}
+
 .webResult a {
   display: inline-flex;
   align-items: center;
