@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   type FormEvent,
   useCallback,
@@ -11,12 +10,14 @@ import {
 } from "react";
 import {
   type ProposedStudyBlock,
-  readStudyOutcome,
+  type RoutinePreview,
+  readRoutinePreview,
   readStudyPlan,
   readStudyPreferences,
   readStudyPreview,
   readStudyTask,
   readStudyTasks,
+  routineRequest,
   type StudyAssignmentDraft,
   type StudyBlock,
   type StudyPlan,
@@ -50,6 +51,11 @@ import {
   studentWeekdays,
   studentWriteUncertain,
 } from "../lib/student-schedule";
+import { parseStudyCapture } from "../lib/study-capture";
+import { mondayOf } from "./classes-week";
+import { PlannerOverview } from "./planner-overview";
+import { PlannerWelcome } from "./planner-welcome";
+import { RoutineChangeReview } from "./routine-change-review";
 import styles from "./student-daily-plan.module.css";
 
 type OutcomeKind = "done" | "took_longer" | "skipped";
@@ -196,6 +202,16 @@ export function StudentStudyPlanPreview({
           <strong>{studyMinutes(unfitted)}</strong>Work that doesn’t fit
         </div>
       </div>
+      <h3>Study blocks being replaced</h3>
+      {preview.replaced_blocks.length ? (
+        <StudyProposedBlocks
+          blocks={preview.replaced_blocks}
+          timezone={timezone}
+        />
+      ) : (
+        <p>No existing study blocks will be replaced.</p>
+      )}
+      <h3>Proposed study blocks</h3>
       <StudyUnfittedWork result={result} timezone={timezone} />
       {result.blocks.length ? (
         <StudyProposedBlocks blocks={result.blocks} timezone={timezone} />
@@ -244,7 +260,7 @@ export function StudentStudyPlanPreview({
             {busy ? "Saving plan…" : "Use this plan"}
           </button>
           <span className={styles.hint}>
-            No school or Google Calendar events are changed.
+            Classes, calendar events and alarms stay as they are.
           </span>
         </div>
       </div>
@@ -500,6 +516,8 @@ export function StudentStudyAgenda({
 export function StudentStudyTaskForm({
   task,
   assignment,
+  captureTitle,
+  captureNow,
   timezone,
   courses,
   disabled,
@@ -508,6 +526,8 @@ export function StudentStudyTaskForm({
 }: {
   task?: StudyTask;
   assignment?: StudyAssignmentDraft;
+  captureTitle?: string;
+  captureNow?: number;
   timezone: string;
   courses: StudentCourse[];
   disabled: boolean;
@@ -515,15 +535,20 @@ export function StudentStudyTaskForm({
   onClose: () => void;
 }) {
   const id = useId();
+  const [capture] = useState(() =>
+    !task && !assignment && captureTitle
+      ? parseStudyCapture(captureTitle, courses, timezone, captureNow)
+      : null,
+  );
   const [value, setValue] = useState<StudyTaskFields>(
     task
       ? studyTaskDraft(task)
       : {
-          title: assignment?.title ?? "",
-          course_id: assignment?.course_id ?? null,
+          title: assignment?.title ?? capture?.title ?? captureTitle ?? "",
+          course_id: assignment?.course_id ?? capture?.course_id ?? null,
           due_at: assignment?.due_at ?? null,
-          estimated_minutes: 60,
-          remaining_minutes: 60,
+          estimated_minutes: capture?.estimated_minutes ?? 60,
+          remaining_minutes: capture?.estimated_minutes ?? 60,
           difficulty: 3,
           priority: 3,
           course_weight: 1,
@@ -531,7 +556,9 @@ export function StudentStudyTaskForm({
         },
   );
   const [deadline, setDeadline] = useState(
-    value.due_at ? studyLocalDateTime(value.due_at, timezone) : "",
+    value.due_at
+      ? studyLocalDateTime(value.due_at, timezone)
+      : (capture?.deadlineLocal ?? ""),
   );
   const [deadlineChoice, setDeadlineChoice] = useState(
     value.due_at ? new Date(value.due_at).toISOString() : "",
@@ -603,6 +630,16 @@ export function StudentStudyTaskForm({
           Cancel
         </button>
       </div>
+      {capture && (
+        <section className={styles.notice} aria-label="Review captured task">
+          <strong>Check what NavoX understood</strong>
+          <p>From: {captureTitle}</p>
+          {capture.notes.map((note) => (
+            <p key={note}>{note}</p>
+          ))}
+          <p>Nothing is saved until you confirm the details below.</p>
+        </section>
+      )}
       {task?.source_needs_review && (
         <div className={styles.notice}>
           <h4>Review the school calendar update</h4>
@@ -858,117 +895,6 @@ export function StudentStudyTaskForm({
   );
 }
 
-function StudyOutcomeForm({
-  block,
-  task,
-  kind,
-  disabled,
-  onSave,
-  onClose,
-}: {
-  block: StudyBlock;
-  task: StudyTask;
-  kind: Exclude<OutcomeKind, "skipped">;
-  disabled: boolean;
-  onSave: (value: {
-    actual_minutes: number;
-    remaining_minutes: number;
-    complete_task: boolean;
-  }) => Promise<boolean>;
-  onClose: () => void;
-}) {
-  const id = useId();
-  const [actual, setActual] = useState(
-    kind === "done" ? String(block.minutes) : "",
-  );
-  const [remaining, setRemaining] = useState(
-    kind === "done"
-      ? String(Math.max(0, task.remaining_minutes - block.minutes))
-      : "",
-  );
-  const [complete, setComplete] = useState(false);
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (
-      await onSave({
-        actual_minutes: Number(actual),
-        remaining_minutes: complete ? 0 : Number(remaining),
-        complete_task: complete,
-      })
-    )
-      onClose();
-  }
-  return (
-    <form className={styles.form} onSubmit={submit}>
-      <div className={styles.heading}>
-        <div>
-          <h3>
-            {kind === "done"
-              ? "Nice work. What’s left?"
-              : "Let’s make room for the rest."}
-          </h3>
-          <p className={styles.muted}>{block.title}</p>
-        </div>
-        <button
-          type="button"
-          className={styles.quiet}
-          disabled={disabled}
-          onClick={onClose}
-        >
-          Cancel
-        </button>
-      </div>
-      <fieldset className={styles.fields} disabled={disabled}>
-        <label htmlFor={`${id}-actual`}>
-          Minutes you actually studied
-          <input
-            id={`${id}-actual`}
-            required
-            type="number"
-            min={0}
-            max={1440}
-            value={actual}
-            onChange={(event) => setActual(event.target.value)}
-          />
-        </label>
-        <label htmlFor={`${id}-left`}>
-          Minutes still needed
-          <input
-            id={`${id}-left`}
-            required
-            disabled={complete}
-            type="number"
-            min={kind === "took_longer" ? 1 : 0}
-            max={10080}
-            value={complete ? "0" : remaining}
-            onChange={(event) => setRemaining(event.target.value)}
-          />
-        </label>
-      </fieldset>
-      {kind === "done" && (
-        <label className={styles.check}>
-          <input
-            type="checkbox"
-            checked={complete}
-            disabled={disabled}
-            onChange={(event) => setComplete(event.target.checked)}
-          />
-          This finishes the whole task
-        </label>
-      )}
-      <p className={styles.hint}>
-        Saving progress adjusts future study blocks in NavoX. Classes, shifts,
-        and external calendars stay as saved.
-      </p>
-      <div className={styles.actions}>
-        <button className={styles.primary} disabled={disabled} type="submit">
-          Save progress and adjust plan
-        </button>
-      </div>
-    </form>
-  );
-}
-
 function StudyWindows({
   label,
   values,
@@ -1212,7 +1138,12 @@ function StudyPreferencesForm({
   );
 }
 
-function StudentDailyPlanAccount() {
+function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
+  const [captureTitle, setCaptureTitle] = useState("");
+  const [routineReview, setRoutineReview] = useState<{
+    body: ReturnType<typeof studyPreferencesDraft> & { request_id: string };
+    preview: RoutinePreview;
+  } | null>(null);
   const [tasks, setTasks] = useState<StudyTask[]>([]),
     [preferences, setPreferences] = useState<StudyPreferences | null>(null),
     [plan, setPlan] = useState<StudyPlan | null>(null),
@@ -1224,13 +1155,9 @@ function StudentDailyPlanAccount() {
     [notice, setNotice] = useState("");
   const [tab, setTab] = useState<"plan" | "tasks" | "rhythm">("plan"),
     [taskEditor, setTaskEditor] = useState<StudyTask | "new" | null>(null),
-    [outcome, setOutcome] = useState<{
-      block: StudyBlock;
-      kind: Exclude<OutcomeKind, "skipped">;
-    } | null>(null),
     [preview, setPreview] = useState<StudyPlanPreview | null>(null),
     [confirmed, setConfirmed] = useState(false),
-    [days, setDays] = useState(7),
+    [days] = useState(7),
     [undo, setUndo] = useState<{ outcomeId: string; revision: number } | null>(
       null,
     ),
@@ -1249,13 +1176,60 @@ function StudentDailyPlanAccount() {
           studyRequest("/tasks", readStudyTasks),
           studyRequest("/preferences", readStudyPreferences),
           studyRequest("/plan", readStudyPlan),
-          studentRequest("/timetable?days=7", readStudentTimetable),
+          studentRequest("/timetable?days=14", readStudentTimetable),
         ]);
       if (request !== generation.current) return false;
       setTasks(nextTasks);
       setPreferences(nextPreferences);
       setPlan(nextPlan);
-      setTimetable(nextTimetable);
+      const aligned = mondayOf(nextTimetable.date);
+      const week =
+        nextTimetable.date === aligned
+          ? nextTimetable
+          : await studentRequest(
+              `/timetable?days=14&date=${aligned}`,
+              readStudentTimetable,
+            );
+      if (request !== generation.current) return false;
+      setTimetable(week);
+      // A Today link opens a review form, never a write from a URL.
+      const intent = new URLSearchParams(window.location.hash.slice(1));
+      const block = nextPlan.blocks.find(
+        (item) => item.id === intent.get("block") && item.status === "planned",
+      );
+      const kind = intent.get("outcome");
+      if (
+        !reset &&
+        block &&
+        !nextPlan.needs_review &&
+        (kind === "done" || kind === "took_longer")
+      ) {
+        setTab("plan");
+        setNotice(
+          `Choose ${kind === "done" ? "Done" : "Took longer"} below to review every affected change.`,
+        );
+        window.history.replaceState(
+          window.history.state,
+          "",
+          window.location.pathname + window.location.search,
+        );
+      } else if (!reset && block && kind === "skipped") {
+        setTab("plan");
+        setNotice(`Review ${block.title} below, then choose Skip to confirm.`);
+        window.history.replaceState(
+          window.history.state,
+          "",
+          window.location.pathname + window.location.search,
+        );
+      } else if (!reset && window.location.hash === "#add-task") {
+        setTab("tasks");
+        setTaskEditor("new");
+        window.history.replaceState(
+          window.history.state,
+          "",
+          window.location.pathname + window.location.search,
+        );
+      }
       setError("");
       setUndo((current) =>
         !nextPlan.needs_review && current?.revision === nextPlan.revision
@@ -1266,7 +1240,6 @@ function StudentDailyPlanAccount() {
       if (reset) {
         setUncertain(false);
         setTaskEditor(null);
-        setOutcome(null);
         setPreview(null);
         setConfirmed(false);
         setLastResult(null);
@@ -1287,7 +1260,12 @@ function StudentDailyPlanAccount() {
   useEffect(() => {
     alive.current = true;
     void load();
+    const changed = () => {
+      void load();
+    };
+    window.addEventListener("navox:study-plan-changed", changed);
     return () => {
+      window.removeEventListener("navox:study-plan-changed", changed);
       alive.current = false;
       ++generation.current;
     };
@@ -1328,7 +1306,61 @@ function StudentDailyPlanAccount() {
       if (alive.current) setBusy(false);
     }
   }
-  const locked = busy || loading || uncertain;
+  const locked = busy || loading || uncertain || !!routineReview;
+  async function reviewRoutine(
+    value: ReturnType<typeof studyPreferencesDraft>,
+  ): Promise<boolean> {
+    if (operation.current || locked) return false;
+    operation.current = true;
+    setBusy(true);
+    setError("");
+    const body = { ...value, request_id: crypto.randomUUID() };
+    try {
+      const preview = await routineRequest(
+        accountKey,
+        "/preferences/preview",
+        readRoutinePreview,
+        "POST",
+        body,
+      );
+      if (alive.current) setRoutineReview({ body, preview });
+    } catch (cause) {
+      if (alive.current) setError(studentError(cause));
+    } finally {
+      operation.current = false;
+      if (alive.current) setBusy(false);
+    }
+    return false;
+  }
+  async function confirmRoutine() {
+    if (operation.current || !routineReview) return;
+    operation.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      await routineRequest(
+        accountKey,
+        "/preferences/confirm",
+        readStudyPreferences,
+        "POST",
+        {
+          ...routineReview.body,
+          preview_hash: routineReview.preview.preview_hash,
+        },
+      );
+      if (!alive.current) return;
+      setRoutineReview(null);
+      if (!(await load())) setUncertain(true);
+      setNotice(
+        "Routine saved. Review a new study plan if your blocks changed.",
+      );
+    } catch (cause) {
+      if (alive.current) setError(studentError(cause));
+    } finally {
+      operation.current = false;
+      if (alive.current) setBusy(false);
+    }
+  }
   async function previewPlan() {
     if (operation.current || locked) return;
     operation.current = true;
@@ -1352,69 +1384,8 @@ function StudentDailyPlanAccount() {
       if (alive.current) setBusy(false);
     }
   }
-  async function record(
-    block: StudyBlock,
-    kind: OutcomeKind,
-    progress?: {
-      actual_minutes: number;
-      remaining_minutes: number;
-      complete_task: boolean;
-    },
-  ) {
-    const task = tasks.find((task) => task.id === block.task_id);
-    if (!task) return false;
-    const result = await mutate(
-      `/blocks/${block.id}/outcome`,
-      readStudyOutcome,
-      "POST",
-      {
-        request_id: crypto.randomUUID(),
-        revision: block.revision,
-        task_revision: task.revision,
-        outcome: kind,
-        ...(kind === "skipped"
-          ? { actual_minutes: 0, remaining_minutes: null, complete_task: false }
-          : progress),
-      },
-    );
-    if (result) {
-      setLastResult(result.result);
-      setUndo({
-        outcomeId: result.undo_request_id,
-        revision: result.plan.revision,
-      });
-      setNotice(
-        kind === "skipped"
-          ? "That block was skipped. The remaining plan has been adjusted."
-          : "Progress saved. The remaining plan has been adjusted.",
-      );
-      setOutcome(null);
-    }
-    return !!result;
-  }
   return (
-    <div className={styles.panel}>
-      <header className={`${styles.card} ${styles.hero}`}>
-        <div>
-          <p className={styles.eyebrow}>Your study plan</p>
-          <h2>A plan with room to be human.</h2>
-          <p className={styles.muted}>
-            Work around your classes, shifts, and sleep. Adjust as the day
-            unfolds.
-          </p>
-        </div>
-        <button
-          type="button"
-          className={styles.primary}
-          disabled={locked || !preferences}
-          onClick={() => {
-            setTab("tasks");
-            setTaskEditor("new");
-          }}
-        >
-          ＋ Add a task
-        </button>
-      </header>
+    <div className={tab === "plan" ? styles.planRoot : styles.panel}>
       {error && (
         <p className={styles.error} role="alert">
           {error}
@@ -1486,156 +1457,66 @@ function StudentDailyPlanAccount() {
         </section>
       ) : (
         <>
-          <section className={styles.card} aria-busy={loading}>
-            <nav className={styles.tabs} aria-label="Study planning views">
-              {[
-                ["plan", "My plan"],
-                [
-                  "tasks",
-                  `Tasks · ${tasks.filter((task) => task.status === "active").length}`,
-                ],
-                ["rhythm", "My rhythm"],
-              ].map(([value, label]) => (
-                <button
-                  type="button"
-                  key={value}
-                  aria-pressed={tab === value}
-                  onClick={() => setTab(value as typeof tab)}
-                >
-                  {label}
-                </button>
-              ))}
-            </nav>
-            {tab === "plan" && (
-              <>
-                <div className={styles.heading} style={{ marginTop: "1.2rem" }}>
-                  <div>
-                    <h3>
-                      {studentDayLabel(timetable.date)} and the days ahead
-                    </h3>
-                    <p className={styles.hint}>
-                      {preferences.timezone.replaceAll("_", " ")} · classes and
-                      shifts are kept free
-                    </p>
-                  </div>
-                  <div className={styles.actions} style={{ marginTop: 0 }}>
-                    <label className={styles.hint}>
-                      Plan for{" "}
-                      <select
-                        value={days}
-                        disabled={locked}
-                        onChange={(event) => {
-                          setDays(Number(event.target.value));
-                          setPreview(null);
-                          setConfirmed(false);
-                        }}
-                      >
-                        {[1, 3, 7, 14].map((value) => (
-                          <option key={value} value={value}>
-                            {value} {value === 1 ? "day" : "days"}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button
-                      className={styles.primary}
-                      disabled={locked}
-                      type="button"
-                      onClick={() => void previewPlan()}
-                    >
-                      Preview a plan
-                    </button>
-                  </div>
-                </div>
-                <p className={styles.hint}>
-                  Done, Took longer, and Skip update future study blocks here.
-                  Nothing is sent to a school or added to an external calendar.
-                </p>
-                {plan.needs_review && (
-                  <div className={styles.warning} role="status">
-                    <strong>Review your updated schedule.</strong>
-                    <p>
-                      {plan.review_notice ??
-                        "Your tasks, routine, or timetable changed. Preview and accept an updated plan before recording progress."}
-                    </p>
-                    <button
-                      type="button"
-                      disabled={locked}
-                      onClick={() => void previewPlan()}
-                    >
-                      Review updated schedule &amp; preview
-                    </button>
-                  </div>
-                )}
-                {outcome &&
-                  !plan.needs_review &&
-                  tasks.some((task) => task.id === outcome.block.task_id) && (
-                    <StudyOutcomeForm
-                      key={`${outcome.block.id}-${outcome.kind}-${epoch}`}
-                      {...outcome}
-                      task={
-                        tasks.find(
-                          (task) => task.id === outcome.block.task_id,
-                        ) as StudyTask
-                      }
-                      disabled={locked}
-                      onClose={() => setOutcome(null)}
-                      onSave={(value) =>
-                        record(outcome.block, outcome.kind, value)
-                      }
-                    />
-                  )}
-                <StudentStudyAgenda
+          <section
+            className={tab === "plan" ? styles.planCanvas : styles.card}
+            aria-busy={loading}
+          >
+            {tab !== "plan" && (
+              <nav className={styles.tabs} aria-label="Study planning views">
+                {[
+                  ["plan", "My plan"],
+                  [
+                    "tasks",
+                    `Tasks · ${tasks.filter((task) => task.status === "active").length}`,
+                  ],
+                  ["rhythm", "My rhythm"],
+                ].map(([value, label]) => (
+                  <button
+                    type="button"
+                    key={value}
+                    aria-pressed={tab === value}
+                    onClick={() => setTab(value as typeof tab)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </nav>
+            )}
+            {tab === "plan" &&
+              (tasks.length === 0 ? (
+                <PlannerWelcome
+                  key={preferences.revision}
+                  preferences={preferences}
+                  hasClasses={timetable.courses.some((c) => !c.archived)}
+                  disabled={locked}
+                  onCapture={(text) => {
+                    setCaptureTitle(text);
+                    setTaskEditor("new");
+                    setTab("tasks");
+                  }}
+                  onRoutine={reviewRoutine}
+                />
+              ) : (
+                <PlannerOverview
                   plan={plan}
                   tasks={tasks}
                   timetable={timetable}
-                  disabled={locked || plan.needs_review}
-                  onOutcome={(block, kind) => {
-                    if (kind === "skipped") void record(block, kind);
-                    else setOutcome({ block, kind });
+                  accountKey={accountKey}
+                  disabled={locked}
+                  onAdd={() => {
+                    setCaptureTitle("");
+                    setTaskEditor("new");
+                    setTab("tasks");
                   }}
+                  onEdit={(task) => {
+                    setTaskEditor(task);
+                    setTab("tasks");
+                  }}
+                  onRoutine={() => setTab("rhythm")}
+                  onReplan={() => void previewPlan()}
+                  onReload={() => void load()}
                 />
-                <details className={styles.disclosure}>
-                  <summary>Recent study progress</summary>
-                  {plan.blocks
-                    .filter(
-                      (block) =>
-                        block.status !== "planned" &&
-                        block.status !== "superseded" &&
-                        block.status !== "needs_review",
-                    )
-                    .slice(-20)
-                    .reverse()
-                    .map((block) => (
-                      <p className={styles.hint} key={block.id}>
-                        {block.title} · {block.status.replaceAll("_", " ")} ·{" "}
-                        {studyMinutes(block.actual_minutes)} recorded ·{" "}
-                        {studentDayLabel(
-                          studentDateInZone(
-                            block.start_at,
-                            preferences.timezone,
-                          ),
-                        )}
-                      </p>
-                    ))}
-                  {!plan.blocks.some(
-                    (block) =>
-                      block.status !== "planned" &&
-                      block.status !== "superseded" &&
-                      block.status !== "needs_review",
-                  ) && (
-                    <p className={styles.hint}>
-                      No progress has been recorded yet.
-                    </p>
-                  )}
-                  {plan.has_more_history && (
-                    <p className={styles.hint}>
-                      Older history is saved; this view shows recent blocks.
-                    </p>
-                  )}
-                </details>
-              </>
-            )}
+              ))}
             {tab === "tasks" && (
               <>
                 <div className={styles.heading} style={{ marginTop: "1.2rem" }}>
@@ -1658,6 +1539,8 @@ function StudentDailyPlanAccount() {
                   <StudentStudyTaskForm
                     key={`${taskEditor === "new" ? "new" : taskEditor.id}-${epoch}`}
                     task={taskEditor === "new" ? undefined : taskEditor}
+                    captureTitle={captureTitle}
+                    captureNow={Date.parse(timetable.server_now)}
                     timezone={preferences.timezone}
                     courses={timetable.courses.filter(
                       (course) => !course.archived,
@@ -1806,7 +1689,6 @@ function StudentDailyPlanAccount() {
                                     : current,
                                 );
                                 setTaskEditor(null);
-                                setOutcome(null);
                                 setPreview(null);
                                 setLastResult(null);
 
@@ -1851,39 +1733,20 @@ function StudentDailyPlanAccount() {
                   key={`${preferences.revision}-${epoch}`}
                   preferences={preferences}
                   disabled={locked}
-                  onSave={async (value) => {
-                    const result = await mutate(
-                      "/preferences",
-                      readStudyPreferences,
-                      "PUT",
-                      { ...value, request_id: crypto.randomUUID() },
-                    );
-                    if (result)
-                      setNotice(
-                        "Planning preferences saved. Preview a fresh plan to use them.",
-                      );
-                    return !!result;
-                  }}
+                  onSave={reviewRoutine}
                 />
               </>
             )}
-            <footer className={styles.foot}>
-              <span>
-                {preferences.timezone.replaceAll("_", " ")} · server checked{" "}
-                {studentClock(timetable.server_now, preferences.timezone)}
-              </span>
-              <div className={styles.actions} style={{ marginTop: 0 }}>
-                <Link href="/classes">Edit classes & shifts</Link>
-                <button
-                  type="button"
-                  disabled={busy || loading}
-                  onClick={() => void load(uncertain)}
-                >
-                  {loading ? "Refreshing…" : "Refresh saved plan"}
-                </button>
-              </div>
-            </footer>
           </section>
+          {routineReview && (
+            <RoutineChangeReview
+              preview={routineReview.preview}
+              draft={{ ...routineReview.body, timezone: preferences.timezone }}
+              busy={busy || loading}
+              onApprove={() => void confirmRoutine()}
+              onCancel={() => setRoutineReview(null)}
+            />
+          )}
           {preview && (
             <StudentStudyPlanPreview
               preview={preview}
@@ -1930,5 +1793,5 @@ function StudentDailyPlanAccount() {
   );
 }
 export function StudentDailyPlan({ accountId }: { accountId: string }) {
-  return <StudentDailyPlanAccount key={accountId} />;
+  return <StudentDailyPlanAccount key={accountId} accountKey={accountId} />;
 }

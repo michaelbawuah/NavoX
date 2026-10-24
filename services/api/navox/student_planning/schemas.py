@@ -104,7 +104,35 @@ class DailyWindow(Input):
         return self
 
 
+class AlarmPreferences(Input):
+    enabled: bool = Field(default=False, strict=True)
+    days: list[int] = Field(default_factory=lambda: list(range(7)), max_length=7)
+    smart: bool = Field(default=False, strict=True)
+    prep_minutes: int = Field(default=30, ge=0, le=180, strict=True)
+    sound: Literal["gentle", "chime"] = "gentle"
+    snooze_minutes: Literal[5, 10, 15] = 10
+    skip_date: date | None = None
+
+    @field_validator("days", mode="before")
+    @classmethod
+    def unique_days(cls, value: object) -> list[int]:
+        if not isinstance(value, list) or any(
+            type(day) is not int or not 0 <= day <= 6 for day in value
+        ):
+            raise ValueError("Choose alarm weekdays from 0 to 6")
+        return sorted(set(value))
+
+
 class Preferences(Input):
+    travel_minutes: int = Field(default=15, ge=0, le=240, strict=True)
+    wake_times: list[str] | None = Field(default=None, min_length=7, max_length=7)
+    alarm: AlarmPreferences = Field(default_factory=AlarmPreferences)
+
+    @field_validator("wake_times")
+    @classmethod
+    def daily_wakes(cls, value: list[str] | None) -> list[str] | None:
+        return [wall_time(clock) for clock in value] if value is not None else None
+
     wake_time: str = "07:00"
     sleep_time: str = "23:00"
     focus_windows: list[DailyWindow] = Field(default_factory=list, max_length=14)
@@ -116,7 +144,9 @@ class Preferences(Input):
 
     @model_validator(mode="after")
     def nonempty(self) -> Self:
-        if self.wake_time == self.sleep_time:
+        if self.wake_time == self.sleep_time or (
+            self.wake_times and self.sleep_time in self.wake_times
+        ):
             raise ValueError("Choose different wake and sleep times")
         return self
 
@@ -124,6 +154,10 @@ class Preferences(Input):
 class PreferencesUpdate(Preferences):
     request_id: UUID
     revision: int = Field(ge=0)
+
+
+class PreferencesConfirm(PreferencesUpdate):
+    preview_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class PreferencesView(Preferences):
@@ -172,15 +206,6 @@ class PlanResult(Input):
     planning_only: Literal[True] = True
 
 
-class PreviewView(Input):
-    preview_id: UUID
-    preview_hash: str
-    expires_at: datetime
-    base_revision: int
-    result: PlanResult
-    requires_acceptance: Literal[True] = True
-
-
 class AcceptInput(Input):
     preview_id: UUID
     preview_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -202,6 +227,16 @@ class BlockView(ProposedBlock):
     status: Literal["planned", "done", "took_longer", "skipped", "superseded", "needs_review"]
     actual_minutes: int
     outcome_at: datetime | None
+
+
+class PreviewView(Input):
+    preview_id: UUID
+    preview_hash: str
+    expires_at: datetime
+    base_revision: int
+    result: PlanResult
+    replaced_blocks: list[BlockView]
+    requires_acceptance: Literal[True] = True
 
 
 class PlanView(Input):
@@ -238,15 +273,32 @@ class OutcomeInput(Input):
         return self
 
 
+class OutcomeConfirmInput(OutcomeInput):
+    preview_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class OutcomeView(Input):
     task: TaskView
     block: BlockView
     plan: PlanView
     result: PlanResult
     undo_request_id: UUID
+    preview_hash: str | None = None
+    replaced_blocks: list[BlockView] = Field(default_factory=list)
 
 
 class UndoInput(Input):
     request_id: UUID
     outcome_request_id: UUID
     revision: int = Field(ge=1)
+
+
+class MoveInput(Input):
+    request_id: UUID
+    revision: int = Field(ge=1)
+    start_at: datetime
+    _instant = field_validator("start_at")(aware)
+
+
+class MoveConfirm(MoveInput):
+    preview_hash: str = Field(pattern=r"^[a-f0-9]{64}$")

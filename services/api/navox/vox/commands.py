@@ -13,6 +13,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from navox.ai.message_limits import SPOKEN_MESSAGE_LIMIT, TYPED_MESSAGE_LIMIT
 from navox.connectors.sync_state import database_now, utc
 from navox.core.settings import Settings
 from navox.db.models import User
@@ -21,7 +22,7 @@ from navox.db.vox_media import VoxMediaCleanup
 from navox.vox import media, service
 from navox.vox.worker import DatabaseAuthority, WorkerAccessLost
 
-MAX_WAKE_TEXT = 4000
+MAX_WAKE_TEXT = SPOKEN_MESSAGE_LIMIT
 MAX_QUEUED = 8
 MAX_COMMANDS = 200
 
@@ -43,12 +44,8 @@ def _crypto(settings: Settings) -> tuple[Fernet, bytes]:
     raise service.VoxError(503, "Vox question delivery is not configured")
 
 
-def _text(value: str) -> str:
-    if (
-        not isinstance(value, str)
-        or not 1 <= len(value.strip()) <= MAX_WAKE_TEXT
-        or "\x00" in value
-    ):
+def _text(value: str, maximum: int = MAX_WAKE_TEXT) -> str:
+    if not isinstance(value, str) or not 1 <= len(value.strip()) <= maximum or "\x00" in value:
         raise service.VoxError(422, "The wake question is invalid")
     return value.strip()
 
@@ -65,9 +62,10 @@ async def enqueue_wake(
     request_id: UUID,
     text: str,
     settings: Settings,
+    typed: bool = False,
 ) -> None:
     """Acknowledgement means queued, never spoken or an approved external action."""
-    question = _text(text)
+    question = _text(text, TYPED_MESSAGE_LIMIT if typed else MAX_WAKE_TEXT)
     cipher, digest_key = _crypto(settings)
 
     async def operation() -> None:
@@ -91,7 +89,9 @@ async def enqueue_wake(
         if cleanup is None or cleanup.status != "armed":
             raise service.VoxError(410, "This Vox connection has ended")
         binding = f"{user_id}:{workspace_id}:{connection_id}:{request_id}:"
-        digest = hmac.new(digest_key, (binding + question).encode(), hashlib.sha256).hexdigest()
+        digest = hmac.new(
+            digest_key, (binding + json.dumps([typed, question])).encode(), hashlib.sha256
+        ).hexdigest()
         await _clear_expired(database, connection_id, boundary.now)
         previous = await database.scalar(
             select(VoxWakeCommand).where(
@@ -118,7 +118,9 @@ async def enqueue_wake(
         )
         if (total or 0) >= MAX_COMMANDS or (queued or 0) >= MAX_QUEUED:
             raise service.VoxError(429, "Vox is still receiving your earlier question")
-        envelope = json.dumps({"binding": binding, "text": question}, ensure_ascii=False)
+        envelope = json.dumps(
+            {"binding": binding, "text": question, "typed": typed}, ensure_ascii=False
+        )
         database.add(
             VoxWakeCommand(
                 connection_id=connection_id,
@@ -186,7 +188,15 @@ async def take_wake_commands(check: DatabaseAuthority, settings: Settings) -> li
                 )
                 if envelope.get("binding") != binding:
                     continue
-                result.append(WakeCommand(row.request_id, _text(envelope["text"])))
+                result.append(
+                    WakeCommand(
+                        row.request_id,
+                        _text(
+                            envelope["text"],
+                            TYPED_MESSAGE_LIMIT if envelope.get("typed") is True else MAX_WAKE_TEXT,
+                        ),
+                    )
+                )
             except (InvalidToken, ValueError, KeyError, TypeError, AttributeError):
                 continue
         await database.commit()

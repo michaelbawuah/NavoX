@@ -155,7 +155,6 @@ function submitLogin() {
 }
 
 function prepareReset() {
-  click(button("Term & settings"));
   const summary = [...host.querySelectorAll("summary")].find(
     (item) => item.textContent === "Forget my student data",
   );
@@ -329,6 +328,7 @@ describe("actual confirmed student reset revokes before data mutation", () => {
       currentAccount = account;
       await mount(
         createElement(StudentClassesWorkspace, {
+          settingsOnly: true,
           accountId: `${account.workspace.id}:${account.id}`,
         }),
       );
@@ -378,6 +378,7 @@ describe("actual confirmed student reset revokes before data mutation", () => {
     currentAccount = account;
     await mount(
       createElement(StudentClassesWorkspace, {
+        settingsOnly: true,
         accountId: `${account.workspace.id}:${account.id}`,
       }),
     );

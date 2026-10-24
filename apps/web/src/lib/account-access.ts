@@ -52,6 +52,38 @@ async function accessForAccount(
   apiBaseUrl: string,
   account: Account,
 ): Promise<AccountAccess> {
+  // Older accounts started in UTC even when the device was in another zone.
+  // The server only initializes untouched accounts, with explicit owner binding.
+  if (account.timezone === "UTC" && account.workspace?.id) {
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/workspace/timezone/initialize`,
+        {
+          method: "POST",
+          credentials: "include",
+          cache: "no-store",
+          signal: AbortSignal.timeout(10_000),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            user_id: account.id,
+            workspace_id: account.workspace.id,
+          }),
+        },
+      );
+      if (!response.ok) throw new Error("Timezone unavailable");
+      const saved = await response.json();
+      if (
+        saved.user_id !== account.id ||
+        saved.workspace_id !== account.workspace.id
+      )
+        throw new Error("Account changed");
+      new Intl.DateTimeFormat("en", { timeZone: saved.timezone }).format();
+      account = { ...account, timezone: saved.timezone };
+    } catch {
+      // Keep the last server value; never pretend an unsaved device zone was saved.
+    }
+  }
   try {
     return {
       account,

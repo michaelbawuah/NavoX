@@ -1,0 +1,442 @@
+.weekLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 2.1fr) minmax(240px, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.weekMain {
+  min-width: 0;
+}
+.weekScroll {
+  overflow-x: auto;
+  border: 1px solid var(--nx-border);
+  border-radius: 14px;
+}
+.weekGrid {
+  min-width: 640px;
+}
+.weekHead,
+.weekBody {
+  display: grid;
+  grid-template-columns: 48px repeat(7, minmax(0, 1fr));
+  position: relative;
+}
+.weekHead {
+  height: 64px;
+  border-bottom: 1px solid var(--nx-border);
+}
+.weekHead > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--nx-muted);
+}
+.weekHead strong {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  font-size: 16px;
+  color: var(--nx-text);
+}
+.weekHead [data-today="true"] {
+  color: var(--nx-accent-text);
+}
+.weekHead :where([data-today="true"]) strong {
+  background: var(--nx-accent);
+  color: var(--nx-on-accent);
+  border-radius: 50%;
+}
+.hours {
+  position: relative;
+  font-size: 11px;
+  color: var(--nx-muted);
+}
+.hours span {
+  position: absolute;
+  right: 6px;
+  transform: translateY(-50%);
+}
+.dayColumn {
+  position: relative;
+  border-left: 1px solid var(--nx-border);
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 63px,
+    var(--nx-border) 63px,
+    var(--nx-border) 64px
+  );
+}
+.dayColumn[data-today="true"] {
+  background-color: color-mix(in srgb, var(--nx-accent) 3%, var(--nx-bg));
+}
+.dayColumn .classBlock {
+  position: absolute;
+  display: block;
+  padding: 6px;
+  text-align: left;
+  min-height: 44px;
+  overflow: hidden;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--class-color) 40%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--class-color) 14%, var(--nx-bg));
+  color: var(--class-color);
+  cursor: pointer;
+  line-height: 1.25;
+  z-index: 1;
+}
+.classBlock strong,
+.classBlock small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.classBlock small {
+  color: var(--nx-text);
+  font-size: 11px;
+  margin-top: 3px;
+}
+.dayColumn .classBlock[aria-pressed="true"] {
+  outline: 2px solid var(--class-color);
+  outline-offset: -2px;
+}
+.dayColumn .classBlock[data-shift="true"] {
+  border-style: dashed;
+  background: var(--nx-bg);
+}
+.classBlock[data-cancelled="true"] {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+.nowLine {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--nx-danger);
+  z-index: 2;
+  pointer-events: none;
+}
+.nowLine::before {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--nx-danger);
+  top: -3px;
+  left: -4px;
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 0;
+  font-size: 12px;
+  color: var(--nx-muted);
+}
+.legend span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+.shiftKey {
+  border: 1px dashed var(--nx-warning);
+}
+.detail {
+  background: var(--nx-surface);
+  border: 1px solid var(--nx-border);
+  border-radius: 16px;
+  padding: 20px;
+  min-width: 0;
+}
+.detail .relative {
+  color: var(--nx-accent-text);
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+.detail h2 {
+  font: 600 20px / 1.35 var(--nx-font);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.kind {
+  font-size: 14px;
+  color: var(--nx-muted);
+  text-transform: capitalize;
+}
+.detail dl {
+  margin: 0;
+}
+.detail dl > div {
+  padding: 16px 0;
+  border-top: 1px solid var(--nx-border);
+}
+.detail dt {
+  font-size: 13px;
+  color: var(--nx-muted);
+  margin-bottom: 4px;
+}
+.detail dd {
+  font-size: 14px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.detailActions {
+  display: flex;
+  gap: 8px;
+  margin: 16px 0;
+}
+.detailActions > a {
+  flex: 1;
+  background: var(--nx-accent);
+  color: var(--nx-on-accent);
+  text-decoration: none;
+}
+.detail button,
+.shiftPrompt button {
+  border: 1px solid var(--nx-border);
+  background: var(--nx-surface);
+  color: var(--nx-text);
+  border-radius: 8px;
+  padding: 8px 14px;
+  min-height: 44px;
+  font: 600 14px var(--nx-font);
+  cursor: pointer;
+}
+.detail .ask {
+  width: 100%;
+  border-color: var(--nx-accent);
+  border-radius: 999px;
+  color: var(--nx-accent-text);
+}
+.detail p[role="status"] {
+  font-size: 13px;
+}
+.welcome {
+  display: grid;
+  gap: 28px;
+  padding: 24px 0;
+}
+.welcomeHero {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+.welcomeHero h2 {
+  font: 700 32px / 1.2 var(--nx-font);
+  margin: 0 0 16px;
+}
+.welcomeHero p {
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--nx-muted);
+  margin: 0;
+  max-width: 660px;
+}
+.noa {
+  position: relative;
+  flex: 0 0 160px;
+}
+.noa svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.noa > span {
+  position: absolute;
+  left: 0;
+  top: 8px;
+  z-index: 1;
+  transform: rotate(-7deg);
+  background: var(--nx-accent);
+  color: var(--nx-on-accent);
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.methods {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+.methods button {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: 12px;
+  text-align: left;
+  padding: 20px;
+  border: 1px solid var(--nx-border);
+  border-radius: 16px;
+  background: var(--nx-surface);
+  color: var(--nx-text);
+  font: 14px / 1.5 var(--nx-font);
+  cursor: pointer;
+}
+.methods strong {
+  font-size: 17px;
+}
+.methods button > span:not(.methodIcon) {
+  color: var(--nx-muted);
+}
+.methods small {
+  margin-top: auto;
+  padding-top: 8px;
+  color: var(--nx-accent-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.methods .voiceCard {
+  background: var(--nx-accent);
+  color: var(--nx-on-accent);
+  box-shadow: 4px 4px 0 var(--nx-border);
+}
+.methods .voiceCard > span:not(.methodIcon),
+.methods :where(.voiceCard) small {
+  color: var(--nx-on-accent);
+}
+.methodIcon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--nx-raised);
+  color: var(--nx-accent);
+  font-size: 24px;
+}
+.methods button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.welcome h3 {
+  font-size: 16px;
+  margin: 0 0 12px;
+}
+.welcome h3 small {
+  font-size: 13px;
+  color: var(--nx-muted);
+  font-weight: 400;
+  margin-left: 8px;
+}
+.preview {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  border: 1px dashed var(--nx-border);
+  padding: 16px;
+  border-radius: 12px;
+  opacity: 0.55;
+}
+.preview span {
+  display: block;
+  text-align: center;
+  font-size: 12px;
+  color: var(--nx-muted);
+}
+.preview i {
+  display: block;
+  height: 24px;
+  border-radius: 5px;
+  background: #b69cff;
+  margin-top: 8px;
+}
+.preview i:nth-child(3) {
+  background: #7aa2f7;
+}
+.preview i:nth-child(4) {
+  background: #ff8a9b;
+}
+.preview > div:nth-child(2n) i {
+  background: var(--nx-accent);
+  margin-top: 32px;
+}
+.preview > div:nth-child(2n) i:nth-child(n + 3) {
+  display: none;
+}
+.preview > div:nth-child(6) i {
+  background: var(--nx-warning);
+  height: 50px;
+}
+.shiftPrompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--nx-border);
+  border-radius: 12px;
+  padding: 16px 20px;
+  background: var(--nx-surface);
+  font-size: 14px;
+  color: var(--nx-muted);
+}
+.shiftPrompt button {
+  white-space: nowrap;
+}
+@media (max-width: 1100px) {
+  .weekLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .detail {
+    max-width: none;
+  }
+  .methods {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 767px) {
+  .welcome {
+    padding: 0;
+  }
+  .welcomeHero {
+    gap: 12px;
+  }
+  .noa {
+    flex-basis: 84px;
+  }
+  .noa > span {
+    font-size: 10px;
+  }
+  .welcomeHero h2 {
+    font-size: 26px;
+  }
+  .welcomeHero p {
+    font-size: 14px;
+  }
+  .methods {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .methods button {
+    min-height: 180px;
+  }
+  .shiftPrompt {
+    align-items: start;
+    flex-direction: column;
+  }
+  .preview {
+    padding: 12px 8px;
+    gap: 4px;
+  }
+  .welcome h3 small {
+    display: block;
+    margin: 4px 0;
+  }
+  .weekGrid {
+    min-width: 700px;
+  }
+}

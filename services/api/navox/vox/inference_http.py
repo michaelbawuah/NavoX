@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 import httpx
 
+from navox.ai.message_limits import SPOKEN_MESSAGE_LIMIT, TYPED_MESSAGE_LIMIT
 from navox.core.settings import Settings
 from navox.vox.inference_config import ProviderRoute, VoxInferenceConfig, route_credential
 from navox.vox.inference_speech import MAX_WIRE_BYTES, decode_speech_events
@@ -57,11 +58,19 @@ Briefly name the source and quote its stated timezone for dates/times. Never
 derive UTC offsets or local time conversions yourself; if the source omits a
 timezone, say so. If lookup is unavailable, say you could not verify the answer
 instead of guessing. Never send, delete, purchase, schedule, or approve an action.
-If a write is requested, explain that it needs its existing review flow. Never
+When prepare_study_plan is available and planning is requested, use it to prepare
+an exact proposal. Read back the affected blocks and direct the student to the
+on-screen approval; nothing has been applied. For lengthy proposals, ask them to
+review the complete on-screen list. Use get_student_free_time for availability;
+explain missing calendar or routine coverage. When prepare_alarm_change is available,
+use it for a requested wake or alarm
+change and read back its review before directing the student to approve on screen.
+Explain that browser alarms require NavoX open. Other writes need their existing
+review flow. Never treat conversation text as completed approval. Never
 reveal credentials. Do not claim the call will be remembered after it ends."""
 
 
-def bounded_text(value: Any, maximum: int = 4_000) -> str:
+def bounded_text(value: Any, maximum: int = SPOKEN_MESSAGE_LIMIT) -> str:
     if not isinstance(value, str) or not value.strip() or len(value) > maximum:
         raise ProviderRejected("The voice response is outside its supported bound")
     return value.strip()
@@ -298,7 +307,7 @@ class OpenAICompatiblePipeline:
                     self.config.stt, "/audio/transcriptions", audio=audio, input_bound=3000
                 )
                 question = bounded_text(result.get("text"))
-            question = bounded_text(question)
+            question = bounded_text(question, TYPED_MESSAGE_LIMIT)
             messages: list[dict[str, Any]] = [{"role": "system", "content": INSTRUCTIONS}]
             messages.extend(history_messages(history))
             messages.append({"role": "user", "content": question})

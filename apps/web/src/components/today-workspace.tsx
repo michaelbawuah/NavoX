@@ -13,37 +13,41 @@ import {
 import { productFeatures } from "../lib/product-features";
 import { hasGoogleReadAccess } from "../lib/setup-progress";
 import type { TodaySource } from "../lib/source-references";
+import {
+  notifyStudentTimezoneChanged,
+  studentLocalTime,
+} from "../lib/student-time";
 import { consumerTodaySections } from "../lib/today-sections";
 import { AISettings } from "./ai-settings";
+import { AppearanceSettings } from "./appearance-settings";
 import { ApprovalPanel } from "./approval-panel";
 import { CommunicationDrafts } from "./communication-drafts";
 import { ConnectionsPanel } from "./connections-panel";
-import { DailyFocus } from "./daily-focus";
 import { DismissCommitment } from "./dismiss-commitment";
-import { GuidedSetup } from "./guided-setup";
+import { InboxMessage } from "./inbox-message";
+import { InboxWelcome } from "./inbox-welcome";
+import inboxStyles from "./inbox-workspace.module.css";
 import {
   IntelligenceControls,
   IntelligenceFeedback,
-  WorkspaceContext,
 } from "./intelligence-controls";
+import { NoaSettings } from "./noa-settings";
 import { OperationalAssistance } from "./operational-assistance";
 import { PagedList } from "./paged-list";
 import { PersonalMemoryPanel } from "./personal-memory";
 import { PersonalRoutines } from "./personal-routines";
 import { ProactivePanel } from "./proactive-panel";
+import { RoutineAlarmSettings } from "./routine-alarm-settings";
 import { SourceReferences } from "./source-references";
 import { StudentCalendarConnections } from "./student-calendar-connections";
-import { StudentDayPanel } from "./student-day-panel";
-import { StudentDayReviewEntry } from "./student-day-review-entry";
-import { StudentEmailCard } from "./student-email-actions";
+import { StudentClassesWorkspace } from "./student-classes";
 import { StudentGoalsCard } from "./student-goals";
 import { StudentLmsFeeds } from "./student-lms-feeds";
 import { StudentNotifications } from "./student-notifications";
-import { StudentPlanToday } from "./student-plan-today";
 import { StudentRecoveryCard } from "./student-recovery";
 import { ThreadWatchPanel } from "./thread-watch-panel";
+import { TodayHome } from "./today-home";
 import styles from "./today-workspace.module.css";
-import { VoxHomeLauncher } from "./vox-call-controls";
 import { VoxUsageReport } from "./vox-usage-report";
 import { WorkspaceShell } from "./workspace-shell";
 
@@ -202,7 +206,7 @@ export type TodayWorkspaceView =
   | "connections"
   | "settings";
 
-interface TodayWorkspaceProps {
+export interface TodayWorkspaceProps {
   view?: TodayWorkspaceView;
   account: Account;
   connections: GoogleConnection[];
@@ -253,23 +257,40 @@ function dueLabel(value: string | null, timezone: string): string {
 }
 
 function greeting(timezone: string): string {
-  const hour = Number(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      hour: "numeric",
-      hourCycle: "h23",
-    }).format(new Date()),
-  );
-  if (hour < 12) {
-    return "Good morning";
-  }
-  if (hour < 18) {
-    return "Good afternoon";
-  }
-  return "Good evening";
+  return studentLocalTime(new Date(), timezone).greeting;
 }
 
-export function TodayWorkspace({
+export function TodayWorkspace(props: TodayWorkspaceProps) {
+  if (!props.view || props.view === "today") return <TodayHome {...props} />;
+  if (
+    props.view === "inbox" &&
+    !props.connectionsUnavailable &&
+    !props.connections.some(
+      (c) =>
+        c.status === "active" &&
+        c.granted_scopes.some((scope) =>
+          [
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.modify",
+          ].includes(scope),
+        ),
+    )
+  )
+    return (
+      <WorkspaceShell
+        current="Inbox"
+        accountName={props.account.display_name ?? props.account.email}
+        accountKey={`${props.account.workspace.id}:${props.account.id}`}
+        timezone={props.account.timezone}
+        onSignOut={props.onSignOut}
+      >
+        <InboxWelcome />
+      </WorkspaceShell>
+    );
+  return <LegacyTodayWorkspace {...props} />;
+}
+
+function LegacyTodayWorkspace({
   view = "today",
   account,
   connections,
@@ -282,18 +303,25 @@ export function TodayWorkspace({
   const needsConnectionSetup =
     !connectionsUnavailable &&
     !connections.some((connection) => connection.status === "active");
-  const needsReadSetup = !connections.some(
+  const _needsReadSetup = !connections.some(
     (connection) =>
       connection.status === "active" && hasGoogleReadAccess(connection),
   );
-  const [showSetAside, setShowSetAside] = useState(false);
+  const [_showSetAside, _setShowSetAside] = useState(false);
   const [timezone, setTimezone] = useState(account.timezone ?? "UTC");
+  useEffect(() => {
+    setTimezone(account.timezone ?? "UTC");
+  }, [account.timezone]);
   const [today, setToday] = useState<TodayPayload | null>(null);
   const [workspaceError, setWorkspaceError] = useState("");
   const [todayError, setTodayError] = useState("");
+  const [inboxTab, setInboxTab] = useState<"needs" | "drafts" | "waiting">(
+    "needs",
+  );
+  const [draftCount, setDraftCount] = useState(0);
   const [selectedReplyId, setSelectedReplyId] = useState<string | null>(null);
   const [replySelectionKey, setReplySelectionKey] = useState(0);
-  const [reviewId, setReviewId] = useState<string | null>(null);
+  const [reviewId, _setReviewId] = useState<string | null>(null);
   const handledRouteSelection = useRef(false);
   const [workspaceMessage, setWorkspaceMessage] = useState("");
   const [loadingToday, setLoadingToday] = useState(true);
@@ -573,6 +601,7 @@ export function TodayWorkspace({
       router.push(`/inbox?reply=${encodeURIComponent(item.id)}#drafts`);
       return;
     }
+    setInboxTab("needs");
     setSelectedReplyId(item.id);
     setReplySelectionKey((key) => key + 1);
     focusSection("drafts");
@@ -731,7 +760,7 @@ export function TodayWorkspace({
         !["completed", "cancelled", "dismissed"].includes(item.status),
     )
     .sort((a, b) => Date.parse(a.due_at ?? "") - Date.parse(b.due_at ?? ""));
-  const renewals = allItems.filter(
+  const _renewals = allItems.filter(
     (item) =>
       item.type === "renewal" &&
       !["completed", "cancelled", "dismissed"].includes(item.status),
@@ -1110,29 +1139,12 @@ export function TodayWorkspace({
   return (
     <WorkspaceShell
       current={page.current}
+      timezone={timezone}
       accountKey={`${account.workspace.id}:${account.id}`}
       accountName={account.display_name ?? account.email}
       onSignOut={onSignOut}
     >
       <div className={styles.workspace}>
-        <header className={styles.pageHeader}>
-          <div>
-            <p className={styles.kicker}>{page.current}</p>
-            <h1>{page.title}</h1>
-            <p className={styles.heroCopy}>{page.copy}</p>
-          </div>
-          {["today", "inbox", "planner"].includes(view) && (
-            <button
-              className={styles.secondaryAction}
-              disabled={loadingToday}
-              onClick={() => void refreshToday()}
-              type="button"
-            >
-              {loadingToday ? "Refreshing…" : "Refresh"}
-            </button>
-          )}
-        </header>
-
         {connectionsUnavailable && (
           <div className={styles.errorBanner} role="alert">
             <p>{message || "Connected apps could not be loaded."}</p>
@@ -1172,292 +1184,167 @@ export function TodayWorkspace({
           </div>
         )}
 
-        {view === "today" && (
-          <div className={styles.focusLayout}>
-            <div className={styles.focusColumn}>
-              {productFeatures.studentVox && <VoxHomeLauncher />}
-              {productFeatures.studentPlanning && (
-                <StudentPlanToday
-                  accountId={`${account.workspace.id}:${account.id}`}
-                />
-              )}
-              <StudentDayPanel
-                accountId={`${account.workspace.id}:${account.id}`}
-              />
-              {!connectionsUnavailable &&
-                (needsReadSetup || today?.total === 0) && (
-                  <details className={styles.toolDisclosure}>
-                    <summary>Connect email or Calendar (optional)</summary>
-                    <GuidedSetup
-                      key={`${account.id}:${account.workspace.id}`}
-                      connections={connections}
-                      paused={agentPaused}
-                      itemCount={today?.total ?? 0}
-                      loading={loadingToday || !!todayError}
-                      onConnectionsChanged={onConnectionsChanged}
-                      onRefresh={refreshToday}
-                    />
-                  </details>
-                )}
-              <div id="daily-briefing">
-                <DailyFocus
-                  payload={today}
-                  loading={loadingToday}
-                  error={todayError}
-                  now={Date.now()}
-                  paused={agentPaused}
-                  busyItemId={handlingId ?? mutatingId}
-                  canDraftReply={canDraftReply}
-                  onPrepare={handleCommitment}
-                  onReview={(item) => setReviewId(item.id)}
-                  onRefresh={refreshToday}
-                />
-              </div>
-              {reviewItem && (
-                <div id="review-suggestion">
-                  {renderSection("Review suggestion", [reviewItem], "")}
-                </div>
-              )}
-              {sections["Needs your attention"].length > 0 && (
-                <details className={styles.toolDisclosure}>
-                  <summary>
-                    All priorities{" "}
-                    <span>{sections["Needs your attention"].length}</span>
-                  </summary>
-                  {renderSection(
-                    "Needs your attention",
-                    sections["Needs your attention"],
-                    "No active priorities in your saved items.",
-                  )}
-                </details>
-              )}
-              <ThreadWatchPanel
-                key={`${account.id}:${account.workspace.id}`}
-                compact
-                paused={agentPaused}
-                eligibleCommitmentIds={allItems
-                  .filter(canDraftReply)
-                  .map((item) => item.id)}
-                onDraftReply={(id) => {
-                  const item = allItems.find((row) => row.id === id);
-                  if (item && canDraftReply(item)) openReply(item);
-                }}
-              />
-              <section
-                className={styles.quickLinks}
-                aria-label="Continue your day"
+        {view === "inbox" && (
+          <div>
+            <nav className={inboxStyles.tabs} aria-label="Inbox sections">
+              <button
+                type="button"
+                aria-pressed={inboxTab === "needs"}
+                onClick={() => setInboxTab("needs")}
               >
-                <Link href="/inbox">
-                  <strong>Review email</strong>
-                  <span>
-                    Drafts, replies, and approvals{" "}
-                    <span aria-hidden="true">→</span>
-                  </span>
-                </Link>
-                <Link href="/navox">
-                  <strong>Ask NavoX</strong>
-                  <span>
-                    Talk through your next step{" "}
-                    <span aria-hidden="true">→</span>
-                  </span>
-                </Link>
-                <StudentDayReviewEntry enabled={productFeatures.studentCoach} />
-                {productFeatures.studentGoals && (
-                  <Link href="/goals">
-                    <strong>Your goals, at your pace</strong>
-                    <span>
-                      Review your own check-ins{" "}
-                      <span aria-hidden="true">→</span>
-                    </span>
-                  </Link>
-                )}
+                Needs reply ·{" "}
+                {
+                  inboxItems.filter(
+                    (i) =>
+                      ![
+                        "completed",
+                        "cancelled",
+                        "dismissed",
+                        "waiting",
+                        "waiting_on_external",
+                      ].includes(i.status),
+                  ).length
+                }
+              </button>
+              <button
+                type="button"
+                aria-pressed={inboxTab === "drafts"}
+                onClick={() => setInboxTab("drafts")}
+              >
+                Drafts · {draftCount}
+              </button>
+              <button
+                type="button"
+                aria-pressed={inboxTab === "waiting"}
+                onClick={() => setInboxTab("waiting")}
+              >
+                Waiting for reply ·{" "}
+                {
+                  inboxItems.filter((i) =>
+                    ["waiting", "waiting_on_external"].includes(i.status),
+                  ).length
+                }
+              </button>
+            </nav>
+            <div className={inboxStyles.layout}>
+              <div className={inboxStyles.list}>
                 {productFeatures.studentEmail && (
                   <Link href="/email-actions">
-                    <strong>One email, one next step</strong>
-                    <span>
-                      Review an email action <span aria-hidden="true">→</span>
-                    </span>
+                    Review an email for a task or deadline
                   </Link>
                 )}
-                {productFeatures.studentRecovery && (
-                  <Link href="/recovery">
-                    <strong>Catch up at your pace</strong>
-                    <span>
-                      Review a proposal from your saved work{" "}
-                      <span aria-hidden="true">→</span>
-                    </span>
-                  </Link>
-                )}
-              </section>
-              {sections.Updates.length > 0 && (
-                <details className={styles.toolDisclosure}>
-                  <summary>
-                    Recent updates <span>{sections.Updates.length}</span>
-                  </summary>
-                  {renderSection(
-                    "Updates",
-                    sections.Updates,
-                    "No recent updates.",
-                  )}
-                </details>
-              )}
-              <details
-                className={styles.toolDisclosure}
-                open={activePlan !== null}
-              >
-                <summary>Activity</summary>
-                {renderActivity()}
-              </details>
-            </div>
-            <aside
-              className={styles.toolsColumn}
-              aria-label="Your day at a glance"
-            >
-              <WorkspaceContext
-                timezone={timezone}
-                onTimezoneChange={setTimezone}
-              />
-              {renderAgenda()}
-              <section
-                className={styles.sectionCard}
-                aria-labelledby="renewals-heading"
-                aria-busy={loadingToday}
-              >
-                <div className={styles.sectionHeading}>
-                  <h2 id="renewals-heading">Upcoming renewals</h2>
-                  <Link href="/subscriptions">View all</Link>
-                </div>
-                {renewals.length > 0 ? (
-                  <ul className={styles.renewalList}>
-                    {renewals.slice(0, 3).map((item) => (
-                      <li key={item.id}>
+                {inboxTab !== "drafts" &&
+                  inboxItems
+                    .filter((i) =>
+                      inboxTab === "waiting"
+                        ? ["waiting", "waiting_on_external"].includes(i.status)
+                        : ![
+                            "completed",
+                            "cancelled",
+                            "dismissed",
+                            "waiting",
+                            "waiting_on_external",
+                          ].includes(i.status),
+                    )
+                    .map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={inboxStyles.row}
+                        aria-pressed={selectedReplyId === item.id}
+                        onClick={() => {
+                          setSelectedReplyId(item.id);
+                          setReplySelectionKey((k) => k + 1);
+                        }}
+                      >
                         <strong>{item.title}</strong>
-                        <span>{dueLabel(item.due_at, timezone)}</span>
-                      </li>
+                        {item.description && (
+                          <span>{item.description.slice(0, 180)}</span>
+                        )}
+                        <small>
+                          {item.reasons.slice(0, 2).join(" · ") ||
+                            "Review this email request"}
+                        </small>
+                      </button>
                     ))}
-                  </ul>
-                ) : (
-                  <p className={styles.emptyState}>
-                    {loadingToday
-                      ? "Loading renewals…"
-                      : todayError
-                        ? "Renewals could not be refreshed."
-                        : "No upcoming renewals in your saved items."}
+                {inboxTab === "drafts" && (
+                  <p>
+                    Open a saved draft on the right. Your edits stay here until
+                    you save or discard them.
                   </p>
                 )}
-              </section>
-            </aside>
-          </div>
-        )}
-
-        {view === "inbox" && (
-          <div className={styles.layout}>
-            {productFeatures.studentEmail && <StudentEmailCard />}
-            <nav className={styles.viewTabs} aria-label="Inbox sections">
-              <a href="#needs-reply">Needs reply</a>
-              <a href="#drafts">Drafts</a>
-              <a href="#approvals">Approvals</a>
-              <a href="#follow-ups">Follow-ups</a>
-            </nav>
-            <div id="needs-reply">
-              {renderSection(
-                "Needs reply",
-                inboxItems.filter(
-                  (item) =>
-                    ![
-                      "completed",
-                      "cancelled",
-                      "dismissed",
-                      "waiting",
-                      "waiting_on_external",
-                    ].includes(item.status),
-                ),
-                "No saved email requests need a reply. Connect and sync Gmail to bring them here.",
-              )}
-            </div>
-            <section
-              id="drafts"
-              className={styles.panelSlot}
-              aria-label="Email drafts"
-            >
-              <CommunicationDrafts
-                key={`${account.id}:${account.workspace.id}`}
-                commitments={approvalCommitments}
-                selectedCommitmentId={selectedReplyId}
-                selectionKey={replySelectionKey}
-                connections={connections}
-                paused={agentPaused}
-                onStateChanged={refreshToday}
-              />
-            </section>
-            <section
-              id="approvals"
-              className={styles.panelSlot}
-              aria-label="Exact message approvals"
-            >
-              <ApprovalPanel
-                showComposer={false}
-                agentPaused={agentPaused}
-                commitments={approvalCommitments}
-                connections={connections}
-                onStateChanged={refreshToday}
-              />
-            </section>
-            <div id="follow-ups">
-              <div id="thread-watches">
-                <ThreadWatchPanel
-                  key={`${account.id}:${account.workspace.id}`}
-                  paused={agentPaused}
-                  eligibleCommitmentIds={allItems
-                    .filter(canDraftReply)
-                    .map((item) => item.id)}
-                  onDraftReply={(id) => {
-                    const item = allItems.find((row) => row.id === id);
-                    if (item && canDraftReply(item)) openReply(item);
-                  }}
-                />
+                {inboxTab === "needs" &&
+                  !inboxItems.some(
+                    (i) =>
+                      ![
+                        "completed",
+                        "cancelled",
+                        "dismissed",
+                        "waiting",
+                        "waiting_on_external",
+                      ].includes(i.status),
+                  ) && (
+                    <p>
+                      You’re caught up. Emails that need you will appear here.
+                    </p>
+                  )}
               </div>
-              {renderSection(
-                "Follow-ups",
-                inboxItems.filter((item) =>
-                  ["waiting", "waiting_on_external"].includes(item.status),
-                ),
-                "No email follow-ups are waiting right now.",
-              )}
-            </div>
-            {(today?.set_aside?.length ?? 0) > 0 && (
-              <div className={styles.setAside}>
-                <button
-                  type="button"
-                  aria-expanded={showSetAside}
-                  aria-controls="set-aside-items"
-                  onClick={() => setShowSetAside(!showSetAside)}
-                >
-                  Suggestions set aside <span>{today?.set_aside?.length}</span>
-                </button>
-                <p>
-                  Older or unverified suggestions stay here until you decide to
-                  keep them.
-                </p>
-                {showSetAside && (
-                  <div id="set-aside-items">
-                    {renderSection(
-                      "Set aside",
-                      today?.set_aside ?? [],
-                      "No suggestions set aside.",
-                      true,
-                    )}
-                  </div>
+              <div className={inboxStyles.detail}>
+                {selectedReplyId && inboxTab !== "drafts" && (
+                  <InboxMessage
+                    key={selectedReplyId}
+                    id={selectedReplyId}
+                    accountKey={`${account.workspace.id}:${account.id}`}
+                    timezone={timezone}
+                  />
                 )}
+                <div
+                  id="drafts"
+                  className={inboxStyles.panel}
+                  hidden={inboxTab === "waiting"}
+                >
+                  <CommunicationDrafts
+                    key={`${account.id}:${account.workspace.id}`}
+                    commitments={approvalCommitments}
+                    selectedCommitmentId={selectedReplyId}
+                    selectionKey={replySelectionKey}
+                    connections={connections}
+                    paused={agentPaused}
+                    onStateChanged={refreshToday}
+                    onDraftCount={setDraftCount}
+                  />
+                </div>
+                <div
+                  id="approvals"
+                  className={inboxStyles.panel}
+                  hidden={inboxTab !== "drafts"}
+                >
+                  <ApprovalPanel
+                    showComposer={false}
+                    agentPaused={agentPaused}
+                    commitments={approvalCommitments}
+                    connections={connections}
+                    onStateChanged={refreshToday}
+                  />
+                </div>
+                <div
+                  className={inboxStyles.panel}
+                  hidden={inboxTab !== "waiting"}
+                >
+                  <ThreadWatchPanel
+                    key={`${account.id}:${account.workspace.id}`}
+                    paused={agentPaused}
+                    eligibleCommitmentIds={allItems
+                      .filter(canDraftReply)
+                      .map((i) => i.id)}
+                    onDraftReply={(id) => {
+                      const item = allItems.find((i) => i.id === id);
+                      if (item && canDraftReply(item)) openReply(item);
+                    }}
+                  />
+                </div>
               </div>
-            )}
-            <details
-              className={styles.toolDisclosure}
-              open={activePlan !== null}
-            >
-              <summary>Activity</summary>
-              {renderActivity()}
-            </details>
+            </div>
           </div>
         )}
 
@@ -1559,10 +1446,26 @@ export function TodayWorkspace({
         )}
 
         {view === "settings" && (
-          <div className={styles.settingsGrid}>
+          <div className={styles.settingsLayout}>
+            <nav className={styles.settingsNav} aria-label="Settings sections">
+              {[
+                ["profile", "Profile"],
+                ["school-term", "School & term"],
+                ["settings-connections", "Connections"],
+                ["notifications", "Notifications"],
+                ["voice-noa", "Voice & Noa"],
+                ["memory-privacy", "Memory & privacy"],
+                ["appearance", "Appearance"],
+                ["routine-alarm", "Routine & alarm"],
+              ].map(([id, label]) => (
+                <a key={id} href={`#${id}`}>
+                  {label}
+                </a>
+              ))}
+            </nav>
             <div className={styles.focusColumn}>
-              <section className={styles.controlCard}>
-                <h2>Account</h2>
+              <section id="profile" className={styles.controlCard}>
+                <h2>Profile</h2>
                 <dl className={styles.accountDetails}>
                   <div>
                     <dt>Name</dt>
@@ -1572,33 +1475,64 @@ export function TodayWorkspace({
                     <dt>Email</dt>
                     <dd>{account.email}</dd>
                   </div>
-                  <div>
-                    <dt>Workspace</dt>
-                    <dd>{account.workspace.name}</dd>
-                  </div>
                 </dl>
+              </section>
+              <section id="school-term" aria-label="School and term">
+                <StudentClassesWorkspace
+                  settingsOnly
+                  accountId={`${account.workspace.id}:${account.id}`}
+                  onTimezoneChange={(zone) =>
+                    notifyStudentTimezoneChanged(
+                      `${account.workspace.id}:${account.id}`,
+                      zone,
+                    )
+                  }
+                />
+              </section>
+              <section id="settings-connections" className={styles.controlCard}>
+                <h2>Connections</h2>
+                <p>
+                  Choose the apps NavoX can use and review their permissions.
+                </p>
                 <Link className={styles.textLink} href="/connections">
                   Manage connected apps
                 </Link>
               </section>
-              <PersonalMemoryPanel
-                key={`${account.id}:${account.workspace.id}`}
-              />
-              <StudentNotifications
-                accountId={`${account.workspace.id}:${account.id}`}
-              />
-              <AISettings />
-              <VoxUsageReport
-                key={`${account.workspace.id}:${account.id}`}
-                accountId={`${account.workspace.id}:${account.id}`}
-              />
-            </div>
-            <div className={styles.focusColumn}>
-              <WorkspaceContext
-                timezone={timezone}
-                onTimezoneChange={setTimezone}
-              />
-              {renderActivity()}
+              <div id="notifications">
+                <StudentNotifications
+                  accountId={`${account.workspace.id}:${account.id}`}
+                />
+              </div>
+              <div id="voice-noa">
+                <NoaSettings
+                  key={`${account.workspace.id}:${account.id}`}
+                  accountKey={`${account.workspace.id}:${account.id}`}
+                />
+              </div>
+              <div id="memory-privacy">
+                <PersonalMemoryPanel
+                  key={`${account.id}:${account.workspace.id}`}
+                />
+              </div>
+              <div id="appearance">
+                <AppearanceSettings
+                  accountKey={`${account.workspace.id}:${account.id}`}
+                />
+              </div>
+              {productFeatures.studentPlanning && (
+                <RoutineAlarmSettings
+                  key={`${account.workspace.id}:${account.id}`}
+                  accountKey={`${account.workspace.id}:${account.id}`}
+                />
+              )}
+              <details className={styles.toolDisclosure}>
+                <summary>AI and usage</summary>
+                <AISettings />
+                <VoxUsageReport
+                  key={`${account.workspace.id}:${account.id}`}
+                  accountId={`${account.workspace.id}:${account.id}`}
+                />
+              </details>
             </div>
           </div>
         )}

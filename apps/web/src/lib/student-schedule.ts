@@ -1,3 +1,4 @@
+import { studentLocalTime } from "./student-time";
 export const studentLmsOptions = [
   ["none", "Not sure / add later"],
   ["canvas", "Canvas"],
@@ -52,6 +53,7 @@ export interface StudentMeeting extends StudentMeetingInput {
   revision: number;
 }
 export interface StudentCourseInput {
+  office_hours?: string | null;
   code: string;
   name: string;
   term_start: string;
@@ -305,6 +307,9 @@ export function readStudentCourse(value: unknown): StudentCourse {
     term_start: date(v.term_start),
     term_end: date(v.term_end),
     professor: nullable(v.professor),
+    ...(v.office_hours !== undefined
+      ? { office_hours: nullable(v.office_hours) }
+      : {}),
     archived: boolean(v.archived),
     revision: number(v.revision),
     meetings: array(v.meetings, readStudentMeeting),
@@ -470,19 +475,26 @@ export async function studentRequest<T>(
   parse: (value: unknown) => T,
   method = "GET",
   body?: unknown,
+  accountKey?: string,
 ): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12_000);
+  const timer = setTimeout(
+    () => controller.abort(),
+    path.startsWith("/planning") ? 60_000 : 12_000,
+  );
   try {
     const response = await fetch(`${apiBaseUrl}/student${path}`, {
       method,
       credentials: "include",
       cache: "no-store",
       signal: controller.signal,
+      headers: {
+        ...(accountKey ? { "X-NavoX-Account": accountKey } : {}),
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
       ...(body === undefined
         ? {}
         : {
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
           }),
     });
@@ -522,13 +534,7 @@ export async function studentRequest<T>(
   }
 }
 export function studentDateInZone(instantValue: string, zone: string): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: zone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(instantValue));
-  return `${parts.find((p) => p.type === "year")?.value}-${parts.find((p) => p.type === "month")?.value}-${parts.find((p) => p.type === "day")?.value}`;
+  return studentLocalTime(instantValue, zone).date;
 }
 export function addStudentDays(value: string, amount: number): string {
   const day = new Date(`${value}T12:00:00Z`);
@@ -536,11 +542,7 @@ export function addStudentDays(value: string, amount: number): string {
   return day.toISOString().slice(0, 10);
 }
 export function studentClock(value: string, zone: string): string {
-  return new Intl.DateTimeFormat("en", {
-    timeZone: zone,
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(value));
+  return studentLocalTime(value, zone).clock;
 }
 export function studentDayLabel(value: string): string {
   return new Intl.DateTimeFormat("en", {
@@ -584,6 +586,9 @@ export function studentCourseDraft(
     term_start: value.term_start,
     term_end: value.term_end,
     professor: value.professor,
+    ...(value.office_hours !== undefined
+      ? { office_hours: value.office_hours }
+      : {}),
   };
 }
 export function studentMeetingDraft(

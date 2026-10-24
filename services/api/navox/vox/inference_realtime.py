@@ -21,6 +21,7 @@ import av
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
+from navox.ai.message_limits import TYPED_MESSAGE_LIMIT
 from navox.core.settings import Settings
 from navox.vox.inference_config import VoxInferenceConfig, route_credential
 from navox.vox.inference_http import (
@@ -357,7 +358,7 @@ class OpenAIRealtimeAdapter:
         try:
             async with asyncio.timeout(self.config.turn_timeout_seconds):
                 if text is not None:
-                    self._question = bounded_text(text)
+                    self._question = bounded_text(text, TYPED_MESSAGE_LIMIT)
                     await self._send(
                         {
                             "type": "conversation.item.create",

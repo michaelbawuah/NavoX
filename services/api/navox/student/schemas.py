@@ -83,6 +83,7 @@ class CourseInput(Input):
     term_start: date
     term_end: date
     professor: str | None = Field(default=None, max_length=120)
+    office_hours: str | None = Field(default=None, max_length=500)
 
     @model_validator(mode="after")
     def term(self) -> Self:

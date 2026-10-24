@@ -71,6 +71,7 @@ class StudentPlanningPreview(Base):
     preview_hash: Mapped[str] = mapped_column(String(64))
     base_revision: Mapped[int] = mapped_column(Integer)
     result: Mapped[dict[str, object]] = mapped_column(JSON)
+    replaced_blocks: Mapped[list[dict[str, object]] | None] = mapped_column(JSON, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

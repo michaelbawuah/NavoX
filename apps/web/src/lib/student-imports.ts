@@ -87,19 +87,33 @@ const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 export async function readStudentScreenshot(
   file: File,
+  pdf = false,
 ): Promise<StudentScreenshotPreview> {
-  if (!["image/png", "image/jpeg", "image/webp"].includes(file.type))
-    throw new Error("Choose a PNG, JPEG, or WebP screenshot.");
+  if (
+    !(
+      pdf ? ["application/pdf"] : ["image/png", "image/jpeg", "image/webp"]
+    ).includes(
+      file.type ||
+        (pdf && file.name.toLowerCase().endsWith(".pdf")
+          ? "application/pdf"
+          : ""),
+    )
+  )
+    throw new Error(
+      pdf
+        ? "Choose a PDF schedule."
+        : "Choose a PNG, JPEG, or WebP screenshot.",
+    );
   if (file.size > 5 * 1024 * 1024)
     throw new Error("Choose a screenshot smaller than 5 MB.");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 35_000);
   try {
     const response = await fetch(
-      `${apiBaseUrl}/student/imports/screenshot/preview`,
+      `${apiBaseUrl}/student/imports/${pdf ? "pdf" : "screenshot"}/preview`,
       {
         method: "POST",
-        headers: { "Content-Type": file.type },
+        headers: { "Content-Type": pdf ? "application/pdf" : file.type },
         body: file,
         credentials: "include",
         cache: "no-store",

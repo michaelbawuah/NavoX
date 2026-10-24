@@ -44,8 +44,9 @@ describe("goals entry points", () => {
     productFeatures.studentGoals = true;
     const today = render("today"),
       planner = render("planner");
-    expect(today).toContain("Your goals, at your pace");
-    expect(today).toContain('href="/goals"');
+    expect(today).not.toContain("Your goals, at your pace");
+    expect(today).toContain("Loading your day…");
+    expect(today).not.toContain('href="/goals"');
     expect(planner).toContain("Review my goals");
     expect(planner).toContain("Tasks &amp; events");
     expect(today).not.toContain("You attended");

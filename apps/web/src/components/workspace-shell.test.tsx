@@ -31,12 +31,12 @@ describe("workspace navigation", () => {
       const html = renderToStaticMarkup(
         <EnabledShell current="Board">Practice lesson</EnabledShell>,
       );
-      expect(html.match(/href="\/board"/g)).toHaveLength(1);
+      expect(html.match(/href="\/board"/g)).toHaveLength(2);
       expect(
         html.match(
           /<a(?=[^>]*href="\/board")(?=[^>]*aria-current="page")[^>]*>/g,
         ),
-      ).toHaveLength(1);
+      ).toHaveLength(2);
       expect(html).not.toContain('href="/news"');
     } finally {
       vi.unstubAllEnvs();
@@ -68,7 +68,7 @@ describe("workspace navigation", () => {
     expect(html).toContain('href="#workspace-content"');
     expect(html).toContain('id="workspace-content"');
     expect(html.match(/Upcoming events/g)).toHaveLength(1);
-    expect(html).toContain('aria-controls="workspace-navigation"');
+    expect(html).toContain('aria-label="Open profile menu"');
     expect(html).toContain('aria-expanded="false"');
   });
 });

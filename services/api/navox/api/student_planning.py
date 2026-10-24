@@ -1,7 +1,7 @@
 """Disabled-by-default, explicitly accepted study plans. Never writes a calendar."""
 
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
@@ -9,12 +9,16 @@ from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDe
 from navox.api.connector_management import require_origin
 from navox.api.student import result, scope
 from navox.student import service as schedule
-from navox.student_planning import service
+from navox.student_planning import completion, service
 from navox.student_planning.schemas import (
     AcceptInput,
+    MoveConfirm,
+    MoveInput,
+    OutcomeConfirmInput,
     OutcomeInput,
     OutcomeView,
     PlanView,
+    PreferencesConfirm,
     PreferencesUpdate,
     PreferencesView,
     PreviewInput,
@@ -36,8 +40,16 @@ def enabled(request: Request, settings: SettingsDependency) -> None:
         raise HTTPException(404, "Study planning is not enabled")
 
 
+def expected_planning_owner(request: Request, account: CurrentAccountDependency) -> None:
+    values = request.headers.getlist("X-NavoX-Account")
+    if values and values != [f"{account.workspace.id}:{account.user.id}"]:
+        raise HTTPException(409, "Your account changed. Reopen the plan and try again")
+
+
 router = APIRouter(
-    prefix="/student/planning", tags=["student planning"], dependencies=[Depends(enabled)]
+    prefix="/student/planning",
+    tags=["student planning"],
+    dependencies=[Depends(enabled), Depends(expected_planning_owner)],
 )
 
 
@@ -138,6 +150,17 @@ async def preview_plan(
     return await result(service.preview(database, *scope(account), payload))
 
 
+@router.get("/previews/{preview_id}", response_model=PreviewView)
+async def get_plan_preview(
+    preview_id: UUID,
+    response: Response,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+) -> PreviewView:
+    response.headers["Cache-Control"] = "private, no-store"
+    return await result(service.get_preview(database, *scope(account), preview_id))
+
+
 @router.post("/accept", response_model=PlanView)
 async def accept_plan(
     payload: AcceptInput,
@@ -168,6 +191,43 @@ async def record_outcome(
     return await result(service.outcome(database, *scope(account), block_id, payload))
 
 
+@router.post("/blocks/{block_id}/outcome/preview", response_model=OutcomeView)
+async def preview_outcome(
+    block_id: UUID,
+    payload: OutcomeInput,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> OutcomeView:
+    require_origin(request, settings.web_origin)
+    return await result(
+        service.outcome(database, *scope(account), block_id, payload, preview_only=True)
+    )
+
+
+@router.post("/blocks/{block_id}/outcome/confirm", response_model=OutcomeView)
+async def confirm_outcome(
+    block_id: UUID,
+    payload: OutcomeConfirmInput,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> OutcomeView:
+    require_origin(request, settings.web_origin)
+    outcome_input = OutcomeInput.model_validate(payload.model_dump(exclude={"preview_hash"}))
+    return await result(
+        service.outcome(
+            database,
+            *scope(account),
+            block_id,
+            outcome_input,
+            expected_preview=payload.preview_hash,
+        )
+    )
+
+
 @router.post("/undo", response_model=PlanView)
 async def undo_progress(
     payload: UndoInput,
@@ -178,3 +238,149 @@ async def undo_progress(
 ) -> PlanView:
     require_origin(request, settings.web_origin)
     return await result(service.undo_outcome(database, *scope(account), payload))
+
+
+def expected_routine_owner(request: Request, account: CurrentAccountDependency) -> None:
+    if request.headers.getlist("X-NavoX-Account") != [f"{account.workspace.id}:{account.user.id}"]:
+        raise HTTPException(409, "Your account changed. Reopen Settings and try again")
+
+
+@router.post("/preferences/preview", dependencies=[Depends(expected_routine_owner)])
+async def preview_preferences(
+    payload: PreferencesUpdate,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict:
+    require_origin(request, settings.web_origin)
+    return await result(service.preference_preview(database, *scope(account), payload))
+
+
+@router.post(
+    "/preferences/confirm",
+    response_model=PreferencesView,
+    dependencies=[Depends(expected_routine_owner)],
+)
+async def confirm_preferences(
+    payload: PreferencesConfirm,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> PreferencesView:
+    require_origin(request, settings.web_origin)
+    candidate = PreferencesUpdate.model_validate(payload.model_dump(exclude={"preview_hash"}))
+    await result(schedule.owner(database, *scope(account), lock=True))
+    previous = await result(
+        service.command(
+            database,
+            *scope(account),
+            candidate.request_id,
+            "preferences",
+            candidate.model_dump(mode="json"),
+        )
+    )
+    if previous:
+        return await result(service.preferences(database, *scope(account)))
+    preview = await result(service.preference_preview(database, *scope(account), candidate))
+    if preview["warnings"] or any(
+        row["enabled"] and row["scheduled_at"] is None for row in preview["alarm_occurrences"]
+    ):
+        raise HTTPException(409, "Resolve timetable or wake-time warnings before approving")
+    if preview["preview_hash"] != payload.preview_hash:
+        raise HTTPException(
+            409, "Your routine, classes or study blocks changed. Review a fresh preview"
+        )
+    return await result(service.save_preferences(database, *scope(account), candidate))
+
+
+@router.get("/alarm", dependencies=[Depends(expected_routine_owner)])
+async def alarm_view(account: CurrentAccountDependency, database: DatabaseSession) -> dict:
+    current = await result(service.preferences(database, *scope(account)))
+    payload = PreferencesUpdate.model_validate(
+        {**current.model_dump(exclude={"timezone"}), "request_id": uuid4()}
+    )
+    preview = await result(service.preference_preview(database, *scope(account), payload))
+    return {
+        "timezone": preview["timezone"],
+        "alarm_occurrences": preview["alarm_occurrences"],
+        "native_ringing_available": False,
+    }
+
+
+@router.post("/blocks/{block_id}/move/preview", dependencies=[Depends(expected_routine_owner)])
+async def preview_move(
+    block_id: UUID,
+    payload: MoveInput,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict:
+    from navox.student_planning.moving import move
+
+    require_origin(request, settings.web_origin)
+    return await result(move(database, *scope(account), block_id, payload))
+
+
+@router.post("/blocks/{block_id}/move/confirm", dependencies=[Depends(expected_routine_owner)])
+async def confirm_move(
+    block_id: UUID,
+    payload: MoveConfirm,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict:
+    from navox.student_planning.moving import move
+
+    require_origin(request, settings.web_origin)
+    candidate = MoveInput.model_validate(payload.model_dump(exclude={"preview_hash"}))
+    return await result(
+        move(database, *scope(account), block_id, candidate, expected_preview=payload.preview_hash)
+    )
+
+
+@router.get("/openings", dependencies=[Depends(expected_routine_owner)])
+async def get_openings(
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    days: Annotated[int, Query(ge=1, le=7)] = 1,
+) -> dict:
+    from navox.student_planning.openings import openings
+
+    return await result(openings(database, *scope(account), days))
+
+
+@router.post("/tasks/{task_id}/complete/preview", dependencies=[Depends(expected_routine_owner)])
+async def preview_task_completion(
+    task_id: UUID,
+    payload: completion.CompleteInput,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict:
+    require_origin(request, settings.web_origin)
+    return await result(completion.complete(database, *scope(account), task_id, payload))
+
+
+@router.post("/tasks/{task_id}/complete/confirm", dependencies=[Depends(expected_routine_owner)])
+async def confirm_task_completion(
+    task_id: UUID,
+    payload: completion.CompleteConfirm,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict:
+    require_origin(request, settings.web_origin)
+    candidate = completion.CompleteInput.model_validate(
+        payload.model_dump(exclude={"preview_hash"})
+    )
+    return await result(
+        completion.complete(
+            database, *scope(account), task_id, candidate, expected_preview=payload.preview_hash
+        )
+    )

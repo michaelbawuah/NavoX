@@ -46,6 +46,7 @@ class StudentCourse(Base):
     code: Mapped[str] = mapped_column(String(40), default="")
     name: Mapped[str] = mapped_column(String(200))
     professor: Mapped[str | None] = mapped_column(String(120))
+    office_hours: Mapped[str | None] = mapped_column(String(500), nullable=True)
     term_start: Mapped[date] = mapped_column(Date)
     term_end: Mapped[date] = mapped_column(Date)
     archived: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -837,3 +837,95 @@ async def test_reply_execution_checks_binding_and_receipt(
         )
         assert result == ("uncertain" if failure == "wrong_receipt" else "blocked")
         assert len(gateway.calls) == (1 if failure == "wrong_receipt" else 0)
+
+
+@pytest.mark.asyncio
+async def test_discard_unapproved_draft_and_all_versions_without_sending(
+    approval_environment, monkeypatch
+):
+    client, factory, settings, draft, _, _ = await setup(approval_environment, monkeypatch)
+    path = f"/api/v1/communication-drafts/{draft['id']}?expected_version=1"
+    assert (
+        await client.delete(path, headers={"Origin": "https://foreign.example"})
+    ).status_code == 403
+    response = await client.delete(path, headers={"Origin": settings.web_origin})
+    assert response.status_code == 200, response.text
+    async with factory() as db:
+        assert await db.get(CommunicationDraft, UUID(draft["id"])) is None
+        assert not list(
+            await db.scalars(
+                select(CommunicationDraftVersion).where(
+                    CommunicationDraftVersion.draft_id == UUID(draft["id"])
+                )
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_discard_rejects_prepared_approval_and_cannot_discard_approved_send(
+    approval_environment, monkeypatch
+):
+    client, factory, settings, draft, connection, _ = await setup(approval_environment, monkeypatch)
+    action = await prepare(client, draft, connection)
+    response = await client.delete(
+        f"/api/v1/communication-drafts/{draft['id']}?expected_version=1",
+        headers={"Origin": settings.web_origin},
+    )
+    assert response.status_code == 200, response.text
+    async with factory() as db:
+        approval = await db.scalar(select(Approval).where(Approval.action_id == UUID(action["id"])))
+        assert approval.status == "rejected"
+    assert (await approve(client, draft, action)).status_code != 200
+
+
+@pytest.mark.asyncio
+async def test_inbox_message_reads_exact_live_source_and_rechecks_withdrawal(
+    approval_environment, monkeypatch
+):
+    from navox.providers import google_oauth, google_sources
+
+    (
+        client,
+        factory,
+        settings,
+        account,
+        commitment,
+        connection_id,
+        source_id,
+    ) = await reply_source_environment(approval_environment)
+
+    async def token(*args, **kwargs):
+        return "synthetic-test-token"
+
+    withdrawn = [False]
+
+    async def message(self, access_token, *, workspace_id, connection_id, external_id, now):
+        if withdrawn[0]:
+            async with factory() as db:
+                row = await db.get(Connection, connection_id)
+                row.status = "disconnected"
+                await db.commit()
+        return SourceDocument(
+            id=uuid4(),
+            workspace_id=workspace_id,
+            provider="google",
+            source_type="gmail_message",
+            external_id=external_id,
+            subject="Live subject",
+            content="Live plain text",
+            occurred_at=now,
+            retrieved_at=now,
+        )
+
+    monkeypatch.setattr(google_oauth, "access_token_for_connection", token)
+    monkeypatch.setattr(google_sources.GoogleSourceGateway, "gmail_message", message)
+    path = f"/api/v1/communication-drafts/sources/{commitment['id']}/{source_id}/message"
+    response = await client.get(path)
+    assert response.status_code == 200, response.text
+    assert response.json()["body"] == "Live plain text"
+    assert "Untrusted retained" not in response.text
+    assert response.headers["Cache-Control"] == "private, no-store"
+    withdrawn[0] = True
+    response = await client.get(path)
+    assert response.status_code in {403, 409}
+    assert "Live plain text" not in response.text

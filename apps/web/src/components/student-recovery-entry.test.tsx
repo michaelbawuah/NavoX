@@ -44,8 +44,9 @@ describe("recovery entry points", () => {
     productFeatures.studentRecovery = true;
     const today = render("today"),
       planner = render("planner");
-    expect(today).toContain("Catch up at your pace");
-    expect(today).toContain('href="/recovery"');
+    expect(today).not.toContain("Catch up at your pace");
+    expect(today).toContain("Loading your day…");
+    expect(today).not.toContain('href="/recovery"');
     expect(planner).toContain("Review a catch-up proposal");
     expect(planner).toContain("Tasks &amp; events");
     expect(today).not.toContain("You missed class");

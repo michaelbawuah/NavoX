@@ -425,3 +425,46 @@ async def test_real_english_timetable_ocr_produces_reviewable_rows():
     assert (row.start_time, row.end_time) == ("09:05", "09:55")
     assert row.timezone is None
     assert result.requires_review is True
+
+
+@pytest.mark.asyncio
+async def test_pdf_schedule_preview_uses_bounded_local_extraction_and_remains_readonly(monkeypatch):
+    from types import SimpleNamespace
+
+    async def extract(raw, media_type):
+        assert raw == b"%PDF-test"
+        assert media_type == "application/pdf"
+        return SimpleNamespace(pages=["CS 2110 Monday 9:00 AM-10:00 AM"])
+
+    monkeypatch.setattr(student_screenshot, "extract_material", extract)
+    async with AsyncClient(
+        transport=ASGITransport(app=screenshot_app()), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/v1/student/imports/pdf/preview",
+            content=b"%PDF-test",
+            headers={"Content-Type": "application/pdf"},
+        )
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.json()["requires_review"] is True
+    assert response.json()["candidates"][0]["course_code"] == "CS 2110"
+
+
+@pytest.mark.asyncio
+async def test_pdf_schedule_rejects_excess_pages(monkeypatch):
+    from types import SimpleNamespace
+
+    async def extract(*args):
+        return SimpleNamespace(pages=["text"] * 11)
+
+    monkeypatch.setattr(student_screenshot, "extract_material", extract)
+    async with AsyncClient(
+        transport=ASGITransport(app=screenshot_app()), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/v1/student/imports/pdf/preview",
+            content=b"%PDF-test",
+            headers={"Content-Type": "application/pdf"},
+        )
+    assert response.status_code == 422
