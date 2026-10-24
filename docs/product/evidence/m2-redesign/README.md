@@ -70,3 +70,17 @@ need side-by-side review against the 19-page source. See ../../m2-redesign-20261
   these are measured estimates, not a fully reconciled bill. No quota was reset.
 - Final server check found zero active test calls. Demo fixtures remain intentionally.
 - Main/production are unchanged. Work remains in draft PR #57.
+
+
+## Sidebar and additional screens — test release 731c89e
+
+- `profile-name-saved.png` and `profile-name-first.png`: first-name/school profile layout.
+- `classes-*`, `planner-*`, `inbox-*`: saved/first, desktop/mobile, dark/light views.
+- `today-night-*`: controlled 3 AM in America/New_York (07:00Z); real synthetic QA class data.
+- `routine-review-mobile.png`: approval review on a 375 px viewport.
+- `routine-and-night-mobile-emulation.webm`: routine preview, approval, late-night view and Settings navigation.
+
+These are browser emulation, not physical-phone evidence. QA alarm settings were
+restored through the same preview/confirm API after testing. No real student account
+was modified. Inbox images show unconnected state, not successful Gmail/Outlook triage.
+See the authoritative acceptance ledger for remaining requirements and deviations.
