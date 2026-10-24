@@ -86,6 +86,7 @@ interface ApprovalPanelProps {
   connections: GoogleConnection[];
   onStateChanged: () => Promise<void>;
   showComposer?: boolean;
+  timezone?: string;
 }
 
 async function apiError(response: Response): Promise<string> {
@@ -109,11 +110,12 @@ function terminal(status: string): boolean {
   ].includes(status);
 }
 
-function expiryLabel(value: string | undefined): string {
+function expiryLabel(value: string | undefined, timezone?: string): string {
   if (!value) {
     return "No active approval";
   }
   return new Intl.DateTimeFormat(undefined, {
+    ...(timezone ? { timeZone: timezone } : {}),
     hour: "numeric",
     minute: "2-digit",
     second: "2-digit",
@@ -126,6 +128,7 @@ export function ApprovalPanel({
   connections,
   onStateChanged,
   showComposer = true,
+  timezone,
 }: ApprovalPanelProps) {
   const gmailConnections = useMemo(
     () =>
@@ -391,7 +394,7 @@ export function ApprovalPanel({
             </div>
             <small>
               {activeAction.approval?.status === "pending"
-                ? `Expires ${expiryLabel(activeAction.approval.expires_at)}`
+                ? `Expires ${expiryLabel(activeAction.approval.expires_at, timezone)}`
                 : activeAction.approval?.status.replaceAll("_", " ")}
             </small>
           </div>
@@ -433,6 +436,7 @@ export function ApprovalPanel({
             action={activeAction}
             connections={connections}
             paused={agentPaused}
+            timezone={timezone}
           />
 
           {approvalPending && (

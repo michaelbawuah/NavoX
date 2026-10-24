@@ -682,12 +682,20 @@ async def test_realtime_pcm_bridge_resamples_24k_to_48k_and_reports_only_actual_
 
 
 @pytest.mark.asyncio
-async def test_invalid_realtime_or_cancelled_turn_never_silently_falls_back():
-    from navox.vox.inference_http import ProviderRejected
+async def test_invalid_realtime_or_cancelled_turn_never_silently_falls_back(caplog):
+    from navox.vox.inference_http import ProviderRejected, bounded_text
+
+    private_body = "synthetic-private-provider-body-and-credential"
+    private_note = "synthetic-private-exception-note"
 
     class Rejected(FailingRealtime):
         async def respond(self, emit, text=None):
-            raise ProviderRejected("synthetic quota/config denial")
+            try:
+                bounded_text(private_body, maximum=1)
+            except ProviderRejected as error:
+                error.args = (private_body,)
+                error.add_note(private_note)
+                raise
 
     check, output = Check(), Output()
     key = CallContextKey(check.authority.user_id, check.authority.workspace_id, uuid4(), 0)
@@ -708,6 +716,18 @@ async def test_invalid_realtime_or_cancelled_turn_never_silently_falls_back():
     assert worker.pipeline.calls == 0
     assert worker.failed
     assert context.history(connection) == ()
+    failures = [record for record in caplog.records if record.msg == "Vox spoken turn failed"]
+    assert len(failures) == 1
+    record = failures[0]
+    assert record.error_type == "ProviderRejected"
+    function, line = record.failure_site.split(":")
+    assert function == "bounded_text"
+    assert line.isdecimal() and int(line) > 0
+    assert record.exc_info is None
+    assert record.stack_info is None
+    for private in (private_body, private_note):
+        assert private not in caplog.text
+        assert private not in repr(vars(record))
     await worker.close()
 
 

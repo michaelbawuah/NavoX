@@ -78,19 +78,19 @@ def _score(task: TaskView, now: datetime) -> float:
     )
 
 
-def build_plan(
-    tasks: list[TaskView],
+def available_slots(
     preferences: Preferences,
     timezone: str,
     *,
     start_at: datetime,
     end_at: datetime,
     busy: list[tuple[datetime, datetime]],
-) -> PlanResult:
+    wake_overrides: dict[date, datetime | None] | None = None,
+) -> tuple[list[Slot], set[str]]:
     start_at, end_at = utc(start_at), utc(end_at)
     if end_at <= start_at or end_at - start_at > timedelta(days=15):
         raise ValueError("Choose an increasing planning window of at most 14 local days")
-    if len(tasks) > 200 or len(busy) > 10_000:
+    if len(busy) > 10_000:
         raise ValueError("Too many records to plan safely")
     zone = ZoneInfo(timezone)
     slots: list[Slot] = []
@@ -101,8 +101,18 @@ def build_plan(
     while day <= last_day:
         try:
             awake_start, awake_end = _window(
-                day, preferences.wake_time, preferences.sleep_time, timezone
+                day,
+                preferences.wake_times[day.weekday()]
+                if preferences.wake_times
+                else preferences.wake_time,
+                preferences.sleep_time,
+                timezone,
             )
+            if wake_overrides and day in wake_overrides:
+                wake = wake_overrides[day]
+                if wake is None:
+                    raise ValueError("Smart wake time is unresolved")
+                awake_start = utc(wake)
             clipped_start, clipped_end = max(awake_start, start_at), min(awake_end, end_at)
             # Split at midnight so each actual local day keeps its own 15% buffer.
             current = clipped_start
@@ -121,6 +131,17 @@ def build_plan(
                 "A routine window crosses a clock change; that window was left unscheduled."
             )
         day += timedelta(days=1)
+    # Per-day wake times and smart alarms can overlap a preceding overnight
+    # routine. Count each real minute once before subtracting events or reserving
+    # the deadline buffer, while preserving local-day boundaries.
+    distinct: list[Slot] = []
+    for slot in sorted(slots, key=lambda item: (item.start, item.end)):
+        if distinct and slot.day == distinct[-1].day and slot.start <= distinct[-1].end:
+            previous = distinct[-1]
+            distinct[-1] = Slot(previous.start, max(previous.end, slot.end), previous.day)
+        else:
+            distinct.append(slot)
+    slots = distinct
     for start, end in busy:
         slots = subtract(slots, utc(start), utc(end))
     day = first_day - timedelta(days=1)
@@ -146,6 +167,31 @@ def build_plan(
                 except ValueError:
                     warnings.add("A focus window crosses a clock change and was not assumed.")
         day += timedelta(days=1)
+    return slots, warnings
+
+
+def build_plan(
+    tasks: list[TaskView],
+    preferences: Preferences,
+    timezone: str,
+    *,
+    start_at: datetime,
+    end_at: datetime,
+    busy: list[tuple[datetime, datetime]],
+    wake_overrides: dict[date, datetime | None] | None = None,
+    reserve_buffer: bool = True,
+) -> PlanResult:
+    if len(tasks) > 200:
+        raise ValueError("Too many records to plan safely")
+    start_at, end_at = utc(start_at), utc(end_at)
+    slots, warnings = available_slots(
+        preferences,
+        timezone,
+        start_at=start_at,
+        end_at=end_at,
+        busy=busy,
+        wake_overrides=wake_overrides,
+    )
     free_by_day: dict[date, int] = {}
     for slot in slots:
         free_by_day[slot.day] = free_by_day.get(slot.day, 0) + int(
@@ -154,7 +200,7 @@ def build_plan(
     # Reserve real unscheduled time first. Breaks are additional, not counted as
     # the 15% buffer. Taking it from the last free slots is stable and explainable.
     for day, free in free_by_day.items():
-        reserve = math.ceil(free * 0.15)
+        reserve = math.ceil(free * 0.15) if reserve_buffer else 0
         for slot in sorted(
             [item for item in slots if item.day == day], key=lambda item: item.end, reverse=True
         ):
@@ -164,7 +210,10 @@ def build_plan(
                 reserve -= take
             if reserve == 0:
                 break
-    budgets = {day: free - math.ceil(free * 0.15) for day, free in free_by_day.items()}
+    budgets = {
+        day: free - (math.ceil(free * 0.15) if reserve_buffer else 0)
+        for day, free in free_by_day.items()
+    }
     planned_by_day = {day: 0 for day in free_by_day}
     blocks: list[ProposedBlock] = []
     unfitted: list[UnfittedWork] = []
@@ -178,12 +227,14 @@ def build_plan(
     )
     for task in ordered:
         remaining = task.remaining_minutes
+        task_days: dict[date, int] = {}
         deadline = min(utc(task.due_at), end_at) if task.due_at else end_at
         if deadline > start_at:
             while remaining and len(blocks) < MAX_BLOCKS:
                 candidates = sorted(
                     slots,
                     key=lambda slot: (
+                        task_days.get(slot.day, 0),
                         not slot.focus if task.difficulty >= 4 else slot.focus,
                         slot.start,
                     ),
@@ -196,7 +247,9 @@ def build_plan(
                         budgets.get(slot.day, 0) - planned_by_day.get(slot.day, 0),
                         int((min(slot.end, deadline) - slot.start).total_seconds() // 60),
                     )
-                    if minutes > 0:
+                    # Do not turn narrow gaps into unusable fragments. A short final
+                    # remainder is allowed only when it completes the task.
+                    if minutes >= min(15, remaining):
                         selected = slot, minutes
                         break
                 if selected is None:
@@ -214,6 +267,7 @@ def build_plan(
                     )
                 )
                 planned_by_day[slot.day] += minutes
+                task_days[slot.day] = task_days.get(slot.day, 0) + minutes
                 remaining -= minutes
                 rest = timedelta(minutes=preferences.break_minutes)
                 slots = subtract(slots, slot.start - rest, end + rest)
@@ -257,7 +311,7 @@ def build_plan(
             DayCapacity(
                 day=day,
                 free_minutes=free,
-                buffer_minutes=math.ceil(free * 0.15),
+                buffer_minutes=math.ceil(free * 0.15) if reserve_buffer else 0,
                 planned_minutes=planned_by_day[day],
             )
             for day, free in sorted(free_by_day.items())

@@ -81,18 +81,37 @@ async def verified_source(
         raise EmailError("The selected email connection is unavailable", 403)
     definition = await database.get(ConnectorDefinition, connector.connector_definition_id)
     if (
-        resource.provider != "google"
-        or connector.legacy_connection_id is None
+        connector.legacy_connection_id is None
         or definition is None
         or not definition.active
         or definition.connector_class != "OAUTH_API"
         or definition.trust_level != "NAVOX_FIRST_PARTY"
+    ):
+        raise EmailError("Select a current message from your authorized email source", 403)
+    legacy = await database.get(Connection, connector.legacy_connection_id, populate_existing=True)
+    if definition.connector_key == "microsoft-outlook":
+        scopes = connector.config.get("scopes")
+        if (
+            resource.provider != "microsoft"
+            or legacy is None
+            or legacy.provider != "microsoft"
+            or legacy.external_account_id != f"connector:{connector.id}"
+            or legacy.credential_reference is None
+            or legacy.credential_reference != connector.credential_reference
+            or "Mail.Read" not in legacy.granted_scopes
+            or not isinstance(scopes, list)
+            or "Mail.Read" not in scopes
+            or not 1 <= len(resource.external_id) <= 512
+            or any(ord(char) < 32 for char in resource.external_id)
+        ):
+            raise EmailError("The selected Outlook source is unavailable", 403)
+    elif (
+        resource.provider != "google"
         or definition.connector_key not in {GMAIL_MANIFEST.id, GOOGLE_CONNECTOR_KEY}
         or not re.fullmatch(r"[a-fA-F0-9]{8,128}", resource.external_id)
+        or legacy is None
+        or legacy.provider != "google"
     ):
-        raise EmailError("Select a current message from your authorized Gmail source", 403)
-    legacy = await database.get(Connection, connector.legacy_connection_id, populate_existing=True)
-    if legacy is None or legacy.provider != "google":
         raise EmailError("The selected Gmail source is unavailable", 403)
     return resource, connector, definition.connector_key
 
@@ -103,23 +122,27 @@ async def source_authority_hash(
     legacy = await database.get(Connection, connector.legacy_connection_id, populate_existing=True)
     if legacy is None:
         raise EmailError("The selected email authority changed", 403)
-    return digest(
-        {
-            "connector_id": str(connector.id),
-            "definition_id": str(connector.connector_definition_id),
-            "generation": connector.sync_generation if in_flight else None,
-            "legacy_id": str(connector.legacy_connection_id),
-            "account": connector.external_account_id,
-            "status": connector.status if in_flight else None,
-            "health": connector.health_state if in_flight else None,
-            "authorized": sorted(connector.authorized_capabilities),
-            "provided": sorted(connector.provider_capabilities),
-            "credential": str(legacy.credential_reference),
-            "legacy_account": legacy.external_account_id,
-            "legacy_scopes": sorted(legacy.granted_scopes),
-            "legacy_status": legacy.status,
-        }
-    )
+    authority: dict[str, Any] = {
+        "connector_id": str(connector.id),
+        "definition_id": str(connector.connector_definition_id),
+        "generation": connector.sync_generation if in_flight else None,
+        "legacy_id": str(connector.legacy_connection_id),
+        "account": connector.external_account_id,
+        "status": connector.status if in_flight else None,
+        "health": connector.health_state if in_flight else None,
+        "authorized": sorted(connector.authorized_capabilities),
+        "provided": sorted(connector.provider_capabilities),
+        "credential": str(legacy.credential_reference),
+        "legacy_account": legacy.external_account_id,
+        "legacy_scopes": sorted(legacy.granted_scopes),
+        "legacy_status": legacy.status,
+    }
+    if connector.provider == "microsoft":
+        # Microsoft rotation replaces its encrypted bundle. Preserve the original
+        # Gmail digest format; only this provider uses a stable mailbox identity.
+        authority["credential"] = None
+        authority["mailbox_identity"] = connector.config.get("account_id")
+    return digest(authority)
 
 
 def seal(row: StudentEmailReview, payload: dict[str, Any], settings: Settings) -> str:
@@ -504,7 +527,7 @@ async def analyze(
             raise
         except Exception:
             raise EmailError(
-                "The selected email could not be read. Reconnect Gmail or try later", 503
+                "The selected email could not be read. Reconnect your mailbox or try later", 503
             ) from None
         await schedule.owner(database, user_id, workspace_id, lock=True)
         source, connector, fresh_key = await verified_source(
@@ -518,22 +541,32 @@ async def analyze(
             raise EmailError(
                 "The email read authority changed while the message was read. Analyze again"
             )
+        provider, source_type = (
+            ("microsoft", "outlook_message")
+            if definition_key == "microsoft-outlook"
+            else ("google", "gmail_message")
+        )
         if (
             document.workspace_id != workspace_id
-            or document.provider != "google"
-            or document.source_type != "gmail_message"
+            or document.provider != provider
+            or document.source_type != source_type
             or document.external_id != source_meta[0]
             or document.metadata.get("status") == "deleted"
             or fresh_key != definition_key
         ):
             raise EmailError("The selected email changed or is unavailable. Sync and review again")
-        canonical = (
-            gmail_resource(document, connector.id)
-            if definition_key == GMAIL_MANIFEST.id
-            else google_canonical_resource(document, connector_connection_id=connector.id)
-        )
+        if definition_key == "microsoft-outlook":
+            from navox.outlook.tasks import canonical_document
+
+            canonical = canonical_document(document, connector.id)
+        else:
+            canonical = (
+                gmail_resource(document, connector.id)
+                if definition_key == GMAIL_MANIFEST.id
+                else google_canonical_resource(document, connector_connection_id=connector.id)
+            )
         if resource_hash(canonical) != payload.source_hash:
-            raise EmailError("The email changed since it was saved. Sync Gmail and analyze again")
+            raise EmailError("The email changed since it was saved. Reopen it and analyze again")
         row = await owned_review(
             database, user_id=user_id, workspace_id=workspace_id, review_id=review_id
         )

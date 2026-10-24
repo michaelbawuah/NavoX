@@ -1,0 +1,254 @@
+{
+  "release": "74711c071b11484dc0ab0ac62ea7c84b3d8483b5",
+  "sendNumber": 1,
+  "error": "Error",
+  "network": [
+    {
+      "at": 1792865892701,
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "status": 200
+    },
+    {
+      "at": 1792865892701,
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "status": 200
+    },
+    {
+      "at": 1792865894578,
+      "method": "GET",
+      "path": "/api/v1/vox/usage/status",
+      "status": 200
+    },
+    {
+      "at": 1792865894596,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/context",
+      "status": 200
+    },
+    {
+      "at": 1792865894687,
+      "method": "POST",
+      "path": "/api/v1/vox/calls",
+      "status": 201
+    },
+    {
+      "at": 1792865895434,
+      "method": "POST",
+      "path": "/api/v1/vox/calls/:id/media",
+      "status": 200
+    },
+    {
+      "at": 1792865900162,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865900563,
+      "method": "POST",
+      "path": "/api/v1/vox/calls/:id/messages",
+      "status": 200
+    },
+    {
+      "at": 1792865901758,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865903335,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865904910,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865906487,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865908067,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865909638,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865911212,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865912789,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865914369,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865915941,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865917522,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865919100,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865920671,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865921136,
+      "method": "POST",
+      "path": "/api/v1/vox/calls/:id/media/:id/renew",
+      "status": 200
+    },
+    {
+      "at": 1792865922263,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865923837,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865924560,
+      "method": "GET",
+      "path": "/api/v1/vox/usage/status",
+      "status": 200
+    },
+    {
+      "at": 1792865925406,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865926982,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865928562,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865930135,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865931705,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865933283,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865934853,
+      "method": "GET",
+      "path": "/api/v1/vox/calls/:id/transcript",
+      "status": 200
+    },
+    {
+      "at": 1792865936221,
+      "method": "POST",
+      "path": "/api/v1/vox/calls/:id/media/:id/close",
+      "status": 204
+    }
+  ],
+  "details": {
+    "visibility": "visible",
+    "online": true,
+    "timeOrigin": 1792865891804.2,
+    "route": "/",
+    "inputs": [
+      {
+        "id": "vox-message",
+        "disabled": true,
+        "valueLength": 0
+      }
+    ],
+    "buttons": [
+      {
+        "text": "SpeakerOn",
+        "aria": "Turn speaker off",
+        "disabled": false
+      },
+      {
+        "text": "",
+        "aria": "Minimize call",
+        "disabled": false
+      },
+      {
+        "text": "Mic off",
+        "aria": "Unmute microphone",
+        "disabled": true
+      },
+      {
+        "text": "Send",
+        "aria": null,
+        "disabled": true
+      },
+      {
+        "text": "Hang up",
+        "aria": null,
+        "disabled": false
+      }
+    ],
+    "notices": [
+      "Reconnecting"
+    ],
+    "peers": [
+      {
+        "connection": "closed",
+        "ice": "closed"
+      }
+    ]
+  }
+}

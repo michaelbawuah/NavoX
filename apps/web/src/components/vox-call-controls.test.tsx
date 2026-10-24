@@ -17,6 +17,21 @@ import {
   VoxCallProvider,
 } from "./vox-call-provider";
 
+// Conversation transport is exercised independently; lifecycle tests keep their fetch seams.
+vi.mock("../lib/vox-conversation", () => ({
+  useVoxConversation: () => ({
+    key: "",
+    turns: [],
+    draft: "",
+    notice: "",
+    busy: false,
+    pending: "",
+    available: true,
+    setDraft: vi.fn(),
+    send: vi.fn(),
+  }),
+}));
+
 const account = {
   id: "10000000-0000-4000-8000-000000000001",
   email: "synthetic-vox-ui@example.test",
@@ -434,7 +449,7 @@ describe("Vox call interface with real provider and controller", () => {
     await test.mount();
     expect(button("Talk with NavoX").disabled).toBe(true);
     expect(host.textContent).toContain("Vox calls are not available yet");
-    const link = host.querySelector<HTMLAnchorElement>("a");
+    const link = host.querySelector<HTMLAnchorElement>('a[href="/navox"]');
     expect(link?.textContent).toBe("Use typed chat");
     expect(link?.getAttribute("href")).toBe("/navox");
     await click("Talk with NavoX");
@@ -499,22 +514,15 @@ describe("Vox call interface with real provider and controller", () => {
     expect(test.requests[0].mayPlayAudio()).toBe(true);
   });
 
-  it("captions stay unavailable until a real stream exists and never fabricate transcript text", async () => {
+  it("offers the conversation composer without inventing transcript text", async () => {
     const test = rig();
     await test.mount();
     await click("Talk with NavoX");
-    expect(dialog().textContent).toContain(
-      "Live captions are not available yet",
+    expect(dialog().querySelector("textarea")).not.toBeNull();
+    expect(dialog().querySelector('[role="log"]')?.textContent).toContain(
+      "What's next?",
     );
-    expect(button("Captions unavailable").disabled).toBe(true);
-    expect(button("Captions unavailable").textContent).toContain("Unavailable");
-    await click("Captions unavailable");
-    expect(latest?.state.captionsEnabled).toBe(true);
-    expect(test.requests[0].mayTransmitAudio()).toBe(true);
-    expect(test.requests[0].mayPlayAudio()).toBe(true);
-    expect(dialog().textContent).not.toMatch(
-      /You said|You asked|Transcript|Meeting added/u,
-    );
+    expect(dialog().textContent).not.toContain("You said");
   });
 
   it("retries browser-blocked sound only on a tap without unmuting or restarting the call", async () => {
@@ -596,8 +604,11 @@ describe("Vox call interface with real provider and controller", () => {
     const test = rig();
     await test.mount();
     await click("Talk with NavoX");
-    const first = button("Minimize call");
-    const last = dialog().querySelector<HTMLAnchorElement>("a");
+    const first = dialog().querySelector<HTMLElement>(
+      'summary[aria-label="Vox settings"]',
+    );
+    if (!first) throw Error("Missing settings control");
+    const last = dialog().querySelector<HTMLAnchorElement>('a[href="/navox"]');
     if (!last) throw new Error("Missing modal typed-chat alternative");
     first.focus();
     act(() =>
@@ -641,7 +652,7 @@ describe("Vox call interface with real provider and controller", () => {
     const test = rig();
     await test.mount();
     await click("Talk with NavoX");
-    const link = dialog().querySelector<HTMLAnchorElement>("a");
+    const link = dialog().querySelector<HTMLAnchorElement>('a[href="/navox"]');
     if (!link) throw new Error("Missing typed chat link");
     const event = new MouseEvent("click", { bubbles: true, cancelable: true });
     event.preventDefault(); // Keep jsdom on this synthetic document.

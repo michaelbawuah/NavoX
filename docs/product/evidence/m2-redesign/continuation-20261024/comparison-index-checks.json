@@ -1,0 +1,74 @@
+{
+  "release": "c18329ee4eef35c48dac1a072926efee0d3843f7",
+  "passed": true,
+  "comparisons": 12,
+  "cases": [
+    {
+      "width": 1440,
+      "device": "desktop",
+      "theme": "dark",
+      "viewport": 1440,
+      "images": 24
+    },
+    {
+      "width": 1440,
+      "device": "desktop",
+      "theme": "light",
+      "viewport": 1440,
+      "images": 24
+    },
+    {
+      "width": 1440,
+      "device": "mobile",
+      "theme": "dark",
+      "viewport": 1440,
+      "images": 24
+    },
+    {
+      "width": 1440,
+      "device": "mobile",
+      "theme": "light",
+      "viewport": 1440,
+      "images": 24
+    },
+    {
+      "width": 375,
+      "device": "desktop",
+      "theme": "dark",
+      "viewport": 375,
+      "images": 24
+    },
+    {
+      "width": 375,
+      "device": "desktop",
+      "theme": "light",
+      "viewport": 375,
+      "images": 24
+    },
+    {
+      "width": 375,
+      "device": "mobile",
+      "theme": "dark",
+      "viewport": 375,
+      "images": 24
+    },
+    {
+      "width": 375,
+      "device": "mobile",
+      "theme": "light",
+      "viewport": 375,
+      "images": 24
+    }
+  ],
+  "recordedViewport": {
+    "width": 375,
+    "height": 812
+  },
+  "video": {
+    "duration": 53.44,
+    "width": 374,
+    "height": 812
+  },
+  "page_errors": [],
+  "scope": "Offline evidence viewer only; no additional app or provider qualification"
+}

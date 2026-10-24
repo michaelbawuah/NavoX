@@ -238,6 +238,7 @@ async def course_views(
             code=row.code,
             name=row.name,
             professor=row.professor,
+            office_hours=row.office_hours,
             term_start=row.term_start,
             term_end=row.term_end,
             archived=row.archived,
@@ -286,6 +287,8 @@ async def save_course(
         check_revision(row.revision, payload.revision)
         # A shortened term may exclude classes, but never silently destroys them.
         for key, value in payload.model_dump(exclude={"revision"}).items():
+            if key == "office_hours" and key not in payload.model_fields_set:
+                continue
             setattr(row, key, value)
         row.revision += 1
     audit(
@@ -320,9 +323,9 @@ async def save_meeting(
             course_id=course_id,
             user_id=user_id,
             workspace_id=workspace_id,
-            dates=None,
+            dates=reviewed_meeting_dates(payload, course, None),
             revision=1,
-            **payload.model_dump(),
+            **payload.model_dump(exclude={"dates"}),
         )
         database.add(row)
     else:
@@ -333,18 +336,48 @@ async def save_meeting(
         if not isinstance(payload, MeetingUpdate):
             raise StudentError(422, "A section revision is required")
         check_revision(row.revision, payload.revision)
-        if row.dates is not None and payload.weekdays != row.weekdays:
+        if (
+            row.dates is not None
+            and payload.weekdays != row.weekdays
+            and "dates" not in payload.model_fields_set
+        ):
             raise StudentError(
                 409,
                 "Imported sections keep their reviewed dates. "
                 "Add a recurring section to change its days.",
             )
-        for key, value in payload.model_dump(exclude={"revision"}).items():
+        course = cast(
+            StudentCourse,
+            await get_owned(database, StudentCourse, row.course_id, user_id, workspace_id),
+        )
+        row.dates = reviewed_meeting_dates(payload, course, row.dates)
+        for key, value in payload.model_dump(exclude={"revision", "dates"}).items():
             setattr(row, key, value)
         row.revision += 1
     audit(database, user_id, workspace_id, "student.meeting.saved", row.id)
     await database.commit()
     return MeetingView.model_validate(row)
+
+
+def reviewed_meeting_dates(
+    payload: MeetingInput, course: StudentCourse, existing: list[str] | None
+) -> list[str] | None:
+    dates = (
+        ([day.isoformat() for day in payload.dates] if payload.dates is not None else None)
+        if "dates" in payload.model_fields_set
+        else existing
+    )
+    if payload.kind == "exam":
+        if dates is None or len(dates) != 1:
+            raise StudentError(422, "Choose one exact exam date; exams do not repeat weekly")
+        exam_day = date.fromisoformat(dates[0])
+        if not course.term_start <= exam_day <= course.term_end:
+            raise StudentError(422, "Choose an exam date within the course term")
+        if payload.weekdays != [exam_day.weekday()]:
+            raise StudentError(422, "The exam weekday must match its exact date")
+    elif "dates" in payload.model_fields_set and dates != existing:
+        raise StudentError(422, "Exact-date changes are for exams; keep imported meeting dates")
+    return dates
 
 
 async def remove_record(
@@ -926,6 +959,7 @@ async def reset_data(
         erase_all_owned_feeds,
         lock_all_feeds_for_reset,
     )
+    from navox.outlook.cleanup import clear_private_data, lock_for_reset
     from navox.student_calendars.service import forget_calendar_data
     from navox.student_email.service import forget_email_data
     from navox.student_goals.service import forget_goals_data
@@ -933,8 +967,9 @@ async def reset_data(
     from navox.student_recovery.service import forget_recovery_data
     from navox.vox.service import forget_vox_data
 
-    # Feed workers use connector→membership→User. Lock their authorities before
-    # the shared student writer lock, then forget everything in one transaction.
+    # Mail and feed workers use connector→membership→User. Lock Outlook first:
+    # the feed helper takes membership/User locks as well as its connectors.
+    outlook_connections = await lock_for_reset(database, user_id=user_id, workspace_id=workspace_id)
     try:
         feed_connections = await lock_all_feeds_for_reset(
             database, user_id=user_id, workspace_id=workspace_id
@@ -954,6 +989,13 @@ async def reset_data(
         return True
     current = await profile(database, user_id, workspace_id)
     check_revision(current.revision, revision)
+    await clear_private_data(
+        database,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        connector_ids=outlook_connections,
+        advance_generation=True,
+    )
     try:
         await erase_all_owned_feeds(
             database,

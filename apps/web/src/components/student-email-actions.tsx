@@ -400,6 +400,7 @@ export function StudentEmailTaskActions({
   taskUnavailable = false,
   onAccept,
   onCheck,
+  showReplyHandoff = true,
 }: {
   review: StudentEmailReview;
   timezone: string;
@@ -409,6 +410,7 @@ export function StudentEmailTaskActions({
   taskUnavailable?: boolean;
   onAccept: (confirmed: boolean, refresh: boolean) => void;
   onCheck: () => void;
+  showReplyHandoff?: boolean;
 }) {
   const [confirmed, setConfirmed] = useState(false);
   const existing = review.existing_task;
@@ -510,23 +512,24 @@ export function StudentEmailTaskActions({
           Check saved review
         </button>
       </div>
-      {review.reply_handoff ? (
-        <div className={styles.inset}>
-          <h3>Need to reply?</h3>
-          <p>{review.reply_handoff.notice}</p>
-          <Link href={review.reply_handoff.path}>
-            Open existing Inbox reply flow →
-          </Link>
+      {showReplyHandoff &&
+        (review.reply_handoff ? (
+          <div className={styles.inset}>
+            <h3>Need to reply?</h3>
+            <p>{review.reply_handoff.notice}</p>
+            <Link href={review.reply_handoff.path}>
+              Open existing Inbox reply flow →
+            </Link>
+            <p className={styles.hint}>
+              Review the recipient and exact draft there. This screen does not
+              send messages.
+            </p>
+          </div>
+        ) : (
           <p className={styles.hint}>
-            Review the recipient and exact draft there. This screen does not
-            send messages.
+            No existing Inbox reply flow is available for this saved source.
           </p>
-        </div>
-      ) : (
-        <p className={styles.hint}>
-          No existing Inbox reply flow is available for this saved source.
-        </p>
-      )}
+        ))}
     </section>
   );
 }

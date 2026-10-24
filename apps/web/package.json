@@ -18,7 +18,8 @@
     "next": "16.4.2",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "roughjs": "4.6.6"
+    "roughjs": "4.6.6",
+    "@navox/ui": "0.1.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",

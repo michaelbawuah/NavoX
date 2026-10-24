@@ -5,7 +5,7 @@ from datetime import date
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from navox.api.auth import (
@@ -41,7 +41,14 @@ from navox.student.schemas import (
     TimetableView,
 )
 
-router = APIRouter(prefix="/student", tags=["student"])
+
+def expected_owner(request: Request, account: CurrentAccountDependency) -> None:
+    values = request.headers.getlist("X-NavoX-Account")
+    if values and values != [f"{account.workspace.id}:{account.user.id}"]:
+        raise HTTPException(409, "Your account changed. Reopen this page and try again")
+
+
+router = APIRouter(prefix="/student", tags=["student"], dependencies=[Depends(expected_owner)])
 
 
 def scope(account: CurrentAccount) -> tuple[UUID, UUID]:

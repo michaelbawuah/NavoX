@@ -4,14 +4,24 @@ import Link from "next/link";
 import {
   type KeyboardEvent,
   type ReactNode,
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import type { VoxCallController, VoxCallState } from "../lib/vox-call";
+import {
+  useVoxConversation,
+  type VoxConversationModel,
+} from "../lib/vox-conversation";
 import styles from "./vox-call-controls.module.css";
 import { useVoxCall } from "./vox-call-provider";
+import { VoxClassReview } from "./vox-class-review";
+import { VoxConversation } from "./vox-conversation";
+import { VoxPlanReview } from "./vox-plan-review";
+import { VoxRoutineReview } from "./vox-routine-review";
+import { VoxTaskReview } from "./vox-task-review";
 
 type IconName = "microphone" | "speaker" | "captions" | "hang-up" | "minimize";
 
@@ -185,6 +195,7 @@ function WebLookup({ state }: { state: VoxCallState }) {
 }
 
 function CallDialog({
+  conversation,
   controller,
   state,
   chatHref,
@@ -193,6 +204,7 @@ function CallDialog({
   onStart,
   usageNotice,
 }: {
+  conversation: VoxConversationModel;
   controller: VoxCallController;
   state: VoxCallState;
   chatHref: string;
@@ -222,10 +234,27 @@ function CallDialog({
       active.hasAttribute("data-vox-launcher")
     )
       returnTarget.current = active;
-    if (typeof element.showModal === "function") element.showModal();
-    else element.setAttribute("open", "");
-    element.querySelector<HTMLButtonElement>("button")?.focus();
+    const viewport =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia("(max-width: 767px)")
+        : null;
+    const present = () => {
+      if (element.open && typeof element.close === "function") element.close();
+      const phone = viewport?.matches ?? true;
+      element.setAttribute("aria-modal", String(phone));
+      if (phone && typeof element.showModal === "function") element.showModal();
+      else if (typeof element.show === "function") element.show();
+      else element.setAttribute("open", "");
+    };
+    present();
+    viewport?.addEventListener("change", present);
+    element
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="Minimize call"],button[aria-label="Close call details"]',
+      )
+      ?.focus();
     return () => {
+      viewport?.removeEventListener("change", present);
       if (typeof element.close === "function" && element.open) element.close();
       else element.removeAttribute("open");
     };
@@ -235,14 +264,21 @@ function CallDialog({
     if (event.key === "Escape") {
       event.preventDefault();
       dismiss();
-    } else if (event.key === "Tab") {
+    } else if (
+      event.key === "Tab" &&
+      dialog.current?.getAttribute("aria-modal") === "true"
+    ) {
       const focusable = [
         ...(dialog.current?.querySelectorAll<HTMLElement>(
-          "button:not([disabled]),a[href]",
+          "button:not([disabled]),a[href],textarea:not([disabled]),input:not([disabled]),summary",
         ) ?? []),
       ];
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
+      const visible = focusable.filter(
+        (node) =>
+          !node.closest("details:not([open])") || node.tagName === "SUMMARY",
+      );
+      const first = visible[0];
+      const last = visible[visible.length - 1];
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last?.focus();
@@ -271,6 +307,38 @@ function CallDialog({
           <p className={styles.eyebrow}>A little company for your day</p>
           <h2 id={`${id}-title`}>NavoX Vox</h2>
         </div>
+        {!ended && (
+          <details className={styles.panelSettings}>
+            <summary aria-label="Vox settings">⚙</summary>
+            <div className={styles.settingsPopover}>
+              <fieldset className={styles.controls} aria-label="Call controls">
+                <button
+                  type="button"
+                  className={styles.control}
+                  aria-pressed={state.speakerEnabled}
+                  aria-label={
+                    state.speakerEnabled
+                      ? "Turn speaker off"
+                      : "Turn speaker on"
+                  }
+                  onClick={() =>
+                    controller.setSpeakerEnabled(!state.speakerEnabled)
+                  }
+                >
+                  <Icon name="speaker" />
+                  <span className={styles.controlLabel}>Speaker</span>
+                  <small>{state.speakerEnabled ? "On" : "Off"}</small>
+                </button>
+              </fieldset>
+              <p className={styles.captionNote}>
+                Off the record. This conversation clears when you hang up.
+              </p>
+              <Link href="/settings" onClick={onMinimize}>
+                Voice and saved preferences
+              </Link>
+            </div>
+          </details>
+        )}
         <button
           type="button"
           className={styles.iconButton}
@@ -312,6 +380,81 @@ function CallDialog({
         </p>
       </div>
       <WebLookup state={state} />
+      {state.ownerVerified &&
+        state.owner &&
+        !ended &&
+        state.planReview?.kind === "study-plan" && (
+          <VoxPlanReview
+            key={
+              state.callId +
+              ":" +
+              state.owner.workspaceId +
+              ":" +
+              state.owner.userId +
+              ":" +
+              state.planReview.preview_id
+            }
+            proposal={state.planReview}
+            accountKey={state.owner.workspaceId + ":" + state.owner.userId}
+            onClose={() => controller.dismissPlanReview()}
+          />
+        )}
+      {state.ownerVerified &&
+        state.owner &&
+        !ended &&
+        state.planReview?.kind === "routine" && (
+          <VoxRoutineReview
+            key={
+              state.callId +
+              ":" +
+              state.owner.workspaceId +
+              ":" +
+              state.owner.userId +
+              ":" +
+              state.planReview.preview_id
+            }
+            proposal={state.planReview}
+            accountKey={state.owner.workspaceId + ":" + state.owner.userId}
+            onClose={() => controller.dismissPlanReview()}
+          />
+        )}
+      {state.ownerVerified &&
+        state.owner &&
+        !ended &&
+        state.planReview?.kind === "task" && (
+          <VoxTaskReview
+            key={
+              state.callId +
+              ":" +
+              state.owner.workspaceId +
+              ":" +
+              state.owner.userId +
+              ":" +
+              state.planReview.preview_id
+            }
+            proposal={state.planReview}
+            accountKey={state.owner.workspaceId + ":" + state.owner.userId}
+            onClose={() => controller.dismissPlanReview()}
+          />
+        )}
+      {state.ownerVerified &&
+        state.owner &&
+        !ended &&
+        state.planReview?.kind === "class" && (
+          <VoxClassReview
+            key={`${state.callId}:${state.owner.workspaceId}:${state.owner.userId}:${state.planReview.preview_id}`}
+            proposal={state.planReview}
+            accountKey={`${state.owner.workspaceId}:${state.owner.userId}`}
+            onClose={() => controller.dismissPlanReview()}
+          />
+        )}
+      {!ended && (
+        <VoxConversation
+          model={conversation}
+          state={state}
+          controller={controller}
+        />
+      )}
       {usageNotice && state.endReason !== "allowance-reached" && (
         <p role="status" data-vox-usage="true" className={styles.hint}>
           {usageNotice}
@@ -348,52 +491,7 @@ function CallDialog({
                 </button>
               </div>
             )}
-          <fieldset className={styles.controls} aria-label="Call controls">
-            <button
-              type="button"
-              className={styles.control}
-              aria-pressed={state.microphoneMuted}
-              aria-label={
-                state.microphoneMuted ? "Unmute microphone" : "Mute microphone"
-              }
-              onClick={() =>
-                controller.setMicrophoneMuted(!state.microphoneMuted)
-              }
-            >
-              <Icon name="microphone" />
-              <span className={styles.controlLabel}>Microphone</span>
-              <small>{state.microphoneMuted ? "Muted" : "On"}</small>
-            </button>
-            <button
-              type="button"
-              className={styles.control}
-              aria-pressed={state.speakerEnabled}
-              aria-label={
-                state.speakerEnabled ? "Turn speaker off" : "Turn speaker on"
-              }
-              onClick={() =>
-                controller.setSpeakerEnabled(!state.speakerEnabled)
-              }
-            >
-              <Icon name="speaker" />
-              <span className={styles.controlLabel}>Speaker</span>
-              <small>{state.speakerEnabled ? "On" : "Off"}</small>
-            </button>
-            <button
-              type="button"
-              className={styles.control}
-              aria-label="Captions unavailable"
-              aria-describedby={`${id}-captions-note`}
-              disabled
-            >
-              <Icon name="captions" />
-              <span className={styles.controlLabel}>Captions</span>
-              <small>Unavailable</small>
-            </button>
-          </fieldset>
-          <p id={`${id}-captions-note`} className={styles.captionNote}>
-            Live captions are not available yet.
-          </p>
+
           <button
             type="button"
             className={styles.hangUp}
@@ -565,9 +663,51 @@ export function VoxCallControls({
   chatHref?: string;
 }) {
   const call = useVoxCall();
+  const conversation = useVoxConversation(call?.state);
   const launcher = useRef<HTMLButtonElement>(null);
   const [dismissedCallId, setDismissedCallId] = useState<string | null>(null);
   const [startError, setStartError] = useState(false);
+  const [showTip, setShowTip] = useState(false);
+  const tipKey = call?.state.owner
+    ? `navox:vox-tip:${call.state.owner.workspaceId}:${call.state.owner.userId}`
+    : "";
+  useEffect(() => {
+    if (!tipKey) return;
+    try {
+      setShowTip(localStorage.getItem(tipKey) !== "seen");
+    } catch {
+      setShowTip(false);
+    }
+  }, [tipKey]);
+  function dismissTip() {
+    setShowTip(false);
+    try {
+      if (tipKey) localStorage.setItem(tipKey, "seen");
+    } catch {
+      /* Optional hint only. */
+    }
+  }
+  useEffect(() => {
+    const open = (event: globalThis.KeyboardEvent) => {
+      if (
+        !(event.metaKey || event.ctrlKey) ||
+        event.key.toLowerCase() !== "j" ||
+        !call?.state.ownerVerified ||
+        !call.available
+      )
+        return;
+      event.preventDefault();
+      if (
+        ["connecting", "active", "reconnecting", "standby"].includes(
+          call.state.phase,
+        )
+      )
+        call.controller.setMinimized(false);
+      else void call.controller.start().catch(() => setStartError(true));
+    };
+    document.addEventListener("keydown", open);
+    return () => document.removeEventListener("keydown", open);
+  }, [call]);
   const className = `${styles.widget} ${variant === "floating" ? styles.floating : styles.home}`;
   const verified = call?.state.ownerVerified === true;
   const cleanupIncomplete = call?.state.endReason === "cleanup-incomplete";
@@ -640,6 +780,7 @@ export function VoxCallControls({
         aria-expanded={cleanupIncomplete ? undefined : open}
         disabled={!available && !cleanupIncomplete}
         onClick={() => {
+          dismissTip();
           if (cleanupIncomplete) window.location.reload();
           else if (ongoing) controller.setMinimized(false);
           else void start();
@@ -673,7 +814,18 @@ export function VoxCallControls({
           <Link href={chatHref}>Use typed chat</Link>
         </p>
       ) : !ongoing && !open ? (
-        <p className={styles.hint}>A conversation, at your pace.</p>
+        showTip ? (
+          <div className={styles.firstTip}>
+            <span>Talk to NavoX. Ask anything.</span>
+            <button
+              type="button"
+              aria-label="Dismiss Vox tip"
+              onClick={dismissTip}
+            >
+              ×
+            </button>
+          </div>
+        ) : null
       ) : null}
       {startError && !cleanupIncomplete && (
         <p role="alert" className={styles.hint}>
@@ -687,6 +839,7 @@ export function VoxCallControls({
       )}
       {open && (
         <CallDialog
+          conversation={conversation}
           controller={controller}
           state={state}
           chatHref={chatHref}

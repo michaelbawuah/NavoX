@@ -1,3 +1,4 @@
+import type { VoxPlanReview } from "./vox-plan-review";
 import { VoxReservationError } from "./vox-reservations";
 import type { VoxWebLookup } from "./vox-web-results";
 
@@ -43,6 +44,7 @@ export interface VoxCallState {
   speakerBlocked: boolean;
   wakeStatus?: "off" | "starting" | "listening" | "unavailable";
   webLookup?: VoxWebLookup | null;
+  planReview?: VoxPlanReview | null;
   wakeInputStatus?: "queued" | "failed" | null;
   captionsEnabled: boolean;
   minimized: boolean;
@@ -63,6 +65,7 @@ export type VoxTransportEvent =
       status: "off" | "starting" | "listening" | "unavailable";
     }
   | { type: "web-lookup"; result: VoxWebLookup }
+  | { type: "plan-review"; result: VoxPlanReview }
   | { type: "wake-input"; status: "queued" | "failed" }
   | { type: "ended" };
 
@@ -210,6 +213,11 @@ export class VoxCallController {
         // A detached view must not prevent transport cleanup or other updates.
       }
     }
+  }
+
+  dismissPlanReview(): void {
+    this.state.planReview = null;
+    this.publish();
   }
 
   private moment(): number {
@@ -365,6 +373,7 @@ export class VoxCallController {
       wakeStatus: "off",
       wakeInputStatus: null,
       webLookup: null,
+      planReview: null,
     };
     this.resumeStandby = false;
     this.deferredJoin = false;
@@ -482,6 +491,12 @@ export class VoxCallController {
         if (!this.joined()) return;
         if (event.type === "wake-status") {
           this.state.wakeStatus = event.status;
+          this.publish();
+          return;
+        }
+        if (event.type === "plan-review") {
+          if (!this.state.ownerVerified) return;
+          this.state.planReview = event.result;
           this.publish();
           return;
         }

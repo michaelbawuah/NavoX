@@ -44,7 +44,29 @@ export interface StudyWindow {
   start_time: string;
   end_time: string;
 }
+export interface AlarmPreferences {
+  enabled: boolean;
+  days: number[];
+  smart: boolean;
+  prep_minutes: number;
+  sound: "gentle" | "chime";
+  snooze_minutes: 5 | 10 | 15;
+  skip_date: string | null;
+}
+export const defaultAlarm: AlarmPreferences = {
+  enabled: false,
+  days: [0, 1, 2, 3, 4, 5, 6],
+  smart: false,
+  prep_minutes: 30,
+  sound: "gentle",
+  snooze_minutes: 10,
+  skip_date: null,
+};
 export interface StudyPreferences {
+  travel_minutes?: number;
+  wake_times?: string[] | null;
+  alarm?: AlarmPreferences;
+
   wake_time: string;
   sleep_time: string;
   focus_windows: StudyWindow[];
@@ -110,6 +132,7 @@ export interface StudyPlanResult {
   planning_only: true;
 }
 export interface StudyPlanPreview {
+  replaced_blocks: StudyBlock[];
   preview_id: string;
   preview_hash: string;
   expires_at: string;
@@ -267,9 +290,40 @@ function readWindow(value: unknown): StudyWindow {
     end_time: wall(v.end_time),
   };
 }
+function readAlarmPreferences(value: unknown): AlarmPreferences {
+  const v = obj(value);
+  const snooze = num(v.snooze_minutes, 5, 15);
+  if (![5, 10, 15].includes(snooze)) return invalid();
+  const days = list(v.days, (item) => num(item, 0, 6), 7);
+  if (new Set(days).size !== days.length) return invalid();
+  return {
+    enabled: bool(v.enabled),
+    days,
+    smart: bool(v.smart),
+    prep_minutes: num(v.prep_minutes, 0, 180),
+    sound: en(v.sound, ["gentle", "chime"]),
+    snooze_minutes: snooze as 5 | 10 | 15,
+    skip_date: nullable(v.skip_date, day),
+  };
+}
 export function readStudyPreferences(value: unknown): StudyPreferences {
   const v = obj(value);
+  if (
+    v.wake_times != null &&
+    (!Array.isArray(v.wake_times) || v.wake_times.length !== 7)
+  )
+    return invalid();
   return {
+    ...(v.travel_minutes !== undefined
+      ? { travel_minutes: num(v.travel_minutes, 0, 240) }
+      : {}),
+    ...(v.wake_times !== undefined
+      ? {
+          wake_times:
+            v.wake_times === null ? null : list(v.wake_times, wall, 7),
+        }
+      : {}),
+    ...(v.alarm !== undefined ? { alarm: readAlarmPreferences(v.alarm) } : {}),
     wake_time: wall(v.wake_time),
     sleep_time: wall(v.sleep_time),
     focus_windows: list(v.focus_windows, readWindow, 14),
@@ -377,6 +431,7 @@ export function readStudyPreview(value: unknown): StudyPlanPreview {
     expires_at: instant(v.expires_at),
     base_revision: num(v.base_revision),
     result: readStudyPlanResult(v.result),
+    replaced_blocks: list(v.replaced_blocks, readStudyBlock, 5000),
     requires_acceptance: true,
   };
 }
@@ -388,6 +443,20 @@ export function readStudyOutcome(value: unknown): StudyOutcome {
     plan: readStudyPlan(v.plan),
     result: readStudyPlanResult(v.result),
     undo_request_id: id(v.undo_request_id),
+  };
+}
+export interface StudyOutcomePreview extends StudyOutcome {
+  preview_hash: string;
+  replaced_blocks: StudyBlock[];
+}
+export function readStudyOutcomePreview(value: unknown): StudyOutcomePreview {
+  const v = obj(value);
+  const hash = text(v.preview_hash, 64);
+  if (!/^[a-f0-9]{64}$/.test(hash)) return invalid();
+  return {
+    ...readStudyOutcome(value),
+    preview_hash: hash,
+    replaced_blocks: list(v.replaced_blocks, readStudyBlock, 600),
   };
 }
 export function studyTaskDraft(value: StudyTaskFields): StudyTaskFields {
@@ -405,6 +474,11 @@ export function studyTaskDraft(value: StudyTaskFields): StudyTaskFields {
 }
 export function studyPreferencesDraft(value: StudyPreferences) {
   return {
+    ...(value.travel_minutes !== undefined
+      ? { travel_minutes: value.travel_minutes }
+      : {}),
+    ...(value.wake_times !== undefined ? { wake_times: value.wake_times } : {}),
+    ...(value.alarm !== undefined ? { alarm: value.alarm } : {}),
     wake_time: value.wake_time,
     sleep_time: value.sleep_time,
     focus_windows: value.focus_windows.map((row) => ({
@@ -482,4 +556,232 @@ export function studyDeadlineChoices(
     .map((offset) => new Date(nominal - offset).toISOString())
     .filter((value) => studyLocalDateTime(value, timezone) === local)
     .sort();
+}
+
+export type AlarmOccurrence = {
+  day: string;
+  enabled: boolean;
+  scheduled_at: string | null;
+  reason: string;
+  first_class_at: string | null;
+  first_class_title: string | null;
+};
+export function readAlarmView(value: unknown): {
+  timezone: string;
+  alarm_occurrences: AlarmOccurrence[];
+  native_ringing_available: false;
+} {
+  const v = obj(value);
+  if (v.native_ringing_available !== false) return invalid();
+  return {
+    timezone: zone(v.timezone),
+    native_ringing_available: false,
+    alarm_occurrences: list(
+      v.alarm_occurrences,
+      (item) => {
+        const row = obj(item);
+        return {
+          day: day(row.day),
+          enabled: bool(row.enabled),
+          scheduled_at: nullable(row.scheduled_at, instant),
+          reason: text(row.reason, 500),
+          first_class_at: nullable(row.first_class_at, instant),
+          first_class_title: nullable(row.first_class_title, (item) =>
+            text(item, 240),
+          ),
+        };
+      },
+      14,
+    ),
+  };
+}
+export function readRoutinePreview(value: unknown) {
+  const v = obj(value),
+    hash = text(v.preview_hash, 64);
+  if (!/^[a-f0-9]{64}$/.test(hash)) return invalid();
+  return {
+    ...readAlarmView(value),
+    preview_hash: hash,
+    warnings: list(v.warnings, (item) => text(item, 2000), 50),
+    replaced_blocks: list(v.replaced_blocks, readStudyBlock, 600),
+    previous_alarm_occurrences: readAlarmView({
+      ...v,
+      alarm_occurrences: v.previous_alarm_occurrences,
+    }).alarm_occurrences,
+  };
+}
+export type RoutinePreview = ReturnType<typeof readRoutinePreview>;
+
+export async function routineRequest<T>(
+  accountKey: string,
+  path: string,
+  parse: (value: unknown) => T,
+  method = "GET",
+  body?: unknown,
+): Promise<T> {
+  const base =
+    process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+  const response = await fetch(`${base}/student/planning${path}`, {
+    method,
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      "X-NavoX-Account": accountKey,
+    },
+    signal: AbortSignal.timeout(60000),
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+  const value: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail =
+      value && typeof value === "object" && "detail" in value
+        ? value.detail
+        : null;
+    throw new Error(
+      response.status < 500 &&
+        typeof detail === "string" &&
+        detail.length <= 400
+        ? detail
+        : response.status === 409
+          ? "Your schedule or account changed. Review a fresh preview."
+          : "Your schedule could not be checked. Please try again.",
+    );
+  }
+  return parse(value);
+}
+
+export function readStudyMove(value: unknown) {
+  const v = obj(value),
+    hash = text(v.preview_hash, 64);
+  if (
+    !/^[a-f0-9]{64}$/.test(hash) ||
+    v.other_blocks_change !== false ||
+    v.alarms_change !== false ||
+    v.calendar_events_change !== false
+  )
+    return invalid();
+  const before = readStudyBlock(v.before),
+    after = readStudyBlock(v.after);
+  if (
+    before.id !== after.id ||
+    before.task_id !== after.task_id ||
+    before.minutes !== after.minutes
+  )
+    return invalid();
+  return {
+    preview_hash: hash,
+    before,
+    after,
+    warnings: list(v.warnings, (item) => text(item, 2000), 50),
+  };
+}
+export type StudyMove = ReturnType<typeof readStudyMove>;
+
+export function readStudyOpenings(value: unknown) {
+  const v = obj(value);
+  return {
+    timezone: zone(v.timezone),
+    checked_at: instant(v.checked_at),
+    expires_at: instant(v.expires_at),
+    calendar_checked: bool(v.calendar_checked),
+    routine_confirmed: bool(v.routine_confirmed),
+    warnings: list(v.warnings, (item) => text(item, 2000), 50),
+    openings: list(
+      v.openings,
+      (item) => {
+        const r = obj(item),
+          start = instant(r.start_at),
+          end = instant(r.end_at);
+        if (Date.parse(end) <= Date.parse(start)) return invalid();
+        return {
+          start_at: start,
+          end_at: end,
+          minutes: num(r.minutes, 15, 1440),
+        };
+      },
+      200,
+    ),
+  };
+}
+export type StudyOpenings = ReturnType<typeof readStudyOpenings>;
+
+export interface TaskCompletion {
+  preview_hash: string;
+  task: StudyTask;
+  removed_blocks: StudyBlock[];
+  credited_minutes: 0;
+  other_blocks_change: false;
+  alarms_change: false;
+  calendar_events_change: false;
+}
+export function readTaskCompletion(value: unknown): TaskCompletion {
+  const v = obj(value),
+    hash = text(v.preview_hash, 64);
+  if (
+    !/^[a-f0-9]{64}$/.test(hash) ||
+    v.credited_minutes !== 0 ||
+    v.other_blocks_change !== false ||
+    v.alarms_change !== false ||
+    v.calendar_events_change !== false
+  )
+    return invalid();
+  return {
+    preview_hash: hash,
+    task: readStudyTask(v.task),
+    removed_blocks: list(v.removed_blocks, readStudyBlock, 5000),
+    credited_minutes: 0,
+    other_blocks_change: false,
+    alarms_change: false,
+    calendar_events_change: false,
+  };
+}
+
+export type TaskChangeBody = StudyTaskSave & {
+  request_id: string;
+  revision?: number;
+};
+export interface TaskChangePreview {
+  course_label: string | null;
+  preview_hash: string;
+  timezone: string;
+  before: StudyTask | null;
+  proposed: StudyTaskFields;
+  replaced_blocks: StudyBlock[];
+}
+export function readStudyTaskFields(value: unknown): StudyTaskFields {
+  const v = obj(value);
+  return {
+    title: text(v.title, 200),
+    course_id: nullable(v.course_id, id),
+    due_at: nullable(v.due_at, instant),
+    estimated_minutes: num(v.estimated_minutes, 1, 10080),
+    remaining_minutes: num(
+      v.remaining_minutes ?? v.estimated_minutes,
+      0,
+      10080,
+    ),
+    difficulty: num(v.difficulty, 1, 5),
+    priority: num(v.priority, 1, 5),
+    course_weight: num(v.course_weight, 1, 10),
+    status: en(v.status, ["active", "completed", "archived"]),
+  };
+}
+export function readTaskChangePreview(value: unknown): TaskChangePreview {
+  const v = obj(value),
+    hash = text(v.preview_hash, 64);
+  if (
+    !/^[a-f0-9]{64}$/.test(hash) ||
+    v.alarms_change !== false ||
+    v.calendar_events_change !== false
+  )
+    return invalid();
+  return {
+    preview_hash: hash,
+    course_label: nullable(v.course_label, (value) => text(value, 200)),
+    timezone: zone(v.timezone),
+    before: nullable(v.before, readStudyTask),
+    proposed: readStudyTaskFields(v.proposed),
+    replaced_blocks: list(v.replaced_blocks, readStudyBlock, 5000),
+  };
 }

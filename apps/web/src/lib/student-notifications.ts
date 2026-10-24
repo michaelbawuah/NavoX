@@ -18,34 +18,46 @@ export type ClassAlertStatus = {
 const apiBase =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
+export class NotificationRequestError extends Error {}
+
+export function notificationError(cause: unknown, fallback: string): string {
+  return cause instanceof NotificationRequestError ? cause.message : fallback;
+}
+
 export async function classAlertRequest(
   path = "",
   method = "GET",
   body?: unknown,
+  accountKey?: string,
 ): Promise<unknown> {
   const response = await fetch(`${apiBase}/student/notifications${path}`, {
     method,
     credentials: "include",
     cache: "no-store",
     signal: AbortSignal.timeout(10_000),
+    headers: {
+      ...(accountKey ? { "X-NavoX-Account": accountKey } : {}),
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+    },
     ...(body === undefined
       ? {}
       : {
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         }),
   });
   const payload: unknown =
     response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {
-    const detail =
-      payload && typeof payload === "object" && "detail" in payload
-        ? payload.detail
-        : null;
-    throw new Error(
-      typeof detail === "string"
-        ? detail
-        : "Notification settings could not be saved. Refresh to check their status.",
+    throw new NotificationRequestError(
+      response.status === 401
+        ? "Sign in again to manage your reminders."
+        : response.status === 409
+          ? "Your account or reminder settings changed. Open Settings again before continuing."
+          : response.status === 422
+            ? "Check your reminder times and limits, then try again."
+            : response.status === 503
+              ? "Class reminders are temporarily unavailable. Please try again later."
+              : "Your reminders could not be updated. Please try again.",
     );
   }
   return payload;

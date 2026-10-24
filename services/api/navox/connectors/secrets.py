@@ -26,6 +26,7 @@ LEASE_PURPOSES = frozenset(
     {
         "sync.read",
         "health.read",
+        "communication.send",
         "events.manage",
         "events.cleanup",
         "events.verify",

@@ -2,8 +2,8 @@
 
 import hashlib
 import json
-from datetime import UTC, datetime, time, timedelta
-from typing import TypeVar
+from datetime import UTC, date, datetime, time, timedelta
+from typing import Any, TypeVar
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -11,7 +11,8 @@ from pydantic import BaseModel
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from navox.connectors.sync_state import database_now, utc
+from navox.connectors.sync_state import database_now as database_now
+from navox.connectors.sync_state import utc
 from navox.db.lms_feeds import LmsFeedItem
 from navox.db.student import StudentCourse
 from navox.db.student_planning import (
@@ -23,6 +24,7 @@ from navox.db.student_planning import (
 )
 from navox.student import service as schedule
 from navox.student.occurrences import project
+from navox.student_planning import calendar_busy
 from navox.student_planning.planner import build_plan
 from navox.student_planning.schemas import (
     MAX_TASKS,
@@ -397,14 +399,26 @@ async def save_task(
     workspace_id: UUID,
     payload: TaskCreate | TaskUpdate | TaskImport,
     task_id: UUID | None = None,
+    *,
+    expected_preview: str | None = None,
 ) -> TaskView:
     await schedule.owner(database, user_id, workspace_id, lock=True)
     action = "task.update" if task_id else "task.create"
     body = {"task_id": str(task_id), "payload": payload.model_dump(mode="json")}
+    if expected_preview is not None:
+        body["preview_hash"] = expected_preview
     previous = await command(database, user_id, workspace_id, payload.request_id, action, body)
     if previous:
         current = await get_task(database, user_id, workspace_id, UUID(str(previous.result["id"])))
         return (await reviewed_task_views(database, user_id, workspace_id, [task_view(current)]))[0]
+    if expected_preview is not None:
+        from navox.student_planning.task_review import review
+
+        checked = await review(database, user_id, workspace_id, payload, task_id)
+        if checked["preview_hash"] != expected_preview:
+            raise schedule.StudentError(
+                409, "The task or affected study blocks changed. Review again"
+            )
     await _course(database, user_id, workspace_id, payload.course_id)
     remaining = (
         payload.remaining_minutes
@@ -567,6 +581,20 @@ async def preferences(database: AsyncSession, user_id: UUID, workspace_id: UUID)
     )
 
 
+def scheduling_preferences(value: dict[str, Any]) -> dict[str, Any]:
+    # Sound/snooze never change study time; enabled smart wake times do.
+    # Omitting new defaults preserves source hashes of pre-redesign plans.
+    result = {key: item for key, item in value.items() if key != "alarm"}
+    if result.get("wake_times") is None:
+        result.pop("wake_times", None)
+    if result.get("travel_minutes", 15) == 15:
+        result.pop("travel_minutes", None)
+    alarm = value.get("alarm") or {}
+    if alarm.get("enabled") and alarm.get("smart"):
+        result["smart_wake"] = {k: alarm.get(k) for k in ("days", "prep_minutes", "skip_date")}
+    return result
+
+
 async def save_preferences(
     database: AsyncSession, user_id: UUID, workspace_id: UUID, payload: PreferencesUpdate
 ) -> PreferencesView:
@@ -580,10 +608,13 @@ async def save_preferences(
     row = await state(database, user_id, workspace_id)
     if row.preferences_revision != payload.revision:
         raise schedule.StudentError(409, "Your routine changed. Refresh before saving again")
-    row.preferences = payload.model_dump(mode="json", exclude={"request_id", "revision"})
+    candidate = payload.model_dump(mode="json", exclude={"request_id", "revision"})
+    routine_changed = scheduling_preferences(row.preferences) != scheduling_preferences(candidate)
+    row.preferences = candidate
     row.preferences_revision += 1
-    row.revision += 1
-    await invalidate_future(database, user_id, workspace_id, row)
+    if routine_changed:
+        row.revision += 1
+        await invalidate_future(database, user_id, workspace_id, row)
     result = PreferencesView.model_validate(
         {
             **row.preferences,
@@ -615,11 +646,13 @@ async def stable_source_hash(
     )
     task_rows = await tasks(database, user_id, workspace_id)
     eligible = await eligible_tasks(database, user_id, workspace_id, task_rows)
+    access = await calendar_busy.inventory(database, user_id, workspace_id)
     return digest(
         {
+            **({"calendar_access": access} if access else {}),
             "version": 1,
             "timezone": user.timezone,
-            "preferences": planning.preferences,
+            "preferences": scheduling_preferences(planning.preferences),
             "tasks": [row.model_dump(mode="json") for row in task_rows],
             "eligible_tasks": sorted(str(row.id) for row in eligible),
             "current_sources": await current_sources(
@@ -630,7 +663,7 @@ async def stable_source_hash(
             ),
             "schedule": [
                 [
-                    row.model_dump(mode="json")
+                    row.model_dump(mode="json", exclude={"office_hours"})
                     for row in sorted(collection, key=lambda row: str(row.model_dump()["id"]))
                 ]
                 for collection in source
@@ -763,14 +796,17 @@ async def snapshot(
     now: datetime,
 ) -> tuple[str, PlanResult]:
     user = await schedule.owner(database, user_id, workspace_id)
-    source = await schedule.state_for_window(database, user_id, workspace_id, start_at, end_at)
+    source_start = datetime.combine(
+        start_at.astimezone(ZoneInfo(user.timezone)).date(), time.min, ZoneInfo(user.timezone)
+    ).astimezone(UTC)
+    source = await schedule.state_for_window(database, user_id, workspace_id, source_start, end_at)
     courses, fixed, edits, breaks = source
     occurrences, fixed_occurrences, _, warnings = project(
         courses,
         fixed,
         edits,
         breaks,
-        start_at=start_at,
+        start_at=source_start,
         end_at=end_at,
         include_conflicts=False,
     )
@@ -811,13 +847,48 @@ async def snapshot(
     )
     if len(history) > 620:
         raise schedule.StudentError(409, "Too many preserved study windows to replan safely")
+    prefs = Preferences.model_validate(planning.preferences)
     busy = [
-        (row.start_at - timedelta(minutes=row.walk_minutes or 0), row.end_at)
+        (
+            row.start_at
+            - timedelta(
+                minutes=row.walk_minutes if row.walk_minutes is not None else prefs.travel_minutes
+            ),
+            row.end_at
+            + timedelta(
+                minutes=row.walk_minutes if row.walk_minutes is not None else prefs.travel_minutes
+            ),
+        )
         for row in occurrences
         if not row.cancelled
     ]
-    busy.extend((row.start_at, row.end_at) for row in fixed_occurrences)
-    prefs = Preferences.model_validate(planning.preferences)
+    busy.extend(
+        (
+            row.start_at - timedelta(minutes=prefs.travel_minutes),
+            row.end_at + timedelta(minutes=prefs.travel_minutes),
+        )
+        for row in fixed_occurrences
+    )
+    external = await calendar_busy.collect(
+        database,
+        user_id,
+        workspace_id,
+        start_at=start_at,
+        end_at=end_at,
+        travel_minutes=prefs.travel_minutes,
+    )
+    busy.extend(external.intervals)
+    from navox.student_planning.alarm import alarm_schedule
+
+    day = start_at.astimezone(ZoneInfo(user.timezone)).date()
+    wakes = alarm_schedule(prefs, user.timezone, day, occurrences, days=15)
+    wake_overrides = {
+        date.fromisoformat(row["day"]): datetime.fromisoformat(row["scheduled_at"])
+        if row["scheduled_at"]
+        else None
+        for row in wakes
+        if row["enabled"] and prefs.alarm.smart
+    }
     busy.extend(
         (utc(row.start_at), utc(row.end_at) + timedelta(minutes=prefs.break_minutes))
         for row in history
@@ -825,15 +896,16 @@ async def snapshot(
     fingerprint = digest(
         {
             "version": 1,
+            "calendar": external.digest,
             "revision": planning.revision,
             "timezone": user.timezone,
-            "preferences": planning.preferences,
+            "preferences": scheduling_preferences(planning.preferences),
             "tasks": [row.model_dump(mode="json") for row in task_rows],
             "eligible_tasks": sorted(str(row.id) for row in eligible),
             "current_sources": source_states,
             "schedule": [
                 [
-                    row.model_dump(mode="json")
+                    row.model_dump(mode="json", exclude={"office_hours"})
                     for row in sorted(collection, key=lambda row: str(row.model_dump()["id"]))
                 ]
                 for collection in source
@@ -854,8 +926,19 @@ async def snapshot(
         for task in eligible
     ]
     result = build_plan(
-        planning_tasks, prefs, user.timezone, start_at=start_at, end_at=end_at, busy=busy
+        planning_tasks,
+        prefs,
+        user.timezone,
+        start_at=start_at,
+        end_at=end_at,
+        busy=busy,
+        wake_overrides=wake_overrides,
     )
+    result.warnings.extend(external.warnings)
+    if fixed_occurrences or any(row.walk_minutes is None for row in occurrences):
+        result.warnings.append(
+            f"Unknown walking times use your {prefs.travel_minutes}-minute travel buffer."
+        )
     if any(block.status == "planned" for block in history):
         result.warnings.append(
             "Your in-progress study block stays in place; its planned work is already allocated."
@@ -863,6 +946,52 @@ async def snapshot(
     if any(block.status == "skipped" for block in history):
         result.warnings.append("Skipped study windows stay free; unfinished work moves later.")
     return fingerprint, result
+
+
+async def future_blocks(
+    database: AsyncSession, user_id: UUID, workspace_id: UUID, moment: datetime
+) -> list[BlockView]:
+    rows = list(
+        await database.scalars(
+            select(StudentStudyBlock)
+            .where(
+                StudentStudyBlock.user_id == user_id,
+                StudentStudyBlock.workspace_id == workspace_id,
+                StudentStudyBlock.status == "planned",
+                StudentStudyBlock.start_at >= moment,
+            )
+            .order_by(StudentStudyBlock.start_at, StudentStudyBlock.id)
+            .limit(5001)
+        )
+    )
+    if len(rows) > 5000:
+        raise schedule.StudentError(409, "Too many study blocks to review safely")
+    return [block_view(row) for row in rows]
+
+
+async def get_preview(
+    database: AsyncSession, user_id: UUID, workspace_id: UUID, preview_id: UUID
+) -> PreviewView:
+    await schedule.owner(database, user_id, workspace_id)
+    record = await schedule.get_owned(
+        database, StudentPlanningPreview, preview_id, user_id, workspace_id
+    )
+    planning = await state(database, user_id, workspace_id)
+    if (
+        record.accepted_at
+        or utc(record.expires_at) <= await database_now(database)
+        or record.base_revision != planning.revision
+        or record.replaced_blocks is None
+    ):
+        raise schedule.StudentError(409, "This plan preview changed or expired. Preview it again")
+    return PreviewView(
+        preview_id=record.id,
+        preview_hash=record.preview_hash,
+        expires_at=utc(record.expires_at),
+        base_revision=record.base_revision,
+        result=PlanResult.model_validate(record.result),
+        replaced_blocks=[BlockView.model_validate(row) for row in record.replaced_blocks],
+    )
 
 
 async def preview(
@@ -901,8 +1030,15 @@ async def preview(
     )
     await schedule.count_limit(database, StudentPlanningPreview, user_id, workspace_id, 20)
     identifier = uuid4()
+    replaced_blocks = await future_blocks(database, user_id, workspace_id, moment)
+    replacements = [row.model_dump(mode="json") for row in replaced_blocks]
     preview_hash = digest(
-        {"id": str(identifier), "source": source_hash, "result": result.model_dump(mode="json")}
+        {
+            "id": str(identifier),
+            "source": source_hash,
+            "result": result.model_dump(mode="json"),
+            "replaced_blocks": replacements,
+        }
     )
     record = StudentPlanningPreview(
         id=identifier,
@@ -912,6 +1048,7 @@ async def preview(
         preview_hash=preview_hash,
         base_revision=row.revision,
         result=result.model_dump(mode="json"),
+        replaced_blocks=replacements,
         expires_at=moment + timedelta(minutes=20),
     )
     database.add(record)
@@ -922,6 +1059,7 @@ async def preview(
         expires_at=record.expires_at,
         base_revision=row.revision,
         result=result,
+        replaced_blocks=replaced_blocks,
     )
 
 
@@ -987,6 +1125,7 @@ async def accept(
     planning = await state(database, user_id, workspace_id)
     if (
         record.accepted_at
+        or record.replaced_blocks is None
         or utc(record.expires_at) <= moment
         or record.preview_hash != payload.preview_hash
         or planning.revision != record.base_revision
@@ -1006,6 +1145,9 @@ async def accept(
         raise schedule.StudentError(
             409, "Your schedule, tasks or the current time changed. Preview again"
         )
+    current_replacements = await future_blocks(database, user_id, workspace_id, moment)
+    if [row.model_dump(mode="json") for row in current_replacements] != record.replaced_blocks:
+        raise schedule.StudentError(409, "The affected study blocks changed. Review a new plan")
     await apply_result(database, user_id, workspace_id, result, now=moment, plan_id=record.id)
     planning.revision += 1
     planning.window_start, planning.window_end = result.start_at, result.end_at
@@ -1030,12 +1172,20 @@ async def outcome(
     payload: OutcomeInput,
     *,
     now: datetime | None = None,
+    preview_only: bool = False,
+    expected_preview: str | None = None,
 ) -> OutcomeView:
     await schedule.owner(database, user_id, workspace_id, lock=True)
     body = {"block_id": str(block_id), "payload": payload.model_dump(mode="json")}
-    previous = await command(database, user_id, workspace_id, payload.request_id, "outcome", body)
+    previous = (
+        None
+        if preview_only
+        else await command(database, user_id, workspace_id, payload.request_id, "outcome", body)
+    )
     if previous:
         recorded = OutcomeView.model_validate(previous.result)
+        if expected_preview is not None and expected_preview != recorded.preview_hash:
+            raise schedule.StudentError(409, "Review the current changes before approving")
         current = await plan_view(database, user_id, workspace_id)
         if current.needs_review or current.revision != recorded.plan.revision:
             raise schedule.StudentError(
@@ -1088,6 +1238,11 @@ async def outcome(
         )
     )
     old_future = [str(row.id) for row in future_rows]
+    replaced_blocks = sorted(
+        [block_view(row) for row in future_rows], key=lambda row: (row.start_at, str(row.id))
+    )
+    base_revision = planning.revision
+    base_source = await stable_source_hash(database, user_id, workspace_id, planning)
     task.actual_minutes += payload.actual_minutes
     if payload.outcome == "done":
         task.remaining_minutes = (
@@ -1125,6 +1280,22 @@ async def outcome(
     source_hash, result = await snapshot(
         database, user_id, workspace_id, planning, start_at=start, end_at=end, now=moment
     )
+    preview_hash = digest(
+        {
+            "owner": [str(user_id), str(workspace_id)],
+            "block": str(block_id),
+            "input": payload.model_dump(mode="json", exclude={"request_id"}),
+            "revision": base_revision,
+            "source": base_source,
+            "before": [row.model_dump(mode="json") for row in replaced_blocks],
+            "result": result.model_dump(mode="json"),
+        }
+    )
+    if expected_preview is not None and expected_preview != preview_hash:
+        await database.rollback()
+        raise schedule.StudentError(
+            409, "The schedule changed. Preview the changes again before approving"
+        )
     plan_id = uuid4()
     await apply_result(database, user_id, workspace_id, result, now=moment, plan_id=plan_id)
     planning.needs_review = False
@@ -1138,7 +1309,14 @@ async def outcome(
         plan=await plan_view(database, user_id, workspace_id),
         result=result,
         undo_request_id=payload.request_id,
+        preview_hash=preview_hash,
+        replaced_blocks=replaced_blocks,
     )
+    if preview_only:
+        # Execute the exact planner in the locked transaction, then discard every
+        # mutation. Preview cannot record progress, audit, or persist new blocks.
+        await database.rollback()
+        return response
     await remember(
         database,
         user_id,
@@ -1376,7 +1554,10 @@ async def forget_planning_data(database: AsyncSession, user_id: UUID, workspace_
     from navox.student_recovery.service import invalidate_recovery_previews
 
     await invalidate_recovery_previews(database, user_id, workspace_id)
+    from navox.db.noa import NoaSettings
+
     for model in (
+        NoaSettings,
         StudentPlanningCommand,
         StudentPlanningPreview,
         StudentStudyBlock,
@@ -1386,3 +1567,71 @@ async def forget_planning_data(database: AsyncSession, user_id: UUID, workspace_
         await database.execute(
             delete(model).where(model.user_id == user_id, model.workspace_id == workspace_id)
         )
+
+
+async def preference_preview(
+    database: AsyncSession, user_id: UUID, workspace_id: UUID, payload: PreferencesUpdate
+) -> dict[str, Any]:
+    """Bind routine/alarm consent to every study block it would retire, plus class sources."""
+    from navox.student_planning.alarm import alarm_schedule
+
+    user = await schedule.owner(database, user_id, workspace_id, lock=True)
+    current = await preferences(database, user_id, workspace_id)
+    if current.revision != payload.revision:
+        raise schedule.StudentError(409, "Your routine changed. Review it again")
+    now = await database_now(database)
+    blocks = list(
+        await database.scalars(
+            select(StudentStudyBlock)
+            .where(
+                StudentStudyBlock.user_id == user_id,
+                StudentStudyBlock.workspace_id == workspace_id,
+                StudentStudyBlock.status == "planned",
+                StudentStudyBlock.start_at >= now,
+            )
+            .order_by(StudentStudyBlock.start_at, StudentStudyBlock.id)
+            .limit(601)
+        )
+    )
+    if len(blocks) > 600:
+        raise schedule.StudentError(409, "Too many future blocks to review safely")
+    zone = ZoneInfo(user.timezone)
+    day = now.astimezone(zone).date()
+    start = datetime.combine(day, time.min, zone).astimezone(UTC)
+    end = datetime.combine(day + timedelta(days=14), time.min, zone).astimezone(UTC)
+    sources = await schedule.state_for_window(database, user_id, workspace_id, start, end)
+    occurrences, _, _, warnings = project(
+        *sources, start_at=start, end_at=end, include_conflicts=False
+    )
+    routine_changed = scheduling_preferences(
+        current.model_dump(mode="json", exclude={"revision", "timezone"})
+    ) != scheduling_preferences(payload.model_dump(mode="json", exclude={"revision", "request_id"}))
+    replaced = (
+        [block_view(row).model_dump(mode="json") for row in blocks] if routine_changed else []
+    )
+    alarm = alarm_schedule(payload, user.timezone, day, occurrences, days=7)
+    candidate = payload.model_dump(mode="json", exclude={"request_id", "revision"})
+    fingerprint = digest(
+        {
+            "request": payload.model_dump(mode="json"),
+            "timezone": user.timezone,
+            "day": day,
+            "replaced": replaced,
+            "sources": [
+                [row.model_dump(mode="json") for row in sorted(group, key=lambda row: str(row.id))]
+                for group in sources
+            ],
+        }
+    )
+    return {
+        "preview_hash": fingerprint,
+        "preferences": candidate,
+        "replaced_blocks": replaced,
+        "timezone": user.timezone,
+        "alarm_occurrences": alarm,
+        "warnings": warnings,
+        "native_ringing_available": False,
+        "previous_alarm_occurrences": alarm_schedule(
+            current, user.timezone, day, occurrences, days=7
+        ),
+    }

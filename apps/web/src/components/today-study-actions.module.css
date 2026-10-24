@@ -1,0 +1,76 @@
+.root {
+  margin-left: 52px;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.actions button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+  background: var(--nx-surface);
+  color: var(--nx-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.actions button:focus-visible,
+.form input:focus-visible {
+  outline: 2px solid var(--nx-accent);
+  outline-offset: 3px;
+}
+.form {
+  display: grid;
+  gap: 12px;
+  padding: 16px 0;
+  font-size: 14px;
+  color: var(--nx-text);
+}
+.form label {
+  display: grid;
+  gap: 6px;
+}
+.form input {
+  min-height: 44px;
+  padding: 8px;
+  background: var(--nx-surface);
+  color: var(--nx-text);
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+  max-width: 100%;
+}
+.form .checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.preview {
+  display: grid;
+  gap: 8px;
+}
+.preview p {
+  margin: 0;
+}
+.preview ul {
+  padding-left: 20px;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+@media (max-width: 767px) {
+  .root {
+    margin-left: 0;
+  }
+}
+
+.moveRoot {
+  margin: 0;
+  min-width: 0;
+}

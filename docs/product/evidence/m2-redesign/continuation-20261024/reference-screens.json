@@ -1,0 +1,77 @@
+{
+  "source": "NavoX-Milestone-2-Redesign-Spec.pdf",
+  "source_sha256": "46d215617f964b948ce6007f67713a8f2b4ce69c7afc3f27ce0635a6775cc937",
+  "source_pages": 19,
+  "extracted_screens": [
+    {
+      "page": 4,
+      "filename": "reference-today.png",
+      "width": 2880,
+      "height": 2372
+    },
+    {
+      "page": 5,
+      "filename": "reference-welcome.png",
+      "width": 2880,
+      "height": 2220
+    },
+    {
+      "page": 6,
+      "filename": "reference-night.png",
+      "width": 2880,
+      "height": 2220
+    },
+    {
+      "page": 7,
+      "notice": "No embedded screen"
+    },
+    {
+      "page": 8,
+      "filename": "reference-phone-bottom.png",
+      "width": 780,
+      "height": 1688
+    },
+    {
+      "page": 10,
+      "filename": "reference-classes.png",
+      "width": 2880,
+      "height": 2220
+    },
+    {
+      "page": 11,
+      "filename": "reference-classes-first.png",
+      "width": 2880,
+      "height": 2220
+    },
+    {
+      "page": 13,
+      "filename": "reference-planner.png",
+      "width": 2880,
+      "height": 2220
+    },
+    {
+      "page": 14,
+      "filename": "reference-planner-first.png",
+      "width": 2880,
+      "height": 2220
+    },
+    {
+      "page": 15,
+      "filename": "reference-inbox.png",
+      "width": 2880,
+      "height": 2220
+    },
+    {
+      "page": 16,
+      "filename": "reference-inbox-first.png",
+      "width": 2880,
+      "height": 2220
+    },
+    {
+      "page": 17,
+      "filename": "reference-settings.png",
+      "width": 2880,
+      "height": 2308
+    }
+  ]
+}

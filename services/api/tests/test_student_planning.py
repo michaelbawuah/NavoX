@@ -1501,3 +1501,540 @@ async def test_replayed_undo_refreshes_source_validity_without_restoring_anythin
     assert second.status_code == 200, second.text
     assert second.json()["needs_review"] is True
     assert second.json()["revision"] == first.json()["revision"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["done", "took_longer", "skipped"])
+async def test_progress_preview_discards_all_writes_and_confirms_exact_changes(planning_env, kind):
+    env = planning_env
+    current_task = await create_task(env)
+    plan, _ = await accept(env)
+    block = next(row for row in plan["blocks"] if row["status"] == "planned")
+    env.clock.now = datetime.fromisoformat(block["start_at"]) + timedelta(minutes=30)
+    payload = {
+        "request_id": str(uuid4()),
+        "revision": block["revision"],
+        "task_revision": current_task["revision"],
+        "outcome": kind,
+        "actual_minutes": 0 if kind == "skipped" else 45,
+    }
+    if kind == "took_longer":
+        payload["remaining_minutes"] = 150
+    path = ROOT + f"/blocks/{block['id']}/outcome"
+    before_tasks = (await env.client.get(ROOT + "/tasks")).json()
+    before_plan = (await env.client.get(ROOT + "/plan")).json()
+    async with env.factory() as db:
+        commands = await db.scalar(select(func.count()).select_from(StudentPlanningCommand))
+        blocks = await db.scalar(select(func.count()).select_from(StudentStudyBlock))
+    previewed = await env.client.post(path + "/preview", json=payload)
+    assert previewed.status_code == 200, previewed.text
+    changes = previewed.json()
+    assert len(changes["preview_hash"]) == 64
+    assert changes["replaced_blocks"]
+    assert (await env.client.get(ROOT + "/tasks")).json() == before_tasks
+    assert (await env.client.get(ROOT + "/plan")).json() == before_plan
+    async with env.factory() as db:
+        assert await db.scalar(select(func.count()).select_from(StudentPlanningCommand)) == commands
+        assert await db.scalar(select(func.count()).select_from(StudentStudyBlock)) == blocks
+    # Different wall-clock seconds must not invalidate an unchanged plan.
+    env.clock.now += timedelta(seconds=3)
+    approved = {**payload, "preview_hash": changes["preview_hash"]}
+    saved = await env.client.post(path + "/confirm", json=approved)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["result"] == changes["result"]
+    assert saved.json()["replaced_blocks"] == changes["replaced_blocks"]
+    assert (await env.client.post(path + "/confirm", json=approved)).json() == saved.json()
+
+
+@pytest.mark.asyncio
+async def test_progress_confirmation_rejects_stale_or_forged_preview_without_writes(planning_env):
+    env = planning_env
+    task = await create_task(env)
+    plan, _ = await accept(env)
+    block = next(row for row in plan["blocks"] if row["status"] == "planned")
+    payload = {
+        "request_id": str(uuid4()),
+        "revision": block["revision"],
+        "task_revision": task["revision"],
+        "outcome": "skipped",
+        "actual_minutes": 0,
+    }
+    path = ROOT + f"/blocks/{block['id']}/outcome"
+    proposed = (await env.client.post(path + "/preview", json=payload)).json()
+    assert (
+        await env.client.post(path + "/confirm", json={**payload, "preview_hash": "0" * 64})
+    ).status_code == 409
+    env.clock.now = datetime.fromisoformat(block["start_at"]) + timedelta(minutes=30)
+    assert (
+        await env.client.post(
+            path + "/confirm", json={**payload, "preview_hash": proposed["preview_hash"]}
+        )
+    ).status_code == 409
+    assert (await env.client.get(ROOT + "/tasks")).json()["tasks"][0]["actual_minutes"] == 0
+    assert (await env.client.get(ROOT + "/plan")).json()["revision"] == plan["revision"]
+
+
+def routine_headers(env):
+    return {"X-NavoX-Account": f"{env.workspace_id}:{env.user_id}"}
+
+
+async def routine_candidate(env, **changes):
+    current = (await env.client.get(ROOT + "/preferences")).json()
+    current.pop("timezone")
+    return {**current, **changes, "request_id": str(uuid4())}
+
+
+@pytest.mark.asyncio
+async def test_routine_preview_is_read_only_owner_bound_and_lists_all_retired_blocks(planning_env):
+    env = planning_env
+    await create_task(env)
+    before, _ = await accept(env)
+    payload = await routine_candidate(env, wake_time="10:00")
+    assert (await env.client.post(ROOT + "/preferences/preview", json=payload)).status_code == 409
+    response = await env.client.post(
+        ROOT + "/preferences/preview", headers=routine_headers(env), json=payload
+    )
+    assert response.status_code == 200, response.text
+    reviewed = response.json()
+    assert {b["id"] for b in reviewed["replaced_blocks"]} == {b["id"] for b in before["blocks"]}
+    assert (await env.client.get(ROOT + "/plan")).json() == before
+    assert (await env.client.get(ROOT + "/preferences")).json()["wake_time"] != "10:00"
+    invalid = await env.client.post(
+        ROOT + "/preferences/confirm",
+        headers=routine_headers(env),
+        json={**payload, "preview_hash": "0" * 64},
+    )
+    assert invalid.status_code == 409
+    result = await env.client.post(
+        ROOT + "/preferences/confirm",
+        headers=routine_headers(env),
+        json={**payload, "preview_hash": reviewed["preview_hash"]},
+    )
+    assert result.status_code == 200, result.text
+    repeat = await env.client.post(
+        ROOT + "/preferences/confirm",
+        headers=routine_headers(env),
+        json={**payload, "preview_hash": reviewed["preview_hash"]},
+    )
+    assert repeat.json() == result.json()
+    after = (await env.client.get(ROOT + "/plan")).json()
+    assert after["needs_review"]
+    assert all(b["status"] == "superseded" for b in after["blocks"])
+
+
+@pytest.mark.asyncio
+async def test_alarm_only_change_preserves_accepted_plan_and_freshness(planning_env):
+    env = planning_env
+    await create_task(env)
+    before, _ = await accept(env)
+    payload = await routine_candidate(env)
+    payload["alarm"]["sound"] = "chime"
+    response = await env.client.post(
+        ROOT + "/preferences/preview", headers=routine_headers(env), json=payload
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["replaced_blocks"] == []
+    confirmed = await env.client.post(
+        ROOT + "/preferences/confirm",
+        headers=routine_headers(env),
+        json={**payload, "preview_hash": response.json()["preview_hash"]},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert (await env.client.get(ROOT + "/plan")).json() == before
+    async with env.factory() as database:
+        planning = await service.state(database, env.user_id, env.workspace_id)
+        await service.require_current_plan(database, env.user_id, env.workspace_id, planning)
+
+
+@pytest.mark.asyncio
+async def test_routine_confirmation_rejects_changed_classes_and_wrong_origin(planning_env):
+    env = planning_env
+    payload = await routine_candidate(env, wake_time="09:00")
+    headers = routine_headers(env)
+    response = await env.client.post(ROOT + "/preferences/preview", headers=headers, json=payload)
+    assert response.status_code == 200, response.text
+    confirmation = {**payload, "preview_hash": response.json()["preview_hash"]}
+    rejected = await env.client.post(
+        ROOT + "/preferences/confirm",
+        headers={**headers, "Origin": "https://foreign.example"},
+        json=confirmation,
+    )
+    assert rejected.status_code == 403
+    async with env.factory() as database:
+        database.add(
+            StudentCourse(
+                id=uuid4(),
+                user_id=env.user_id,
+                workspace_id=env.workspace_id,
+                code="NEW 101",
+                name="Changed course",
+                term_start=MONDAY.date(),
+                term_end=(MONDAY + timedelta(days=90)).date(),
+                archived=False,
+                revision=1,
+            )
+        )
+        await database.commit()
+    changed = await env.client.post(
+        ROOT + "/preferences/confirm", headers=headers, json=confirmation
+    )
+    assert changed.status_code == 409
+
+
+@pytest.mark.parametrize("date_value,clock", [("2027-03-14", "02:30"), ("2026-11-01", "01:30")])
+def test_alarm_never_guesses_clock_change(date_value, clock):
+    from datetime import date
+
+    from navox.student_planning.alarm import alarm_schedule
+
+    prefs = Preferences(wake_time=clock, alarm={"enabled": True})
+    row = alarm_schedule(prefs, "America/New_York", date.fromisoformat(date_value), [], days=1)[0]
+    assert row["enabled"] and row["scheduled_at"] is None
+    assert "clock change" in row["reason"]
+
+
+def test_smart_alarm_requires_real_walk_time_and_obeys_skip_day():
+    from navox.student_planning.alarm import alarm_schedule
+
+    first = SimpleNamespace(
+        cancelled=False,
+        start_at=MONDAY.replace(hour=15),
+        walk_minutes=None,
+        course_code="MATH",
+        course_name="Math",
+    )
+    prefs = Preferences(alarm={"enabled": True, "smart": True, "prep_minutes": 30})
+    row = alarm_schedule(prefs, "America/New_York", MONDAY.date(), [first], days=1)[0]
+    assert row["scheduled_at"] is None
+    first.walk_minutes = 8
+    row = alarm_schedule(prefs, "America/New_York", MONDAY.date(), [first], days=1)[0]
+    assert datetime.fromisoformat(row["scheduled_at"]) == first.start_at - timedelta(minutes=38)
+    prefs.alarm.skip_date = MONDAY.date()
+    assert not alarm_schedule(prefs, "America/New_York", MONDAY.date(), [first], days=1)[0][
+        "enabled"
+    ]
+
+
+def test_per_day_wake_times_protect_sleep_in_planner():
+    start = MONDAY.replace(hour=0)
+    prefs = Preferences(wake_times=["10:00", "11:00", "07:00", "07:00", "07:00", "09:00", "09:00"])
+    result = build_plan(
+        [task(remaining_minutes=600)],
+        prefs,
+        "UTC",
+        start_at=start,
+        end_at=start + timedelta(days=2),
+        busy=[],
+    )
+    for block in result.blocks:
+        assert block.start_at.hour >= (10 if block.start_at.weekday() == 0 else 11)
+
+
+@pytest.mark.asyncio
+async def test_move_preview_is_read_only_approved_and_idempotent(planning_env):
+    env = planning_env
+    await create_task(env)
+    before, _ = await accept(env)
+    block = before["blocks"][0]
+    body = {
+        "request_id": str(uuid4()),
+        "revision": block["revision"],
+        "start_at": (MONDAY + timedelta(days=1, hours=2)).isoformat(),
+    }
+    path = ROOT + f"/blocks/{block['id']}/move"
+    reviewed = await env.client.post(path + "/preview", headers=routine_headers(env), json=body)
+    assert reviewed.status_code == 200, reviewed.text
+    assert (await env.client.get(ROOT + "/plan")).json() == before
+    payload = {**body, "preview_hash": reviewed.json()["preview_hash"]}
+    saved = await env.client.post(path + "/confirm", headers=routine_headers(env), json=payload)
+    assert saved.status_code == 200, saved.text
+    again = await env.client.post(path + "/confirm", headers=routine_headers(env), json=payload)
+    assert again.json() == saved.json()
+    after = (await env.client.get(ROOT + "/plan")).json()
+    assert len(after["blocks"]) == len(before["blocks"])
+    assert not after["needs_review"]
+    assert [b for b in before["blocks"] if b["id"] != block["id"]] == [
+        b for b in after["blocks"] if b["id"] != block["id"]
+    ]
+    assert saved.json()["other_blocks_change"] is False
+    assert saved.json()["alarms_change"] is False
+
+
+@pytest.mark.asyncio
+async def test_move_rejects_sleep_conflicts_bad_owner_and_changed_calendar(
+    planning_env, monkeypatch
+):
+    from navox.student_planning import calendar_busy
+
+    env = planning_env
+    await create_task(env)
+    before, _ = await accept(env)
+    block = before["blocks"][0]
+    path = ROOT + f"/blocks/{block['id']}/move"
+    body = {
+        "request_id": str(uuid4()),
+        "revision": block["revision"],
+        "start_at": (MONDAY + timedelta(days=1, hours=2)).isoformat(),
+    }
+    assert (await env.client.post(path + "/preview", json=body)).status_code == 409
+    sleep = {**body, "start_at": (MONDAY + timedelta(hours=18)).isoformat()}  # 02:00 NY
+    assert (
+        await env.client.post(path + "/preview", headers=routine_headers(env), json=sleep)
+    ).status_code == 409
+
+    async def initial(*args, **kwargs):
+        return calendar_busy.CalendarBusy((), "first", True, ())
+
+    monkeypatch.setattr(calendar_busy, "collect", initial)
+    reviewed = await env.client.post(path + "/preview", headers=routine_headers(env), json=body)
+    assert reviewed.status_code == 200, reviewed.text
+
+    async def changed(*args, **kwargs):
+        return calendar_busy.CalendarBusy((), "changed", True, ())
+
+    monkeypatch.setattr(calendar_busy, "collect", changed)
+    result = await env.client.post(
+        path + "/confirm",
+        headers=routine_headers(env),
+        json={**body, "preview_hash": reviewed.json()["preview_hash"]},
+    )
+    assert result.status_code == 409
+    assert (await env.client.get(ROOT + "/plan")).json() == before
+
+
+@pytest.mark.asyncio
+async def test_calendar_busy_times_exclude_study_and_revalidate_on_accept(
+    planning_env, monkeypatch
+):
+    from navox.student_planning import calendar_busy
+
+    env = planning_env
+    await create_task(env)
+    left, right = MONDAY + timedelta(minutes=1), MONDAY + timedelta(hours=4)
+    version = ["one"]
+
+    async def external(*args, **kwargs):
+        return calendar_busy.CalendarBusy(((left, right),), version[0], True, ())
+
+    monkeypatch.setattr(calendar_busy, "collect", external)
+    proposed = await preview(env)
+    assert proposed["result"]["blocks"]
+    assert all(datetime.fromisoformat(b["start_at"]) >= right for b in proposed["result"]["blocks"])
+    version[0] = "two"
+    refused = await env.client.post(
+        ROOT + "/accept",
+        json={
+            "preview_id": proposed["preview_id"],
+            "preview_hash": proposed["preview_hash"],
+            "request_id": str(uuid4()),
+            "confirmed": True,
+        },
+    )
+    assert refused.status_code == 409
+
+
+def test_smart_alarm_protects_the_actual_wake_boundary():
+    start = MONDAY.replace(hour=0)
+    result = build_plan(
+        [task()],
+        Preferences(),
+        "UTC",
+        start_at=start,
+        end_at=start + timedelta(days=1),
+        busy=[],
+        wake_overrides={start.date(): start.replace(hour=10)},
+    )
+    assert result.blocks and min(b.start_at for b in result.blocks) >= start.replace(hour=10)
+    unresolved = build_plan(
+        [task()],
+        Preferences(),
+        "UTC",
+        start_at=start,
+        end_at=start + timedelta(days=1),
+        busy=[],
+        wake_overrides={start.date(): None},
+    )
+    assert not unresolved.blocks
+    assert unresolved.warnings
+
+
+@pytest.mark.asyncio
+async def test_noa_appearance_is_owned_revisioned_and_readonly_by_default(planning_env):
+    from navox.db.noa import NoaSettings
+
+    env = planning_env
+    path = "/api/v1/student/noa"
+    headers = routine_headers(env)
+    assert (await env.client.get(path)).status_code == 409
+    initial = await env.client.get(path, headers=headers)
+    assert initial.status_code == 200
+    assert initial.json()["study_streak"] == 0
+    assert initial.json()["revision"] == 0
+    async with env.factory() as db:
+        assert await db.scalar(select(func.count()).select_from(NoaSettings)) == 0
+    body = {"look": "boy", "vibe": "lavender", "revision": 0}
+    saved = await env.client.put(path, headers=headers, json=body)
+    assert saved.status_code == 200, saved.text
+    assert (await env.client.get(path, headers=headers)).json()["look"] == "boy"
+    assert (await env.client.put(path, headers=headers, json=body)).status_code == 409
+    assert (
+        await env.client.put(
+            path,
+            headers={**headers, "Origin": "https://foreign.example"},
+            json={**body, "revision": 1},
+        )
+    ).status_code == 403
+    async with env.factory() as db:
+        await service.forget_planning_data(db, env.user_id, env.workspace_id)
+        await db.commit()
+        assert await db.scalar(select(func.count()).select_from(NoaSettings)) == 0
+
+
+def test_study_streak_counts_local_days_once_and_does_not_break_before_today_ends():
+    from datetime import date
+
+    from navox.api.noa import study_streak
+
+    today = date(2026, 10, 24)
+    days = {today - timedelta(days=n) for n in (1, 2, 3)}
+    assert study_streak(days, today) == 3
+    assert study_streak(days | {today}, today) == 4
+    assert study_streak(days, today + timedelta(days=1)) == 0
+
+
+@pytest.mark.asyncio
+async def test_free_openings_never_claim_missing_calendar_is_verified(planning_env):
+    env = planning_env
+    response = await env.client.get(ROOT + "/openings?days=1", headers=routine_headers(env))
+    assert response.status_code == 200, response.text
+    assert response.json()["calendar_checked"] is False
+    assert response.json()["routine_confirmed"] is False
+    assert response.json()["warnings"]
+    assert (await env.client.get(ROOT + "/openings?days=1")).status_code == 409
+
+
+def test_planner_spreads_large_task_across_eligible_days_and_avoids_tiny_gaps():
+    result = build_plan(
+        [task(remaining_minutes=180)],
+        Preferences(),
+        "UTC",
+        start_at=MONDAY,
+        end_at=MONDAY + timedelta(days=3),
+        busy=[],
+    )
+    assert len({b.start_at.date() for b in result.blocks}) == 2
+    assert all(b.minutes <= 90 for b in result.blocks)
+    start = MONDAY.replace(hour=9, minute=0)
+    result = build_plan(
+        [task(remaining_minutes=60)],
+        Preferences(),
+        "UTC",
+        start_at=start,
+        end_at=start + timedelta(hours=3),
+        busy=[(start + timedelta(minutes=7), start + timedelta(hours=1))],
+    )
+    assert result.blocks[0].start_at >= start + timedelta(hours=1)
+
+
+@pytest.mark.asyncio
+async def test_replan_binds_every_replaced_block_including_beyond_new_window(planning_env):
+    env = planning_env
+    await create_task(env, estimated_minutes=600, due_at=(MONDAY + timedelta(days=6)).isoformat())
+    saved, _ = await accept(env)
+    before = [row for row in saved["blocks"] if row["status"] == "planned"]
+    proposed = await preview(env, days=1)
+    assert {row["id"] for row in proposed["replaced_blocks"]} == {row["id"] for row in before}
+    assert any(row["start_at"] >= proposed["result"]["end_at"] for row in before)
+    fetched = await env.client.get(ROOT + "/previews/" + proposed["preview_id"])
+    assert fetched.status_code == 200
+    assert fetched.headers["cache-control"] == "private, no-store"
+    assert fetched.json() == proposed
+    after, _ = await accept(env, proposed)
+    assert all(
+        row["status"] == "superseded"
+        for row in after["blocks"]
+        if row["id"] in {b["id"] for b in before}
+    )
+    assert (await env.client.get(ROOT + "/previews/" + proposed["preview_id"])).status_code == 409
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ["legacy", "unreviewed_block"])
+async def test_plan_rejects_unreviewed_replacement_changes(planning_env, mutation):
+    env = planning_env
+    await create_task(env)
+    saved, _ = await accept(env)
+    proposed = await preview(env)
+    async with env.factory() as database:
+        if mutation == "legacy":
+            record = await database.get(StudentPlanningPreview, UUID(proposed["preview_id"]))
+            record.replaced_blocks = None
+        else:
+            row = await database.get(StudentStudyBlock, UUID(saved["blocks"][0]["id"]))
+            row.title = "Unreviewed block title"
+        await database.commit()
+    response = await env.client.post(
+        ROOT + "/accept",
+        json={
+            "preview_id": proposed["preview_id"],
+            "preview_hash": proposed["preview_hash"],
+            "request_id": str(uuid4()),
+            "confirmed": True,
+        },
+    )
+    assert response.status_code == 409
+    current = (await env.client.get(ROOT + "/plan")).json()
+    assert current["revision"] == saved["revision"]
+
+
+@pytest.mark.asyncio
+async def test_task_completion_reviews_only_its_blocks_and_is_idempotent(planning_env):
+    env = planning_env
+    first = await create_task(env, title="Completed lab")
+    second = await create_task(env, title="Other task")
+    saved, _ = await accept(env)
+    headers = {"X-NavoX-Account": f"{env.workspace_id}:{env.user_id}"}
+    path = ROOT + f"/tasks/{first['id']}/complete"
+    body = {"revision": first["revision"], "request_id": str(uuid4())}
+    response = await env.client.post(path + "/preview", json=body, headers=headers)
+    assert response.status_code == 200, response.text
+    proposed = response.json()
+    assert proposed["credited_minutes"] == 0
+    assert proposed["removed_blocks"]
+    assert all(row["task_id"] == first["id"] for row in proposed["removed_blocks"])
+    assert (await env.client.get(ROOT + "/plan")).json() == saved
+    body["preview_hash"] = proposed["preview_hash"]
+    confirmed = await env.client.post(path + "/confirm", json=body, headers=headers)
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["task"]["status"] == "completed"
+    assert confirmed.json()["task"]["remaining_minutes"] == 0
+    assert confirmed.json()["task"]["actual_minutes"] == 0
+    assert (
+        await env.client.post(path + "/confirm", json=body, headers=headers)
+    ).json() == confirmed.json()
+    after = (await env.client.get(ROOT + "/plan")).json()
+    assert [b for b in after["blocks"] if b["task_id"] == second["id"]] == [
+        b for b in saved["blocks"] if b["task_id"] == second["id"]
+    ]
+    assert all(b["status"] == "superseded" for b in after["blocks"] if b["task_id"] == first["id"])
+
+
+@pytest.mark.asyncio
+async def test_task_completion_rejects_stale_or_different_account_approval(planning_env):
+    env = planning_env
+    task = await create_task(env)
+    await accept(env)
+    headers = {"X-NavoX-Account": f"{env.workspace_id}:{env.user_id}"}
+    path = ROOT + f"/tasks/{task['id']}/complete"
+    body = {"revision": task["revision"], "request_id": str(uuid4())}
+    assert (await env.client.post(path + "/preview", json=body)).status_code == 409
+    previewed = (await env.client.post(path + "/preview", json=body, headers=headers)).json()
+    async with env.factory() as database:
+        row = await database.get(StudentTask, UUID(task["id"]))
+        row.title = "Changed task"
+        row.revision += 1
+        await database.commit()
+    body["preview_hash"] = previewed["preview_hash"]
+    assert (await env.client.post(path + "/confirm", json=body, headers=headers)).status_code == 409
+    tasks = (await env.client.get(ROOT + "/tasks")).json()["tasks"]
+    assert tasks[0]["status"] == "active"

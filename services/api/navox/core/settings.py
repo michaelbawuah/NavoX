@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     google_oauth_redirect_uri: str = "http://localhost:8000/api/v1/connections/google/callback"
     google_token_encryption_key: SecretStr | None = None
     connector_secret_encryption_key: SecretStr | None = None
+    microsoft_oauth_client_id: str = ""
+    microsoft_oauth_client_secret: SecretStr | None = None
+    microsoft_oauth_tenant: str = "common"
+    microsoft_oauth_redirect_uri: str = "http://localhost:8000/api/v1/outlook/callback"
     # Web push is deployment-configured and separately opted into on each device.
     student_push_enabled: bool = False
     student_push_vapid_public_key: str = ""
@@ -154,6 +158,16 @@ class Settings(BaseSettings):
                     raise ValueError("Production Google OAuth requires a client secret")
                 if self.google_token_encryption_key is None:
                     raise ValueError("Production Google OAuth requires token encryption")
+            if self.microsoft_oauth_client_id:
+                if not self.microsoft_oauth_redirect_uri.casefold().startswith("https://"):
+                    raise ValueError("Production Microsoft OAuth redirect must use HTTPS")
+                if self.microsoft_oauth_client_secret is None:
+                    raise ValueError("Production Microsoft OAuth requires a client secret")
+                if (
+                    self.connector_secret_encryption_key is None
+                    and self.google_token_encryption_key is None
+                ):
+                    raise ValueError("Production Microsoft OAuth requires token encryption")
         return self
 
     model_config = SettingsConfigDict(

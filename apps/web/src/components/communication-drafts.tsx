@@ -15,7 +15,10 @@ import {
   selectReplyConnection,
   selectReplySource,
 } from "../lib/email-workflow";
+import type { GmailMeetingSource } from "../lib/inbox-meeting-proposal";
+import { productFeatures } from "../lib/product-features";
 import workflowStyles from "./communication-drafts.module.css";
+import { InboxMeetingCheck } from "./inbox-meeting-check";
 import { SavedMemoryPicker } from "./personal-memory";
 import { WatchSentEmail } from "./thread-watch-panel";
 import styles from "./today-workspace.module.css";
@@ -57,26 +60,39 @@ type SendAction = {
   result: { message_id?: string; thread_id?: string | null };
 };
 
-async function request<T>(
+export async function communicationRequest<T>(
   path: string,
   method = "GET",
   body?: unknown,
+  accountKey?: string,
 ): Promise<T> {
   const response = await fetch(`${api}${path}`, {
     method,
     credentials: "include",
     signal: AbortSignal.timeout(method === "POST" ? 65_000 : 10_000),
-    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      ...(accountKey ? { "X-NavoX-Account": accountKey } : {}),
+    },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  }).catch(() => {
+    throw new Error(
+      "The connection was interrupted. Check the current email status before trying again.",
+    );
   });
   const data = await response.json().catch(() => null);
   if (!response.ok)
     throw new Error(
-      typeof data?.detail === "string"
-        ? data.detail
-        : typeof data?.detail?.message === "string"
-          ? data.detail.message
-          : "NavoX could not complete this request.",
+      response.status === 401
+        ? "Sign in again before continuing with this email."
+        : response.status === 409
+          ? "This email or your account changed. Open the latest draft and review it again."
+          : response.status === 403
+            ? "Check your email connection and permissions before continuing."
+            : response.status === 422
+              ? "Check the recipient, subject and message, then try again."
+              : "This email request couldn’t finish. Your text is still here. Please try again.",
     );
   return data as T;
 }
@@ -122,6 +138,10 @@ export function CommunicationDrafts({
   onStateChanged,
   selectedCommitmentId,
   selectionKey,
+  onDraftCount,
+  accountKey,
+  timezone,
+  readMeetingSource,
 }: {
   commitments: { id: string; title: string; description?: string | null }[];
   connections: EmailConnection[];
@@ -129,7 +149,16 @@ export function CommunicationDrafts({
   onStateChanged: () => Promise<void>;
   selectedCommitmentId?: string | null;
   selectionKey?: string | number;
+  onDraftCount?: (count: number) => void;
+  accountKey?: string;
+  timezone?: string;
+  readMeetingSource?: GmailMeetingSource | null;
 }) {
+  const request = useCallback(
+    <T,>(path: string, method = "GET", body?: unknown) =>
+      communicationRequest<T>(path, method, body, accountKey),
+    [accountKey],
+  );
   const [commitmentId, setCommitmentId] = useState(
     eligibleReplyCommitment(commitments, selectedCommitmentId)?.id ??
       (!selectedCommitmentId && commitments.length === 1
@@ -137,6 +166,13 @@ export function CommunicationDrafts({
         : ""),
   );
   const [saved, setSaved] = useState<Draft[]>([]);
+  useEffect(() => {
+    onDraftCount?.(
+      saved.filter(
+        (row) => !["sent", "completed", "discarded"].includes(row.status),
+      ).length,
+    );
+  }, [saved, onDraftCount]);
   const [sources, setSources] = useState<EmailReplySource[]>([]);
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [sourceId, setSourceId] = useState("");
@@ -244,7 +280,7 @@ export function CommunicationDrafts({
     return () => {
       disposed = true;
     };
-  }, []);
+  }, [request]);
   useEffect(() => {
     let disposed = false;
     setSources([]);
@@ -266,7 +302,7 @@ export function CommunicationDrafts({
     return () => {
       disposed = true;
     };
-  }, [selectedCommitment]);
+  }, [selectedCommitment, request]);
 
   useEffect(() => {
     if (!selectedSourceContext || draft || action || manual) return;
@@ -298,7 +334,7 @@ export function CommunicationDrafts({
       disposed = true;
       clearTimeout(timer);
     };
-  }, [action]);
+  }, [action, request]);
 
   useEffect(() => {
     if (
@@ -308,9 +344,16 @@ export function CommunicationDrafts({
     )
       return;
     notifiedCompletion.current = action.id;
+    setSaved((rows) =>
+      rows.map((row) =>
+        row.action_id === action.id || row.id === action.payload.draft_id
+          ? { ...row, status: "completed" }
+          : row,
+      ),
+    );
     void onStateChanged().catch(() =>
       setError(
-        "The email was verified, but your daily view could not refresh. Refresh the page to update it.",
+        "The email was sent and verified. Your Inbox will update when the connection recovers.",
       ),
     );
   }, [action, onStateChanged]);
@@ -343,6 +386,26 @@ export function CommunicationDrafts({
       setBusy(false);
     }
   }
+  useEffect(() => {
+    if (
+      !action ||
+      !["approved", "queued", "executing", "uncertain"].includes(action.status)
+    )
+      return;
+    let live = true;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void request<SendAction>(`/actions/${action.id}`)
+        .then((next) => {
+          if (live) setAction(next);
+        })
+        .catch(() => {});
+    }, 5000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [action, request]);
   const reviewMatches = manual
     ? manualEmailReviewMatches(
         action,
@@ -449,7 +512,10 @@ export function CommunicationDrafts({
           {error}
         </p>
       )}
-      <p>Send a plain text email to one recipient.</p>
+      <p>
+        Nothing is sent until you approve and tap Send. Use only reasons and
+        facts you have provided.
+      </p>
       {commitmentId && !selectedCommitment && !draft && (
         <p role="alert">
           This request is no longer available. Your text is still here. Choose
@@ -574,6 +640,36 @@ export function CommunicationDrafts({
         </label>
         {!manual && (
           <>
+            {productFeatures.studentCalendarAvailability &&
+              accountKey &&
+              timezone && (
+                <InboxMeetingCheck
+                  key={`${selectedCommitment}:${selectedSource}:${accountKey}:${timezone}`}
+                  accountKey={accountKey}
+                  timezone={timezone}
+                  source={
+                    readMeetingSource?.accountKey === accountKey &&
+                    readMeetingSource.commitmentId === selectedCommitment &&
+                    readMeetingSource.sourceId === selectedSource
+                      ? readMeetingSource
+                      : null
+                  }
+                  disabled={busy || paused || !!action || !selectedCommitment}
+                  onUseTimes={(value) => {
+                    const updated = [instructions.trim(), value]
+                      .filter(Boolean)
+                      .join("\n\n");
+                    if (updated.length > 4000) {
+                      setError(
+                        "Shorten your reply instructions before adding these times.",
+                      );
+                      return;
+                    }
+                    setInstructions(updated);
+                    setApproved(false);
+                  }}
+                />
+              )}
             <label>
               What should the reply say?
               <textarea
@@ -820,6 +916,52 @@ export function CommunicationDrafts({
                 approval.
               </p>
             )}
+            <div>
+              <button
+                type="button"
+                disabled={
+                  busy ||
+                  paused ||
+                  dirty ||
+                  (!!action && action.status !== "awaiting_approval")
+                }
+                onClick={() =>
+                  void perform(async () =>
+                    show(
+                      await request<Draft>(
+                        `/communication-drafts/${draft.id}/regenerate`,
+                        "POST",
+                        {
+                          expected_version: draft.current_version,
+                          instructions:
+                            "Make this draft shorter. Preserve its verified facts and the student's edits. Do not invent personal reasons, availability, promises or deadlines.",
+                        },
+                      ),
+                    ),
+                  )
+                }
+              >
+                Make it shorter
+              </button>
+              <button
+                type="button"
+                disabled={
+                  busy || (!!action && action.status !== "awaiting_approval")
+                }
+                onClick={() =>
+                  void perform(async () => {
+                    await request(
+                      `/communication-drafts/${draft.id}?expected_version=${draft.current_version}`,
+                      "DELETE",
+                    );
+                    setSaved((rows) => rows.filter((r) => r.id !== draft.id));
+                    clearDraftForRequest(selectedCommitment);
+                  })
+                }
+              >
+                Discard draft
+              </button>
+            </div>
             <details>
               <summary>Version history (up to 100 recent versions)</summary>
               {draft.versions.map((v) => (
@@ -920,7 +1062,7 @@ export function CommunicationDrafts({
                     )
                   }
                 >
-                  Approve and send now
+                  Send
                 </button>
               </>
             )}
@@ -930,21 +1072,11 @@ export function CommunicationDrafts({
                 <p>Gmail confirmed the sent message.</p>
               )}
             <WatchSentEmail
+              timezone={timezone}
               action={action}
               connections={connections}
               paused={paused}
             />
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                void perform(async () =>
-                  setAction(await request<SendAction>(`/actions/${action.id}`)),
-                )
-              }
-            >
-              Refresh status
-            </button>
           </div>
         )}
       </div>

@@ -208,6 +208,7 @@ describe("verified student facts reach the answer display", () => {
       expires_at: "2026-11-04T15:00:00Z",
       base_revision: 1,
       requires_acceptance: true,
+      replaced_blocks: [],
       result: {
         planning_only: true,
         start_at: "2026-11-04T00:00:00Z",

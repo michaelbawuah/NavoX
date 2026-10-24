@@ -1,13 +1,22 @@
 {
-  "name": "@navox/ui",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Reserved shared UI package for NavoX clients",
-  "scripts": {
-    "typecheck": "tsc --noEmit"
-  },
-  "devDependencies": {
-    "typescript": "5.9.3"
-  }
+	"name": "@navox/ui",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Shared NavoX design tokens and components",
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"typescript": "5.9.3"
+	},
+	"dependencies": {
+		"@fontsource-variable/inter": "5.3.0"
+	},
+	"exports": {
+		".": "./src/index.ts",
+		"./tokens.css": "./src/tokens.css"
+	},
+	"peerDependencies": {
+		"react": "^19.3.0"
+	}
 }
-

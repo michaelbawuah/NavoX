@@ -1,0 +1,88 @@
+> Current continuation: [October 24 evidence and comparison](continuation-20261024/README.md), runtime `c18329e`. The records below are earlier checkpoints.
+
+# 24 October redesign evidence
+
+## Timezone correction — test release 6171872
+- 2,528 web tests passed; TypeScript and Biome clean.
+- 54 account/preferences API tests and 55 Vox schedule/notification tests passed.
+- Real test API in Chromium with America/New_York device timezone: first-time
+  detection persisted; auth, preferences, profile and timetable agreed.
+- Today, Classes, Planner, Inbox and Settings headers matched local instants.
+- Saving America/Los_Angeles updated the Settings header immediately; QA account
+  restored to America/New_York after the check. No real student preference was edited.
+- 375px browser emulation had no horizontal overflow; zero browser page errors.
+- Unit clock cases cover New York 3 AM/noon/11 PM, West Coast date boundaries,
+  05:00/12:00/17:00 greeting boundaries, spring-forward and repeated fall-back hour.
+- timezone-mobile.png is evidence of the timezone release, NOT the final redesign.
+- Physical phone tests, live Vox timezone answer and new visual matching remain pending.
+
+## Open redesign evidence
+First-time Today, normal Today, late-night Today and every other new screen still
+need side-by-side review against the 19-page source. See ../../m2-redesign-20261024.md.
+
+## Welcome screen and persistent call — test release aef0bec
+- 2,530 web tests; TypeScript and Biome passed.
+- Real account UI: five setup steps, no fabricated completion; original supplied Noa SVG.
+- Verified 18px header / 36px greeting, 220px sidebar and 56px header.
+- 375px touch targets >=44px, no horizontal overflow, desktop/mobile light/dark,
+  zero browser page errors. Screenshots use the existing synthetic Vox QA account.
+- Live rented-provider call correctly answered that the saved class timezone is
+  America/New_York/Eastern. Same document, same conversation and exactly one media
+  admission through Classes -> Planner -> Today. Microphone tracks ended on hangup;
+  active transcript became inaccessible (410) after the server acknowledged hangup.
+- vox-navigation-mobile-emulation.webm records this flow. Authentication happened
+  before recording; it contains no login credentials. Synthetic microphone input;
+  video has no audio track. This is NOT a physical-phone recording.
+- Review found primary CTA/mobile Search styling differences, corrected next.
+
+## Deliberate limits / incomplete requirements
+- Calendar helper copy points to Connections instead of claiming every connected
+  calendar is busy-time-only: legacy permissions may include event read access.
+- Full voice-driven class creation, all three calendar providers, Outlook email,
+  Noa preference selection/interactive states, normal Today timeline/countdown,
+  late-night alarm view and the other redesigned pages are not accepted yet.
+- Noa on Today is the supplied static vector illustration. No simulated talking
+  animation was introduced. Vox's existing visual remains pending Part 2.
+- Physical-phone and real-student usage checks remain waiting on the user.
+
+## Populated Today — test release 8c90643
+- 2,531 web tests passed; touched-component follow-up tests, TypeScript and lint passed.
+- Retained QA fixture: three classes with walk times, a recurring shift, three
+  assignments and three weekly goals with synthetic check-ins. Study plan accepted
+  through the normal preview/confirm API; no external calendar writes.
+- Captured 9 AM, 3 PM and 3 AM New York on desktop and 375px dark/light. These use
+  real saved fixture data with an explicitly controlled client/server-display clock.
+  All three greetings were correct; no overflow or page errors.
+- The 3 AM image is an unfinished baseline: it does not yet match the alarm/night
+  design. Do not count it as passed.
+- A separate fresh private account verifies the welcome page and starts at 0/5.
+  Public test-site registration remains closed. Credentials stay in the private
+  backup folder, outside the repository and evidence.
+- Follow-up: show outcome actions on the current Today study block; other blocks
+  remain reachable in Planner, matching the specified compact timeline.
+
+## Final checkpoint for this implementation slice — d252bbf
+- Current-block-only Today actions and failed-load summary correction are deployed.
+- Controlled-clock desktop/mobile captures regenerated against this code release.
+- Side-by-side PNGs: comparison-welcome.png and comparison-today.png. These make
+  unfinished differences visible and are not a claim of complete visual parity.
+- Last navigation call recorded 2,147 provider tokens and $0.024008 estimated
+  provider cost; transport observed 10.350s speaking and 5.172s idle. A separate
+  zero-token provider stream remains uncertain and the transport ledger is open;
+  these are measured estimates, not a fully reconciled bill. No quota was reset.
+- Final server check found zero active test calls. Demo fixtures remain intentionally.
+- Main/production are unchanged. Work remains in draft PR #57.
+
+
+## Sidebar and additional screens — test release 731c89e
+
+- `profile-name-saved.png` and `profile-name-first.png`: first-name/school profile layout.
+- `classes-*`, `planner-*`, `inbox-*`: saved/first, desktop/mobile, dark/light views.
+- `today-night-*`: controlled 3 AM in America/New_York (07:00Z); real synthetic QA class data.
+- `routine-review-mobile.png`: approval review on a 375 px viewport.
+- `routine-and-night-mobile-emulation.webm`: routine preview, approval, late-night view and Settings navigation.
+
+These are browser emulation, not physical-phone evidence. QA alarm settings were
+restored through the same preview/confirm API after testing. No real student account
+was modified. Inbox images show unconnected state, not successful Gmail/Outlook triage.
+See the authoritative acceptance ledger for remaining requirements and deviations.

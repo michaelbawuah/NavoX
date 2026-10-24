@@ -27,11 +27,13 @@ from navox.ai.speech_adapters import MAX_SPEECH_AUDIO_BYTES
 from navox.core.settings import Settings, get_settings
 from navox.db.session import get_database_engine, get_session_factory
 from navox.vox.audio_input import AudioInputBuffer
+from navox.vox.capture_tools import CaptureTools
 from navox.vox.context_store import DatabaseContextStore
 from navox.vox.inference_config import load_inference_config
 from navox.vox.inference_http import OpenAICompatiblePipeline, UsageHooks
 from navox.vox.inference_realtime import OpenAIRealtimeAdapter
 from navox.vox.inference_worker import ConfiguredVoiceWorker
+from navox.vox.planning_tools import REVIEW_TOPIC, PlanningTools
 from navox.vox.provider import cloud_config
 from navox.vox.schedule_tools import ScheduleTools
 from navox.vox.session_context import CallContextKey, VoxCallContext
@@ -377,7 +379,18 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                     topic=WEB_TOPIC,
                 )
 
+            async def publish_plan(result: dict[str, object]) -> None:
+                await inference_check()
+                await ctx.room.local_participant.publish_data(
+                    json.dumps(result, ensure_ascii=False).encode(),
+                    reliable=True,
+                    destination_identities=[assignment.client_identity],
+                    topic=REVIEW_TOPIC,
+                )
+
             tools = VoxReadTools(
+                PlanningTools(check, settings, publish_plan),
+                CaptureTools(check, settings, publish_plan),
                 ScheduleTools(check),
                 PublicWebTools(check, inference, settings, usage, publish_web),
             )

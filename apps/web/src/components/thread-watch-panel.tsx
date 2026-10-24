@@ -63,12 +63,14 @@ function ReminderFields({
   disabled,
   onChoice,
   onCustom,
+  timezone,
 }: {
   choice: ReminderChoice;
   custom: string;
   disabled: boolean;
   onChoice: (value: ReminderChoice) => void;
   onCustom: (value: string) => void;
+  timezone?: string;
 }) {
   const id = useId();
   const [localZone, setLocalZone] = useState("");
@@ -103,8 +105,10 @@ function ReminderFields({
             onChange={(event) => onCustom(event.target.value)}
           />
           <small>
-            Uses this device’s local time zone
-            {localZone ? ` (${localZone})` : ""}. Choose a time within 30 days.
+            {timezone
+              ? "Uses your saved time zone."
+              : `Uses this device’s local time zone${localZone ? ` (${localZone})` : ""}.`}{" "}
+            Choose a time within 30 days.
           </small>
         </label>
       )}
@@ -120,6 +124,7 @@ export function ThreadWatchCard({
   onDraftReply,
   onAction,
   onReschedule,
+  timezone,
 }: {
   watch: ThreadWatch;
   paused?: boolean;
@@ -131,6 +136,7 @@ export function ThreadWatchCard({
     action: "pause" | "resume" | "cancel" | "check",
   ) => void;
   onReschedule?: (id: string, remindAt: string) => Promise<void>;
+  timezone?: string;
 }) {
   const [choice, setChoice] = useState<ReminderChoice>("2");
   const [custom, setCustom] = useState("");
@@ -145,7 +151,7 @@ export function ThreadWatchCard({
     event.preventDefault();
     setDateError("");
     try {
-      const time = reminderAt(choice, custom, Date.now());
+      const time = reminderAt(choice, custom, Date.now(), timezone);
       await onReschedule?.(watch.id, time);
     } catch (error) {
       setDateError(
@@ -169,14 +175,14 @@ export function ThreadWatchCard({
       <p className={styles.detail}>
         Reminder:{" "}
         <time dateTime={watch.remind_at}>
-          {threadWatchTime(watch.remind_at)}
+          {threadWatchTime(watch.remind_at, timezone)}
         </time>
       </p>
       {watch.last_checked_at ? (
         <p className={styles.detail}>
           Last checked{" "}
           <time dateTime={watch.last_checked_at}>
-            {threadWatchTime(watch.last_checked_at)}
+            {threadWatchTime(watch.last_checked_at, timezone)}
           </time>
         </p>
       ) : (
@@ -194,7 +200,7 @@ export function ThreadWatchCard({
         <p className={styles.note}>
           Reply detected{" "}
           <time dateTime={watch.replied_at}>
-            {threadWatchTime(watch.replied_at)}
+            {threadWatchTime(watch.replied_at, timezone)}
           </time>
           . This watch has stopped.
         </p>
@@ -275,6 +281,7 @@ export function ThreadWatchCard({
               disabled={busy || paused}
               onChoice={setChoice}
               onCustom={setCustom}
+              timezone={timezone}
             />
             <button type="submit" disabled={busy || paused}>
               Save reminder
@@ -297,12 +304,14 @@ export function ThreadWatchPanel({
   onDraftReply,
   compact = false,
   refreshKey,
+  timezone,
 }: {
   paused?: boolean;
   eligibleCommitmentIds?: string[];
   onDraftReply?: (commitmentId: string) => void;
   compact?: boolean;
   refreshKey?: string | number;
+  timezone?: string;
 }) {
   const [items, setItems] = useState<ThreadWatch[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -311,24 +320,38 @@ export function ThreadWatchPanel({
   const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState("");
   const requestId = useRef(0);
-  const refresh = useCallback(async () => {
+  const panelRef = useRef<HTMLElement>(null);
+  const reading = useRef(false);
+  const busyRef = useRef(false);
+  busyRef.current = !!busyId;
+  const refresh = useCallback(async (quiet = false) => {
+    const protectedView = () =>
+      busyRef.current || !!panelRef.current?.querySelector("details[open]");
+    if (
+      quiet &&
+      (document.visibilityState === "hidden" ||
+        reading.current ||
+        protectedView())
+    )
+      return;
     const current = ++requestId.current;
-    setLoading(true);
+    reading.current = true;
+    if (!quiet) setLoading(true);
     try {
       const data = await request<{ items: ThreadWatch[] }>("");
       if (current !== requestId.current) return;
+      if (quiet && protectedView()) return;
       setItems(data.items);
       setLoaded(true);
       setError("");
-    } catch (error) {
+    } catch {
       if (current === requestId.current)
-        setError(
-          error instanceof Error
-            ? error.message
-            : "Email watches could not be refreshed.",
-        );
+        setError("Reply updates could not load. Try again in a moment.");
     } finally {
-      if (current === requestId.current) setLoading(false);
+      if (current === requestId.current) {
+        reading.current = false;
+        if (!quiet) setLoading(false);
+      }
     }
   }, []);
 
@@ -337,10 +360,18 @@ export function ThreadWatchPanel({
     void refreshKey;
     void refresh();
     const listener = () => void refresh();
+    const quiet = () => void refresh(true);
     window.addEventListener(changedEvent, listener);
+    window.addEventListener("focus", quiet);
+    document.addEventListener("visibilitychange", quiet);
+    const timer = window.setInterval(quiet, 60_000);
     return () => {
       requestId.current++;
+      reading.current = false;
       window.removeEventListener(changedEvent, listener);
+      window.removeEventListener("focus", quiet);
+      document.removeEventListener("visibilitychange", quiet);
+      window.clearInterval(timer);
     };
   }, [refresh, refreshKey]);
 
@@ -349,6 +380,7 @@ export function ThreadWatchPanel({
     action: "pause" | "resume" | "cancel" | "check",
   ) {
     requestId.current++;
+    reading.current = false;
     setLoading(false);
     setBusyId(id);
     setError("");
@@ -363,7 +395,7 @@ export function ThreadWatchPanel({
       );
       setMessage(
         action === "check"
-          ? "Check requested. Refresh saved status to see the result."
+          ? "Check requested. The result will appear here when it is ready."
           : action === "cancel"
             ? "Email watch cancelled."
             : action === "pause"
@@ -384,6 +416,7 @@ export function ThreadWatchPanel({
 
   async function reschedule(id: string, remindAt: string) {
     requestId.current++;
+    reading.current = false;
     setLoading(false);
     setBusyId(id);
     setError("");
@@ -421,6 +454,7 @@ export function ThreadWatchPanel({
 
   return (
     <section
+      ref={panelRef}
       className={styles.panel}
       aria-label={compact ? "Email follow-up reminders" : "Email reply watches"}
       aria-busy={loading}
@@ -430,13 +464,15 @@ export function ThreadWatchPanel({
           <p className={styles.kicker}>Follow through</p>
           <h2>{compact ? "Email follow-ups" : "Waiting for a reply"}</h2>
         </div>
-        <button
-          type="button"
-          disabled={loading || !!busyId}
-          onClick={() => void refresh()}
-        >
-          {loading ? "Loading…" : "Refresh status"}
-        </button>
+        {error && (
+          <button
+            type="button"
+            disabled={loading || !!busyId}
+            onClick={() => void refresh()}
+          >
+            {loading ? "Trying…" : "Try again"}
+          </button>
+        )}
       </div>
       {!compact && (
         <p className={styles.intro}>
@@ -478,6 +514,7 @@ export function ThreadWatchPanel({
       <div className={styles.items}>
         {visible.map((watch) => (
           <ThreadWatchCard
+            timezone={timezone}
             key={watch.id}
             watch={watch}
             paused={paused}
@@ -499,7 +536,11 @@ export function ThreadWatchPanel({
           <summary>Finished watches ({history.length})</summary>
           <div className={styles.items}>
             {history.map((watch) => (
-              <ThreadWatchCard key={watch.id} watch={watch} />
+              <ThreadWatchCard
+                key={watch.id}
+                watch={watch}
+                timezone={timezone}
+              />
             ))}
           </div>
         </details>
@@ -512,10 +553,12 @@ export function WatchSentEmail({
   action,
   connections,
   paused = false,
+  timezone,
 }: {
   action: WatchableSendAction;
   connections: EmailConnection[];
   paused?: boolean;
+  timezone?: string;
 }) {
   if (watchEligibility(action, connections) === "unverified") return null;
   return (
@@ -524,6 +567,7 @@ export function WatchSentEmail({
       action={action}
       connections={connections}
       paused={paused}
+      timezone={timezone}
     />
   );
 }
@@ -532,10 +576,12 @@ function WatchSentEmailControl({
   action,
   connections,
   paused,
+  timezone,
 }: {
   action: WatchableSendAction;
   connections: EmailConnection[];
   paused: boolean;
+  timezone?: string;
 }) {
   const [existing, setExisting] = useState<ThreadWatch | null>(null);
   const [loading, setLoading] = useState(true);
@@ -587,14 +633,14 @@ function WatchSentEmailControl({
     setError("");
     if (eligibility !== "eligible" || paused || !loaded || existing) return;
     try {
-      const selection = JSON.stringify([action.id, choice, custom]);
+      const selection = JSON.stringify([action.id, choice, custom, timezone]);
       if (!pending.current || pending.current.selection !== selection) {
         pending.current = {
           selection,
           payload: {
             action_id: action.id,
             request_id: crypto.randomUUID(),
-            remind_at: reminderAt(choice, custom, Date.now()),
+            remind_at: reminderAt(choice, custom, Date.now(), timezone),
           },
         };
       }
@@ -612,7 +658,7 @@ function WatchSentEmailControl({
       setError(
         error instanceof Error
           ? error.message
-          : "The watch could not be saved. Refresh its status before trying again.",
+          : "The watch could not be saved. Check its status before trying again.",
       );
     } finally {
       setBusy(false);
@@ -657,6 +703,7 @@ function WatchSentEmailControl({
                 disabled={busy || paused}
                 onChoice={setChoice}
                 onCustom={setCustom}
+                timezone={timezone}
               />
               <button
                 type="submit"
@@ -684,7 +731,7 @@ function WatchSentEmailControl({
           disabled={busy || loading}
           onClick={() => void refresh()}
         >
-          Refresh watch status
+          Try again
         </button>
       )}
     </div>

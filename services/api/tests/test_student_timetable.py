@@ -36,6 +36,61 @@ MEETING = {
 }
 
 
+@pytest.mark.asyncio
+async def test_exam_is_one_reviewed_date_and_omitted_dates_survive_edit(student_env):
+    await register(student_env)
+    course = await create_course(student_env)
+    exam = await create_meeting(
+        student_env,
+        course,
+        kind="exam",
+        dates=["2026-10-25"],
+        weekdays=[6],
+        start_time="08:40",
+        end_time="10:00",
+    )
+    response = await student_env.client.get("/api/v1/student/timetable?date=2026-10-25&days=8")
+    assert response.status_code == 200, response.text
+    occurrences = response.json()["occurrences"]
+    assert len(occurrences) == 1
+    assert occurrences[0]["kind"] == "exam"
+    assert occurrences[0]["start_at"].startswith("2026-10-25")
+    changed = await student_env.client.patch(
+        f"/api/v1/student/meetings/{exam['id']}",
+        json={
+            **MEETING,
+            "kind": "exam",
+            "weekdays": [6],
+            "revision": exam["revision"],
+            "room": "202",
+        },
+    )
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["dates"] == ["2026-10-25"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {},
+        {"dates": ["2027-10-25"]},
+        {"dates": ["2026-10-25"], "weekdays": [0]},
+        {"dates": ["2026-10-25", "2026-11-01"]},
+    ],
+)
+async def test_exam_cannot_silently_recur_or_leave_term(student_env, changes):
+    await register(student_env)
+    course = await create_course(student_env)
+    response = await student_env.client.post(
+        f"/api/v1/student/courses/{course['id']}/meetings",
+        json={**MEETING, "kind": "exam", "weekdays": [6], **changes},
+    )
+    assert response.status_code == 422, response.text
+    saved = await student_env.client.get("/api/v1/student/timetable?date=2026-10-25&days=8")
+    assert saved.json()["occurrences"] == []
+
+
 @pytest_asyncio.fixture
 async def student_env(ai_database, monkeypatch):
     settings = Settings(_env_file=None, app_environment="test", ai_provider="disabled")

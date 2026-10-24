@@ -25,6 +25,8 @@ from navox.db import (
     lms_feeds,  # noqa: F401 - registers reviewed student calendar feed data
     memory,  # noqa: F401 - registers owner-saved preferences
     news,  # noqa: F401
+    noa,  # noqa: F401 - registers owner-selected mascot appearance
+    outlook,  # noqa: F401 - registers encrypted Outlook reviews and send receipts
     routines,  # noqa: F401 - registers opt-in schedules and run history
     student,  # noqa: F401 - registers owner-managed classes and timetable
     student_alerts,  # noqa: F401 - registers opt-in device alerts and delivery history

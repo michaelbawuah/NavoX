@@ -431,23 +431,36 @@ export async function studentEmailRequest<T>(
   method = "GET",
   body?: unknown,
   signal?: AbortSignal,
+  scope?: { accountKey: string; namespace: "outlook" },
 ): Promise<T> {
   try {
-    const response = await fetch(`${apiBaseUrl}/student/email${path}`, {
-      method,
-      credentials: "include",
-      cache: "no-store",
-      redirect: "error",
-      signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(45_000)])
-        : AbortSignal.timeout(45_000),
-      ...(body === undefined
-        ? {}
-        : {
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          }),
-    });
+    const response = await fetch(
+      `${apiBaseUrl}/${scope?.namespace ?? "student/email"}${path}`,
+      {
+        method,
+        credentials: "include",
+        cache: "no-store",
+        redirect: "error",
+        ...(scope || body !== undefined
+          ? {
+              headers: {
+                ...(scope ? { "X-NavoX-Account": scope.accountKey } : {}),
+                ...(body === undefined
+                  ? {}
+                  : { "Content-Type": "application/json" }),
+              },
+            }
+          : {}),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(45_000)])
+          : AbortSignal.timeout(45_000),
+        ...(body === undefined
+          ? {}
+          : {
+              body: JSON.stringify(body),
+            }),
+      },
+    );
     const payload: unknown = await response.json().catch(() => null);
     if (!response.ok) {
       const v =
@@ -916,6 +929,18 @@ export class StudentEmailController {
     await this.run(
       async (signal) => {
         const review = await this.api.review(reviewId, signal);
+        return { review, context: await this.api.context(signal) };
+      },
+      (result) => this.showReview(result.review, result.context),
+    );
+  };
+  /** A provider-specific selected-message flow may hand over a server review id. */
+  openExternalReview = async (reviewId: string) => {
+    await this.run(
+      async (signal) => {
+        const review = await this.api.review(reviewId, signal);
+        if (review.review_id !== reviewId)
+          throw new Error("The email review changed. Reopen it.");
         return { review, context: await this.api.context(signal) };
       },
       (result) => this.showReview(result.review, result.context),

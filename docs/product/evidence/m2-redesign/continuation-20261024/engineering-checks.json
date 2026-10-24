@@ -1,0 +1,119 @@
+{
+  "release": "c18329ee4eef35c48dac1a072926efee0d3843f7",
+  "passed": true,
+  "summary": "2740 web tests and 45 Vox API tests passed; static checks passed. Earlier 139 Inbox/planning regressions are separately recorded.",
+  "full_web_suite": {
+    "files": 185,
+    "tests": 2740,
+    "release": "c18329ee4eef35c48dac1a072926efee0d3843f7"
+  },
+  "api_checkpoints": [
+    {
+      "scope": "Vox capture/inference/planning tools",
+      "tests": 45,
+      "release": "c18329ee4eef35c48dac1a072926efee0d3843f7"
+    },
+    {
+      "scope": "Inbox/provider/privacy/placement focused regressions",
+      "tests": 139,
+      "release": "3244a9139159275d194c8799c1ad59eebf7cc1dc"
+    }
+  ],
+  "typecheck": "passed",
+  "biome": {
+    "result": "passed",
+    "errors": 0,
+    "warnings": 32,
+    "infos": 14
+  },
+  "ruff": "passed",
+  "mypy": {
+    "result": "passed",
+    "source_files": 468
+  },
+  "checks": [
+    {
+      "command": [
+        ".venv/bin/ruff",
+        "check",
+        "--fix",
+        "--select",
+        "I",
+        "navox/vox/capture_tools.py",
+        "navox/vox/inference_http.py",
+        "tests/test_vox_capture_tools.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.03
+    },
+    {
+      "command": [
+        ".venv/bin/ruff",
+        "format",
+        "navox/vox/capture_tools.py",
+        "navox/vox/inference_http.py",
+        "tests/test_vox_capture_tools.py"
+      ],
+      "exit_code": 0,
+      "seconds": 0.01
+    },
+    {
+      "command": [
+        ".venv/bin/ruff",
+        "check",
+        "navox",
+        "tests"
+      ],
+      "exit_code": 0,
+      "seconds": 0.01
+    },
+    {
+      "command": [
+        ".venv/bin/mypy",
+        "navox"
+      ],
+      "exit_code": 0,
+      "seconds": 1.41
+    },
+    {
+      "command": [
+        ".venv/bin/pytest",
+        "-q",
+        "tests/test_vox_capture_tools.py",
+        "tests/test_vox_inference.py",
+        "tests/test_vox_planning_tools.py"
+      ],
+      "exit_code": 0,
+      "seconds": 9.09
+    },
+    {
+      "command": [
+        "npm",
+        "test",
+        "--",
+        "--run"
+      ],
+      "exit_code": 0,
+      "seconds": 6.49
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "exit_code": 0,
+      "seconds": 1.21
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "lint"
+      ],
+      "exit_code": 0,
+      "seconds": 0.41
+    }
+  ],
+  "entire_api_suite_run": false
+}

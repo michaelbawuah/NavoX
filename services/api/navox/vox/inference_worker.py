@@ -301,10 +301,17 @@ class ConfiguredVoiceWorker:
             self.failed = not self._closed and epoch == self._epoch
             await self.output.clear()
         except Exception as error:
+            trace = error.__traceback__
+            failure_site = "unknown"
+            while trace is not None:
+                if "/navox/" in trace.tb_frame.f_code.co_filename:
+                    failure_site = f"{trace.tb_frame.f_code.co_name}:{trace.tb_lineno}"
+                trace = trace.tb_next
             logging.getLogger(__name__).warning(
-                "Vox spoken turn failed", extra={"error_type": type(error).__name__}
+                "Vox spoken turn failed",
+                extra={"error_type": type(error).__name__, "failure_site": failure_site},
             )
-            # No raw provider exception, transcript, tool result or credential is logged.
+            # Only code location and type: no exception text, traceback, locals or content.
             self.failed = True
             await self.output.clear()
         finally:

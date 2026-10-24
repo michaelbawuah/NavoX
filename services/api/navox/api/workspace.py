@@ -8,9 +8,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import select
 
 from navox.api.auth import CurrentAccountDependency, DatabaseSession
-from navox.db.models import WorkspaceDisplayPreference
+from navox.db.models import User, WorkspaceDisplayPreference
+from navox.db.student import StudentProfile
 
 router = APIRouter(prefix="/workspace", tags=["workspace"])
 
@@ -60,9 +62,70 @@ async def get_preferences(
     preference = await database.get(
         WorkspaceDisplayPreference, (current_account.workspace.id, current_account.user.id)
     )
+    profile = await database.scalar(
+        select(StudentProfile.id).where(StudentProfile.user_id == current_account.user.id)
+    )
     return {
         **prefs.model_dump(),
-        "timezone_selected": preference is not None or current_account.user.timezone != "UTC",
+        "timezone_selected": (
+            preference is not None or profile is not None or current_account.user.timezone != "UTC"
+        ),
+    }
+
+
+class InitialTimezone(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    timezone: str = Field(min_length=1, max_length=64)
+    user_id: str
+    workspace_id: str
+
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, value: str) -> str:
+        return DisplayPreferences.valid_timezone(value)
+
+
+@router.post("/timezone/initialize")
+async def initialize_timezone(
+    payload: InitialTimezone,
+    database: DatabaseSession,
+    current_account: CurrentAccountDependency,
+) -> dict[str, str]:
+    """Persist device-local time once; never replace a student's saved choice.
+
+    Identity binding prevents a delayed request from modifying a newly signed-in
+    account. The user lock serializes this with profile/preference saves.
+    """
+    if (payload.user_id, payload.workspace_id) != (
+        str(current_account.user.id),
+        str(current_account.workspace.id),
+    ):
+        raise HTTPException(409, "Your account changed. Please try again.")
+    user = await database.scalar(
+        select(User)
+        .where(User.id == current_account.user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    assert user is not None
+    preference = await database.scalar(
+        select(WorkspaceDisplayPreference.user_id).where(
+            WorkspaceDisplayPreference.user_id == user.id
+        )
+    )
+    profile = await database.scalar(
+        select(StudentProfile.id).where(StudentProfile.user_id == user.id)
+    )
+    if preference is None and profile is None and user.timezone == "UTC":
+        user.timezone = payload.timezone
+        database.add(
+            WorkspaceDisplayPreference(workspace_id=current_account.workspace.id, user_id=user.id)
+        )
+        await database.commit()
+    return {
+        "timezone": user.timezone,
+        "user_id": str(user.id),
+        "workspace_id": str(current_account.workspace.id),
     }
 
 
@@ -72,6 +135,12 @@ async def save_preferences(
     database: DatabaseSession,
     current_account: CurrentAccountDependency,
 ) -> DisplayPreferences:
+    await database.scalar(
+        select(User)
+        .where(User.id == current_account.user.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if payload.weather_visible and not payload.weather_city:
         raise HTTPException(422, "Choose a city to show weather")
     preference = await database.get(

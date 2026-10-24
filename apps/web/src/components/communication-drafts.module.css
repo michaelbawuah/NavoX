@@ -41,3 +41,50 @@
 .outcome[data-tone="success"] {
   background: color-mix(in srgb, #49a687 12%, transparent);
 }
+
+.meetingFields {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.meetingFields input,
+.meetingFields select,
+.meetingFields button {
+  min-height: 44px;
+  max-width: 100%;
+}
+
+.meetingFields label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  line-height: 1.4;
+}
+
+.meetingFields input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 1.2rem;
+  min-height: 1.2rem;
+}
+
+.meetingEvidence {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.meetingEvidence blockquote {
+  margin: 0.35rem 0;
+  padding: 0.5rem 0.8rem;
+  border-left: 3px solid var(--nx-accent);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.meetingEvidence ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}

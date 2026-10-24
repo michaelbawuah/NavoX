@@ -7,6 +7,7 @@ import {
   type ThreadWatch,
   threadWatchReplyTarget,
   threadWatchStatusLabel,
+  threadWatchTime,
   watchEligibility,
 } from "./thread-watch";
 
@@ -108,6 +109,36 @@ describe("reminder times", () => {
     expect(reminderAt("custom", "2026-10-20T15:30", now)).toBe(
       "2026-10-20T19:30:00.000Z",
     );
+  });
+
+  it("uses the saved account zone even when the device is elsewhere", () => {
+    vi.stubEnv("TZ", "Europe/London");
+    expect(
+      reminderAt("custom", "2026-10-20T15:30", now, "America/New_York"),
+    ).toBe("2026-10-20T19:30:00.000Z");
+    expect(
+      reminderAt("custom", "2026-10-20T15:30", now, "America/Los_Angeles"),
+    ).toBe("2026-10-20T22:30:00.000Z");
+    expect(
+      threadWatchTime("2026-10-20T19:30:00Z", "America/New_York"),
+    ).toContain("3:30 PM");
+    expect(
+      threadWatchTime("2026-10-20T19:30:00Z", "America/Los_Angeles"),
+    ).toContain("12:30 PM");
+  });
+
+  it("requires an unambiguous saved-zone clock time across clock changes", () => {
+    expect(() =>
+      reminderAt(
+        "custom",
+        "2027-03-14T02:30",
+        Date.parse("2027-03-01T12:00:00Z"),
+        "America/New_York",
+      ),
+    ).toThrow("skipped by a clock change");
+    expect(() =>
+      reminderAt("custom", "2026-11-01T01:30", now, "America/New_York"),
+    ).toThrow("happens twice");
   });
 
   it("rejects missing, impossible, past and out-of-range times", () => {

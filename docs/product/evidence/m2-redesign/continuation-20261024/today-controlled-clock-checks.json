@@ -1,0 +1,96 @@
+{
+  "release": "c18329ee4eef35c48dac1a072926efee0d3843f7",
+  "origin": "https://vox-test.66-175-235-169.nip.io",
+  "controlledClientAndTimetableClock": true,
+  "realSavedSyntheticData": true,
+  "physicalPhoneAcceptance": false,
+  "screens": [
+    {
+      "localTime": "09am",
+      "device": "desktop",
+      "theme": "dark",
+      "filename": "today-09am-desktop-dark.png",
+      "noPageOverflow": true
+    },
+    {
+      "localTime": "09am",
+      "device": "mobile",
+      "theme": "dark",
+      "filename": "today-09am-mobile-dark.png",
+      "noPageOverflow": true
+    },
+    {
+      "localTime": "09am",
+      "device": "desktop",
+      "theme": "light",
+      "filename": "today-09am-desktop-light.png",
+      "noPageOverflow": true
+    },
+    {
+      "localTime": "09am",
+      "device": "mobile",
+      "theme": "light",
+      "filename": "today-09am-mobile-light.png",
+      "noPageOverflow": true
+    },
+    {
+      "localTime": "03pm",
+      "device": "desktop",
+      "theme": "dark",
+      "filename": "today-03pm-desktop-dark.png",
+      "noPageOverflow": true
+    },
+    {
+      "localTime": "03pm",
+      "device": "mobile",
+      "theme": "dark",
+      "filename": "today-03pm-mobile-dark.png",
+      "noPageOverflow": true
+    },
+    {
+      "localTime": "03pm",
+      "device": "desktop",
+      "theme": "light",
+      "filename": "today-03pm-desktop-light.png",
+      "noPageOverflow": true
+    },
+    {
+      "localTime": "03pm",
+      "device": "mobile",
+      "theme": "light",
+      "filename": "today-03pm-mobile-light.png",
+      "noPageOverflow": true
+    },
+    {
+      "localTime": "03am",
+      "device": "desktop",
+      "theme": "dark",
+      "filename": "today-03am-desktop-dark.png",
+      "noPageOverflow": true
+    },
+    {
+      "localTime": "03am",
+      "device": "mobile",
+      "theme": "dark",
+      "filename": "today-03am-mobile-dark.png",
+      "noPageOverflow": true
+    },
+    {
+      "localTime": "03am",
+      "device": "desktop",
+      "theme": "light",
+      "filename": "today-03am-desktop-light.png",
+      "noPageOverflow": true
+    },
+    {
+      "localTime": "03am",
+      "device": "mobile",
+      "theme": "light",
+      "filename": "today-03am-mobile-light.png",
+      "noPageOverflow": true
+    }
+  ],
+  "errors": [],
+  "nightCanExpandFullDay": true,
+  "passed": true
+}

@@ -75,6 +75,14 @@ def test_grid_headers_are_not_fabricated_into_class_meetings():
     assert any("manually" in warning for warning in result.warnings)
 
 
+def test_explicit_exam_type_is_preserved_for_review_without_inventing_exam_date():
+    result = screenshot.parse_screenshot_text("CS 2110 EXAM Sunday 8:40 AM - 10:00 AM")
+    assert result.requires_review is True
+    assert result.candidates[0].kind == "exam"
+    assert result.candidates[0].weekdays == [6]
+    assert not hasattr(result.candidates[0], "dates")
+
+
 def test_multi_course_grid_row_and_duplicate_rows_are_not_repeated():
     result = screenshot.parse_screenshot_text(
         "CS 2110 ECE 3140 Monday 9:00 AM-10:00 AM\n"
@@ -425,3 +433,46 @@ async def test_real_english_timetable_ocr_produces_reviewable_rows():
     assert (row.start_time, row.end_time) == ("09:05", "09:55")
     assert row.timezone is None
     assert result.requires_review is True
+
+
+@pytest.mark.asyncio
+async def test_pdf_schedule_preview_uses_bounded_local_extraction_and_remains_readonly(monkeypatch):
+    from types import SimpleNamespace
+
+    async def extract(raw, media_type):
+        assert raw == b"%PDF-test"
+        assert media_type == "application/pdf"
+        return SimpleNamespace(pages=["CS 2110 Monday 9:00 AM-10:00 AM"])
+
+    monkeypatch.setattr(student_screenshot, "extract_material", extract)
+    async with AsyncClient(
+        transport=ASGITransport(app=screenshot_app()), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/v1/student/imports/pdf/preview",
+            content=b"%PDF-test",
+            headers={"Content-Type": "application/pdf"},
+        )
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.json()["requires_review"] is True
+    assert response.json()["candidates"][0]["course_code"] == "CS 2110"
+
+
+@pytest.mark.asyncio
+async def test_pdf_schedule_rejects_excess_pages(monkeypatch):
+    from types import SimpleNamespace
+
+    async def extract(*args):
+        return SimpleNamespace(pages=["text"] * 11)
+
+    monkeypatch.setattr(student_screenshot, "extract_material", extract)
+    async with AsyncClient(
+        transport=ASGITransport(app=screenshot_app()), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/api/v1/student/imports/pdf/preview",
+            content=b"%PDF-test",
+            headers={"Content-Type": "application/pdf"},
+        )
+    assert response.status_code == 422

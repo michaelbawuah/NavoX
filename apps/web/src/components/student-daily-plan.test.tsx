@@ -98,6 +98,7 @@ const preview: StudyPlanPreview = {
   base_revision: 1,
   result,
   requires_acceptance: true,
+  replaced_blocks: [],
 };
 const table: StudentTimetable = {
   server_now: "2026-10-19T14:00:00Z",
@@ -191,7 +192,9 @@ describe("reviewable daily study plans", () => {
       }),
     );
     expect(html).toContain("replace my future study blocks in NavoX");
-    expect(html).toContain("No school or Google Calendar events are changed");
+    expect(html).toContain(
+      "Classes, calendar events and alarms stay as they are",
+    );
     expect(html).not.toMatch(
       /<button[^>]*disabled=""[^>]*>Use this plan<\/button>/,
     );

@@ -209,7 +209,7 @@ function SourceSync({
           void onCompleteRef.current().catch(() => {
             if (mounted.current) {
               setError(
-                "Sync finished. Use Refresh Today to reload your workspace.",
+                "Your source is up to date, but Today could not load. Open Today to try again.",
               );
             }
           });
@@ -325,27 +325,53 @@ export function IntelligenceControls({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState<IntelligenceStatus | null>(null);
+  const readGeneration = useRef(0);
+  const reading = useRef(false);
+  const busyRef = useRef(false);
+  busyRef.current = busy !== null;
   const onStatusUnavailableRef = useRef(onStatusUnavailable);
   useEffect(() => {
     onStatusUnavailableRef.current = onStatusUnavailable;
   }, [onStatusUnavailable]);
   const refreshStatus = useCallback(async () => {
+    const current = ++readGeneration.current;
+    reading.current = true;
     try {
-      setStatus(
-        await request<IntelligenceStatus>(
-          "/intelligence/status",
-          undefined,
-          AbortSignal.timeout(10_000),
-        ),
+      const next = await request<IntelligenceStatus>(
+        "/intelligence/status",
+        undefined,
+        AbortSignal.timeout(10_000),
       );
+      if (current === readGeneration.current) setStatus(next);
     } catch {
       /* Source controls remain usable when summary is unavailable. */
+      if (current !== readGeneration.current) return;
       if (guided) setStatus(null);
       onStatusUnavailableRef.current?.();
+    } finally {
+      if (current === readGeneration.current) reading.current = false;
     }
   }, [guided]);
   useEffect(() => {
     void refreshStatus();
+    const quiet = () => {
+      if (
+        document.visibilityState !== "hidden" &&
+        !reading.current &&
+        !busyRef.current
+      )
+        void refreshStatus();
+    };
+    window.addEventListener("focus", quiet);
+    document.addEventListener("visibilitychange", quiet);
+    const timer = window.setInterval(quiet, 60_000);
+    return () => {
+      readGeneration.current++;
+      reading.current = false;
+      window.removeEventListener("focus", quiet);
+      document.removeEventListener("visibilitychange", quiet);
+      window.clearInterval(timer);
+    };
   }, [refreshStatus]);
   useEffect(() => {
     onStatusChange?.(status);
@@ -523,7 +549,7 @@ export function IntelligenceControls({
           sources.
         </p>
       )}
-      {status && !guided && (
+      {status && !guided && status.active_commitments > 0 && (
         <p className={styles.stats}>
           {status.active_commitments} active commitments ·{" "}
           {status.evidence_count} evidence references
@@ -538,14 +564,16 @@ export function IntelligenceControls({
               "Source processing is not configured yet. Your saved commitments remain available.")}
         </p>
       )}
-      <button
-        className={styles.secondary}
-        disabled={busy !== null}
-        onClick={() => void refresh()}
-        type="button"
-      >
-        {busy === "refresh" ? "Refreshing…" : "Refresh Today"}
-      </button>
+      {error && (
+        <button
+          className={styles.secondary}
+          disabled={busy !== null}
+          onClick={() => void refresh()}
+          type="button"
+        >
+          {busy === "refresh" ? "Trying…" : "Try again"}
+        </button>
+      )}
       {error && (
         <p className={styles.error} role="alert">
           {error}
@@ -830,9 +858,11 @@ export function WorkspaceReadout({
 export function WorkspaceContext({
   timezone,
   onTimezoneChange,
+  onTimezoneSaved,
 }: {
   timezone: string;
   onTimezoneChange: (value: string) => void;
+  onTimezoneSaved?: (value: string) => void;
 }) {
   const [now, setNow] = useState<Date | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
@@ -853,23 +883,14 @@ export function WorkspaceContext({
     )
       .then((value) => {
         if (!active) return;
-        const { timezone_selected, ...saved } = value;
-        const display = {
-          ...saved,
-          timezone:
-            timezone_selected === false
-              ? Intl.DateTimeFormat().resolvedOptions().timeZone
-              : saved.timezone,
-        };
+        const { timezone_selected: _selected, ...display } = value;
         setPreferences(display);
         setDraft(display);
         onTimezoneChange(display.timezone);
       })
       .catch(() => {
         if (active)
-          setError(
-            "Display settings could not be loaded. Refresh to try again.",
-          );
+          setError("Display settings could not load. Try again in a moment.");
       });
     return () => {
       active = false;
@@ -922,6 +943,7 @@ export function WorkspaceContext({
       setPreferences(saved);
       setDraft(saved);
       onTimezoneChange(saved.timezone);
+      onTimezoneSaved?.(saved.timezone);
       setMessage("Display preferences saved.");
     } catch (cause) {
       setError(

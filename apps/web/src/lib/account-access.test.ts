@@ -351,3 +351,53 @@ describe("returning sign-in connections", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("student-local account restoration", () => {
+  it("persists the device zone before returning an untouched account", async () => {
+    const account = {
+      id: "u",
+      email: "test@example.com",
+      timezone: "UTC",
+      workspace: { id: "w" },
+    };
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(account))
+      .mockResolvedValueOnce(
+        Response.json({
+          user_id: "u",
+          workspace_id: "w",
+          timezone: "America/New_York",
+        }),
+      )
+      .mockResolvedValueOnce(Response.json([]));
+    vi.stubGlobal("fetch", request);
+    const result = await restoreAccountAccess("https://navox.example/api/v1");
+    expect(result.account?.timezone).toBe("America/New_York");
+    expect(request.mock.calls[1][0]).toContain(
+      "/workspace/timezone/initialize",
+    );
+    expect(JSON.parse(request.mock.calls[1][1].body)).toMatchObject({
+      user_id: "u",
+      workspace_id: "w",
+    });
+  });
+  it("never substitutes an unsaved browser timezone when initialization fails", async () => {
+    const account = {
+      id: "u",
+      email: "test@example.com",
+      timezone: "UTC",
+      workspace: { id: "w" },
+    };
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(account))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(Response.json([]));
+    vi.stubGlobal("fetch", request);
+    expect(
+      (await restoreAccountAccess("https://navox.example/api/v1")).account
+        ?.timezone,
+    ).toBe("UTC");
+  });
+});

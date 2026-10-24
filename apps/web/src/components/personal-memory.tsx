@@ -322,7 +322,7 @@ export function PersonalMemoryPanel() {
       }
       setError(
         cause instanceof Error
-          ? `${cause.message}${uncertainWrite.current ? " The change may have been saved. Reload preferences to check before making another change." : ""}`
+          ? `${cause.message}${uncertainWrite.current ? " The change may have been saved. Retry to check before making another change." : ""}`
           : "Saved preferences could not be updated.",
       );
     } finally {
@@ -358,13 +358,8 @@ export function PersonalMemoryPanel() {
       <div className={styles.heading}>
         <div>
           <p className={styles.kicker}>Make it personal</p>
-          <h2 id="saved-memory-heading">What NavoX remembers</h2>
+          <h2 id="saved-memory-heading">What NavoX knows about me</h2>
         </div>
-        <span>
-          {memories
-            ? `${memories.length} / 30 saved`
-            : "Your saved preferences"}
-        </span>
       </div>
       <p>
         Save your writing preferences and project context. Choose them with{" "}
@@ -383,7 +378,7 @@ export function PersonalMemoryPanel() {
             disabled={loading || busy}
             onClick={() => void load()}
           >
-            Reload preferences
+            Retry
           </button>
         </p>
       )}
@@ -481,7 +476,7 @@ export function PersonalMemoryPanel() {
         ))}
       </ul>
       <form onSubmit={save} className={styles.form}>
-        <h3>{editingId ? "Edit saved preference" : "Save something useful"}</h3>
+        <h3>{editingId ? "Edit saved preference" : "Add something"}</h3>
         <div className={styles.row}>
           <label>
             Type

@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -14,6 +14,7 @@ from navox.api.auth import (
     hash_session_token,
     request_session_token,
 )
+from navox.api.student import expected_owner
 from navox.db.models import UserSession
 from navox.db.student_alerts import StudentPushSubscription
 from navox.student_alerts.push import configured
@@ -34,7 +35,11 @@ from navox.student_alerts.service import (
     unsubscribe,
 )
 
-router = APIRouter(prefix="/student/notifications", tags=["student-notifications"])
+router = APIRouter(
+    prefix="/student/notifications",
+    tags=["student-notifications"],
+    dependencies=[Depends(expected_owner)],
+)
 
 
 @router.get("", response_model=AlertStatus)

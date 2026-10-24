@@ -47,15 +47,13 @@ async function requestJson<T>(
       throw new Error("A cooldown is active. Try again after it ends.");
     if (response.status === 409)
       throw new Error(
-        "The connection changed or is not ready. Refresh its status before retrying.",
+        "The connection changed or is not ready. Try again in a moment.",
       );
     if (response.status === 503)
       throw new Error(
         "This service is not configured or is temporarily unavailable.",
       );
-    throw new Error(
-      "The request could not be completed. Refresh and try again.",
-    );
+    throw new Error("The request could not be completed. Try again.");
   }
   return (await response.json()) as T;
 }
@@ -72,6 +70,10 @@ export function ConnectionsPanel({
   const [catalog, setCatalog] = useState<ConnectorEntry[]>([]);
   const [connections, setConnections] = useState<ManagedConnection[]>([]);
   const [tab, setTab] = useState<"connected" | "browse">("connected");
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("source") === "gmail")
+      setTab("browse");
+  }, []);
   const [query, setQuery] = useState("");
   const [showImport, setShowImport] = useState(false);
   const [showRest, setShowRest] = useState(false);
@@ -203,7 +205,7 @@ export function ConnectionsPanel({
       } catch {
         if (mounted.current)
           setError(
-            "The operation succeeded, but other workspace controls could not refresh. Reload before using them.",
+            "Your change was saved. Some account details could not update yet; reopen this page before making another change.",
           );
       }
       return true;
@@ -270,13 +272,15 @@ export function ConnectionsPanel({
             source synced.
           </p>
         </div>
-        <button
-          type="button"
-          disabled={pending !== null || loading}
-          onClick={() => void refresh()}
-        >
-          Refresh status
-        </button>
+        {error ? (
+          <button
+            type="button"
+            disabled={pending !== null || loading}
+            onClick={() => void refresh()}
+          >
+            Try again
+          </button>
+        ) : null}
       </div>
       {agentPaused ? (
         <p className={styles.warning}>
@@ -343,7 +347,7 @@ export function ConnectionsPanel({
                 <div>
                   <h3>{connection.name}</h3>
                   <p className={styles.account}>
-                    {connection.account_label ?? "Workspace connection"}
+                    {connection.account_label ?? "Connected account"}
                   </p>
                 </div>
                 <span className={styles.badge} data-health={connection.health}>
@@ -633,10 +637,6 @@ export function ConnectionsPanel({
         />
       ) : null}
       <div className={styles.footer}>
-        <small>
-          Overview checked: {formatConnectionTime(refreshedAt)}. Checking status
-          does not read source content.
-        </small>
         {pagination.pages > 1 ? (
           <div className={styles.pagination}>
             <button

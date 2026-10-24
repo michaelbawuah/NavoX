@@ -94,6 +94,7 @@ const preview = {
   base_revision: 1,
   result,
   requires_acceptance: true,
+  replaced_blocks: [],
 };
 const preferences = {
   wake_time: "07:00",
@@ -111,6 +112,7 @@ describe("study-plan response boundaries", () => {
     expect(readStudyPreview(preview)).toMatchObject({
       base_revision: 1,
       requires_acceptance: true,
+      replaced_blocks: [],
       result: { planning_only: true },
     });
     expect(readStudyPlan(plan).blocks[0]).toMatchObject({
@@ -293,4 +295,26 @@ describe("accepted-plan source review", () => {
     expect(value.review_notice).toBe("Your timetable changed.");
     expect(value.blocks[0].status).toBe("needs_review");
   });
+});
+
+it("rejects incomplete weekly wakes and invalid alarm choices", () => {
+  expect(() =>
+    readStudyPreferences({ ...preferences, wake_times: ["07:00"] }),
+  ).toThrow();
+  const alarm = {
+    enabled: true,
+    days: [0],
+    smart: false,
+    prep_minutes: 30,
+    sound: "gentle",
+    snooze_minutes: 7,
+    skip_date: null,
+  };
+  expect(() => readStudyPreferences({ ...preferences, alarm })).toThrow();
+  expect(() =>
+    readStudyPreferences({
+      ...preferences,
+      alarm: { ...alarm, snooze_minutes: 5, days: [0, 0] },
+    }),
+  ).toThrow();
 });

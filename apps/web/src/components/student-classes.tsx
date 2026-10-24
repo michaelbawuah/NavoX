@@ -51,9 +51,10 @@ import {
   studentWriteUncertain,
 } from "../lib/student-schedule";
 import { consumeStudentClassDraft } from "../lib/student-voice";
+import { ClassesWeek, mondayOf } from "./classes-week";
+import { ClassesWelcome } from "./classes-welcome";
 import { StudentNotifications } from "./student-notifications";
 import styles from "./student-schedule.module.css";
-import { StudentTimeLookup } from "./student-time-lookup";
 import { StudentTimetableImport } from "./student-timetable-import";
 
 const noContent = (_value: unknown) => null;
@@ -465,26 +466,51 @@ function MeetingFields({
 }) {
   return (
     <>
-      <fieldset className={styles.days}>
-        <legend>Days</legend>
-        {studentWeekdays.map((label, day) => (
-          <label key={label}>
-            <input
-              type="checkbox"
-              checked={value.weekdays.includes(day)}
-              onChange={(event) =>
-                onChange({
-                  ...value,
-                  weekdays: event.target.checked
-                    ? [...value.weekdays, day].sort()
-                    : value.weekdays.filter((item) => item !== day),
-                })
-              }
-            />
-            {label}
-          </label>
-        ))}
-      </fieldset>
+      {value.kind === "exam" ? (
+        <label htmlFor={`${id}-exam-date`}>
+          Exam date
+          <input
+            id={`${id}-exam-date`}
+            type="date"
+            required
+            value={value.dates?.[0] ?? ""}
+            onChange={(event) => {
+              const day = event.target.value;
+              onChange({
+                ...value,
+                dates: day ? [day] : null,
+                weekdays: day
+                  ? [(new Date(`${day}T12:00:00Z`).getUTCDay() + 6) % 7]
+                  : [],
+              });
+            }}
+          />
+          <span className={styles.hint}>
+            One saved exam date. It will not repeat every week.
+          </span>
+        </label>
+      ) : (
+        <fieldset className={styles.days}>
+          <legend>Days</legend>
+          {studentWeekdays.map((label, day) => (
+            <label key={label}>
+              <input
+                type="checkbox"
+                checked={value.weekdays.includes(day)}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    weekdays: event.target.checked
+                      ? [...value.weekdays, day].sort()
+                      : value.weekdays.filter((item) => item !== day),
+                  })
+                }
+              />
+              {label}
+            </label>
+          ))}
+        </fieldset>
+      )}
       <label htmlFor={`${id}-kind`}>
         Section type
         <select
@@ -621,6 +647,7 @@ export function StudentCourseEditor({
           code: suggested?.code ?? "",
           name: suggested?.name ?? "",
           professor: suggested?.professor ?? null,
+          office_hours: suggested?.office_hours ?? null,
           term_start: profile.term_start ?? "",
           term_end: profile.term_end ?? "",
         },
@@ -638,6 +665,7 @@ export function StudentCourseEditor({
         code: value.code.trim(),
         name: value.name.trim(),
         professor: clean(value.professor ?? ""),
+        office_hours: clean(value.office_hours ?? ""),
       })
     )
       onClose();
@@ -718,6 +746,18 @@ export function StudentCourseEditor({
             }
           />
         </label>
+        <label className={styles.wide} htmlFor={`${id}-office-hours`}>
+          Office hours (optional)
+          <input
+            id={`${id}-office-hours`}
+            maxLength={500}
+            value={value.office_hours ?? ""}
+            placeholder="e.g. Tue 2–4 PM, Phillips 101"
+            onChange={(e) =>
+              setValue({ ...value, office_hours: e.target.value })
+            }
+          />
+        </label>
       </fieldset>
       {validation && (
         <p className={styles.error} role="alert">
@@ -774,6 +814,16 @@ function StudentMeetingEditor({
   const [validation, setValidation] = useState("");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (
+      value.kind === "exam" &&
+      (!value.dates ||
+        value.dates.length !== 1 ||
+        value.dates[0] < course.term_start ||
+        value.dates[0] > course.term_end)
+    ) {
+      setValidation("Choose the exam date within this course’s term.");
+      return;
+    }
     if (value.weekdays.length === 0) {
       setValidation("Choose at least one day for this section.");
       return;
@@ -1205,12 +1255,12 @@ function StudentBreakEditor({
 }
 
 function StudentClassesAccount({
-  displayName,
   accountKey,
   onTimezoneChange,
+  settingsOnly = false,
 }: {
-  displayName?: string | null;
   accountKey: string;
+  settingsOnly?: boolean;
   onTimezoneChange?: (zone: string) => void;
 }) {
   const [profile, setProfile] = useState<StudentProfile | null>(null);
@@ -1223,9 +1273,8 @@ function StudentClassesAccount({
   const [notice, setNotice] = useState("");
   const [date, setDate] = useState("");
   const [tab, setTab] = useState<"week" | "courses" | "shifts" | "term">(
-    "week",
+    settingsOnly ? "term" : "week",
   );
-  const [setup, setSetup] = useState(true);
   const [editor, setEditor] = useState<Editor>(null);
   const [exception, setException] = useState<{
     course: StudentCourse;
@@ -1241,75 +1290,91 @@ function StudentClassesAccount({
   const generation = useRef(0);
   const dateRef = useRef("");
   const operation = useRef(false);
-  const firstProfile = useRef(true);
   const alive = useRef(true);
   const [spokenDraft, setSpokenDraft] = useState("");
-  const load = useCallback(async (reset = false): Promise<boolean> => {
-    const request = ++generation.current;
-    setLoading(true);
-    try {
-      const [nextProfile, active, archived, nextTable] = await Promise.all([
-        studentRequest("/profile", readStudentProfile),
-        studentRequest("/courses?archived=false", (value) =>
-          readStudentList(value, "courses", readStudentCourse),
-        ),
-        studentRequest("/courses?archived=true", (value) =>
-          readStudentList(value, "courses", readStudentCourse),
-        ),
-        studentRequest(
-          `/timetable?days=7${dateRef.current ? `&date=${dateRef.current}` : ""}`,
-          readStudentTimetable,
-        ),
-      ]);
-      if (request !== generation.current) return false;
-      if (firstProfile.current) {
-        setSetup(nextProfile.revision === 0);
-        firstProfile.current = false;
-      }
-      setProfile(nextProfile);
-      setCourses([
-        ...new Map(
-          [...active, ...archived].map((row) => [row.id, row]),
-        ).values(),
-      ]);
-      setTimetable(nextTable);
-      setDate(nextTable.date);
-      dateRef.current = nextTable.date;
-      setError("");
-      if (reset) {
-        setUncertain(false);
-        setEditor(null);
-        setException(null);
-        setImportMode(null);
-        setScreenshotSuggestion(null);
-        setEpoch((value) => value + 1);
-        setNotice(
-          "Saved timetable reloaded. Check the saved details before making another change.",
-        );
-      }
-      return true;
-    } catch (cause) {
-      if (request === generation.current) setError(studentError(cause));
-      return false;
-    } finally {
-      if (request === generation.current) setLoading(false);
-    }
+  const [queuedSpokenDraft, setQueuedSpokenDraft] = useState<string | null>(
+    null,
+  );
+  const openSpokenDraft = useCallback((draft: string) => {
+    setSpokenDraft(draft);
+    setScreenshotSuggestion(studentClassPrefill(draft));
+    setTab("courses");
+    setEditor({ kind: "course" });
+    setQueuedSpokenDraft(null);
   }, []);
+  const load = useCallback(
+    async (reset = false, quiet = false): Promise<boolean> => {
+      const request = ++generation.current;
+      if (!quiet) setLoading(true);
+      try {
+        const [nextProfile, active, archived, nextTable] = await Promise.all([
+          studentRequest("/profile", readStudentProfile),
+          studentRequest("/courses?archived=false", (value) =>
+            readStudentList(value, "courses", readStudentCourse),
+          ),
+          studentRequest("/courses?archived=true", (value) =>
+            readStudentList(value, "courses", readStudentCourse),
+          ),
+          studentRequest(
+            `/timetable?days=7${dateRef.current ? `&date=${dateRef.current}` : ""}`,
+            readStudentTimetable,
+          ),
+        ]);
+        if (request !== generation.current) return false;
+        setProfile(nextProfile);
+        setCourses([
+          ...new Map(
+            [...active, ...archived].map((row) => [row.id, row]),
+          ).values(),
+        ]);
+        const aligned = mondayOf(nextTable.date);
+        const week =
+          nextTable.date === aligned
+            ? nextTable
+            : await studentRequest(
+                `/timetable?days=7&date=${aligned}`,
+                readStudentTimetable,
+              );
+        if (request !== generation.current) return false;
+        setTimetable(week);
+        setDate(week.date);
+        dateRef.current = week.date;
+        setError("");
+        if (reset) {
+          setUncertain(false);
+          setEditor(null);
+          setException(null);
+          setImportMode(null);
+          setScreenshotSuggestion(null);
+          setEpoch((value) => value + 1);
+          setNotice(
+            "Saved timetable reloaded. Check the saved details before making another change.",
+          );
+        }
+        return true;
+      } catch (cause) {
+        if (request === generation.current) setError(studentError(cause));
+        return false;
+      } finally {
+        if (request === generation.current && !quiet) setLoading(false);
+      }
+    },
+    [],
+  );
   useEffect(() => {
     alive.current = true;
     let draft: string | null = null;
     try {
-      draft = consumeStudentClassDraft(window.sessionStorage, accountKey);
+      if (!settingsOnly)
+        draft = consumeStudentClassDraft(window.sessionStorage, accountKey);
     } catch {
       /* Timetable loading also works when browser storage is blocked. */
     }
-    if (draft) {
-      setSpokenDraft(draft);
-      setScreenshotSuggestion(studentClassPrefill(draft));
-      setTab("courses");
-      setEditor({ kind: "course" });
-    }
-    if (new URLSearchParams(window.location.search).has("add")) {
+    if (draft) openSpokenDraft(draft);
+    if (
+      !settingsOnly &&
+      new URLSearchParams(window.location.search).has("add")
+    ) {
       window.history.replaceState({}, "", window.location.pathname);
     }
     void load();
@@ -1317,7 +1382,73 @@ function StudentClassesAccount({
       alive.current = false;
       ++generation.current;
     };
-  }, [load, accountKey]);
+  }, [load, accountKey, openSpokenDraft, settingsOnly]);
+  useEffect(() => {
+    if (settingsOnly) return;
+    const receive = () => {
+      let draft: string | null = null;
+      try {
+        draft = consumeStudentClassDraft(window.sessionStorage, accountKey);
+      } catch {
+        /* Keep any existing editor intact when browser storage is unavailable. */
+      }
+      if (!draft) return;
+      if (
+        busy ||
+        uncertain ||
+        editor ||
+        exception ||
+        importMode ||
+        operation.current
+      )
+        setQueuedSpokenDraft(draft);
+      else openSpokenDraft(draft);
+    };
+    window.addEventListener("navox:class-draft-ready", receive);
+    return () => window.removeEventListener("navox:class-draft-ready", receive);
+  }, [
+    accountKey,
+    settingsOnly,
+    busy,
+    uncertain,
+    editor,
+    exception,
+    importMode,
+    openSpokenDraft,
+  ]);
+  useEffect(() => {
+    if (
+      settingsOnly ||
+      busy ||
+      loading ||
+      uncertain ||
+      editor ||
+      exception ||
+      importMode
+    )
+      return;
+    const refresh = () => {
+      if (document.visibilityState === "visible" && !operation.current)
+        void load(false, true);
+    };
+    const interval = window.setInterval(refresh, 60000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [
+    settingsOnly,
+    busy,
+    loading,
+    uncertain,
+    editor,
+    exception,
+    importMode,
+    load,
+  ]);
   const mutate: Save = async (path, parse, method, body) => {
     if (operation.current || uncertain) return null;
     operation.current = true;
@@ -1383,26 +1514,48 @@ function StudentClassesAccount({
   }
   return (
     <div className={styles.workspace}>
-      <header className={styles.hero}>
-        <div>
-          <p className={styles.eyebrow}>
-            {profile?.school_name || "Your student space"}
-          </p>
-          <h1>Your week, in one place.</h1>
-          <p>
-            Classes, labs, and shifts. Know what’s next, and leave a little room
-            to breathe.
-          </p>
+      {!settingsOnly && (
+        <div className={styles.classesToolbar}>
+          <p>Classes, labs and shifts</p>
+          <details className={styles.addMenu}>
+            <summary>
+              Add <span aria-hidden="true">⌄</span>
+            </summary>
+            <div>
+              <button
+                type="button"
+                disabled={!profile || locked}
+                onClick={(e) => {
+                  choose("manual");
+                  e.currentTarget.closest("details")?.removeAttribute("open");
+                }}
+              >
+                Add a class
+              </button>
+              <button
+                type="button"
+                disabled={!profile || locked}
+                onClick={(e) => {
+                  choose("ics");
+                  e.currentTarget.closest("details")?.removeAttribute("open");
+                }}
+              >
+                Import a file
+              </button>
+              <button
+                type="button"
+                disabled={!profile || locked}
+                onClick={(e) => {
+                  choose("screenshot");
+                  e.currentTarget.closest("details")?.removeAttribute("open");
+                }}
+              >
+                Snap a photo
+              </button>
+            </div>
+          </details>
         </div>
-        <button
-          className={styles.primary}
-          type="button"
-          disabled={!profile || locked}
-          onClick={() => choose("manual")}
-        >
-          ＋ Add a class
-        </button>
-      </header>
+      )}
       {error && (
         <p className={styles.error} role="alert">
           {error}
@@ -1438,8 +1591,31 @@ function StudentClassesAccount({
           {notice}
         </p>
       )}
+      {queuedSpokenDraft && !settingsOnly && (
+        <section className={styles.notice} aria-label="Class draft from Vox">
+          <p>
+            Your next class draft is ready. Finish or cancel your current edit,
+            then review it. Nothing has been added yet.
+          </p>
+          <div className={styles.actions}>
+            <button
+              type="button"
+              disabled={locked || !!editor || !!exception || !!importMode}
+              onClick={() => openSpokenDraft(queuedSpokenDraft)}
+            >
+              Review class from Vox
+            </button>
+            <button type="button" onClick={() => setQueuedSpokenDraft(null)}>
+              Dismiss draft
+            </button>
+          </div>
+        </section>
+      )}
       {!profile ? (
-        <section className={styles.panel} aria-busy={loading}>
+        <section
+          className={`${styles.panel} ${tab === "week" ? styles.weekPanel : ""}`}
+          aria-busy={loading}
+        >
           <p className={styles.muted}>
             {loading
               ? "Opening your saved timetable…"
@@ -1448,54 +1624,43 @@ function StudentClassesAccount({
         </section>
       ) : (
         <>
-          {setup && (
-            <StudentSetupCard
-              key={`setup-${epoch}`}
-              profile={{
-                ...profile,
-                display_name: profile.display_name ?? displayName ?? null,
-              }}
-              busy={locked}
-              onSave={async (value) => {
-                const saved = await mutate(
-                  "/profile",
-                  readStudentProfile,
-                  "PUT",
-                  value,
-                );
-                if (saved) onTimezoneChange?.(saved.timezone);
-                return !!saved;
-              }}
-              onChoose={choose}
-              onClose={() => setSetup(false)}
-            />
-          )}
-          {!setup && courses.length === 0 && (
-            <p className={styles.hint}>
-              You can add your school and term dates in Term &amp; settings
-              whenever you’re ready.
-            </p>
-          )}
-          <section className={styles.panel} aria-busy={loading}>
-            <nav className={styles.tabs} aria-label="Timetable views">
-              {[
-                ["week", "Your week"],
-                ["courses", "Courses"],
-                ["shifts", "Work & commitments"],
-                ["term", "Term & settings"],
-              ].map(([value, label]) => (
-                <button
-                  key={value}
-                  aria-pressed={tab === value}
-                  type="button"
-                  onClick={() => setTab(value as typeof tab)}
-                >
-                  {label}
-                  {value === "courses" &&
-                    ` · ${courses.filter((row) => !row.archived).length}`}
-                </button>
-              ))}
-            </nav>
+          {!settingsOnly &&
+            tab === "week" &&
+            !courses.some((row) => !row.archived) &&
+            !timetable?.fixed_blocks.length && (
+              <ClassesWelcome
+                disabled={locked}
+                onChoose={choose}
+                onShifts={() => {
+                  setTab("shifts");
+                  setEditor({ kind: "shift" });
+                }}
+              />
+            )}
+          <section
+            className={`${styles.panel} ${tab === "week" ? styles.weekPanel : ""}`}
+            aria-busy={loading}
+          >
+            {!settingsOnly && (
+              <nav className={styles.tabs} aria-label="Timetable views">
+                {[
+                  ["week", "Week"],
+                  ["courses", "Courses"],
+                  ["shifts", "Shifts"],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    aria-pressed={tab === value}
+                    type="button"
+                    onClick={() => setTab(value as typeof tab)}
+                  >
+                    {label}
+                    {value === "courses" &&
+                      ` · ${courses.filter((row) => !row.archived).length}`}
+                  </button>
+                ))}
+              </nav>
+            )}
             {tab === "week" && (
               <>
                 <div className={styles.dateNav}>
@@ -1547,11 +1712,6 @@ function StudentClassesAccount({
                 </div>
                 {timetable && (
                   <>
-                    <p className={styles.hint}>
-                      All displayed times:{" "}
-                      {timetable.timezone.replaceAll("_", " ")} · server checked{" "}
-                      {studentClock(timetable.server_now, timetable.timezone)}
-                    </p>
                     {timetable.conflicts.length > 0 && (
                       <p className={styles.warning}>
                         {timetable.conflicts.length} saved time{" "}
@@ -1567,42 +1727,26 @@ function StudentClassesAccount({
                         {warning}
                       </p>
                     ))}
-                    <StudentTimeLookup
-                      key={timetable.date}
-                      date={timetable.date}
-                      timezone={timetable.timezone}
-                    />
-                    {!courses.some((row) => !row.archived) &&
-                    timetable.fixed_blocks.length === 0 ? (
-                      <div className={styles.empty}>
-                        <h3>Let’s start with your next class.</h3>
-                        <p>
-                          Add a course by hand or review a schedule file. No
-                          school connection needed.
-                        </p>
-                        <div
-                          className={styles.actions}
-                          style={{ justifyContent: "center" }}
-                        >
-                          <button
-                            className={styles.primary}
-                            disabled={locked}
-                            type="button"
-                            onClick={() => choose("manual")}
-                          >
-                            Add first class
-                          </button>
-                          <button
-                            disabled={locked}
-                            type="button"
-                            onClick={() => choose("ics")}
-                          >
-                            Import timetable
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <StudentDayAgenda timetable={timetable} />
+                    {(courses.some((row) => !row.archived) ||
+                      timetable.fixed_blocks.length > 0) && (
+                      <ClassesWeek
+                        timetable={timetable}
+                        onEdit={(course, meeting) => {
+                          setTab("courses");
+                          setEditor(
+                            meeting
+                              ? { kind: "meeting", course, meeting }
+                              : { kind: "course", course },
+                          );
+                        }}
+                        onShift={(id) => {
+                          setTab("shifts");
+                          const shift = timetable.fixed_blocks.find(
+                            (row) => row.id === id,
+                          );
+                          if (shift) setEditor({ kind: "shift", shift });
+                        }}
+                      />
                     )}
                   </>
                 )}
@@ -2183,9 +2327,8 @@ function StudentClassesAccount({
                       setImportMode(null);
                       setScreenshotSuggestion(null);
                       setSpokenDraft("");
-                      setSetup(true);
                       setEpoch((value) => value + 1);
-                      setTab("week");
+                      setTab(settingsOnly ? "term" : "week");
                       setNotice(
                         "Your student timetable and profile have been forgotten.",
                       );
@@ -2203,19 +2346,6 @@ function StudentClassesAccount({
                 </p>
               </>
             )}
-            <footer className={styles.panelFoot}>
-              <span>
-                {profile.timezone.replaceAll("_", " ")} · saved in your personal
-                account
-              </span>
-              <button
-                disabled={busy || loading}
-                type="button"
-                onClick={() => void load(uncertain)}
-              >
-                {loading ? "Refreshing…" : "Refresh saved timetable"}
-              </button>
-            </footer>
           </section>
         </>
       )}
@@ -2223,7 +2353,7 @@ function StudentClassesAccount({
   );
 }
 
-function StudentProfileSettings({
+export function StudentProfileSettings({
   profile,
   busy,
   onSave,
@@ -2349,9 +2479,10 @@ function StudentProfileSettings({
 
 export function StudentClassesWorkspace({
   accountId,
-  displayName,
   onTimezoneChange,
+  settingsOnly,
 }: {
+  settingsOnly?: boolean;
   accountId: string;
   displayName?: string | null;
   timezone?: string;
@@ -2361,7 +2492,7 @@ export function StudentClassesWorkspace({
     <StudentClassesAccount
       key={accountId}
       accountKey={accountId}
-      displayName={displayName}
+      settingsOnly={settingsOnly}
       onTimezoneChange={onTimezoneChange}
     />
   );

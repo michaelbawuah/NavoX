@@ -105,3 +105,48 @@ describe("class reminders", () => {
     expect(opened).toEqual(["https://navox.net/classes"]);
   });
 });
+
+describe("reminder transport errors", () => {
+  it("binds the visible account and never displays provider or validation internals", async () => {
+    const { classAlertRequest } = await import("./student-notifications");
+    const original = globalThis.fetch;
+    let headers: HeadersInit | undefined;
+    globalThis.fetch = async (_url, init) => {
+      headers = init?.headers;
+      return Response.json(
+        { detail: "private provider stack trace and account data" },
+        { status: 503 },
+      );
+    };
+    try {
+      await expect(
+        classAlertRequest(
+          "/settings",
+          "PUT",
+          { enabled: true },
+          "workspace:student",
+        ),
+      ).rejects.toThrow("Class reminders are temporarily unavailable");
+      expect(headers).toMatchObject({ "X-NavoX-Account": "workspace:student" });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+  it("preserves only approved friendly errors, not native browser messages", async () => {
+    const { notificationError, NotificationRequestError } = await import(
+      "./student-notifications"
+    );
+    expect(
+      notificationError(
+        new TypeError("push endpoint secret/internal failure"),
+        "Try again.",
+      ),
+    ).toBe("Try again.");
+    expect(
+      notificationError(
+        new NotificationRequestError("Check browser permissions."),
+        "Try again.",
+      ),
+    ).toBe("Check browser permissions.");
+  });
+});
