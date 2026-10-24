@@ -58,3 +58,15 @@ need side-by-side review against the 19-page source. See ../../m2-redesign-20261
   backup folder, outside the repository and evidence.
 - Follow-up: show outcome actions on the current Today study block; other blocks
   remain reachable in Planner, matching the specified compact timeline.
+
+## Final checkpoint for this implementation slice — d252bbf
+- Current-block-only Today actions and failed-load summary correction are deployed.
+- Controlled-clock desktop/mobile captures regenerated against this code release.
+- Side-by-side PNGs: comparison-welcome.png and comparison-today.png. These make
+  unfinished differences visible and are not a claim of complete visual parity.
+- Last navigation call recorded 2,147 provider tokens and $0.024008 estimated
+  provider cost; transport observed 10.350s speaking and 5.172s idle. A separate
+  zero-token provider stream remains uncertain and the transport ledger is open;
+  these are measured estimates, not a fully reconciled bill. No quota was reset.
+- Final server check found zero active test calls. Demo fixtures remain intentionally.
+- Main/production are unchanged. Work remains in draft PR #57.
