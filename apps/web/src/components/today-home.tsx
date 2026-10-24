@@ -273,7 +273,7 @@ function TodayHomeAccount({
   const classesLeft = rows.filter(
     (r) => r.courseId && !r.study && Date.parse(r.end || r.start) > now,
   ).length;
-  const summary = !data
+  const summary = !data?.timetable
     ? ""
     : `${classesLeft ? `${classesLeft} ${classesLeft === 1 ? "class" : "classes"} left today` : "No more classes on your timetable today"}${due.length ? `, and ${due.length} ${due.length === 1 ? "thing" : "things"} due soon` : ""}.`;
   const sticker = welcoming

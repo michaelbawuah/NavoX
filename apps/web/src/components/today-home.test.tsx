@@ -162,6 +162,9 @@ describe("Today home", () => {
     expect(host.textContent).not.toContain("Done for today");
     expect(host.textContent).not.toContain("Let’s set up NavoX");
     expect(host.textContent).not.toContain("internal details");
+    expect(host.textContent).not.toContain(
+      "No more classes on your timetable today",
+    );
   });
   it("shows a real saved shift in the correct day and hides empty side sections", async () => {
     vi.mocked(studentRequest).mockResolvedValue({
