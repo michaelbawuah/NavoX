@@ -1,9 +1,6 @@
 /** Private calendar-purpose transport. Construction performs no I/O. */
 import { googleAuthorizationUrl } from "./connection-management";
-import {
-  readStudyPreferences,
-  type StudyPreferences,
-} from "./student-planning";
+import type { AlarmPreferences, StudyPreferences } from "./student-planning";
 
 export const CALENDAR_CONSENT_VERSION = "calendar-availability.v1";
 export const CALENDAR_READ_SCOPES = [
@@ -356,15 +353,58 @@ function readWindow(value: unknown) {
   if (start_time === end_time) return invalid();
   return { weekdays, start_time, end_time };
 }
-function preferences(value: unknown): AvailabilityInput["preferences"] {
+const PREFERENCE_KEYS = [
+  "wake_time",
+  "sleep_time",
+  "focus_windows",
+  "never_schedule",
+  "max_study_minutes",
+  "break_minutes",
+  "wake_times",
+  "travel_minutes",
+  "alarm",
+] as const;
+function calendarDay(value: unknown): string {
+  const v = text(value, 10, 10);
+  const parsed = Date.parse(`${v}T12:00:00Z`);
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(v) ||
+    !Number.isFinite(parsed) ||
+    new Date(parsed).getUTCFullYear() < 1 ||
+    new Date(parsed).toISOString().slice(0, 10) !== v
+  )
+    return invalid();
+  return v;
+}
+function alarmPreferences(value: unknown): AlarmPreferences {
   const v = obj(value, [
-    "wake_time",
-    "sleep_time",
-    "focus_windows",
-    "never_schedule",
-    "max_study_minutes",
-    "break_minutes",
+    "enabled",
+    "days",
+    "smart",
+    "prep_minutes",
+    "sound",
+    "snooze_minutes",
+    "skip_date",
   ]);
+  const days = list(v.days, (day) => num(day, 0, 6), 7);
+  const snooze_minutes = num(v.snooze_minutes, 5, 15);
+  if (
+    new Set(days).size !== days.length ||
+    ![5, 10, 15].includes(snooze_minutes)
+  )
+    return invalid();
+  return {
+    enabled: bool(v.enabled),
+    days,
+    smart: bool(v.smart),
+    prep_minutes: num(v.prep_minutes, 0, 180),
+    sound: en(v.sound, ["gentle", "chime"]),
+    snooze_minutes: snooze_minutes as AlarmPreferences["snooze_minutes"],
+    skip_date: nullable(v.skip_date, calendarDay),
+  };
+}
+function preferences(value: unknown): AvailabilityInput["preferences"] {
+  const v = obj(value, PREFERENCE_KEYS);
   const result = {
     wake_time: clock(v.wake_time),
     sleep_time: clock(v.sleep_time),
@@ -372,8 +412,15 @@ function preferences(value: unknown): AvailabilityInput["preferences"] {
     never_schedule: list(v.never_schedule, readWindow, 28),
     max_study_minutes: num(v.max_study_minutes, 15, 90),
     break_minutes: num(v.break_minutes, 5, 60),
+    wake_times: nullable(v.wake_times, (times) => list(times, clock, 7, 7)),
+    travel_minutes: num(v.travel_minutes, 0, 240),
+    alarm: alarmPreferences(v.alarm),
   };
-  if (result.wake_time === result.sleep_time) return invalid();
+  if (
+    result.wake_time === result.sleep_time ||
+    result.wake_times?.includes(result.sleep_time)
+  )
+    return invalid();
   return result;
 }
 const coverageStates = [
@@ -1154,17 +1201,16 @@ export function createStudentCalendarApi(
       send(
         "/student/availability/routine",
         (value) => {
-          obj(value, [
-            "wake_time",
-            "sleep_time",
-            "focus_windows",
-            "never_schedule",
-            "max_study_minutes",
-            "break_minutes",
+          const { revision, timezone, ...saved } = obj(value, [
+            ...PREFERENCE_KEYS,
             "revision",
             "timezone",
           ]);
-          return readStudyPreferences(value);
+          return {
+            ...preferences(saved),
+            revision: num(revision),
+            timezone: zone(timezone),
+          };
         },
         signal,
       ),

@@ -16,12 +16,14 @@ export function RoutineChangeReview({
   busy,
   onApprove,
   onCancel,
+  cancelLabel = "Keep current settings",
 }: {
   preview: RoutinePreview;
   draft: StudyPreferences;
   busy: boolean;
   onApprove: () => void;
   onCancel: () => void;
+  cancelLabel?: string;
 }) {
   const alarm = draft.alarm ?? defaultAlarm,
     wakes = draft.wake_times ?? Array(7).fill(draft.wake_time);
@@ -140,7 +142,7 @@ export function RoutineChangeReview({
           Approve these changes
         </button>
         <button type="button" disabled={busy} onClick={onCancel}>
-          Keep current settings
+          {cancelLabel}
         </button>
       </div>
     </section>

@@ -48,9 +48,11 @@ import {
 } from "../lib/today-home";
 import { NoaArtwork } from "./noa-artwork";
 import { noaVibes, useNoaChoice } from "./noa-settings";
+import { TodayEarlyAlarm } from "./today-early-alarm";
 import styles from "./today-home.module.css";
 import { TodayNext } from "./today-next";
 import { TodayEveningAlarm, TodayNightActions } from "./today-night";
+import { TodayNightSuggestions } from "./today-night-suggestions";
 import {
   type ProgressReceipt,
   TodayProgressReceipt,
@@ -498,6 +500,36 @@ function TodayHomeAccount({
           />
         )}
         {late && <TodayNightActions alarm={todayAlarm} now={now} />}
+        {late && data && (
+          <TodayNightSuggestions
+            accountKey={accountKey}
+            timezone={zone}
+            now={now}
+            plan={data.plan}
+            tasks={data.tasks}
+            openings={openings.data}
+            onSaved={() => {
+              void load();
+              window.dispatchEvent(new Event("navox:study-plan-changed"));
+            }}
+          />
+        )}
+        {local &&
+          (late || local.hour >= 21) &&
+          (() => {
+            const alarm = late
+              ? todayAlarm
+              : data?.alarms.find((row) => row.day > local.date);
+            return alarm ? (
+              <TodayEarlyAlarm
+                accountKey={accountKey}
+                alarm={alarm}
+                timezone={zone}
+                now={now}
+                onSaved={() => void load()}
+              />
+            ) : null;
+          })()}
         {local && local.hour >= 21 && (
           <TodayEveningAlarm
             alarm={data?.alarms.find((a) => a.day > local.date)}

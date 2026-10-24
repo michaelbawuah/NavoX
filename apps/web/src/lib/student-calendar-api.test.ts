@@ -28,6 +28,18 @@ const prefs = {
   never_schedule: [],
   max_study_minutes: 90,
   break_minutes: 15,
+  // The complete JSON shape of the canonical backend Preferences model.
+  travel_minutes: 15,
+  wake_times: null,
+  alarm: {
+    enabled: false,
+    days: [0, 1, 2, 3, 4, 5, 6],
+    smart: false,
+    prep_minutes: 30,
+    sound: "gentle" as const,
+    snooze_minutes: 10 as const,
+    skip_date: null,
+  },
 };
 const start: CalendarStartInput = {
   generation: 4,
@@ -237,6 +249,35 @@ describe("account-bound calendar API", () => {
     await expect(api.preferences(signal())).rejects.toMatchObject({
       code: "invalid-response",
     });
+  });
+  it("reads saved per-day wakes, travel and alarm settings in the canonical routine response", async () => {
+    const data = {
+      ...prefs,
+      revision: 2,
+      timezone: "America/New_York",
+      travel_minutes: 35,
+      wake_times: [
+        "06:30",
+        "06:30",
+        "06:30",
+        "06:30",
+        "06:30",
+        "08:00",
+        "08:00",
+      ],
+      alarm: {
+        ...prefs.alarm,
+        enabled: true,
+        days: [0, 1, 2, 3, 4],
+        smart: true,
+        prep_minutes: 45,
+        sound: "chime",
+        snooze_minutes: 15,
+        skip_date: "2026-10-25",
+      },
+    };
+    const { api } = setup(data);
+    await expect(api.preferences(signal())).resolves.toEqual(data);
   });
   it("starts only the exact consented purpose and sends no write or Gmail scopes", async () => {
     const { api, fetcher } = setup(authorization());
@@ -481,6 +522,85 @@ describe("account-bound calendar API", () => {
   });
 });
 describe("calendar snapshot consistency", () => {
+  it("preserves the canonical routine fields inside an availability snapshot", () => {
+    const data = snapshot();
+    data.input.preferences = {
+      ...prefs,
+      travel_minutes: 35,
+      wake_times: [
+        "06:30",
+        "06:30",
+        "06:30",
+        "06:30",
+        "06:30",
+        "08:00",
+        "08:00",
+      ],
+      alarm: {
+        ...prefs.alarm,
+        enabled: true,
+        days: [0, 1, 2, 3, 4],
+        smart: true,
+        prep_minutes: 45,
+        sound: "chime",
+        snooze_minutes: 15,
+        skip_date: "2026-10-25",
+      },
+    };
+    expect(
+      readAvailabilitySnapshot(data, account, preview, now).input.preferences,
+    ).toEqual(data.input.preferences);
+  });
+  it.each([
+    { travel_minutes: -1 },
+    { travel_minutes: 241 },
+    { travel_minutes: "15" },
+    { wake_times: ["07:00"] },
+    {
+      wake_times: [
+        "24:00",
+        "07:00",
+        "07:00",
+        "07:00",
+        "07:00",
+        "07:00",
+        "07:00",
+      ],
+    },
+    {
+      wake_times: [
+        "23:00",
+        "07:00",
+        "07:00",
+        "07:00",
+        "07:00",
+        "07:00",
+        "07:00",
+      ],
+    },
+    { alarm: { ...prefs.alarm, enabled: "true" } },
+    { alarm: { ...prefs.alarm, days: [0, 0] } },
+    { alarm: { ...prefs.alarm, days: [7] } },
+    { alarm: { ...prefs.alarm, prep_minutes: 181 } },
+    { alarm: { ...prefs.alarm, snooze_minutes: 7 } },
+    { alarm: { ...prefs.alarm, sound: "unsupported" } },
+    { alarm: { ...prefs.alarm, skip_date: "2026-02-30" } },
+    { alarm: { ...prefs.alarm, access_token: "unexpected" } },
+  ])(
+    "rejects malformed new routine fields in both API contracts: %j",
+    async (patch) => {
+      const value = { ...structuredClone(prefs), ...patch };
+      const { api } = setup({ ...value, revision: 2, timezone: "UTC" });
+      await expect(api.preferences(signal())).rejects.toMatchObject({
+        code: "invalid-response",
+      });
+      const data = snapshot();
+      Object.assign(data.input.preferences, patch);
+      expect(() =>
+        readAvailabilitySnapshot(data, account, preview, now),
+      ).toThrow();
+    },
+  );
   it("keeps unchecked source coverage provisional", () => {
     const data = snapshot();
     data.input.coverage[1].state = "unavailable";

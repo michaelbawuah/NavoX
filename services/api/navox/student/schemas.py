@@ -13,7 +13,7 @@ MAX_FIXED_BLOCKS = 50
 MAX_BREAKS = 50
 MAX_IMPORT_BYTES = 2_000_000
 MAX_IMPORT_OCCURRENCES = 5_000
-MeetingKind = Literal["lecture", "lab", "discussion", "recitation", "seminar", "other"]
+MeetingKind = Literal["lecture", "lab", "discussion", "recitation", "seminar", "exam", "other"]
 Lms = Literal["none", "canvas", "blackboard", "moodle", "brightspace", "google_classroom", "other"]
 
 
@@ -125,6 +125,7 @@ class ScheduleInput(Input):
 
 class MeetingInput(ScheduleInput):
     kind: MeetingKind = "lecture"
+    dates: list[date] | None = Field(default=None, min_length=1, max_length=366)
     building: str | None = Field(default=None, max_length=160)
     room: str | None = Field(default=None, max_length=80)
     instructor: str | None = Field(default=None, max_length=120)

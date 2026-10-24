@@ -57,6 +57,9 @@ async def get_noa(
             StudentStudyBlock.user_id == user_id,
             StudentStudyBlock.workspace_id == workspace_id,
             StudentStudyBlock.status == "done",
+            # M2 credits recorded study completions. This is not a focus timer
+            # or proof of uninterrupted elapsed work (the later Noa focus feature).
+            StudentStudyBlock.actual_minutes >= 15,
             StudentStudyBlock.outcome_at.is_not(None),
             StudentStudyBlock.outcome_at <= moment,
         )

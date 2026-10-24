@@ -75,6 +75,14 @@ def test_grid_headers_are_not_fabricated_into_class_meetings():
     assert any("manually" in warning for warning in result.warnings)
 
 
+def test_explicit_exam_type_is_preserved_for_review_without_inventing_exam_date():
+    result = screenshot.parse_screenshot_text("CS 2110 EXAM Sunday 8:40 AM - 10:00 AM")
+    assert result.requires_review is True
+    assert result.candidates[0].kind == "exam"
+    assert result.candidates[0].weekdays == [6]
+    assert not hasattr(result.candidates[0], "dates")
+
+
 def test_multi_course_grid_row_and_duplicate_rows_are_not_repeated():
     result = screenshot.parse_screenshot_text(
         "CS 2110 ECE 3140 Monday 9:00 AM-10:00 AM\n"

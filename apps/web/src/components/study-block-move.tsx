@@ -15,20 +15,27 @@ export function StudyBlockMove({
   timezone,
   now,
   onSaved,
+  suggestedStart,
+  onKeepCurrent,
 }: {
   block: StudyBlock;
   accountKey: string;
   timezone: string;
   now: number;
   onSaved: () => void;
+  suggestedStart?: string;
+  onKeepCurrent?: () => void;
 }) {
   const [open, setOpen] = useState(false),
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState("");
+  const [uncertain, setUncertain] = useState(false);
   const [local, setLocal] = useState(
-    studyLocalDateTime(block.start_at, timezone),
+    studyLocalDateTime(suggestedStart ?? block.start_at, timezone),
   );
-  const [choice, setChoice] = useState(""),
+  const [choice, setChoice] = useState(
+      suggestedStart ? new Date(suggestedStart).toISOString() : "",
+    ),
     [preview, setPreview] = useState<StudyMove | null>(null);
   const request = useRef(crypto.randomUUID()),
     alive = useRef(true);
@@ -86,11 +93,14 @@ export function StudyBlockMove({
       } else setPreview(value);
     } catch (error) {
       if (alive.current) {
-        setPreview(null);
+        if (!confirm) setPreview(null);
+        else setUncertain(true);
         setNotice(
-          error instanceof Error
-            ? error.message
-            : "Couldn’t check this move. Try again.",
+          confirm
+            ? "Couldn’t confirm the move. Retry this approval to check the same change. Closing this review will not undo a move that may have saved."
+            : error instanceof Error
+              ? error.message
+              : "Couldn’t check this move. Try again.",
         );
       }
     } finally {
@@ -100,18 +110,27 @@ export function StudyBlockMove({
   return (
     <div className={styles.moveRoot}>
       {!open ? (
-        <button
-          type="button"
-          disabled={Date.parse(block.start_at) <= now}
-          aria-label={`Move: ${block.title}`}
-          onClick={() => {
-            request.current = crypto.randomUUID();
-            setOpen(true);
-            setNotice("");
-          }}
-        >
-          Move
-        </button>
+        <div>
+          <button
+            type="button"
+            disabled={Date.parse(block.start_at) <= now}
+            aria-label={`Move: ${block.title}`}
+            onClick={() => {
+              request.current = crypto.randomUUID();
+              setOpen(true);
+              setNotice("");
+              setUncertain(false);
+              if (suggestedStart) void submit(false);
+            }}
+          >
+            {suggestedStart ? "Review suggested move" : "Move"}
+          </button>
+          {suggestedStart && onKeepCurrent && (
+            <button type="button" onClick={onKeepCurrent}>
+              Keep it
+            </button>
+          )}
+        </div>
       ) : (
         <form
           className={styles.form}
@@ -188,9 +207,10 @@ export function StudyBlockMove({
               onClick={() => {
                 setOpen(false);
                 setPreview(null);
+                onKeepCurrent?.();
               }}
             >
-              Keep current time
+              {uncertain ? "Close review" : "Keep current time"}
             </button>
           </div>
         </form>

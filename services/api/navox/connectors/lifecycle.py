@@ -154,11 +154,15 @@ async def disconnect(
     if await _previous(database, workspace_id, user_id, connection_id, event_type, request_id):
         await database.commit()
         return
+    from navox.outlook.cleanup import clear_private_data
     from navox.student_email.service import invalidate_email_reviews
     from navox.student_recovery.service import invalidate_recovery_previews
 
     await invalidate_recovery_previews(database, user_id, workspace_id)
     await invalidate_email_reviews(
+        database, user_id=user_id, workspace_id=workspace_id, connector_ids=[row.id for row in rows]
+    )
+    await clear_private_data(
         database, user_id=user_id, workspace_id=workspace_id, connector_ids=[row.id for row in rows]
     )
     now = await database_now(database)
@@ -326,12 +330,16 @@ async def delete_learned_data(
     )
     if pending_connector is not None or pending_provider is not None:
         raise HTTPException(409, "Provider subscription cleanup is still pending")
+    from navox.outlook.cleanup import clear_private_data
     from navox.student_email.service import forget_email_data
     from navox.student_recovery.service import invalidate_recovery_previews
 
     await invalidate_recovery_previews(database, user_id, workspace_id)
     # Erase copied email tasks and short-lived source text before locator FKs disappear.
     await forget_email_data(
+        database, user_id=user_id, workspace_id=workspace_id, connector_ids=connector_ids
+    )
+    await clear_private_data(
         database, user_id=user_id, workspace_id=workspace_id, connector_ids=connector_ids
     )
     # Calendar feeds have their own normalized source graph and copied study
@@ -771,6 +779,10 @@ async def delete_learned_data(
         row.external_account_id = f"deleted:{row.id}"
     for provenance_anchor in provenance_accounts:
         provenance_anchor.credential_reference = None
+        if provenance_anchor.provider == "microsoft":
+            provenance_anchor.external_email = None
+            provenance_anchor.granted_scopes = []
+            provenance_anchor.last_error = None
     await database.flush()
     for credential_id in credential_ids:
         still_legacy = await database.scalar(

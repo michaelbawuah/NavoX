@@ -57,7 +57,9 @@ export function ClassesWelcome({
             ⇩
           </span>
           <strong>Import a file</strong>
-          <span>A calendar file from your school’s class schedule page.</span>
+          <span>
+            An .ics or text PDF from your school’s class schedule page.
+          </span>
           <small>.ics calendar file</small>
         </button>
         <button

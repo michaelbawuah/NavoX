@@ -35,6 +35,7 @@ from navox.api.news_conversations import router as news_conversations_router
 from navox.api.news_following import router as news_following_router
 from navox.api.news_stories import router as news_stories_router
 from navox.api.noa import router as noa_router
+from navox.api.outlook import router as outlook_router
 from navox.api.proactive import router as proactive_router
 from navox.api.routines import router as routines_router
 from navox.api.student import router as student_router
@@ -108,6 +109,7 @@ def create_app() -> FastAPI:
     app.include_router(connector_events_router, prefix="/api/v1")
     app.include_router(commitments_router, prefix="/api/v1")
     app.include_router(communication_router, prefix="/api/v1")
+    app.include_router(outlook_router, prefix="/api/v1")
     app.include_router(thread_watches_router, prefix="/api/v1")
     app.include_router(routines_router, prefix="/api/v1")
     app.include_router(memory_router, prefix="/api/v1")

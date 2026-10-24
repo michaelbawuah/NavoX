@@ -73,11 +73,11 @@ describe("Home Vox feature entry", () => {
 });
 
 describe("workspace destinations", () => {
-  it("shows honest examples and connection setup before email access, without draft forms", () => {
+  it("waits for mailbox status before offering setup or a draft form", () => {
     const markup = renderView("inbox");
-    expect(markup).toContain("Never miss an email that needs you");
-    expect(markup).toContain("Example emails, not your inbox");
-    expect(markup).toContain("Connect Gmail");
+    expect(markup).toContain("Checking your email connections");
+    expect(markup).not.toContain("Never miss an email that needs you");
+    expect(markup).not.toContain("Connect Gmail");
     expect(markup).not.toContain('id="drafts"');
     expect(markup).not.toContain("Generate draft");
     expect(markup).not.toContain("Refresh");

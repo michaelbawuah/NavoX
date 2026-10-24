@@ -89,6 +89,18 @@ describe("screenshot review boundary", () => {
 });
 
 describe("explicit voice class prefill", () => {
+  it("recognizes an explicit exam while leaving its actual date for review", () => {
+    expect(
+      studentClassPrefill(
+        "Add CS2110 exam Monday 8:40 AM to 10 AM in Statler 101",
+      ),
+    ).toMatchObject({
+      kind: "exam",
+      course_code: "CS 2110",
+      start_time: "08:40",
+      end_time: "10:00",
+    });
+  });
   it("prefills explicit code, type, days, AM/PM times and room while leaving term and zone to review", () => {
     const draft = studentClassPrefill(
       "Add CS2110 lecture Monday 9:05 AM to 9:55 AM in Hollister 110",

@@ -440,3 +440,22 @@
     min-width: 700px;
   }
 }
+
+.mobileWeekHint {
+  display: none;
+}
+@media (max-width: 767px) {
+  .weekHead > span:first-child,
+  .hours {
+    position: sticky;
+    left: 0;
+    z-index: 4;
+    background: var(--nx-bg);
+  }
+  .mobileWeekHint {
+    display: block;
+    margin: 8px 0 0;
+    color: var(--nx-muted);
+    font-size: 12px;
+  }
+}

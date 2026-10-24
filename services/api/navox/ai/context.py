@@ -48,6 +48,7 @@ def context_capabilities(settings: Settings | None = None) -> dict[tuple[str, st
         (GOOGLE_CONNECTOR_KEY, "communication.message"): {"communication.messages.read"},
         (GOOGLE_CONNECTOR_KEY, "calendar.event"): {"calendar.events.read"},
         ("google-gmail", "communication.message"): {"communication.messages.read"},
+        ("microsoft-outlook", "communication.message"): {"communication.messages.read"},
         ("google-calendar", "calendar.event"): {"calendar.events.read"},
         ("canvas-lms", "academic.assignment"): {"academic.assignments.read"},
         ("canvas-lms", "academic.announcement"): {"academic.announcements.read"},
@@ -233,6 +234,10 @@ class ContextBuilder:
                     "gmail" if resource.resource_type == "communication.message" else "calendar"
                 )
                 if SOURCE_SCOPES[source] not in legacy.granted_scopes:
+                    raise ContextDenied("Source read capability was revoked")
+            elif legacy.provider == "microsoft":
+                owner_email = legacy.external_email
+                if "Mail.Read" not in legacy.granted_scopes:
                     raise ContextDenied("Source read capability was revoked")
         # The connector config is server-managed; source metadata cannot lower
         # classification. Unclassified imported personal data has a PERSONAL floor.

@@ -1,7 +1,7 @@
 "use client";
 import { courseColor } from "@navox/ui";
 import Link from "next/link";
-import { type CSSProperties, useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import {
   addStudentDays,
   type StudentCourse,
@@ -39,6 +39,7 @@ export function ClassesWeek({
   onEdit: (course: StudentCourse, meeting?: StudentMeeting) => void;
   onShift: (id: string) => void;
 }) {
+  const weekViewport = useRef<HTMLElement>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const vox = useVoxRequest();
@@ -51,6 +52,31 @@ export function ClassesWeek({
   }, [timetable.server_now]);
   const now = Date.parse(timetable.server_now) + elapsed;
   const local = studentLocalTime(now, timetable.timezone);
+  useEffect(() => {
+    const viewport = weekViewport.current;
+    if (!viewport) return;
+    const showToday = () => {
+      if (
+        typeof window.matchMedia !== "function" ||
+        !window.matchMedia("(max-width: 767px)").matches
+      ) {
+        viewport.scrollLeft = 0;
+        return;
+      }
+      const inWeek =
+        timetable.date <= local.date &&
+        local.date < addStudentDays(timetable.date, 7);
+      const today = inWeek
+        ? viewport.querySelector<HTMLElement>(`[data-week-day="${local.date}"]`)
+        : null;
+      viewport.scrollLeft = today ? Math.max(0, today.offsetLeft - 48) : 0;
+    };
+    showToday();
+    if (typeof ResizeObserver === "undefined") return;
+    const resize = new ResizeObserver(showToday);
+    resize.observe(viewport);
+    return () => resize.disconnect();
+  }, [local.date, timetable.date]);
   const events: Event[] = [
     ...timetable.occurrences.map((row) => ({
       id: row.id,
@@ -112,6 +138,7 @@ export function ClassesWeek({
     <div className={styles.weekLayout}>
       <div className={styles.weekMain}>
         <section
+          ref={weekViewport}
           className={styles.weekScroll}
           aria-label="Weekly timetable; scroll sideways on a small screen"
         >
@@ -119,7 +146,11 @@ export function ClassesWeek({
             <div className={styles.weekHead}>
               <span />
               {days.map((day) => (
-                <div key={day} data-today={day === local.date}>
+                <div
+                  key={day}
+                  data-week-day={day}
+                  data-today={day === local.date}
+                >
                   <span>
                     {new Intl.DateTimeFormat("en", {
                       weekday: "short",
@@ -226,6 +257,9 @@ export function ClassesWeek({
             </div>
           </div>
         </section>
+        <p className={styles.mobileWeekHint}>
+          Swipe to see the rest of your week.
+        </p>
         <div className={styles.legend}>
           {timetable.courses
             .filter((row) => !row.archived)

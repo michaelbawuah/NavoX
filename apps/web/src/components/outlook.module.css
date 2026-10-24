@@ -1,0 +1,125 @@
+.card {
+  border: 1px solid var(--nx-border);
+  border-radius: 14px;
+  background: var(--nx-surface);
+  color: var(--nx-text);
+  padding: 24px;
+  margin-block: 20px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.card h2 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}
+.card h3 {
+  font-size: 16px;
+}
+.card p {
+  line-height: 1.55;
+}
+.card button,
+.card select,
+.card input,
+.card textarea {
+  font: inherit;
+  color: inherit;
+  border: 1px solid var(--nx-border);
+  border-radius: 10px;
+  background: var(--nx-raised);
+}
+.card button,
+.card select,
+.card input {
+  min-height: 44px;
+  padding: 8px 12px;
+}
+.card button {
+  cursor: pointer;
+}
+.card button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.card button:focus-visible,
+.card input:focus-visible,
+.card textarea:focus-visible,
+.card select:focus-visible {
+  outline: 2px solid var(--nx-accent);
+  outline-offset: 3px;
+}
+.card a {
+  color: var(--nx-accent-text);
+}
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-block: 12px;
+}
+.connection,
+.confirm {
+  border-top: 1px solid var(--nx-border);
+  margin-top: 16px;
+  padding-top: 16px;
+}
+.confirm {
+  border: 1px solid var(--nx-accent);
+  border-radius: 10px;
+  padding: 16px;
+}
+.hint {
+  color: var(--nx-muted);
+  font-size: 13px;
+}
+.editor {
+  display: grid;
+  gap: 14px;
+}
+.editor label {
+  display: grid;
+  gap: 8px;
+  font-size: 14px;
+}
+.editor input,
+.editor textarea,
+.editor select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.editor textarea {
+  padding: 12px;
+  min-height: 160px;
+  resize: vertical;
+  line-height: 1.6;
+}
+.editor .check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.editor .check input {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+  flex: 0 0 auto;
+}
+.body {
+  white-space: pre-wrap;
+  line-height: 1.65;
+}
+.card button.send {
+  background: var(--nx-accent);
+  color: var(--nx-on-accent);
+  font-weight: 600;
+}
+@media (max-width: 767px) {
+  .card {
+    padding: 18px;
+  }
+  .actions {
+    gap: 8px;
+  }
+}

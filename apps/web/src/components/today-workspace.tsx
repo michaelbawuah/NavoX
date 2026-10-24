@@ -34,6 +34,8 @@ import {
 } from "./intelligence-controls";
 import { NoaSettings } from "./noa-settings";
 import { OperationalAssistance } from "./operational-assistance";
+import { OutlookConnectionPanel } from "./outlook-connection-panel";
+import { OutlookInbox } from "./outlook-inbox";
 import { PagedList } from "./paged-list";
 import { PersonalMemoryPanel } from "./personal-memory";
 import { PersonalRoutines } from "./personal-routines";
@@ -285,7 +287,11 @@ export function TodayWorkspace(props: TodayWorkspaceProps) {
         timezone={props.account.timezone}
         onSignOut={props.onSignOut}
       >
-        <InboxWelcome />
+        <OutlookInbox
+          accountKey={`${props.account.workspace.id}:${props.account.id}`}
+          timezone={props.account.timezone}
+          fallback={<InboxWelcome />}
+        />
       </WorkspaceShell>
     );
   return <LegacyTodayWorkspace {...props} />;
@@ -1187,6 +1193,10 @@ function LegacyTodayWorkspace({
 
         {view === "inbox" && (
           <div>
+            <OutlookInbox
+              accountKey={`${account.workspace.id}:${account.id}`}
+              timezone={timezone}
+            />
             <nav className={inboxStyles.tabs} aria-label="Inbox sections">
               <button
                 type="button"
@@ -1424,6 +1434,9 @@ function LegacyTodayWorkspace({
 
         {view === "connections" && (
           <>
+            <OutlookConnectionPanel
+              accountKey={`${account.workspace.id}:${account.id}`}
+            />
             {productFeatures.studentCalendarAvailability && (
               <StudentCalendarConnections
                 key={`calendar:${account.workspace.id}:${account.id}`}

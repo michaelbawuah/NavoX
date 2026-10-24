@@ -26,13 +26,12 @@ export function InboxWelcome() {
             >
               Connect Gmail
             </Link>
-            <button
-              type="button"
-              disabled
-              title="Outlook email is not available on this test release yet"
+            <Link
+              className="nx-button"
+              href="/connections?source=outlook#outlook"
             >
-              Connect Outlook · coming soon
-            </button>
+              Connect Outlook
+            </Link>
           </div>
         </div>
       </header>

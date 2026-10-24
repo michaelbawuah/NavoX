@@ -100,3 +100,44 @@ it("cancelling and a rejected preview cannot commit", async () => {
   expect(host.textContent).not.toContain("Approve move");
   expect(host.textContent).toContain("That time is busy");
 });
+
+it("previews a suggested start without moving until the exact review is approved", async () => {
+  const saved = vi.fn();
+  await act(async () =>
+    root.render(
+      <StudyBlockMove
+        block={block}
+        accountKey="owner:student"
+        timezone="America/New_York"
+        now={Date.parse("2026-10-24T07:00:00Z")}
+        suggestedStart="2026-10-24T20:00:00Z"
+        onSaved={saved}
+        onKeepCurrent={vi.fn()}
+      />,
+    ),
+  );
+  expect(fetch).not.toHaveBeenCalled();
+  await click("Review suggested move");
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(fetch).mock.calls[0][0]).toMatch(/move\/preview$/);
+  expect(
+    JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body)).start_at,
+  ).toBe("2026-10-24T20:00:00.000Z");
+  expect(saved).not.toHaveBeenCalled();
+  await click("Approve move");
+  expect(saved).toHaveBeenCalledOnce();
+});
+
+it("retries an uncertain move with the same reviewed hash and request identity", async () => {
+  await mount();
+  await click("Move");
+  await click("Review move");
+  vi.mocked(fetch).mockRejectedValueOnce(new TypeError("Response lost"));
+  await click("Approve move");
+  expect(host.textContent).toContain("may have saved");
+  expect(host.textContent).toContain("Close review");
+  await click("Approve move");
+  const first = JSON.parse(String(vi.mocked(fetch).mock.calls[1][1]?.body));
+  const retry = JSON.parse(String(vi.mocked(fetch).mock.calls[2][1]?.body));
+  expect(retry).toEqual(first);
+});

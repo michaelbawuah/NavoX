@@ -13,14 +13,14 @@
 .tabs button {
   min-height: 44px;
   padding: 10px 16px;
-  border: 1px solid var(--border, #262b33);
+  border: 1px solid var(--nx-border);
   border-radius: 10px;
-  background: var(--surface, #14171c);
+  background: var(--nx-surface);
   color: inherit;
 }
 .tabs button[aria-pressed="true"] {
-  background: var(--surface-raised, #1b1f26);
-  border-color: #4fd1b5;
+  background: var(--nx-raised);
+  border-color: var(--nx-accent);
 }
 .list {
   display: grid;
@@ -32,9 +32,9 @@
   width: 100%;
   padding: 18px;
   text-align: left;
-  border: 1px solid var(--border, #262b33);
+  border: 1px solid var(--nx-border);
   border-radius: 14px;
-  background: var(--surface, #14171c);
+  background: var(--nx-surface);
   color: inherit;
   min-height: 80px;
   overflow-wrap: anywhere;
@@ -45,15 +45,15 @@
   min-width: 0;
 }
 .preview strong {
-  color: var(--text, #f2f4f7);
+  color: var(--nx-text);
 }
 .row[aria-pressed="true"] {
-  border-color: #4fd1b5;
-  box-shadow: inset 3px 0 #4fd1b5;
+  border-color: var(--nx-accent);
+  box-shadow: inset 3px 0 var(--nx-accent);
 }
 .row span,
 .row small {
-  color: var(--text-muted, #a3acb8);
+  color: var(--nx-muted);
 }
 .row small {
   font-size: 12px;
@@ -65,9 +65,9 @@
 }
 .message {
   padding: 24px;
-  border: 1px solid var(--border, #262b33);
+  border: 1px solid var(--nx-border);
   border-radius: 14px;
-  background: var(--surface, #14171c);
+  background: var(--nx-surface);
   overflow-wrap: anywhere;
 }
 .message h2 {
@@ -76,7 +76,7 @@
 }
 .message p {
   font-size: 13px;
-  color: var(--text-muted, #a3acb8);
+  color: var(--nx-muted);
 }
 .message .sender {
   font-size: 14px;
@@ -89,7 +89,7 @@
   margin: 24px 0;
 }
 .message a {
-  color: var(--accent, #4fd1b5);
+  color: var(--nx-accent-text);
 }
 .list button,
 .message button,

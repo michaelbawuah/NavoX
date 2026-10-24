@@ -160,11 +160,10 @@ export function studentClassPrefill(
   )
     return null;
   const text = transcript.trim().replace(/[’]/g, "'");
-  const kindMatch = /\b(lecture|lab|discussion|recitation|seminar)\b/i.exec(
-    text,
-  );
+  const kindMatch =
+    /\b(lecture|lab|discussion|recitation|seminar|exam)\b/i.exec(text);
   const codeMatch =
-    /^\s*(?:please\s+)?(?:add|create)\s+(?:(?:a|my|the)\s+)?(?:(?:class|lecture|lab|discussion|seminar|recitation)\s+)?([a-z]{2,8})\s*(\d{2,5}[a-z]?)\b/i.exec(
+    /^\s*(?:please\s+)?(?:add|create)\s+(?:(?:a|my|the)\s+)?(?:(?:class|lecture|lab|discussion|seminar|recitation|exam)\s+)?([a-z]{2,8})\s*(\d{2,5}[a-z]?)\b/i.exec(
       text,
     );
   const kind = (kindMatch?.[1]?.toLowerCase() ?? "other") as StudentMeetingKind;

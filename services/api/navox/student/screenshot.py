@@ -41,7 +41,7 @@ _WORKER_ENV = {
     "OPENBLAS_NUM_THREADS": "1",
 }
 
-SectionKind = Literal["lecture", "lab", "discussion", "seminar", "other"]
+SectionKind = Literal["lecture", "lab", "discussion", "seminar", "exam", "other"]
 
 
 class ScreenshotImportError(Exception):
@@ -197,6 +197,8 @@ def parse_screenshot_text(text: str) -> ScreenshotPreview:
             kind = "discussion"
         elif re.search(r"\b(?:sem|seminar)\b", line, re.IGNORECASE):
             kind = "seminar"
+        if re.search(r"\bexam\b", line, re.IGNORECASE):
+            kind = "exam"
         key = (course_code, tuple(weekdays), start, end)
         if key in seen:
             continue

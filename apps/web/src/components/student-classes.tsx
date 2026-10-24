@@ -466,26 +466,51 @@ function MeetingFields({
 }) {
   return (
     <>
-      <fieldset className={styles.days}>
-        <legend>Days</legend>
-        {studentWeekdays.map((label, day) => (
-          <label key={label}>
-            <input
-              type="checkbox"
-              checked={value.weekdays.includes(day)}
-              onChange={(event) =>
-                onChange({
-                  ...value,
-                  weekdays: event.target.checked
-                    ? [...value.weekdays, day].sort()
-                    : value.weekdays.filter((item) => item !== day),
-                })
-              }
-            />
-            {label}
-          </label>
-        ))}
-      </fieldset>
+      {value.kind === "exam" ? (
+        <label htmlFor={`${id}-exam-date`}>
+          Exam date
+          <input
+            id={`${id}-exam-date`}
+            type="date"
+            required
+            value={value.dates?.[0] ?? ""}
+            onChange={(event) => {
+              const day = event.target.value;
+              onChange({
+                ...value,
+                dates: day ? [day] : null,
+                weekdays: day
+                  ? [(new Date(`${day}T12:00:00Z`).getUTCDay() + 6) % 7]
+                  : [],
+              });
+            }}
+          />
+          <span className={styles.hint}>
+            One saved exam date. It will not repeat every week.
+          </span>
+        </label>
+      ) : (
+        <fieldset className={styles.days}>
+          <legend>Days</legend>
+          {studentWeekdays.map((label, day) => (
+            <label key={label}>
+              <input
+                type="checkbox"
+                checked={value.weekdays.includes(day)}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    weekdays: event.target.checked
+                      ? [...value.weekdays, day].sort()
+                      : value.weekdays.filter((item) => item !== day),
+                  })
+                }
+              />
+              {label}
+            </label>
+          ))}
+        </fieldset>
+      )}
       <label htmlFor={`${id}-kind`}>
         Section type
         <select
@@ -789,6 +814,16 @@ function StudentMeetingEditor({
   const [validation, setValidation] = useState("");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (
+      value.kind === "exam" &&
+      (!value.dates ||
+        value.dates.length !== 1 ||
+        value.dates[0] < course.term_start ||
+        value.dates[0] > course.term_end)
+    ) {
+      setValidation("Choose the exam date within this course’s term.");
+      return;
+    }
     if (value.weekdays.length === 0) {
       setValidation("Choose at least one day for this section.");
       return;

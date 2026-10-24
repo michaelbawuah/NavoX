@@ -14,6 +14,7 @@ export const studentMeetingKinds = [
   "discussion",
   "recitation",
   "seminar",
+  "exam",
   "other",
 ] as const;
 export type StudentMeetingKind = (typeof studentMeetingKinds)[number];
@@ -36,6 +37,7 @@ export interface StudentProfile {
   revision: number;
 }
 export interface StudentMeetingInput {
+  dates?: string[] | null;
   kind: StudentMeetingKind;
   weekdays: number[];
   start_time: string;
@@ -596,6 +598,7 @@ export function studentMeetingDraft(
 ): StudentMeetingInput {
   return {
     kind: value.kind,
+    ...(value.kind === "exam" ? { dates: value.dates ?? null } : {}),
     weekdays: [...value.weekdays],
     start_time: value.start_time,
     end_time: value.end_time,
