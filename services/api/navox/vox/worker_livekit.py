@@ -263,6 +263,52 @@ async def _active_epoch(
             await bound.retire()
 
 
+class InputTrackBinding:
+    """One exact owned microphone; late retirement cannot clear its replacement."""
+
+    def __init__(self, assignment: WorkerAssignment, generation: int, audio: AudioInputBuffer):
+        self.assignment = assignment
+        self.generation = generation
+        self.audio = audio
+        self.sid: str | None = None
+
+    def _owner(self, participant: rtc.RemoteParticipant) -> None:
+        if participant.identity != self.assignment.client_identity or not participant_metadata(
+            participant.metadata, self.assignment, self.generation
+        ):
+            raise WorkerAccessLost("The voice participant is outside its assignment")
+
+    def subscribe(
+        self,
+        track: rtc.Track,
+        publication: rtc.RemoteTrackPublication,
+        participant: rtc.RemoteParticipant,
+    ) -> bool:
+        self._owner(participant)
+        if (
+            track.kind != rtc.TrackKind.KIND_AUDIO
+            or publication.source != rtc.TrackSource.SOURCE_MICROPHONE
+        ):
+            raise WorkerAccessLost("The voice track is outside its assignment")
+        if self.sid == publication.sid:
+            return False
+        if self.sid is not None:
+            raise WorkerAccessLost("Another microphone track is still active")
+        self.sid = publication.sid
+        return True
+
+    def release(
+        self, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant
+    ) -> None:
+        self._owner(participant)
+        if self.sid == publication.sid:
+            self.clear()
+
+    def clear(self) -> None:
+        self.sid = None
+        self.audio.discard()
+
+
 async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
     """No subscription, RTC connection or provider request before exact DB proof."""
     assignment = WorkerAssignment.from_metadata(ctx.job.metadata)
@@ -343,10 +389,10 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
         stopped = asyncio.Event()
         streams: set[asyncio.Task[None]] = set()
         handlers: list[tuple[str, Callable[..., None]]] = []
-        subscribed_sid: str | None = None
         seen_client = False
 
         audio_input = AudioInputBuffer()
+        input_track = InputTrackBinding(assignment, intent.generation, audio_input)
         frames = voiced_frames = slow_frames = 0
         receive_seconds = max_receive_seconds = 0.0
 
@@ -375,13 +421,13 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             )
             try:
                 async for event in stream:
-                    if stopped.is_set() or subscribed_sid != track_sid:
+                    if stopped.is_set() or input_track.sid != track_sid:
                         break
                     # Drain RTC promptly; DB and provider admission run separately.
                     audio_input.put(bytes(event.frame.data))
             except Exception as error:
                 log_worker_failure("audio_receive", error)
-                if subscribed_sid == track_sid:
+                if input_track.sid == track_sid:
                     stopped.set()
             finally:
                 await stream.aclose()
@@ -405,20 +451,28 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             publication: rtc.RemoteTrackPublication,
             participant: rtc.RemoteParticipant,
         ) -> None:
-            nonlocal subscribed_sid
-            if subscribed_sid == publication.sid:
-                return
-            if (
-                participant.identity != assignment.client_identity
-                or track.kind != rtc.TrackKind.KIND_AUDIO
-                or publication.source != rtc.TrackSource.SOURCE_MICROPHONE
-                or subscribed_sid is not None
-                or not participant_metadata(participant.metadata, assignment, intent.generation)
-            ):
+            try:
+                if input_track.subscribe(track, publication, participant):
+                    spawn(pump(track, participant, publication.sid))
+            except WorkerAccessLost:
                 stopped.set()
-                return
-            subscribed_sid = publication.sid
-            spawn(pump(track, participant, publication.sid))
+
+        def track_unpublished(
+            publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant
+        ) -> None:
+            try:
+                # Mute/reconnect retires capture without leaving the participant.
+                # Do not cancel an assistant reply just because its mic is muted.
+                input_track.release(publication, participant)
+            except WorkerAccessLost:
+                stopped.set()
+
+        def track_unsubscribed(
+            track: rtc.Track,
+            publication: rtc.RemoteTrackPublication,
+            participant: rtc.RemoteParticipant,
+        ) -> None:
+            track_unpublished(publication, participant)
 
         async def subscribe(participant: rtc.RemoteParticipant) -> None:
             nonlocal seen_client
@@ -449,11 +503,10 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             participant_connected(participant)
 
         def participant_disconnected(participant: rtc.RemoteParticipant) -> None:
-            nonlocal subscribed_sid
             if participant.identity != assignment.client_identity:
                 stopped.set()
                 return
-            subscribed_sid = None
+            input_track.clear()
             # Same-call SDK reconnect may resume only while fresh DB authority survives.
             spawn(interrupt_input())
 
@@ -498,6 +551,8 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             if isinstance(worker, ConfiguredVoiceWorker):
                 await worker.warm()
             on("track_subscribed", subscribed)
+            on("track_unsubscribed", track_unsubscribed)
+            on("track_unpublished", track_unpublished)
             on("participant_connected", participant_connected)
             on("track_published", track_published)
             on("participant_disconnected", participant_disconnected)
