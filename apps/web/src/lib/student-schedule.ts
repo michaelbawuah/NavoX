@@ -1,3 +1,4 @@
+import { studentLocalTime } from "./student-time";
 export const studentLmsOptions = [
   ["none", "Not sure / add later"],
   ["canvas", "Canvas"],
@@ -522,13 +523,7 @@ export async function studentRequest<T>(
   }
 }
 export function studentDateInZone(instantValue: string, zone: string): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: zone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(instantValue));
-  return `${parts.find((p) => p.type === "year")?.value}-${parts.find((p) => p.type === "month")?.value}-${parts.find((p) => p.type === "day")?.value}`;
+  return studentLocalTime(instantValue, zone).date;
 }
 export function addStudentDays(value: string, amount: number): string {
   const day = new Date(`${value}T12:00:00Z`);
@@ -536,11 +531,7 @@ export function addStudentDays(value: string, amount: number): string {
   return day.toISOString().slice(0, 10);
 }
 export function studentClock(value: string, zone: string): string {
-  return new Intl.DateTimeFormat("en", {
-    timeZone: zone,
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(value));
+  return studentLocalTime(value, zone).clock;
 }
 export function studentDayLabel(value: string): string {
   return new Intl.DateTimeFormat("en", {

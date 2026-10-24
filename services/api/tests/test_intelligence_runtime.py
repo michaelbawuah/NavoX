@@ -432,3 +432,63 @@ def test_ai_code_is_not_attached_to_google_failures_or_trusted_after_mutation():
     error.code = "private provider message"
     error.http_status = True
     assert processing_diagnostic(error) == {"code": "provider_request_failed"}
+
+
+@pytest.mark.asyncio
+async def test_device_timezone_initializes_once_and_is_shared(runtime_env):
+    client, factory = runtime_env
+    account = (await client.get("/api/v1/auth/me")).json()
+    payload = {
+        "timezone": "America/New_York",
+        "user_id": account["id"],
+        "workspace_id": account["workspace"]["id"],
+    }
+    response = await client.post("/api/v1/workspace/timezone/initialize", json=payload)
+    assert response.status_code == 200
+    assert response.json() == payload
+    assert (await client.get("/api/v1/auth/me")).json()["timezone"] == "America/New_York"
+    prefs = (await client.get("/api/v1/workspace/preferences")).json()
+    assert prefs["timezone"] == "America/New_York"
+    assert prefs["timezone_selected"] is True
+    # Another device or travel cannot silently change the chosen timezone.
+    again = await client.post(
+        "/api/v1/workspace/timezone/initialize", json=dict(payload, timezone="America/Los_Angeles")
+    )
+    assert again.json()["timezone"] == "America/New_York"
+    from navox.student.service import profile
+
+    async with factory() as db:
+        saved = await profile(db, UUID(account["id"]), UUID(account["workspace"]["id"]))
+        assert saved.timezone == "America/New_York"
+
+
+@pytest.mark.asyncio
+async def test_timezone_initialization_preserves_explicit_utc_and_rejects_stale_owner(runtime_env):
+    client, _ = runtime_env
+    account = (await client.get("/api/v1/auth/me")).json()
+    payload = {
+        "timezone": "America/New_York",
+        "user_id": account["id"],
+        "workspace_id": account["workspace"]["id"],
+    }
+    assert (
+        await client.post("/api/v1/workspace/preferences", json={"timezone": "UTC"})
+    ).status_code == 200
+    assert (await client.post("/api/v1/workspace/timezone/initialize", json=payload)).json()[
+        "timezone"
+    ] == "UTC"
+    assert (
+        await client.post(
+            "/api/v1/workspace/timezone/initialize", json=dict(payload, user_id=str(uuid4()))
+        )
+    ).status_code == 409
+    assert (
+        await client.post(
+            "/api/v1/workspace/timezone/initialize", json=dict(payload, timezone="wrong/time")
+        )
+    ).status_code == 422
+    assert (await client.get("/api/v1/auth/me")).json()["timezone"] == "UTC"
+    await client.post("/api/v1/auth/logout")
+    assert (
+        await client.post("/api/v1/workspace/timezone/initialize", json=payload)
+    ).status_code == 401

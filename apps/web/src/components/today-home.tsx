@@ -31,6 +31,7 @@ import {
   studentClock,
   studentRequest,
 } from "../lib/student-schedule";
+import { studentLocalTime } from "../lib/student-time";
 import {
   dayRows,
   dueSoon,
@@ -206,25 +207,9 @@ function TodayHomeAccount({
     ? Date.parse(data.timetable.server_now) +
       Math.max(0, (clock ?? data.receivedAt) - data.receivedAt)
     : (clock ?? 0);
-  const hour = clock
-    ? Number(
-        new Intl.DateTimeFormat("en-US", {
-          hour: "numeric",
-          hourCycle: "h23",
-          timeZone: zone,
-        }).format(new Date(now)),
-      )
-    : null;
   const firstName =
     account.display_name?.trim().split(/\s+/)[0] || account.email.split("@")[0];
-  const greeting =
-    hour === null
-      ? "Hello"
-      : hour < 12
-        ? "Good morning"
-        : hour < 17
-          ? "Good afternoon"
-          : "Good evening";
+  const greeting = clock ? studentLocalTime(now, zone).greeting : "Hello";
   const rows = data
     ? dayRows(data.timetable, data.plan, data.tasks, data.items, now, zone)
     : [];

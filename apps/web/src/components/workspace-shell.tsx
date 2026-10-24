@@ -11,6 +11,7 @@ import { useAppearance } from "../lib/appearance";
 import { useInboxReplyCount } from "../lib/inbox-reply-count";
 import { productFeatures } from "../lib/product-features";
 import { readStudentProfile, studentRequest } from "../lib/student-schedule";
+import { studentLocalTime } from "../lib/student-time";
 import { useVoxCall } from "./vox-call-provider";
 import styles from "./workspace-shell.module.css";
 
@@ -205,19 +206,8 @@ export function WorkspaceShell({
     const zone =
       timezone ?? savedZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
     try {
-      date =
-        new Intl.DateTimeFormat("en-US", {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-          timeZone: zone,
-        }).format(clock) +
-        " · " +
-        new Intl.DateTimeFormat("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-          timeZone: zone,
-        }).format(clock);
+      const local = studentLocalTime(clock, zone);
+      date = `${local.header} · ${local.clock}`;
     } catch {
       date = "";
     }

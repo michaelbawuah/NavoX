@@ -13,6 +13,10 @@ import {
 import { productFeatures } from "../lib/product-features";
 import { hasGoogleReadAccess } from "../lib/setup-progress";
 import type { TodaySource } from "../lib/source-references";
+import {
+  notifyStudentTimezoneChanged,
+  studentLocalTime,
+} from "../lib/student-time";
 import { consumerTodaySections } from "../lib/today-sections";
 import { AISettings } from "./ai-settings";
 import { AppearanceSettings } from "./appearance-settings";
@@ -249,20 +253,7 @@ function dueLabel(value: string | null, timezone: string): string {
 }
 
 function greeting(timezone: string): string {
-  const hour = Number(
-    new Intl.DateTimeFormat("en-US", {
-      timeZone: timezone,
-      hour: "numeric",
-      hourCycle: "h23",
-    }).format(new Date()),
-  );
-  if (hour < 12) {
-    return "Good morning";
-  }
-  if (hour < 18) {
-    return "Good afternoon";
-  }
-  return "Good evening";
+  return studentLocalTime(new Date(), timezone).greeting;
 }
 
 export function TodayWorkspace(props: TodayWorkspaceProps) {
@@ -289,6 +280,9 @@ function LegacyTodayWorkspace({
   );
   const [showSetAside, setShowSetAside] = useState(false);
   const [timezone, setTimezone] = useState(account.timezone ?? "UTC");
+  useEffect(() => {
+    setTimezone(account.timezone ?? "UTC");
+  }, [account.timezone]);
   const [today, setToday] = useState<TodayPayload | null>(null);
   const [workspaceError, setWorkspaceError] = useState("");
   const [todayError, setTodayError] = useState("");
@@ -1111,6 +1105,7 @@ function LegacyTodayWorkspace({
   return (
     <WorkspaceShell
       current={page.current}
+      timezone={timezone}
       accountKey={`${account.workspace.id}:${account.id}`}
       accountName={account.display_name ?? account.email}
       onSignOut={onSignOut}
@@ -1423,6 +1418,12 @@ function LegacyTodayWorkspace({
               <WorkspaceContext
                 timezone={timezone}
                 onTimezoneChange={setTimezone}
+                onTimezoneSaved={(zone) =>
+                  notifyStudentTimezoneChanged(
+                    `${account.workspace.id}:${account.id}`,
+                    zone,
+                  )
+                }
               />
               {renderActivity()}
             </div>

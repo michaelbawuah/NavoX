@@ -830,9 +830,11 @@ export function WorkspaceReadout({
 export function WorkspaceContext({
   timezone,
   onTimezoneChange,
+  onTimezoneSaved,
 }: {
   timezone: string;
   onTimezoneChange: (value: string) => void;
+  onTimezoneSaved?: (value: string) => void;
 }) {
   const [now, setNow] = useState<Date | null>(null);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
@@ -853,14 +855,7 @@ export function WorkspaceContext({
     )
       .then((value) => {
         if (!active) return;
-        const { timezone_selected, ...saved } = value;
-        const display = {
-          ...saved,
-          timezone:
-            timezone_selected === false
-              ? Intl.DateTimeFormat().resolvedOptions().timeZone
-              : saved.timezone,
-        };
+        const { timezone_selected: _selected, ...display } = value;
         setPreferences(display);
         setDraft(display);
         onTimezoneChange(display.timezone);
@@ -922,6 +917,7 @@ export function WorkspaceContext({
       setPreferences(saved);
       setDraft(saved);
       onTimezoneChange(saved.timezone);
+      onTimezoneSaved?.(saved.timezone);
       setMessage("Display preferences saved.");
     } catch (cause) {
       setError(

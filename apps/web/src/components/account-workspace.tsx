@@ -23,6 +23,10 @@ import {
 import { productFeatures } from "../lib/product-features";
 import { notifyCalendarAccessChanged } from "../lib/student-calendar-privacy";
 import type { CourseMaterialReference } from "../lib/student-material-link";
+import {
+  notifyStudentTimezoneChanged,
+  STUDENT_TIMEZONE_CHANGED,
+} from "../lib/student-time";
 import { NavoXCinematic } from "./navox-cinematic";
 import { StudentAssistantPanel } from "./student-assistant-panel";
 import { StudentAvailability } from "./student-availability";
@@ -165,6 +169,22 @@ export function AccountWorkspace({
     };
   }, []);
 
+  useEffect(() => {
+    const changed = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{ accountKey: string; timezone: string }>
+      ).detail;
+      setAccount((current) =>
+        current &&
+        detail?.accountKey === `${current.workspace.id}:${current.id}`
+          ? { ...current, timezone: detail.timezone }
+          : current,
+      );
+    };
+    window.addEventListener(STUDENT_TIMEZONE_CHANGED, changed);
+    return () => window.removeEventListener(STUDENT_TIMEZONE_CHANGED, changed);
+  }, []);
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const change = notifyAccountSessionChanging();
@@ -270,6 +290,7 @@ export function AccountWorkspace({
             <WorkspaceShell
               current="Board"
               accountKey={`${account.workspace.id}:${account.id}`}
+              timezone={account.timezone}
               accountName={account.display_name ?? account.email}
               onSignOut={signOut}
             >
@@ -287,6 +308,7 @@ export function AccountWorkspace({
             <WorkspaceShell
               current="Classes"
               accountKey={`${account.workspace.id}:${account.id}`}
+              timezone={account.timezone}
               accountName={account.display_name ?? account.email}
               onSignOut={signOut}
             >
@@ -295,12 +317,19 @@ export function AccountWorkspace({
                 accountId={`${account.workspace.id}:${account.id}`}
                 displayName={account.display_name}
                 timezone={account.timezone}
+                onTimezoneChange={(zone) =>
+                  notifyStudentTimezoneChanged(
+                    `${account.workspace.id}:${account.id}`,
+                    zone,
+                  )
+                }
               />
             </WorkspaceShell>
           ) : view === "course" ? (
             <WorkspaceShell
               current="Classes"
               accountKey={`${account.workspace.id}:${account.id}`}
+              timezone={account.timezone}
               accountName={account.display_name ?? account.email}
               onSignOut={signOut}
             >
@@ -319,6 +348,7 @@ export function AccountWorkspace({
             <WorkspaceShell
               current="Today"
               accountKey={`${account.workspace.id}:${account.id}`}
+              timezone={account.timezone}
               accountName={account.display_name ?? account.email}
               onSignOut={signOut}
             >
@@ -335,6 +365,7 @@ export function AccountWorkspace({
             <WorkspaceShell
               current="Planner"
               accountKey={`${account.workspace.id}:${account.id}`}
+              timezone={account.timezone}
               accountName={account.display_name ?? account.email}
               onSignOut={signOut}
             >
@@ -351,6 +382,7 @@ export function AccountWorkspace({
             <WorkspaceShell
               current="Inbox"
               accountKey={`${account.workspace.id}:${account.id}`}
+              timezone={account.timezone}
               accountName={account.display_name ?? account.email}
               onSignOut={signOut}
             >
@@ -368,6 +400,7 @@ export function AccountWorkspace({
             <WorkspaceShell
               current="Planner"
               accountKey={`${account.workspace.id}:${account.id}`}
+              timezone={account.timezone}
               accountName={account.display_name ?? account.email}
               onSignOut={signOut}
             >
@@ -384,6 +417,7 @@ export function AccountWorkspace({
             <WorkspaceShell
               current="Assistant"
               accountKey={`${account.workspace.id}:${account.id}`}
+              timezone={account.timezone}
               accountName={account.display_name ?? account.email}
               onSignOut={signOut}
             >
@@ -406,6 +440,7 @@ export function AccountWorkspace({
             <WorkspaceShell
               current="Planner"
               accountKey={`${account.workspace.id}:${account.id}`}
+              timezone={account.timezone}
               accountName={account.display_name ?? account.email}
               onSignOut={signOut}
             >
