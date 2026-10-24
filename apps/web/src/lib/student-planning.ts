@@ -44,7 +44,28 @@ export interface StudyWindow {
   start_time: string;
   end_time: string;
 }
+export interface AlarmPreferences {
+  enabled: boolean;
+  days: number[];
+  smart: boolean;
+  prep_minutes: number;
+  sound: "gentle" | "chime";
+  snooze_minutes: 5 | 10 | 15;
+  skip_date: string | null;
+}
+export const defaultAlarm: AlarmPreferences = {
+  enabled: false,
+  days: [0, 1, 2, 3, 4, 5, 6],
+  smart: false,
+  prep_minutes: 30,
+  sound: "gentle",
+  snooze_minutes: 10,
+  skip_date: null,
+};
 export interface StudyPreferences {
+  wake_times?: string[] | null;
+  alarm?: AlarmPreferences;
+
   wake_time: string;
   sleep_time: string;
   focus_windows: StudyWindow[];
@@ -267,9 +288,37 @@ function readWindow(value: unknown): StudyWindow {
     end_time: wall(v.end_time),
   };
 }
+function readAlarmPreferences(value: unknown): AlarmPreferences {
+  const v = obj(value);
+  const snooze = num(v.snooze_minutes, 5, 15);
+  if (![5, 10, 15].includes(snooze)) return invalid();
+  const days = list(v.days, (item) => num(item, 0, 6), 7);
+  if (new Set(days).size !== days.length) return invalid();
+  return {
+    enabled: bool(v.enabled),
+    days,
+    smart: bool(v.smart),
+    prep_minutes: num(v.prep_minutes, 0, 180),
+    sound: en(v.sound, ["gentle", "chime"]),
+    snooze_minutes: snooze as 5 | 10 | 15,
+    skip_date: nullable(v.skip_date, day),
+  };
+}
 export function readStudyPreferences(value: unknown): StudyPreferences {
   const v = obj(value);
+  if (
+    v.wake_times != null &&
+    (!Array.isArray(v.wake_times) || v.wake_times.length !== 7)
+  )
+    return invalid();
   return {
+    ...(v.wake_times !== undefined
+      ? {
+          wake_times:
+            v.wake_times === null ? null : list(v.wake_times, wall, 7),
+        }
+      : {}),
+    ...(v.alarm !== undefined ? { alarm: readAlarmPreferences(v.alarm) } : {}),
     wake_time: wall(v.wake_time),
     sleep_time: wall(v.sleep_time),
     focus_windows: list(v.focus_windows, readWindow, 14),
@@ -419,6 +468,8 @@ export function studyTaskDraft(value: StudyTaskFields): StudyTaskFields {
 }
 export function studyPreferencesDraft(value: StudyPreferences) {
   return {
+    ...(value.wake_times !== undefined ? { wake_times: value.wake_times } : {}),
+    ...(value.alarm !== undefined ? { alarm: value.alarm } : {}),
     wake_time: value.wake_time,
     sleep_time: value.sleep_time,
     focus_windows: value.focus_windows.map((row) => ({
@@ -496,4 +547,87 @@ export function studyDeadlineChoices(
     .map((offset) => new Date(nominal - offset).toISOString())
     .filter((value) => studyLocalDateTime(value, timezone) === local)
     .sort();
+}
+
+export type AlarmOccurrence = {
+  day: string;
+  enabled: boolean;
+  scheduled_at: string | null;
+  reason: string;
+  first_class_at: string | null;
+  first_class_title: string | null;
+};
+export function readAlarmView(value: unknown): {
+  timezone: string;
+  alarm_occurrences: AlarmOccurrence[];
+  native_ringing_available: false;
+} {
+  const v = obj(value);
+  if (v.native_ringing_available !== false) return invalid();
+  return {
+    timezone: zone(v.timezone),
+    native_ringing_available: false,
+    alarm_occurrences: list(
+      v.alarm_occurrences,
+      (item) => {
+        const row = obj(item);
+        return {
+          day: day(row.day),
+          enabled: bool(row.enabled),
+          scheduled_at: nullable(row.scheduled_at, instant),
+          reason: text(row.reason, 500),
+          first_class_at: nullable(row.first_class_at, instant),
+          first_class_title: nullable(row.first_class_title, (item) =>
+            text(item, 240),
+          ),
+        };
+      },
+      14,
+    ),
+  };
+}
+export function readRoutinePreview(value: unknown) {
+  const v = obj(value),
+    hash = text(v.preview_hash, 64);
+  if (!/^[a-f0-9]{64}$/.test(hash)) return invalid();
+  return {
+    ...readAlarmView(value),
+    preview_hash: hash,
+    warnings: list(v.warnings, (item) => text(item, 2000), 50),
+    replaced_blocks: list(v.replaced_blocks, readStudyBlock, 600),
+    previous_alarm_occurrences: readAlarmView({
+      ...v,
+      alarm_occurrences: v.previous_alarm_occurrences,
+    }).alarm_occurrences,
+  };
+}
+export type RoutinePreview = ReturnType<typeof readRoutinePreview>;
+
+export async function routineRequest<T>(
+  accountKey: string,
+  path: string,
+  parse: (value: unknown) => T,
+  method = "GET",
+  body?: unknown,
+): Promise<T> {
+  const base =
+    process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+  const response = await fetch(`${base}/student/planning${path}`, {
+    method,
+    credentials: "include",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      "X-NavoX-Account": accountKey,
+    },
+    signal: AbortSignal.timeout(12000),
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+  if (!response.ok)
+    throw new Error(
+      response.status === 409
+        ? "Your routine or account changed. Reopen Settings and review again."
+        : "Your routine could not be checked. Please try again.",
+    );
+  return parse(await response.json());
 }

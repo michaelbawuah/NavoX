@@ -35,6 +35,7 @@ import { PagedList } from "./paged-list";
 import { PersonalMemoryPanel } from "./personal-memory";
 import { PersonalRoutines } from "./personal-routines";
 import { ProactivePanel } from "./proactive-panel";
+import { RoutineAlarmSettings } from "./routine-alarm-settings";
 import { SourceReferences } from "./source-references";
 import { StudentCalendarConnections } from "./student-calendar-connections";
 import { StudentClassesWorkspace } from "./student-classes";
@@ -1434,6 +1435,12 @@ function LegacyTodayWorkspace({
                   }
                 />
               </section>
+              {productFeatures.studentPlanning && (
+                <RoutineAlarmSettings
+                  key={`${account.workspace.id}:${account.id}`}
+                  accountKey={`${account.workspace.id}:${account.id}`}
+                />
+              )}
               <AppearanceSettings
                 accountKey={`${account.workspace.id}:${account.id}`}
               />

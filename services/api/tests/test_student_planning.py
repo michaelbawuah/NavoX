@@ -1572,3 +1572,159 @@ async def test_progress_confirmation_rejects_stale_or_forged_preview_without_wri
     ).status_code == 409
     assert (await env.client.get(ROOT + "/tasks")).json()["tasks"][0]["actual_minutes"] == 0
     assert (await env.client.get(ROOT + "/plan")).json()["revision"] == plan["revision"]
+
+
+def routine_headers(env):
+    return {"X-NavoX-Account": f"{env.workspace_id}:{env.user_id}"}
+
+
+async def routine_candidate(env, **changes):
+    current = (await env.client.get(ROOT + "/preferences")).json()
+    current.pop("timezone")
+    return {**current, **changes, "request_id": str(uuid4())}
+
+
+@pytest.mark.asyncio
+async def test_routine_preview_is_read_only_owner_bound_and_lists_all_retired_blocks(planning_env):
+    env = planning_env
+    await create_task(env)
+    before, _ = await accept(env)
+    payload = await routine_candidate(env, wake_time="10:00")
+    assert (await env.client.post(ROOT + "/preferences/preview", json=payload)).status_code == 409
+    response = await env.client.post(
+        ROOT + "/preferences/preview", headers=routine_headers(env), json=payload
+    )
+    assert response.status_code == 200, response.text
+    reviewed = response.json()
+    assert {b["id"] for b in reviewed["replaced_blocks"]} == {b["id"] for b in before["blocks"]}
+    assert (await env.client.get(ROOT + "/plan")).json() == before
+    assert (await env.client.get(ROOT + "/preferences")).json()["wake_time"] != "10:00"
+    invalid = await env.client.post(
+        ROOT + "/preferences/confirm",
+        headers=routine_headers(env),
+        json={**payload, "preview_hash": "0" * 64},
+    )
+    assert invalid.status_code == 409
+    result = await env.client.post(
+        ROOT + "/preferences/confirm",
+        headers=routine_headers(env),
+        json={**payload, "preview_hash": reviewed["preview_hash"]},
+    )
+    assert result.status_code == 200, result.text
+    repeat = await env.client.post(
+        ROOT + "/preferences/confirm",
+        headers=routine_headers(env),
+        json={**payload, "preview_hash": reviewed["preview_hash"]},
+    )
+    assert repeat.json() == result.json()
+    after = (await env.client.get(ROOT + "/plan")).json()
+    assert after["needs_review"]
+    assert all(b["status"] == "superseded" for b in after["blocks"])
+
+
+@pytest.mark.asyncio
+async def test_alarm_only_change_preserves_accepted_plan_and_freshness(planning_env):
+    env = planning_env
+    await create_task(env)
+    before, _ = await accept(env)
+    payload = await routine_candidate(env)
+    payload["alarm"]["sound"] = "chime"
+    response = await env.client.post(
+        ROOT + "/preferences/preview", headers=routine_headers(env), json=payload
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["replaced_blocks"] == []
+    confirmed = await env.client.post(
+        ROOT + "/preferences/confirm",
+        headers=routine_headers(env),
+        json={**payload, "preview_hash": response.json()["preview_hash"]},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert (await env.client.get(ROOT + "/plan")).json() == before
+    async with env.factory() as database:
+        planning = await service.state(database, env.user_id, env.workspace_id)
+        await service.require_current_plan(database, env.user_id, env.workspace_id, planning)
+
+
+@pytest.mark.asyncio
+async def test_routine_confirmation_rejects_changed_classes_and_wrong_origin(planning_env):
+    env = planning_env
+    payload = await routine_candidate(env, wake_time="09:00")
+    headers = routine_headers(env)
+    response = await env.client.post(ROOT + "/preferences/preview", headers=headers, json=payload)
+    assert response.status_code == 200, response.text
+    confirmation = {**payload, "preview_hash": response.json()["preview_hash"]}
+    rejected = await env.client.post(
+        ROOT + "/preferences/confirm",
+        headers={**headers, "Origin": "https://foreign.example"},
+        json=confirmation,
+    )
+    assert rejected.status_code == 403
+    async with env.factory() as database:
+        database.add(
+            StudentCourse(
+                id=uuid4(),
+                user_id=env.user_id,
+                workspace_id=env.workspace_id,
+                code="NEW 101",
+                name="Changed course",
+                term_start=MONDAY.date(),
+                term_end=(MONDAY + timedelta(days=90)).date(),
+                archived=False,
+                revision=1,
+            )
+        )
+        await database.commit()
+    changed = await env.client.post(
+        ROOT + "/preferences/confirm", headers=headers, json=confirmation
+    )
+    assert changed.status_code == 409
+
+
+@pytest.mark.parametrize("date_value,clock", [("2027-03-14", "02:30"), ("2026-11-01", "01:30")])
+def test_alarm_never_guesses_clock_change(date_value, clock):
+    from datetime import date
+
+    from navox.student_planning.alarm import alarm_schedule
+
+    prefs = Preferences(wake_time=clock, alarm={"enabled": True})
+    row = alarm_schedule(prefs, "America/New_York", date.fromisoformat(date_value), [], days=1)[0]
+    assert row["enabled"] and row["scheduled_at"] is None
+    assert "clock change" in row["reason"]
+
+
+def test_smart_alarm_requires_real_walk_time_and_obeys_skip_day():
+    from navox.student_planning.alarm import alarm_schedule
+
+    first = SimpleNamespace(
+        cancelled=False,
+        start_at=MONDAY.replace(hour=15),
+        walk_minutes=None,
+        course_code="MATH",
+        course_name="Math",
+    )
+    prefs = Preferences(alarm={"enabled": True, "smart": True, "prep_minutes": 30})
+    row = alarm_schedule(prefs, "America/New_York", MONDAY.date(), [first], days=1)[0]
+    assert row["scheduled_at"] is None
+    first.walk_minutes = 8
+    row = alarm_schedule(prefs, "America/New_York", MONDAY.date(), [first], days=1)[0]
+    assert datetime.fromisoformat(row["scheduled_at"]) == first.start_at - timedelta(minutes=38)
+    prefs.alarm.skip_date = MONDAY.date()
+    assert not alarm_schedule(prefs, "America/New_York", MONDAY.date(), [first], days=1)[0][
+        "enabled"
+    ]
+
+
+def test_per_day_wake_times_protect_sleep_in_planner():
+    start = MONDAY.replace(hour=0)
+    prefs = Preferences(wake_times=["10:00", "11:00", "07:00", "07:00", "07:00", "09:00", "09:00"])
+    result = build_plan(
+        [task(remaining_minutes=600)],
+        prefs,
+        "UTC",
+        start_at=start,
+        end_at=start + timedelta(days=2),
+        busy=[],
+    )
+    for block in result.blocks:
+        assert block.start_at.hour >= (10 if block.start_at.weekday() == 0 else 11)

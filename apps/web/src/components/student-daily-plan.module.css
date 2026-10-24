@@ -427,3 +427,12 @@
   color: var(--nx-on-accent);
   border-color: var(--nx-accent);
 }
+
+.planRoot {
+  --plan-border: var(--nx-border);
+  --plan-muted: var(--nx-muted);
+  display: grid;
+  gap: 24px;
+  color: var(--nx-text);
+  min-width: 0;
+}

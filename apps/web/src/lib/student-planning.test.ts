@@ -294,3 +294,25 @@ describe("accepted-plan source review", () => {
     expect(value.blocks[0].status).toBe("needs_review");
   });
 });
+
+it("rejects incomplete weekly wakes and invalid alarm choices", () => {
+  expect(() =>
+    readStudyPreferences({ ...preferences, wake_times: ["07:00"] }),
+  ).toThrow();
+  const alarm = {
+    enabled: true,
+    days: [0],
+    smart: false,
+    prep_minutes: 30,
+    sound: "gentle",
+    snooze_minutes: 7,
+    skip_date: null,
+  };
+  expect(() => readStudyPreferences({ ...preferences, alarm })).toThrow();
+  expect(() =>
+    readStudyPreferences({
+      ...preferences,
+      alarm: { ...alarm, snooze_minutes: 5, days: [0, 0] },
+    }),
+  ).toThrow();
+});

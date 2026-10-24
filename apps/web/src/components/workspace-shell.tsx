@@ -102,6 +102,7 @@ export function WorkspaceShell({
   accountKey,
   onSignOut,
   timezone,
+  night = false,
   inboxCount: suppliedInboxCount,
 }: {
   current: WorkspaceDestination;
@@ -110,6 +111,7 @@ export function WorkspaceShell({
   accountKey?: string;
   onSignOut?: () => Promise<void> | void;
   timezone?: string;
+  night?: boolean;
   inboxCount?: number;
 }) {
   const router = useRouter();
@@ -268,7 +270,7 @@ export function WorkspaceShell({
     );
   }
   return (
-    <div className={styles.shell} data-navox-shell>
+    <div className={styles.shell} data-navox-shell data-night={night}>
       <a className={styles.skip} href="#workspace-content">
         Skip to content
       </a>
@@ -291,7 +293,9 @@ export function WorkspaceShell({
                 {accountName?.trim().slice(0, 1).toUpperCase() || "N"}
               </span>
               <span className={styles.accountName}>
-                <strong>{accountName || "Your account"}</strong>
+                <strong title={accountName}>
+                  {accountName?.trim().split(/\s+/)[0] || "Your account"}
+                </strong>
                 {savedProfile?.school && <small>{savedProfile.school}</small>}
               </span>
               <Icon name="More" />

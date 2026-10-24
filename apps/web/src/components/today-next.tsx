@@ -7,16 +7,18 @@ export function TodayNext({
   row,
   now,
   timezone,
+  label = "Next up",
 }: {
   row: DayRow;
   now: number;
   timezone: string;
+  label?: string;
 }) {
   const minutes = Math.max(0, Math.ceil((Date.parse(row.start) - now) / 60000));
   const circumference = 2 * Math.PI * 38;
   const location = row.courseId ? row.detail : null;
   return (
-    <section className={styles.next} aria-label="Next up">
+    <section className={styles.next} aria-label={label}>
       <div
         className={styles.countdown}
         role="img"
@@ -38,7 +40,9 @@ export function TodayNext({
         </span>
       </div>
       <div className={styles.nextWords}>
-        <p className={styles.nextLabel}>● Next up · starts in {minutes} min</p>
+        <p className={styles.nextLabel}>
+          ● {label} · starts in {minutes} min
+        </p>
         <h2>{row.title}</h2>
         <div className={styles.nextDetails}>
           <span>

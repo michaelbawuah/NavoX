@@ -139,6 +139,10 @@ export function PlannerWelcome({
               await onRoutine({
                 ...studyPreferencesDraft(preferences),
                 wake_time: wake,
+                wake_times:
+                  wake !== preferences.wake_time
+                    ? null
+                    : preferences.wake_times,
                 sleep_time: sleep,
                 focus_windows: windows,
               }),
@@ -192,7 +196,7 @@ export function PlannerWelcome({
             </select>
           </label>
           <button type="submit" disabled={disabled}>
-            Save routine
+            Review routine
           </button>
           {saved && <p role="status">Routine saved.</p>}
         </form>

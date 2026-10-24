@@ -419,3 +419,9 @@
   font-size: 12px;
   color: var(--nx-muted);
 }
+
+:global([data-navox-theme="dark"]) .shell[data-night="true"] {
+  --nx-bg: #05060a;
+  --nx-accent: #b69cff;
+  --nx-accent-text: #b69cff;
+}

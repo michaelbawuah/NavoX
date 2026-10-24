@@ -101,7 +101,12 @@ def build_plan(
     while day <= last_day:
         try:
             awake_start, awake_end = _window(
-                day, preferences.wake_time, preferences.sleep_time, timezone
+                day,
+                preferences.wake_times[day.weekday()]
+                if preferences.wake_times
+                else preferences.wake_time,
+                preferences.sleep_time,
+                timezone,
             )
             clipped_start, clipped_end = max(awake_start, start_at), min(awake_end, end_at)
             # Split at midnight so each actual local day keeps its own 15% buffer.

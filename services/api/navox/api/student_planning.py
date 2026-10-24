@@ -1,7 +1,7 @@
 """Disabled-by-default, explicitly accepted study plans. Never writes a calendar."""
 
 from typing import Annotated
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
@@ -16,6 +16,7 @@ from navox.student_planning.schemas import (
     OutcomeInput,
     OutcomeView,
     PlanView,
+    PreferencesConfirm,
     PreferencesUpdate,
     PreferencesView,
     PreviewInput,
@@ -216,3 +217,72 @@ async def undo_progress(
 ) -> PlanView:
     require_origin(request, settings.web_origin)
     return await result(service.undo_outcome(database, *scope(account), payload))
+
+
+def expected_routine_owner(request: Request, account: CurrentAccountDependency) -> None:
+    if request.headers.getlist("X-NavoX-Account") != [f"{account.workspace.id}:{account.user.id}"]:
+        raise HTTPException(409, "Your account changed. Reopen Settings and try again")
+
+
+@router.post("/preferences/preview", dependencies=[Depends(expected_routine_owner)])
+async def preview_preferences(
+    payload: PreferencesUpdate,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict:
+    require_origin(request, settings.web_origin)
+    return await result(service.preference_preview(database, *scope(account), payload))
+
+
+@router.post(
+    "/preferences/confirm",
+    response_model=PreferencesView,
+    dependencies=[Depends(expected_routine_owner)],
+)
+async def confirm_preferences(
+    payload: PreferencesConfirm,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> PreferencesView:
+    require_origin(request, settings.web_origin)
+    candidate = PreferencesUpdate.model_validate(payload.model_dump(exclude={"preview_hash"}))
+    await result(schedule.owner(database, *scope(account), lock=True))
+    previous = await result(
+        service.command(
+            database,
+            *scope(account),
+            candidate.request_id,
+            "preferences",
+            candidate.model_dump(mode="json"),
+        )
+    )
+    if previous:
+        return await result(service.preferences(database, *scope(account)))
+    preview = await result(service.preference_preview(database, *scope(account), candidate))
+    if preview["warnings"] or any(
+        row["enabled"] and row["scheduled_at"] is None for row in preview["alarm_occurrences"]
+    ):
+        raise HTTPException(409, "Resolve timetable or wake-time warnings before approving")
+    if preview["preview_hash"] != payload.preview_hash:
+        raise HTTPException(
+            409, "Your routine, classes or study blocks changed. Review a fresh preview"
+        )
+    return await result(service.save_preferences(database, *scope(account), candidate))
+
+
+@router.get("/alarm", dependencies=[Depends(expected_routine_owner)])
+async def alarm_view(account: CurrentAccountDependency, database: DatabaseSession) -> dict:
+    current = await result(service.preferences(database, *scope(account)))
+    payload = PreferencesUpdate.model_validate(
+        {**current.model_dump(exclude={"timezone"}), "request_id": uuid4()}
+    )
+    preview = await result(service.preference_preview(database, *scope(account), payload))
+    return {
+        "timezone": preview["timezone"],
+        "alarm_occurrences": preview["alarm_occurrences"],
+        "native_ringing_available": False,
+    }

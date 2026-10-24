@@ -765,3 +765,67 @@
   font-size: 13px;
   color: var(--nx-muted);
 }
+
+.nightActions {
+  display: grid;
+  gap: 16px;
+}
+.nightActions p {
+  font-size: 15px;
+  color: var(--nx-muted);
+  margin: 0;
+}
+.nightActions > div {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.nightActions a,
+.nightActions button,
+.eveningCard a,
+.nightToggle {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+  background: var(--nx-surface);
+  color: var(--nx-text);
+  padding: 8px 16px;
+  font: 600 14px var(--nx-font);
+  text-decoration: none;
+  cursor: pointer;
+}
+.nightActions a {
+  background: var(--nx-accent);
+  color: var(--nx-on-accent);
+  border-color: var(--nx-accent);
+}
+.eveningCard {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 20px;
+  border: 1px solid var(--nx-border);
+  border-radius: 16px;
+  background: var(--nx-surface);
+}
+.eveningCard h2 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+.eveningCard p {
+  color: var(--nx-muted);
+  font-size: 14px;
+  margin: 0;
+}
+.nightToggle {
+  justify-self: start;
+}
+@media (max-width: 767px) {
+  .eveningCard {
+    flex-direction: column;
+    align-items: start;
+  }
+}

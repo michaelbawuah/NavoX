@@ -10,11 +10,14 @@ import {
 } from "react";
 import {
   type ProposedStudyBlock,
+  type RoutinePreview,
+  readRoutinePreview,
   readStudyPlan,
   readStudyPreferences,
   readStudyPreview,
   readStudyTask,
   readStudyTasks,
+  routineRequest,
   type StudyAssignmentDraft,
   type StudyBlock,
   type StudyPlan,
@@ -51,6 +54,7 @@ import {
 import { mondayOf } from "./classes-week";
 import { PlannerOverview } from "./planner-overview";
 import { PlannerWelcome } from "./planner-welcome";
+import { RoutineChangeReview } from "./routine-change-review";
 import styles from "./student-daily-plan.module.css";
 
 type OutcomeKind = "done" | "took_longer" | "skipped";
@@ -1106,6 +1110,10 @@ function StudyPreferencesForm({
 
 function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
   const [captureTitle, setCaptureTitle] = useState("");
+  const [routineReview, setRoutineReview] = useState<{
+    body: ReturnType<typeof studyPreferencesDraft> & { request_id: string };
+    preview: RoutinePreview;
+  } | null>(null);
   const [tasks, setTasks] = useState<StudyTask[]>([]),
     [preferences, setPreferences] = useState<StudyPreferences | null>(null),
     [plan, setPlan] = useState<StudyPlan | null>(null),
@@ -1263,7 +1271,61 @@ function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
       if (alive.current) setBusy(false);
     }
   }
-  const locked = busy || loading || uncertain;
+  const locked = busy || loading || uncertain || !!routineReview;
+  async function reviewRoutine(
+    value: ReturnType<typeof studyPreferencesDraft>,
+  ): Promise<boolean> {
+    if (operation.current || locked) return false;
+    operation.current = true;
+    setBusy(true);
+    setError("");
+    const body = { ...value, request_id: crypto.randomUUID() };
+    try {
+      const preview = await routineRequest(
+        accountKey,
+        "/preferences/preview",
+        readRoutinePreview,
+        "POST",
+        body,
+      );
+      if (alive.current) setRoutineReview({ body, preview });
+    } catch (cause) {
+      if (alive.current) setError(studentError(cause));
+    } finally {
+      operation.current = false;
+      if (alive.current) setBusy(false);
+    }
+    return false;
+  }
+  async function confirmRoutine() {
+    if (operation.current || !routineReview) return;
+    operation.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      await routineRequest(
+        accountKey,
+        "/preferences/confirm",
+        readStudyPreferences,
+        "POST",
+        {
+          ...routineReview.body,
+          preview_hash: routineReview.preview.preview_hash,
+        },
+      );
+      if (!alive.current) return;
+      setRoutineReview(null);
+      if (!(await load())) setUncertain(true);
+      setNotice(
+        "Routine saved. Review a new study plan if your blocks changed.",
+      );
+    } catch (cause) {
+      if (alive.current) setError(studentError(cause));
+    } finally {
+      operation.current = false;
+      if (alive.current) setBusy(false);
+    }
+  }
   async function previewPlan() {
     if (operation.current || locked) return;
     operation.current = true;
@@ -1288,7 +1350,7 @@ function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
     }
   }
   return (
-    <div className={styles.panel}>
+    <div className={tab === "plan" ? styles.planRoot : styles.panel}>
       {error && (
         <p className={styles.error} role="alert">
           {error}
@@ -1397,14 +1459,7 @@ function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
                     setTaskEditor("new");
                     setTab("tasks");
                   }}
-                  onRoutine={async (value) =>
-                    !!(await mutate(
-                      "/preferences",
-                      readStudyPreferences,
-                      "PUT",
-                      { ...value, request_id: crypto.randomUUID() },
-                    ))
-                  }
+                  onRoutine={reviewRoutine}
                 />
               ) : (
                 <PlannerOverview
@@ -1642,23 +1697,20 @@ function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
                   key={`${preferences.revision}-${epoch}`}
                   preferences={preferences}
                   disabled={locked}
-                  onSave={async (value) => {
-                    const result = await mutate(
-                      "/preferences",
-                      readStudyPreferences,
-                      "PUT",
-                      { ...value, request_id: crypto.randomUUID() },
-                    );
-                    if (result)
-                      setNotice(
-                        "Planning preferences saved. Preview a fresh plan to use them.",
-                      );
-                    return !!result;
-                  }}
+                  onSave={reviewRoutine}
                 />
               </>
             )}
           </section>
+          {routineReview && (
+            <RoutineChangeReview
+              preview={routineReview.preview}
+              draft={{ ...routineReview.body, timezone: preferences.timezone }}
+              busy={busy || loading}
+              onApprove={() => void confirmRoutine()}
+              onCancel={() => setRoutineReview(null)}
+            />
+          )}
           {preview && (
             <StudentStudyPlanPreview
               preview={preview}

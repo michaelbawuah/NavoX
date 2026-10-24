@@ -1,0 +1,139 @@
+.card {
+  display: grid;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--nx-border);
+  border-radius: 16px;
+  background: var(--nx-surface);
+  color: var(--nx-text);
+  font: 14px / 1.5 var(--nx-font);
+  min-width: 0;
+  scroll-margin-top: 80px;
+}
+.card h2 {
+  font-size: 18px;
+  margin: 0;
+}
+.card h3 {
+  font-size: 16px;
+}
+.card p {
+  margin: 0;
+  color: var(--nx-muted);
+}
+.webNote {
+  padding: 12px;
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.card fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.card label {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+  min-width: 0;
+}
+.pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.pair > label {
+  flex: 1;
+  min-width: 140px;
+}
+.card input:not([type="checkbox"]),
+.card select {
+  background: var(--nx-bg);
+  color: var(--nx-text);
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+  min-height: 44px;
+  padding: 8px;
+  font: 14px var(--nx-font);
+  min-width: 0;
+  width: 100%;
+}
+.card input[type="checkbox"] {
+  accent-color: var(--nx-accent);
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.card .check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.days {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+}
+.card summary {
+  min-height: 44px;
+  cursor: pointer;
+}
+.alarmDays {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.alarmDays label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+}
+.card button {
+  min-height: 44px;
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+  background: var(--nx-bg);
+  color: var(--nx-text);
+  padding: 8px 16px;
+  font: 600 14px var(--nx-font);
+  cursor: pointer;
+}
+.card .primary {
+  background: var(--nx-accent);
+  color: var(--nx-on-accent);
+  border-color: var(--nx-accent);
+}
+.card button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.review {
+  padding: 16px;
+  border: 1px solid var(--nx-accent);
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+}
+.review ul {
+  padding-left: 20px;
+  font-size: 13px;
+}
+.review li {
+  margin: 8px 0;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+@media (max-width: 767px) {
+  .card {
+    padding: 16px;
+  }
+}

@@ -567,6 +567,15 @@ async def preferences(database: AsyncSession, user_id: UUID, workspace_id: UUID)
     )
 
 
+def scheduling_preferences(value: dict) -> dict:
+    # Alarm sounds, enabled days and snooze do not invalidate accepted study work.
+    # Omitting new defaults preserves source hashes of pre-redesign plans.
+    result = {key: item for key, item in value.items() if key != "alarm"}
+    if result.get("wake_times") is None:
+        result.pop("wake_times", None)
+    return result
+
+
 async def save_preferences(
     database: AsyncSession, user_id: UUID, workspace_id: UUID, payload: PreferencesUpdate
 ) -> PreferencesView:
@@ -580,10 +589,13 @@ async def save_preferences(
     row = await state(database, user_id, workspace_id)
     if row.preferences_revision != payload.revision:
         raise schedule.StudentError(409, "Your routine changed. Refresh before saving again")
-    row.preferences = payload.model_dump(mode="json", exclude={"request_id", "revision"})
+    candidate = payload.model_dump(mode="json", exclude={"request_id", "revision"})
+    routine_changed = scheduling_preferences(row.preferences) != scheduling_preferences(candidate)
+    row.preferences = candidate
     row.preferences_revision += 1
-    row.revision += 1
-    await invalidate_future(database, user_id, workspace_id, row)
+    if routine_changed:
+        row.revision += 1
+        await invalidate_future(database, user_id, workspace_id, row)
     result = PreferencesView.model_validate(
         {
             **row.preferences,
@@ -619,7 +631,7 @@ async def stable_source_hash(
         {
             "version": 1,
             "timezone": user.timezone,
-            "preferences": planning.preferences,
+            "preferences": scheduling_preferences(planning.preferences),
             "tasks": [row.model_dump(mode="json") for row in task_rows],
             "eligible_tasks": sorted(str(row.id) for row in eligible),
             "current_sources": await current_sources(
@@ -827,7 +839,7 @@ async def snapshot(
             "version": 1,
             "revision": planning.revision,
             "timezone": user.timezone,
-            "preferences": planning.preferences,
+            "preferences": scheduling_preferences(planning.preferences),
             "tasks": [row.model_dump(mode="json") for row in task_rows],
             "eligible_tasks": sorted(str(row.id) for row in eligible),
             "current_sources": source_states,
@@ -1422,3 +1434,71 @@ async def forget_planning_data(database: AsyncSession, user_id: UUID, workspace_
         await database.execute(
             delete(model).where(model.user_id == user_id, model.workspace_id == workspace_id)
         )
+
+
+async def preference_preview(
+    database: AsyncSession, user_id: UUID, workspace_id: UUID, payload: PreferencesUpdate
+) -> dict:
+    """Bind routine/alarm consent to every study block it would retire, plus class sources."""
+    from navox.student_planning.alarm import alarm_schedule
+
+    user = await schedule.owner(database, user_id, workspace_id, lock=True)
+    current = await preferences(database, user_id, workspace_id)
+    if current.revision != payload.revision:
+        raise schedule.StudentError(409, "Your routine changed. Review it again")
+    now = await database_now(database)
+    blocks = list(
+        await database.scalars(
+            select(StudentStudyBlock)
+            .where(
+                StudentStudyBlock.user_id == user_id,
+                StudentStudyBlock.workspace_id == workspace_id,
+                StudentStudyBlock.status == "planned",
+                StudentStudyBlock.start_at >= now,
+            )
+            .order_by(StudentStudyBlock.start_at, StudentStudyBlock.id)
+            .limit(601)
+        )
+    )
+    if len(blocks) > 600:
+        raise schedule.StudentError(409, "Too many future blocks to review safely")
+    zone = ZoneInfo(user.timezone)
+    day = now.astimezone(zone).date()
+    start = datetime.combine(day, time.min, zone).astimezone(UTC)
+    end = datetime.combine(day + timedelta(days=14), time.min, zone).astimezone(UTC)
+    sources = await schedule.state_for_window(database, user_id, workspace_id, start, end)
+    occurrences, _, _, warnings = project(
+        *sources, start_at=start, end_at=end, include_conflicts=False
+    )
+    routine_changed = scheduling_preferences(
+        current.model_dump(mode="json", exclude={"revision", "timezone"})
+    ) != scheduling_preferences(payload.model_dump(mode="json", exclude={"revision", "request_id"}))
+    replaced = (
+        [block_view(row).model_dump(mode="json") for row in blocks] if routine_changed else []
+    )
+    alarm = alarm_schedule(payload, user.timezone, day, occurrences, days=7)
+    candidate = payload.model_dump(mode="json", exclude={"request_id", "revision"})
+    fingerprint = digest(
+        {
+            "request": payload.model_dump(mode="json"),
+            "timezone": user.timezone,
+            "day": day,
+            "replaced": replaced,
+            "sources": [
+                [row.model_dump(mode="json") for row in sorted(group, key=lambda row: str(row.id))]
+                for group in sources
+            ],
+        }
+    )
+    return {
+        "preview_hash": fingerprint,
+        "preferences": candidate,
+        "replaced_blocks": replaced,
+        "timezone": user.timezone,
+        "alarm_occurrences": alarm,
+        "warnings": warnings,
+        "native_ringing_available": False,
+        "previous_alarm_occurrences": alarm_schedule(
+            current, user.timezone, day, occurrences, days=7
+        ),
+    }

@@ -739,6 +739,12 @@
   border: 0;
   background: transparent;
 }
+.workspace button {
+  background: var(--nx-surface);
+  border-color: var(--nx-border);
+  color: var(--nx-text);
+}
+
 .workspace .tabs {
   border-bottom: 0;
 }

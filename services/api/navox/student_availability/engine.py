@@ -180,7 +180,9 @@ def compute_availability(request: AvailabilityRequest) -> AvailabilityResult:
         try:
             first, last = _wall_window(
                 day,
-                request.preferences.wake_time,
+                request.preferences.wake_times[day.weekday()]
+                if request.preferences.wake_times
+                else request.preferences.wake_time,
                 request.preferences.sleep_time,
                 request.timezone,
             )

@@ -20,8 +20,11 @@ import {
   type StudentGoal,
 } from "../lib/student-goals";
 import {
+  type AlarmOccurrence,
+  readAlarmView,
   readStudyPlan,
   readStudyTasks,
+  routineRequest,
   type StudyPlan,
   type StudyTask,
   studyRequest,
@@ -44,6 +47,7 @@ import {
 import { NoaArtwork } from "./noa-artwork";
 import styles from "./today-home.module.css";
 import { TodayNext } from "./today-next";
+import { TodayEveningAlarm, TodayNightActions } from "./today-night";
 import {
   type ProgressReceipt,
   TodayProgressReceipt,
@@ -65,6 +69,7 @@ type Data = {
   goals: StudentGoal[];
   boards: SavedBoardSummary[];
   calendarConnected: boolean;
+  alarms: AlarmOccurrence[];
   complete: boolean;
   receivedAt: number;
 };
@@ -105,6 +110,7 @@ function TodayHomeAccount({
     [dismissed, setDismissed] = useState(false),
     [triedVox, setTriedVox] = useState(false);
   const [setupStarted, setSetupStarted] = useState(false);
+  const [showNightDay, setShowNightDay] = useState(false);
   const call = useVoxCall();
   const voxRequest = useVoxRequest();
   const epoch = useRef(0);
@@ -164,10 +170,18 @@ function TodayHomeAccount({
             AbortSignal.timeout(12000),
           )
         : Promise.resolve(null),
+      productFeatures.studentPlanning
+        ? routineRequest(accountKey, "/alarm", readAlarmView).catch(() => null)
+        : Promise.resolve(null),
     ] as const);
     if (turn !== epoch.current) return;
-    const [timetable, plan, tasks, items, goals, boards, calendar] = results;
+    const [timetable, plan, tasks, items, goals, boards, calendar, alarms] =
+      results;
     const value: Data = {
+      alarms:
+        alarms.status === "fulfilled"
+          ? (alarms.value?.alarm_occurrences ?? [])
+          : [],
       timetable: timetable.status === "fulfilled" ? timetable.value : null,
       plan: plan.status === "fulfilled" ? plan.value : null,
       tasks: tasks.status === "fulfilled" ? tasks.value : [],
@@ -272,6 +286,11 @@ function TodayHomeAccount({
   const showSetup = !!data && setupStarted && !dismissed && done < 5;
   const welcoming = !!data && !hasClasses && !rows.length && !hasTask && !error;
   const local = clock ? studentLocalTime(now, zone) : null;
+  const late = local?.period === "late-night" && !welcoming;
+  const firstClass = rows.find(
+    (r) => r.courseId && !r.study && Date.parse(r.start) > now,
+  );
+  const todayAlarm = data?.alarms.find((a) => a.day === local?.date);
   const classesLeft = rows.filter(
     (r) => r.courseId && !r.study && Date.parse(r.end || r.start) > now,
   ).length;
@@ -300,6 +319,7 @@ function TodayHomeAccount({
   return (
     <WorkspaceShell
       current="Today"
+      night={late}
       accountName={account.display_name ?? account.email}
       accountKey={accountKey}
       onSignOut={onSignOut}
@@ -327,9 +347,11 @@ function TodayHomeAccount({
             <p className={styles.heroSummary}>
               {welcoming
                 ? "I’m Noa. Give me about 3 minutes and I’ll know your week: your classes, what’s due, and when you’re actually free."
-                : summary}
+                : late && firstClass
+                  ? `Your first class is at ${studentClock(firstClass.start, zone)}. Let’s leave some room for sleep.`
+                  : summary}
             </p>
-            {!welcoming && data && (
+            {!welcoming && !late && data && (
               <div className={styles.chips}>
                 <button
                   type="button"
@@ -450,7 +472,45 @@ function TodayHomeAccount({
             }}
           />
         )}
-        {next && <TodayNext row={next} now={now} timezone={zone} />}
+        {late && <TodayNightActions alarm={todayAlarm} now={now} />}
+        {local && local.hour >= 21 && (
+          <TodayEveningAlarm
+            alarm={data?.alarms.find((a) => a.day > local.date)}
+            timezone={zone}
+          />
+        )}
+        {late && firstClass ? (
+          <TodayNext
+            row={firstClass}
+            now={now}
+            timezone={zone}
+            label="First thing today"
+          />
+        ) : (
+          next && <TodayNext row={next} now={now} timezone={zone} />
+        )}
+        {late && (
+          <>
+            <div className={styles.chips}>
+              {due.map((item) => (
+                <Link
+                  className={styles.progressChip}
+                  href="/planner"
+                  key={item.id}
+                >
+                  {item.title} · {relativeTime(item.due, now, zone)}
+                </Link>
+              ))}
+            </div>
+            <button
+              type="button"
+              className={styles.nightToggle}
+              onClick={() => setShowNightDay(!showNightDay)}
+            >
+              {showNightDay ? "Keep the night quiet" : "See your full day"}
+            </button>
+          </>
+        )}
         {data &&
           !showSetup &&
           hasClasses &&
@@ -463,252 +523,259 @@ function TodayHomeAccount({
           !connectionsUnavailable && (
             <p className={styles.message}>Done for today</p>
           )}
-        {(rows.length > 0 ||
-          due.length > 0 ||
-          replies.length > 0 ||
-          goals.length > 0 ||
-          board) && (
-          <div className={styles.grid}>
-            <div className={styles.column}>
-              {rows.length > 0 && (
-                <section
-                  className={styles.section}
-                  aria-labelledby="today-plan"
-                >
-                  <div className={styles.heading}>
-                    <h2 id="today-plan">
-                      Your day <small>{rows.length} things</small>
-                    </h2>
-                  </div>
-                  <ol className={styles.list}>
-                    {rows.map((row) => {
-                      const past =
-                          (row.end
-                            ? Date.parse(row.end)
-                            : Date.parse(row.start)) <= now,
-                        current =
-                          Date.parse(row.start) <= now &&
-                          !!row.end &&
-                          Date.parse(row.end) > now;
-                      return (
-                        <li
-                          key={row.id}
-                          className={styles.row}
-                          data-past={past}
-                          data-current={current}
-                          data-shift={row.detail === "Shift"}
-                        >
-                          <Link href={row.href} className={styles.rowTop}>
-                            <time dateTime={row.start}>
-                              {studentClock(row.start, zone)}
-                            </time>
-                            <span
-                              className="nx-dot"
-                              style={
+        {(!late || showNightDay) &&
+          (rows.length > 0 ||
+            due.length > 0 ||
+            replies.length > 0 ||
+            goals.length > 0 ||
+            board) && (
+            <div className={styles.grid}>
+              <div className={styles.column}>
+                {rows.length > 0 && (
+                  <section
+                    className={styles.section}
+                    aria-labelledby="today-plan"
+                  >
+                    <div className={styles.heading}>
+                      <h2 id="today-plan">
+                        Your day <small>{rows.length} things</small>
+                      </h2>
+                    </div>
+                    <ol className={styles.list}>
+                      {rows.map((row) => {
+                        const past =
+                            (row.end
+                              ? Date.parse(row.end)
+                              : Date.parse(row.start)) <= now,
+                          current =
+                            Date.parse(row.start) <= now &&
+                            !!row.end &&
+                            Date.parse(row.end) > now;
+                        return (
+                          <li
+                            key={row.id}
+                            className={styles.row}
+                            data-past={past}
+                            data-current={current}
+                            data-shift={row.detail === "Shift"}
+                          >
+                            <Link href={row.href} className={styles.rowTop}>
+                              <time dateTime={row.start}>
+                                {studentClock(row.start, zone)}
+                              </time>
+                              <span
+                                className="nx-dot"
+                                style={
+                                  {
+                                    "--nx-course": row.courseId
+                                      ? courseColor(row.courseId)
+                                      : row.detail === "Shift"
+                                        ? "var(--nx-warning)"
+                                        : undefined,
+                                  } as CSSProperties
+                                }
+                              />
+                              <span className={styles.rowText}>
+                                <strong className={styles.rowTitle}>
+                                  {row.title}
+                                </strong>
+                                {row.detail && (
+                                  <span className={styles.rowDetail}>
+                                    {row.detail}
+                                    {row.end &&
+                                      ` · ${studentClock(row.start, zone)} – ${studentClock(row.end, zone)}`}
+                                  </span>
+                                )}
+                              </span>
+                              <span className={styles.status}>
+                                {row.study && row.study.status !== "planned"
+                                  ? {
+                                      done: "Done",
+                                      took_longer: "Done",
+                                      skipped: "Skipped",
+                                      needs_review: "Review",
+                                      superseded: "",
+                                    }[row.study.status]
+                                  : current
+                                    ? "Now"
+                                    : next?.id === row.id
+                                      ? "Next"
+                                      : ""}
+                              </span>
+                            </Link>
+                            {current &&
+                              row.study?.status === "planned" &&
+                              !data?.plan?.needs_review &&
+                              (() => {
+                                const block = row.study;
+                                const task = data?.tasks.find(
+                                  (task) => task.id === block?.task_id,
+                                );
+                                return (
+                                  task &&
+                                  block && (
+                                    <TodayStudyActions
+                                      key={`${row.study.id}:${row.study.revision}:${task.revision}`}
+                                      block={block}
+                                      task={task}
+                                      accountKey={accountKey}
+                                      timezone={zone}
+                                      now={now}
+                                      onSaved={(result) => {
+                                        setReceipt({
+                                          result,
+                                          task,
+                                          block,
+                                          savedAt: Date.now(),
+                                        });
+                                        void load();
+                                      }}
+                                    />
+                                  )
+                                );
+                              })()}
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </section>
+                )}
+                {board && (
+                  <section className={styles.section}>
+                    <div className={styles.heading}>
+                      <h2>Continue learning</h2>
+                    </div>
+                    <Link
+                      className={styles.compact}
+                      href={`/board#saved=${board.id}`}
+                    >
+                      <span>
+                        <strong>{board.title}</strong>
+                        <small>Pick up where you left off</small>
+                      </span>
+                      <span className={styles.status}>Resume →</span>
+                    </Link>
+                  </section>
+                )}
+              </div>
+              <div className={styles.column}>
+                {due.length > 0 && (
+                  <section className={`${styles.section} ${styles.sideCard}`}>
+                    <div className={styles.heading}>
+                      <h2>Due soon</h2>
+                      <Link href="/planner">See all</Link>
+                    </div>
+                    <ul className={styles.list}>
+                      {due.map((item) => (
+                        <li key={item.id}>
+                          <Link className={styles.compact} href="/planner">
+                            {item.courseId && (
+                              <i
+                                className="nx-dot"
+                                style={
+                                  {
+                                    "--nx-course": courseColor(item.courseId),
+                                  } as CSSProperties
+                                }
+                              />
+                            )}
+                            <span>
+                              <strong>{item.title}</strong>
+                              <small>
                                 {
-                                  "--nx-course": row.courseId
-                                    ? courseColor(row.courseId)
-                                    : row.detail === "Shift"
-                                      ? "var(--nx-warning)"
-                                      : undefined,
-                                } as CSSProperties
-                              }
-                            />
-                            <span className={styles.rowText}>
-                              <strong className={styles.rowTitle}>
-                                {row.title}
-                              </strong>
-                              {row.detail && (
-                                <span className={styles.rowDetail}>
-                                  {row.detail}
-                                  {row.end &&
-                                    ` · ${studentClock(row.start, zone)} – ${studentClock(row.end, zone)}`}
-                                </span>
-                              )}
+                                  data?.timetable?.courses.find(
+                                    (c) => c.id === item.courseId,
+                                  )?.code
+                                }
+                              </small>
                             </span>
-                            <span className={styles.status}>
-                              {row.study && row.study.status !== "planned"
-                                ? {
-                                    done: "Done",
-                                    took_longer: "Done",
-                                    skipped: "Skipped",
-                                    needs_review: "Review",
-                                    superseded: "",
-                                  }[row.study.status]
-                                : current
-                                  ? "Now"
-                                  : next?.id === row.id
-                                    ? "Next"
-                                    : ""}
+                            <span
+                              className={styles.dueChip}
+                              data-urgent={
+                                Date.parse(item.due) - now <= 2 * 86400000
+                              }
+                            >
+                              {relativeTime(item.due, now, zone)}
                             </span>
                           </Link>
-                          {current &&
-                            row.study?.status === "planned" &&
-                            !data?.plan?.needs_review &&
-                            (() => {
-                              const block = row.study;
-                              const task = data?.tasks.find(
-                                (task) => task.id === block?.task_id,
-                              );
-                              return (
-                                task &&
-                                block && (
-                                  <TodayStudyActions
-                                    key={`${row.study.id}:${row.study.revision}:${task.revision}`}
-                                    block={block}
-                                    task={task}
-                                    accountKey={accountKey}
-                                    timezone={zone}
-                                    now={now}
-                                    onSaved={(result) => {
-                                      setReceipt({
-                                        result,
-                                        task,
-                                        block,
-                                        savedAt: Date.now(),
-                                      });
-                                      void load();
-                                    }}
-                                  />
-                                )
-                              );
-                            })()}
                         </li>
-                      );
-                    })}
-                  </ol>
-                </section>
-              )}
-              {board && (
-                <section className={styles.section}>
-                  <div className={styles.heading}>
-                    <h2>Continue learning</h2>
-                  </div>
-                  <Link
-                    className={styles.compact}
-                    href={`/board#saved=${board.id}`}
-                  >
-                    <span>
-                      <strong>{board.title}</strong>
-                      <small>Pick up where you left off</small>
-                    </span>
-                    <span className={styles.status}>Resume →</span>
-                  </Link>
-                </section>
-              )}
-            </div>
-            <div className={styles.column}>
-              {due.length > 0 && (
-                <section className={`${styles.section} ${styles.sideCard}`}>
-                  <div className={styles.heading}>
-                    <h2>Due soon</h2>
-                    <Link href="/planner">See all</Link>
-                  </div>
-                  <ul className={styles.list}>
-                    {due.map((item) => (
-                      <li key={item.id}>
-                        <Link className={styles.compact} href="/planner">
-                          {item.courseId && (
-                            <i
-                              className="nx-dot"
-                              style={
-                                {
-                                  "--nx-course": courseColor(item.courseId),
-                                } as CSSProperties
-                              }
-                            />
-                          )}
-                          <span>
-                            <strong>{item.title}</strong>
-                            <small>
-                              {
-                                data?.timetable?.courses.find(
-                                  (c) => c.id === item.courseId,
-                                )?.code
-                              }
-                            </small>
-                          </span>
-                          <span
-                            className={styles.dueChip}
-                            data-urgent={
-                              Date.parse(item.due) - now <= 2 * 86400000
-                            }
+                      ))}
+                    </ul>
+                  </section>
+                )}
+                {replies.length > 0 && (
+                  <section className={`${styles.section} ${styles.sideCard}`}>
+                    <div className={styles.heading}>
+                      <h2>Needs a reply</h2>
+                    </div>
+                    <ul className={styles.list}>
+                      {replies.slice(0, 3).map((item) => (
+                        <li key={item.id}>
+                          <Link
+                            className={styles.compact}
+                            href="/inbox#needs-reply"
                           >
-                            {relativeTime(item.due, now, zone)}
-                          </span>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-              {replies.length > 0 && (
-                <section className={`${styles.section} ${styles.sideCard}`}>
-                  <div className={styles.heading}>
-                    <h2>Needs a reply</h2>
-                  </div>
-                  <ul className={styles.list}>
-                    {replies.slice(0, 3).map((item) => (
-                      <li key={item.id}>
-                        <Link
-                          className={styles.compact}
-                          href="/inbox#needs-reply"
-                        >
-                          <span>
-                            <strong>{item.title}</strong>
-                            {item.due_at && (
-                              <small>
-                                {relativeTime(item.due_at, now, zone)}
-                              </small>
-                            )}
-                          </span>
-                          <span className={styles.draftReply}>Draft reply</span>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              )}
-              {goals.length > 0 && (
-                <section className={styles.section}>
-                  <div className={styles.heading}>
-                    <h2>This week’s goals</h2>
-                  </div>
-                  <div className={styles.goalList}>
-                    {goals.map((goal) => (
-                      <Link key={goal.id} className={styles.goal} href="/goals">
-                        <span>{goal.title}</span>
-                        <span>
-                          {goal.tracking === "count"
-                            ? goal.progress.reported_count === null
-                              ? "No check-in"
-                              : `${goal.progress.reported_count}/${goal.progress.target}`
-                            : goal.progress.qualitative_latest === "unknown"
-                              ? "No check-in"
-                              : goal.progress.qualitative_latest === "yes"
-                                ? "✓"
-                                : "Not yet"}
-                        </span>
-                        {goal.tracking === "count" &&
-                          goal.progress.reported_count !== null &&
-                          goal.progress.target !== null && (
-                            <progress
-                              aria-label={goal.title}
-                              value={Math.min(
-                                goal.progress.reported_count,
-                                goal.progress.target,
+                            <span>
+                              <strong>{item.title}</strong>
+                              {item.due_at && (
+                                <small>
+                                  {relativeTime(item.due_at, now, zone)}
+                                </small>
                               )}
-                              max={goal.progress.target}
-                            />
-                          )}
-                      </Link>
-                    ))}
-                  </div>
-                </section>
-              )}
+                            </span>
+                            <span className={styles.draftReply}>
+                              Draft reply
+                            </span>
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
+                {goals.length > 0 && (
+                  <section className={styles.section}>
+                    <div className={styles.heading}>
+                      <h2>This week’s goals</h2>
+                    </div>
+                    <div className={styles.goalList}>
+                      {goals.map((goal) => (
+                        <Link
+                          key={goal.id}
+                          className={styles.goal}
+                          href="/goals"
+                        >
+                          <span>{goal.title}</span>
+                          <span>
+                            {goal.tracking === "count"
+                              ? goal.progress.reported_count === null
+                                ? "No check-in"
+                                : `${goal.progress.reported_count}/${goal.progress.target}`
+                              : goal.progress.qualitative_latest === "unknown"
+                                ? "No check-in"
+                                : goal.progress.qualitative_latest === "yes"
+                                  ? "✓"
+                                  : "Not yet"}
+                          </span>
+                          {goal.tracking === "count" &&
+                            goal.progress.reported_count !== null &&
+                            goal.progress.target !== null && (
+                              <progress
+                                aria-label={goal.title}
+                                value={Math.min(
+                                  goal.progress.reported_count,
+                                  goal.progress.target,
+                                )}
+                                max={goal.progress.target}
+                              />
+                            )}
+                        </Link>
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
         {dismissed && data && !rows.length && !hasClasses && (
           <Button
             variant="quiet"
