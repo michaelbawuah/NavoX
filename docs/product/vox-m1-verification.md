@@ -80,3 +80,55 @@ The first Mac source regression attempt failed in Linux-only calendar parsing an
 Behavior added: temporary encrypted completed-turn state expires with the active renewable call, rather than surviving as saved memory/history. Source erasure conservatively ends the entire active call so retained provider RAM cannot repeat forgotten data. This is intentional; per-turn source provenance is not yet available. No control spacing or visual-design deviations were introduced.
 
 Remaining: real worker/network/device qualification, last-turn crash window, long-context compaction, licensed wake/onset checks, deployment and live usage/cost reconciliation. No test link or phone recording is claimed by this checkpoint.
+
+
+## Live browser checkpoint — 2026-10-23/24
+
+This dated section supersedes earlier deployment/credential/live-call absence
+statements in this historical record. M1 is still **in progress**, and all phone
+acceptance remains pending. See the current [acceptance table](vox-m1-acceptance.md)
+and [operator runbook](vox-m1-runbook.md) for exact evidence and limitations.
+
+- Live primary calls completed two questions with correct follow-up context.
+- The measured 980 ms sentence gap is retained with a configurable 1,200 ms
+  end-of-turn setting; it originally split at the old 600 ms boundary.
+- A six-second browser network disconnection recovered through fresh media
+  admission; the unrepeated follow-up correctly used restored call context.
+- Interruption occurred during output after 6,382 ms of worker playout; the new
+  arithmetic question was answered correctly.
+- A saved QA timetable query returned the expected course, time and room. Test
+  data was cleaned up using the normal student API.
+- End/close returned HTTP 204 and the UI showed Call ended. Model usage and
+  known cost were logged; transport cost is still unknown.
+- Focused backend regression run: 73 passed. Frontend controller/LiveKit/controls:
+  177 passed; web typecheck passed. Counts overlap older test records and must
+  not be summed as a distinct-test total. Full current CI is tracked in PR #56.
+
+The test site uses a separate database and dedicated provider projects. Public
+registration is blocked. No production student data was copied. Private operator
+files and test logins remain outside Git. Real phone recordings, licensed local
+wake, long-duration provider rollover/context compaction, invoice reconciliation,
+and student/cohort usage targets remain outstanding.
+
+
+Automatic fallback was also exercised by refusing only the primary transport in
+the isolated configuration. A real browser call completed STT → text → speech
+with correct first/follow-up arithmetic answers and settled 937 tokens with no
+remaining reservations. Known model cost was USD 0.0018700; transport remained
+unknown. Configuration was restored byte-for-byte. Earlier variability in
+follow-up accuracy and provider latency remains a corpus/device qualification
+concern; no broad quality or latency target is marked passed.
+
+
+Final cleanup/read checks returned zero active calls, zero retained active-call
+checkpoints, zero unfinished cleanup jobs, and zero LiveKit Cloud rooms or
+participants in the dedicated test project. The operator daily endpoint returned
+HTTP 200 and two scoped student rows. The QA row for 2026-10-24 recorded 2,875
+tokens and 199,777 ms connected; its 18,832 ms speaking plus 180,945 ms idle
+balanced exactly. Known model cost was USD 0.0059424, with the total explicitly
+unknown. These are test-call figures, not production student usage.
+
+Both production and isolated test roots returned HTTP 200 from the server.
+The original primary route was restored. Private Mac credential/login files
+retained mode 0600, and a common-secret-pattern scan of the branch diff found no
+matches (a heuristic, not a guarantee). No physical-phone pass is inferred.

@@ -218,7 +218,17 @@ reasoning_effort=none succeeded. The configured fallback now sends
 llm_reasoning_effort (default none); setting it to null omits the field for a
 compatible provider that does not accept it. The same setting applies on every
 tool round trip. No model, voice, authorization boundary or tool permission was
-changed. Full browser fallback requalification is still required for this fix.
+changed.
+
+On 2026-10-24 the isolated primary endpoint was temporarily pointed at a verified
+closed loopback port, then the real STT → text → speech fallback completed both
+questions correctly through the browser. The call settled 937 provider tokens,
+zero remaining reservations, and USD 0.0018700 in known estimated model cost.
+The original operator configuration was restored byte-for-byte afterward. One
+earlier run returned an incorrect follow-up and another was ended before its
+second speech request completed. This successful controlled scenario is not a
+voice-accuracy benchmark or a latency acceptance pass; broader corpus/device
+quality and slow-provider behavior remain open.
 
 Official references reviewed 2026-10-23:
 - https://developers.openai.com/api/docs/guides/function-calling
