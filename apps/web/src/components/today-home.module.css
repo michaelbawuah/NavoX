@@ -30,6 +30,12 @@
   color: var(--nx-muted);
   margin-top: 4px;
 }
+.next > a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: minmax(0, 1.7fr) minmax(240px, 1fr);
@@ -260,4 +266,22 @@
 .row[data-past="true"] .rowTitle,
 .row[data-past="true"] time {
   color: var(--nx-muted);
+}
+
+.next summary {
+  display: grid;
+  gap: 4px;
+  cursor: pointer;
+  list-style: none;
+  min-height: 44px;
+}
+.next summary::-webkit-details-marker {
+  display: none;
+}
+.next summary:focus-visible {
+  outline: 2px solid var(--nx-accent);
+  outline-offset: 4px;
+}
+.next p {
+  margin: 12px 0 0;
 }

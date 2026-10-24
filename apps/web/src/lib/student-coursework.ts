@@ -584,6 +584,7 @@ export async function uploadCourseMaterial(
     request_id: string;
     content: Blob | Uint8Array<ArrayBuffer>;
     media_type: string;
+    account_key?: string;
     material_id?: string;
     signal?: AbortSignal;
   },
@@ -614,6 +615,7 @@ export async function uploadCourseMaterial(
         "Content-Type": input.media_type,
         "X-Material-Title": encodeURIComponent(input.title.trim()),
         "X-Request-ID": input.request_id,
+        ...(input.account_key ? { "X-NavoX-Account": input.account_key } : {}),
       },
       body: input.content,
     },

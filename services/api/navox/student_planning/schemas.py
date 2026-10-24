@@ -238,12 +238,18 @@ class OutcomeInput(Input):
         return self
 
 
+class OutcomeConfirmInput(OutcomeInput):
+    preview_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class OutcomeView(Input):
     task: TaskView
     block: BlockView
     plan: PlanView
     result: PlanResult
     undo_request_id: UUID
+    preview_hash: str | None = None
+    replaced_blocks: list[BlockView] = Field(default_factory=list)
 
 
 class UndoInput(Input):

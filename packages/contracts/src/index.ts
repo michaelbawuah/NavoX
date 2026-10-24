@@ -1,35 +1,40 @@
 export type HealthStatus = "live" | "ready" | "not_ready";
 
 export interface HealthResponse {
-  status: HealthStatus;
-  service: "navox-api";
-  version: string;
+	status: HealthStatus;
+	service: "navox-api";
+	version: string;
 }
 
 export interface WorkspaceSummary {
-  id: string;
-  name: string;
-  workspace_type: "personal" | string;
+	id: string;
+	name: string;
+	workspace_type: "personal" | string;
 }
 
 export interface AuthenticatedAccount {
-  id: string;
-  email: string;
-  display_name: string | null;
-  workspace: WorkspaceSummary;
+	id: string;
+	email: string;
+	display_name: string | null;
+	workspace: WorkspaceSummary;
 }
 
 export interface GoogleConnection {
-  id: string;
-  provider: "google";
-  status: "active" | "needs_reauthorization" | string;
-  granted_scopes: string[];
-  last_checked_at: string | null;
-  last_error: string | null;
+	id: string;
+	provider: "google";
+	status: "active" | "needs_reauthorization" | string;
+	granted_scopes: string[];
+	last_checked_at: string | null;
+	last_error: string | null;
 }
 
-export type * from "./subscriptions";
-export type * from "./news";
-export type * from "./knowledge";
 export type * from "./assistant";
 export type * from "./board";
+export type * from "./knowledge";
+export type * from "./news";
+export type * from "./subscriptions";
+
+/** Student message bounds; mirrored in the API message-limit settings. */
+export const TYPED_MESSAGE_LIMIT = 8000;
+export const SPOKEN_MESSAGE_LIMIT = 4000;
+export const MESSAGE_COUNTER_AT = 7000;

@@ -390,6 +390,20 @@ export function readStudyOutcome(value: unknown): StudyOutcome {
     undo_request_id: id(v.undo_request_id),
   };
 }
+export interface StudyOutcomePreview extends StudyOutcome {
+  preview_hash: string;
+  replaced_blocks: StudyBlock[];
+}
+export function readStudyOutcomePreview(value: unknown): StudyOutcomePreview {
+  const v = obj(value);
+  const hash = text(v.preview_hash, 64);
+  if (!/^[a-f0-9]{64}$/.test(hash)) return invalid();
+  return {
+    ...readStudyOutcome(value),
+    preview_hash: hash,
+    replaced_blocks: list(v.replaced_blocks, readStudyBlock, 600),
+  };
+}
 export function studyTaskDraft(value: StudyTaskFields): StudyTaskFields {
   return {
     title: value.title,

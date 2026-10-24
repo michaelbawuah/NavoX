@@ -1501,3 +1501,74 @@ async def test_replayed_undo_refreshes_source_validity_without_restoring_anythin
     assert second.status_code == 200, second.text
     assert second.json()["needs_review"] is True
     assert second.json()["revision"] == first.json()["revision"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["done", "took_longer", "skipped"])
+async def test_progress_preview_discards_all_writes_and_confirms_exact_changes(planning_env, kind):
+    env = planning_env
+    current_task = await create_task(env)
+    plan, _ = await accept(env)
+    block = next(row for row in plan["blocks"] if row["status"] == "planned")
+    env.clock.now = datetime.fromisoformat(block["start_at"]) + timedelta(minutes=30)
+    payload = {
+        "request_id": str(uuid4()),
+        "revision": block["revision"],
+        "task_revision": current_task["revision"],
+        "outcome": kind,
+        "actual_minutes": 0 if kind == "skipped" else 45,
+    }
+    if kind == "took_longer":
+        payload["remaining_minutes"] = 150
+    path = ROOT + f"/blocks/{block['id']}/outcome"
+    before_tasks = (await env.client.get(ROOT + "/tasks")).json()
+    before_plan = (await env.client.get(ROOT + "/plan")).json()
+    async with env.factory() as db:
+        commands = await db.scalar(select(func.count()).select_from(StudentPlanningCommand))
+        blocks = await db.scalar(select(func.count()).select_from(StudentStudyBlock))
+    previewed = await env.client.post(path + "/preview", json=payload)
+    assert previewed.status_code == 200, previewed.text
+    changes = previewed.json()
+    assert len(changes["preview_hash"]) == 64
+    assert changes["replaced_blocks"]
+    assert (await env.client.get(ROOT + "/tasks")).json() == before_tasks
+    assert (await env.client.get(ROOT + "/plan")).json() == before_plan
+    async with env.factory() as db:
+        assert await db.scalar(select(func.count()).select_from(StudentPlanningCommand)) == commands
+        assert await db.scalar(select(func.count()).select_from(StudentStudyBlock)) == blocks
+    # Different wall-clock seconds must not invalidate an unchanged plan.
+    env.clock.now += timedelta(seconds=3)
+    approved = {**payload, "preview_hash": changes["preview_hash"]}
+    saved = await env.client.post(path + "/confirm", json=approved)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["result"] == changes["result"]
+    assert saved.json()["replaced_blocks"] == changes["replaced_blocks"]
+    assert (await env.client.post(path + "/confirm", json=approved)).json() == saved.json()
+
+
+@pytest.mark.asyncio
+async def test_progress_confirmation_rejects_stale_or_forged_preview_without_writes(planning_env):
+    env = planning_env
+    task = await create_task(env)
+    plan, _ = await accept(env)
+    block = next(row for row in plan["blocks"] if row["status"] == "planned")
+    payload = {
+        "request_id": str(uuid4()),
+        "revision": block["revision"],
+        "task_revision": task["revision"],
+        "outcome": "skipped",
+        "actual_minutes": 0,
+    }
+    path = ROOT + f"/blocks/{block['id']}/outcome"
+    proposed = (await env.client.post(path + "/preview", json=payload)).json()
+    assert (
+        await env.client.post(path + "/confirm", json={**payload, "preview_hash": "0" * 64})
+    ).status_code == 409
+    env.clock.now = datetime.fromisoformat(block["start_at"]) + timedelta(minutes=30)
+    assert (
+        await env.client.post(
+            path + "/confirm", json={**payload, "preview_hash": proposed["preview_hash"]}
+        )
+    ).status_code == 409
+    assert (await env.client.get(ROOT + "/tasks")).json()["tasks"][0]["actual_minutes"] == 0
+    assert (await env.client.get(ROOT + "/plan")).json()["revision"] == plan["revision"]

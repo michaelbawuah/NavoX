@@ -1,3 +1,4 @@
+import type { GoogleConnection } from "./account-access";
 import type { StudyBlock, StudyPlan, StudyTask } from "./student-planning";
 import type { StudentTimetable } from "./student-schedule";
 import { studentClock, studentDateInZone } from "./student-schedule";
@@ -187,11 +188,44 @@ export function relativeTime(value: string, now: number, zone: string): string {
     return minutes === 0 ? "Now" : `in ${minutes} min`;
   const day = studentDateInZone(value, zone),
     today = studentDateInZone(new Date(now).toISOString(), zone);
-  if (day === today) return `today at ${studentClock(value, zone)}`;
+  if (day === today) {
+    const hour = Number(
+      new Intl.DateTimeFormat("en", {
+        hour: "numeric",
+        hourCycle: "h23",
+        timeZone: zone,
+      }).format(new Date(at)),
+    );
+    return `${hour >= 18 ? "tonight" : "today"} at ${studentClock(value, zone)}`;
+  }
   return new Intl.DateTimeFormat("en-US", {
     weekday: "short",
     hour: "numeric",
     minute: "2-digit",
     timeZone: zone,
   }).format(new Date(at));
+}
+
+export function replyItems(
+  items: HomeItem[],
+  connections: GoogleConnection[],
+): HomeItem[] {
+  return items.filter(
+    (i) =>
+      ["task", "follow_up", "promise"].includes(i.type) &&
+      i.sources.some(
+        (s) =>
+          s.provider === "google" &&
+          s.source_type === "gmail_message" &&
+          s.external_resource_id &&
+          connections.some(
+            (c) =>
+              c.id === s.connection_id &&
+              c.status === "active" &&
+              c.granted_scopes.includes(
+                "https://www.googleapis.com/auth/gmail.readonly",
+              ),
+          ),
+      ),
+  );
 }

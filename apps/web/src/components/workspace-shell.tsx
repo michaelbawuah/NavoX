@@ -7,8 +7,11 @@ import {
   notifyAccountSessionChanged,
   notifyAccountSessionChanging,
 } from "../lib/account-session";
+import { useAppearance } from "../lib/appearance";
+import { useInboxReplyCount } from "../lib/inbox-reply-count";
 import { productFeatures } from "../lib/product-features";
 import { readStudentProfile, studentRequest } from "../lib/student-schedule";
+import { useVoxCall } from "./vox-call-provider";
 import styles from "./workspace-shell.module.css";
 
 export type WorkspaceDestination =
@@ -95,7 +98,7 @@ export function WorkspaceShell({
   accountKey,
   onSignOut,
   timezone,
-  inboxCount = 0,
+  inboxCount: suppliedInboxCount,
 }: {
   current: WorkspaceDestination;
   children: ReactNode;
@@ -106,6 +109,12 @@ export function WorkspaceShell({
   inboxCount?: number;
 }) {
   const router = useRouter();
+  const vox = useVoxCall();
+  const owner = vox?.state.ownerVerified ? vox.state.owner : null;
+  const verifiedKey =
+    accountKey || (owner ? `${owner.workspaceId}:${owner.userId}` : undefined);
+  const inboxCount = useInboxReplyCount(verifiedKey, suppliedInboxCount);
+  useAppearance(verifiedKey);
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState("");
   const [help, setHelp] = useState(false);

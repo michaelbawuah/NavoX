@@ -15,6 +15,7 @@ import { hasGoogleReadAccess } from "../lib/setup-progress";
 import type { TodaySource } from "../lib/source-references";
 import { consumerTodaySections } from "../lib/today-sections";
 import { AISettings } from "./ai-settings";
+import { AppearanceSettings } from "./appearance-settings";
 import { ApprovalPanel } from "./approval-panel";
 import { CommunicationDrafts } from "./communication-drafts";
 import { ConnectionsPanel } from "./connections-panel";
@@ -1403,6 +1404,9 @@ function LegacyTodayWorkspace({
                   Manage connected apps
                 </Link>
               </section>
+              <AppearanceSettings
+                accountKey={`${account.workspace.id}:${account.id}`}
+              />
               <PersonalMemoryPanel
                 key={`${account.id}:${account.workspace.id}`}
               />

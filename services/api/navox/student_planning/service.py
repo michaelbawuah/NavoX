@@ -1030,12 +1030,20 @@ async def outcome(
     payload: OutcomeInput,
     *,
     now: datetime | None = None,
+    preview_only: bool = False,
+    expected_preview: str | None = None,
 ) -> OutcomeView:
     await schedule.owner(database, user_id, workspace_id, lock=True)
     body = {"block_id": str(block_id), "payload": payload.model_dump(mode="json")}
-    previous = await command(database, user_id, workspace_id, payload.request_id, "outcome", body)
+    previous = (
+        None
+        if preview_only
+        else await command(database, user_id, workspace_id, payload.request_id, "outcome", body)
+    )
     if previous:
         recorded = OutcomeView.model_validate(previous.result)
+        if expected_preview is not None and expected_preview != recorded.preview_hash:
+            raise schedule.StudentError(409, "Review the current changes before approving")
         current = await plan_view(database, user_id, workspace_id)
         if current.needs_review or current.revision != recorded.plan.revision:
             raise schedule.StudentError(
@@ -1088,6 +1096,11 @@ async def outcome(
         )
     )
     old_future = [str(row.id) for row in future_rows]
+    replaced_blocks = sorted(
+        [block_view(row) for row in future_rows], key=lambda row: (row.start_at, str(row.id))
+    )
+    base_revision = planning.revision
+    base_source = await stable_source_hash(database, user_id, workspace_id, planning)
     task.actual_minutes += payload.actual_minutes
     if payload.outcome == "done":
         task.remaining_minutes = (
@@ -1125,6 +1138,22 @@ async def outcome(
     source_hash, result = await snapshot(
         database, user_id, workspace_id, planning, start_at=start, end_at=end, now=moment
     )
+    preview_hash = digest(
+        {
+            "owner": [str(user_id), str(workspace_id)],
+            "block": str(block_id),
+            "input": payload.model_dump(mode="json", exclude={"request_id"}),
+            "revision": base_revision,
+            "source": base_source,
+            "before": [row.model_dump(mode="json") for row in replaced_blocks],
+            "result": result.model_dump(mode="json"),
+        }
+    )
+    if expected_preview is not None and expected_preview != preview_hash:
+        await database.rollback()
+        raise schedule.StudentError(
+            409, "The schedule changed. Preview the changes again before approving"
+        )
     plan_id = uuid4()
     await apply_result(database, user_id, workspace_id, result, now=moment, plan_id=plan_id)
     planning.needs_review = False
@@ -1138,7 +1167,14 @@ async def outcome(
         plan=await plan_view(database, user_id, workspace_id),
         result=result,
         undo_request_id=payload.request_id,
+        preview_hash=preview_hash,
+        replaced_blocks=replaced_blocks,
     )
+    if preview_only:
+        # Execute the exact planner in the locked transaction, then discard every
+        # mutation. Preview cannot record progress, audit, or persist new blocks.
+        await database.rollback()
+        return response
     await remember(
         database,
         user_id,

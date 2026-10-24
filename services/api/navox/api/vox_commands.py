@@ -2,9 +2,10 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from navox.ai.message_limits import TYPED_MESSAGE_LIMIT
 from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
 from navox.api.vox import (
     PrivateVoxRoute,
@@ -62,6 +63,63 @@ async def wake_question(
             request_id=payload.request_id,
             text=payload.text,
             settings=settings,
+        )
+    )
+    return {"request_id": str(payload.request_id), "status": "accepted", "delivery": "queued"}
+
+
+class TypedInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    text: str = Field(min_length=1, max_length=TYPED_MESSAGE_LIMIT, strict=True, repr=False)
+
+
+@router.get("/{client_call_id}/transcript")
+async def call_transcript(
+    client_call_id: UUID,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    session_token_hash: SessionHashDependency,
+    settings: SettingsDependency,
+    after: int | None = Query(default=None, ge=0),
+) -> dict[str, object]:
+    from navox.vox.panel import transcript
+
+    return await result(
+        transcript(
+            database,
+            settings,
+            account.user.id,
+            account.workspace.id,
+            session_token_hash,
+            client_call_id,
+            after,
+        )
+    )
+
+
+@router.post("/{client_call_id}/messages")
+async def typed_question(
+    client_call_id: UUID,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    session_token_hash: SessionHashDependency,
+    settings: SettingsDependency,
+) -> dict[str, str]:
+    from navox.vox.panel import send_message
+
+    payload = await bounded_json(request, TypedInput, max_bytes=64_000)
+    await result(
+        send_message(
+            database,
+            settings,
+            account.user.id,
+            account.workspace.id,
+            session_token_hash,
+            client_call_id,
+            payload.request_id,
+            payload.text,
         )
     )
     return {"request_id": str(payload.request_id), "status": "accepted", "delivery": "queued"}

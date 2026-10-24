@@ -11,8 +11,13 @@ import {
   useState,
 } from "react";
 import type { VoxCallController, VoxCallState } from "../lib/vox-call";
+import {
+  useVoxConversation,
+  type VoxConversationModel,
+} from "../lib/vox-conversation";
 import styles from "./vox-call-controls.module.css";
 import { useVoxCall } from "./vox-call-provider";
+import { VoxConversation } from "./vox-conversation";
 
 type IconName = "microphone" | "speaker" | "captions" | "hang-up" | "minimize";
 
@@ -186,6 +191,7 @@ function WebLookup({ state }: { state: VoxCallState }) {
 }
 
 function CallDialog({
+  conversation,
   controller,
   state,
   chatHref,
@@ -194,6 +200,7 @@ function CallDialog({
   onStart,
   usageNotice,
 }: {
+  conversation: VoxConversationModel;
   controller: VoxCallController;
   state: VoxCallState;
   chatHref: string;
@@ -237,7 +244,11 @@ function CallDialog({
     };
     present();
     viewport?.addEventListener("change", present);
-    element.querySelector<HTMLButtonElement>("button")?.focus();
+    element
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="Minimize call"],button[aria-label="Close call details"]',
+      )
+      ?.focus();
     return () => {
       viewport?.removeEventListener("change", present);
       if (typeof element.close === "function" && element.open) element.close();
@@ -255,11 +266,15 @@ function CallDialog({
     ) {
       const focusable = [
         ...(dialog.current?.querySelectorAll<HTMLElement>(
-          "button:not([disabled]),a[href]",
+          "button:not([disabled]),a[href],textarea:not([disabled]),input:not([disabled]),summary",
         ) ?? []),
       ];
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
+      const visible = focusable.filter(
+        (node) =>
+          !node.closest("details:not([open])") || node.tagName === "SUMMARY",
+      );
+      const first = visible[0];
+      const last = visible[visible.length - 1];
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last?.focus();
@@ -288,6 +303,38 @@ function CallDialog({
           <p className={styles.eyebrow}>A little company for your day</p>
           <h2 id={`${id}-title`}>NavoX Vox</h2>
         </div>
+        {!ended && (
+          <details className={styles.panelSettings}>
+            <summary aria-label="Vox settings">⚙</summary>
+            <div className={styles.settingsPopover}>
+              <fieldset className={styles.controls} aria-label="Call controls">
+                <button
+                  type="button"
+                  className={styles.control}
+                  aria-pressed={state.speakerEnabled}
+                  aria-label={
+                    state.speakerEnabled
+                      ? "Turn speaker off"
+                      : "Turn speaker on"
+                  }
+                  onClick={() =>
+                    controller.setSpeakerEnabled(!state.speakerEnabled)
+                  }
+                >
+                  <Icon name="speaker" />
+                  <span className={styles.controlLabel}>Speaker</span>
+                  <small>{state.speakerEnabled ? "On" : "Off"}</small>
+                </button>
+              </fieldset>
+              <p className={styles.captionNote}>
+                Off the record. This conversation clears when you hang up.
+              </p>
+              <Link href="/settings" onClick={onMinimize}>
+                Voice and saved preferences
+              </Link>
+            </div>
+          </details>
+        )}
         <button
           type="button"
           className={styles.iconButton}
@@ -329,6 +376,13 @@ function CallDialog({
         </p>
       </div>
       <WebLookup state={state} />
+      {!ended && (
+        <VoxConversation
+          model={conversation}
+          state={state}
+          controller={controller}
+        />
+      )}
       {usageNotice && state.endReason !== "allowance-reached" && (
         <p role="status" data-vox-usage="true" className={styles.hint}>
           {usageNotice}
@@ -365,52 +419,7 @@ function CallDialog({
                 </button>
               </div>
             )}
-          <fieldset className={styles.controls} aria-label="Call controls">
-            <button
-              type="button"
-              className={styles.control}
-              aria-pressed={state.microphoneMuted}
-              aria-label={
-                state.microphoneMuted ? "Unmute microphone" : "Mute microphone"
-              }
-              onClick={() =>
-                controller.setMicrophoneMuted(!state.microphoneMuted)
-              }
-            >
-              <Icon name="microphone" />
-              <span className={styles.controlLabel}>Microphone</span>
-              <small>{state.microphoneMuted ? "Muted" : "On"}</small>
-            </button>
-            <button
-              type="button"
-              className={styles.control}
-              aria-pressed={state.speakerEnabled}
-              aria-label={
-                state.speakerEnabled ? "Turn speaker off" : "Turn speaker on"
-              }
-              onClick={() =>
-                controller.setSpeakerEnabled(!state.speakerEnabled)
-              }
-            >
-              <Icon name="speaker" />
-              <span className={styles.controlLabel}>Speaker</span>
-              <small>{state.speakerEnabled ? "On" : "Off"}</small>
-            </button>
-            <button
-              type="button"
-              className={styles.control}
-              aria-label="Captions unavailable"
-              aria-describedby={`${id}-captions-note`}
-              disabled
-            >
-              <Icon name="captions" />
-              <span className={styles.controlLabel}>Captions</span>
-              <small>Unavailable</small>
-            </button>
-          </fieldset>
-          <p id={`${id}-captions-note`} className={styles.captionNote}>
-            Live captions are not available yet.
-          </p>
+
           <button
             type="button"
             className={styles.hangUp}
@@ -582,6 +591,7 @@ export function VoxCallControls({
   chatHref?: string;
 }) {
   const call = useVoxCall();
+  const conversation = useVoxConversation(call?.state);
   const launcher = useRef<HTMLButtonElement>(null);
   const [dismissedCallId, setDismissedCallId] = useState<string | null>(null);
   const [startError, setStartError] = useState(false);
@@ -757,6 +767,7 @@ export function VoxCallControls({
       )}
       {open && (
         <CallDialog
+          conversation={conversation}
           controller={controller}
           state={state}
           chatHref={chatHref}

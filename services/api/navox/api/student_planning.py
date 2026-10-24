@@ -12,6 +12,7 @@ from navox.student import service as schedule
 from navox.student_planning import service
 from navox.student_planning.schemas import (
     AcceptInput,
+    OutcomeConfirmInput,
     OutcomeInput,
     OutcomeView,
     PlanView,
@@ -166,6 +167,43 @@ async def record_outcome(
 ) -> OutcomeView:
     require_origin(request, settings.web_origin)
     return await result(service.outcome(database, *scope(account), block_id, payload))
+
+
+@router.post("/blocks/{block_id}/outcome/preview", response_model=OutcomeView)
+async def preview_outcome(
+    block_id: UUID,
+    payload: OutcomeInput,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> OutcomeView:
+    require_origin(request, settings.web_origin)
+    return await result(
+        service.outcome(database, *scope(account), block_id, payload, preview_only=True)
+    )
+
+
+@router.post("/blocks/{block_id}/outcome/confirm", response_model=OutcomeView)
+async def confirm_outcome(
+    block_id: UUID,
+    payload: OutcomeConfirmInput,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> OutcomeView:
+    require_origin(request, settings.web_origin)
+    outcome_input = OutcomeInput.model_validate(payload.model_dump(exclude={"preview_hash"}))
+    return await result(
+        service.outcome(
+            database,
+            *scope(account),
+            block_id,
+            outcome_input,
+            expected_preview=payload.preview_hash,
+        )
+    )
 
 
 @router.post("/undo", response_model=PlanView)

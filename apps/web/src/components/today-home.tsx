@@ -37,8 +37,10 @@ import {
   type HomeItem,
   readHomeItems,
   relativeTime,
+  replyItems,
 } from "../lib/today-home";
 import styles from "./today-home.module.css";
+import { TodayStudyActions } from "./today-study-actions";
 import type { TodayWorkspaceProps } from "./today-workspace";
 import { useVoxCall } from "./vox-call-provider";
 import { WorkspaceShell } from "./workspace-shell";
@@ -223,24 +225,7 @@ function TodayHomeAccount({
     : [];
   const next = rows.find((r) => !r.study && Date.parse(r.start) > now);
   const due = data ? dueSoon(data.tasks, data.items, now) : [];
-  const replies = (data?.items ?? []).filter(
-    (i) =>
-      ["task", "follow_up", "promise"].includes(i.type) &&
-      i.sources.some(
-        (s) =>
-          s.provider === "google" &&
-          s.source_type === "gmail_message" &&
-          s.external_resource_id &&
-          connections.some(
-            (c) =>
-              c.id === s.connection_id &&
-              c.status === "active" &&
-              c.granted_scopes.includes(
-                "https://www.googleapis.com/auth/gmail.readonly",
-              ),
-          ),
-      ),
-  );
+  const replies = replyItems(data?.items ?? [], connections);
   const goals = (data?.goals ?? [])
     .filter((g) => g.status === "active")
     .slice(0, 3);
@@ -368,17 +353,36 @@ function TodayHomeAccount({
           </section>
         )}
         {next && (
-          <Link href={next.href} className={styles.next}>
-            <strong>
-              Next: {next.title}
-              {next.detail && ` · ${next.detail}`}
-            </strong>
-            <span>
-              {relativeTime(next.start, now, zone)}
-              {next.walkMinutes !== null &&
-                ` · leave by ${studentClock(new Date(Date.parse(next.start) - next.walkMinutes * 60000).toISOString(), zone)}`}
-            </span>
-          </Link>
+          <details className={styles.next}>
+            <summary>
+              <strong>
+                Next: {next.title}
+                {next.detail && ` · ${next.detail}`}
+              </strong>
+              <span>
+                {relativeTime(next.start, now, zone)}
+                {next.walkMinutes !== null &&
+                  ` · leave by ${studentClock(new Date(Date.parse(next.start) - next.walkMinutes * 60000).toISOString(), zone)}`}
+              </span>
+            </summary>
+            <p>
+              {new Intl.DateTimeFormat("en", {
+                dateStyle: "medium",
+                timeStyle: "short",
+                timeZone: zone,
+              }).format(new Date(next.start))}
+              {next.end && ` – ${studentClock(next.end, zone)}`}
+            </p>
+            <Link href={next.href}>
+              Open{" "}
+              {next.study
+                ? "Planner"
+                : next.detail === "Meeting"
+                  ? "Planner"
+                  : "Classes"}{" "}
+              →
+            </Link>
+          </details>
         )}
         {data &&
           !showSetup &&
@@ -464,25 +468,25 @@ function TodayHomeAccount({
                             </span>
                           </Link>
                           {row.study?.status === "planned" &&
-                            !data?.plan?.needs_review && (
-                              <div className={styles.actions}>
-                                {(
-                                  [
-                                    ["done", "Done"],
-                                    ["took_longer", "Took longer"],
-                                    ["skipped", "Skip"],
-                                  ] as const
-                                ).map(([kind, label]) => (
-                                  <Link
-                                    key={kind}
-                                    href={`/planner#block=${row.id}&outcome=${kind}`}
-                                    aria-label={`${label}: ${row.title}`}
-                                  >
-                                    {label}
-                                  </Link>
-                                ))}
-                              </div>
-                            )}
+                            !data?.plan?.needs_review &&
+                            (() => {
+                              const task = data?.tasks.find(
+                                (task) => task.id === row.study?.task_id,
+                              );
+                              return (
+                                task && (
+                                  <TodayStudyActions
+                                    key={`${row.study.id}:${row.study.revision}:${task.revision}`}
+                                    block={row.study}
+                                    task={task}
+                                    accountKey={accountKey}
+                                    timezone={zone}
+                                    now={now}
+                                    onSaved={() => void load()}
+                                  />
+                                )
+                              );
+                            })()}
                         </li>
                       );
                     })}

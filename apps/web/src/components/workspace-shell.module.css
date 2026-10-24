@@ -190,7 +190,7 @@
   border-bottom: 1px solid var(--nx-border);
 }
 .location {
-  font-size: 18px;
+  font-size: 28px;
   font-weight: 600;
   margin: 0;
   max-width: none;
@@ -278,7 +278,11 @@
     gap: 8px;
   }
   .location {
-    font-size: 18px;
+    font-size: 28px;
+    line-height: 30px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .date {
     display: block;
