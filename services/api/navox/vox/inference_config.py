@@ -79,6 +79,9 @@ class VoxInferenceConfig(BaseModel):
     stt: ProviderRoute = ProviderRoute(model="gpt-transcribe")
     llm: ProviderRoute = ProviderRoute(model="gpt-5.6-luna")
     tts: ProviderRoute = ProviderRoute(model="gpt-4o-mini-tts-2025-12-15", voice="marin")
+    llm_reasoning_effort: (
+        Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | None
+    ) = "none"
     tts_stream_format: Literal["audio", "sse"] = "audio"
     end_of_turn_silence_ms: int = Field(default=1200, strict=True, ge=400, le=2000)
     turn_timeout_seconds: float = Field(default=45, ge=5, le=90, allow_inf_nan=False)

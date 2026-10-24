@@ -193,3 +193,33 @@ the previous fixed 600 ms cutoff. The longer window allows that pause inside one
 utterance, at the cost of up to 600 ms additional end-of-turn wait. It does not
 change the browser's silence gate, wake timing, or animation timings. Configuration
 changes apply to new calls and require draining existing calls before deployment.
+
+
+### Interruption and saved-schedule checks
+
+A generated interruption arrived while the worker was actively playing its
+counting response (output_started=true; played_audio_ms=6,382). The interrupted
+answer was truncated and the next answer correctly returned fifteen for ten
+plus five. The browser's instantaneous UI-state probe was not reliable enough
+to establish the interruption point; worker playout evidence established it.
+This does not measure physical speaker/echo/Bluetooth interruption latency.
+
+A temporary QA-only course and 10:00 meeting in Lab 42 were created through the
+normal authenticated student API. A spoken next-class query correctly returned
+the saved course, time and room. Its meeting was deleted and course archived
+afterward. This verifies live tool integration with saved test data, not the
+owner's real student timetable.
+
+### Fallback tool compatibility
+
+The isolated primary-transport outage test exposed a Chat Completions rejection
+at reasoning_effort when the schedule tools were present. A direct request with
+reasoning_effort=none succeeded. The configured fallback now sends
+llm_reasoning_effort (default none); setting it to null omits the field for a
+compatible provider that does not accept it. The same setting applies on every
+tool round trip. No model, voice, authorization boundary or tool permission was
+changed. Full browser fallback requalification is still required for this fix.
+
+Official references reviewed 2026-10-23:
+- https://developers.openai.com/api/docs/guides/function-calling
+- https://developers.openai.com/api/docs/models/gpt-5.6-luna

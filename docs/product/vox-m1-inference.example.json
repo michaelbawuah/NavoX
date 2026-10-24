@@ -39,5 +39,6 @@
   "max_response_audio_seconds": 30,
   "max_context_characters": 400000,
   "tts_stream_format": "sse",
-  "end_of_turn_silence_ms": 1200
+  "end_of_turn_silence_ms": 1200,
+  "llm_reasoning_effort": "none"
 }

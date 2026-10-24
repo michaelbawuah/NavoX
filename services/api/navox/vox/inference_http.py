@@ -257,6 +257,8 @@ class OpenAICompatiblePipeline:
                     "messages": messages,
                     "max_completion_tokens": self.config.max_output_tokens,
                 }
+                if self.config.llm_reasoning_effort is not None:
+                    body["reasoning_effort"] = self.config.llm_reasoning_effort
                 if self.tools:
                     body["tools"] = [
                         {

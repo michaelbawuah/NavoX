@@ -880,3 +880,70 @@ async def test_sentence_pause_keeps_one_turn_and_quiet_uplink_still_finishes():
 def test_end_of_turn_window_is_strictly_bounded(value):
     with pytest.raises(ValueError):
         VoxInferenceConfig(end_of_turn_silence_ms=value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effort", ["none", None])
+async def test_cascade_schedule_tools_keep_configured_reasoning_across_tool_roundtrip(effort):
+    from navox.vox.schedule_tools import ScheduleTools
+
+    class Tools(ScheduleTools):
+        async def execute(self, name, arguments):
+            assert name == "get_student_schedule"
+            assert arguments == {"mode": "next", "date": None}
+            return {"status": "ok", "next_upcoming": {"course_name": "Biology"}}
+
+    turns = []
+
+    async def handle(request):
+        body = json.loads(request.content)
+        if request.url.path.endswith("completions"):
+            if effort is None:
+                assert "reasoning_effort" not in body
+            else:
+                assert body["reasoning_effort"] == "none"
+            tool = body["tools"][0]["function"]
+            assert tool["name"] == "get_student_schedule"
+            assert tool["strict"] is True
+            assert tool["parameters"]["required"] == ["mode", "date"]
+            turns.append(body)
+            if len(turns) == 1:
+                message = {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "schedule1",
+                            "type": "function",
+                            "function": {
+                                "name": "get_student_schedule",
+                                "arguments": '{"mode":"next","date":null}',
+                            },
+                        }
+                    ],
+                }
+            else:
+                assert body["messages"][-1]["role"] == "tool"
+                assert "Biology" in body["messages"][-1]["content"]
+                message = {"role": "assistant", "content": "Your next class is Biology."}
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": message}],
+                    "usage": {"prompt_tokens": 20, "completion_tokens": 10},
+                },
+            )
+        return httpx.Response(200, content=b"synthetic-mp3")
+
+    check = Check()
+    pipeline = OpenAICompatiblePipeline(
+        VoxInferenceConfig(llm_reasoning_effort=effort),
+        settings(),
+        check,
+        Hooks(),
+        Tools(check),
+        transport=httpx.MockTransport(handle),
+    )
+    reply = await pipeline.respond(None, (), question="What is my next class?")
+    assert reply.answer == "Your next class is Biology."
+    assert len(turns) == 2
