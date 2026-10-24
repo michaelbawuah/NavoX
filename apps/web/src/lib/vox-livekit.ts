@@ -463,6 +463,12 @@ export function createLiveKitVoxTransport(options: {
         signallingWaiters.clear();
       };
       const retireTrack = async (track: LocalAudioTrack) => {
+        // The controller revokes capture immediately before closing the room.
+        // Yield once so terminal close can supersede per-track negotiation;
+        // otherwise SDK disconnect can cancel that negotiation and falsely
+        // quarantine a fully retired call. Physical capture is already stopped.
+        await Promise.resolve();
+        if (closed) return;
         if (!canSignal()) {
           if (!closed)
             await new Promise<void>((resolve) =>
@@ -984,7 +990,7 @@ export function createLiveKitVoxTransport(options: {
               if (track === local) silence();
               acquired.stop();
               track.stop();
-              await room?.unpublishAudio(track);
+              await retireTrack(track);
               return;
             }
             acquired.setEnabled(true);

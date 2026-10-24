@@ -1019,6 +1019,11 @@ describe("qualified LiveKit Vox adapter", () => {
         env.room.unpublishAudio.mockRejectedValue(
           new Error("private SDK details"),
         );
+      if (failure === "unpublish") {
+        // A genuine in-call removal failure must remain quarantined.
+        connection.setMicrophoneEnabled(false);
+        await settle();
+      }
       const closing = connection.close();
       expect(env.media.enabled).toBe(false);
       expect(env.capture.stop).toHaveBeenCalled();
@@ -1135,6 +1140,36 @@ describe("qualified LiveKit Vox adapter", () => {
     expect(env.loadSdk).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])(
+    "terminal close supersedes immediate microphone removal; disconnect failure=%s remains fenced",
+    async (disconnectFails) => {
+      const env = environment();
+      const connection = await env.transport.connect(env.request);
+      connection.setMicrophoneEnabled(true);
+      await settle();
+      const removing = deferred<void>();
+      env.room.unpublishAudio.mockReturnValue(removing.promise);
+      env.room.disconnect.mockImplementation(async () => {
+        removing.reject(
+          new Error("synthetic negotiation cancelled by disconnect"),
+        );
+        if (disconnectFails) throw new Error("synthetic disconnect failure");
+      });
+      // Match the controller: revoke capture, then close in the same turn.
+      connection.setMicrophoneEnabled(false);
+      const closing = connection.close();
+      if (disconnectFails) await expect(closing).rejects.toThrow("unavailable");
+      else await closing;
+      // Observe the unused rejection when no per-track negotiation was started.
+      await removing.promise.catch(() => {});
+      expect(env.room.unpublishAudio).not.toHaveBeenCalled();
+      expect(env.media.readyState).toBe("ended");
+      expect(env.lease.close).toHaveBeenCalledTimes(1);
+      expect(env.room.disconnect).toHaveBeenCalledTimes(1);
+      expect(env.transport.available).toBe(!disconnectFails);
+    },
+  );
+
   it("blocks replacement until a late capture publication retires", async () => {
     const env = environment();
     const publication = deferred<void>();
@@ -1154,7 +1189,8 @@ describe("qualified LiveKit Vox adapter", () => {
     await closing;
     expect(env.transport.available).toBe(true);
     expect(env.media.enabled).toBe(false);
-    expect(env.room.unpublishAudio).toHaveBeenCalled();
+    expect(env.room.unpublishAudio).not.toHaveBeenCalled();
+    expect(env.room.disconnect).toHaveBeenCalledTimes(1);
   });
 
   it.each(["load", "connect"] as const)(
