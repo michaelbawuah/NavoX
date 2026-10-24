@@ -15,8 +15,12 @@ export function useAppearance(accountKey?: string) {
   const [theme, setTheme] = useState<Appearance>("dark");
   useEffect(() => {
     if (!accountKey) return;
-    const apply = () => {
-      const next = read(accountKey);
+    const apply = (event?: Event) => {
+      const choice = event instanceof CustomEvent ? event.detail : null;
+      const next: Appearance =
+        choice?.key === accountKey && ["dark", "light"].includes(choice.theme)
+          ? choice.theme
+          : read(accountKey);
       setTheme(next);
       document.documentElement.dataset.navoxTheme = next;
     };
@@ -39,7 +43,11 @@ export function useAppearance(accountKey?: string) {
       }
       setTheme(next);
       document.documentElement.dataset.navoxTheme = next;
-      window.dispatchEvent(new Event(eventName));
+      window.dispatchEvent(
+        new CustomEvent(eventName, {
+          detail: { key: accountKey, theme: next },
+        }),
+      );
     },
   };
 }

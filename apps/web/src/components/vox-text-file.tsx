@@ -104,53 +104,50 @@ export function VoxTextFile({
       </p>
       {loading ? (
         <p role="status">Loading classes…</p>
-      ) : (
+      ) : courses.length ? (
         <>
-          {courses.length ? (
-            <>
-              <label>
-                File title
-                <input
-                  value={title}
-                  maxLength={160}
-                  disabled={busy}
-                  onChange={(e) => setTitle(e.target.value)}
-                />
-              </label>
-              <label>
-                Save to class
-                <select
-                  value={course}
-                  disabled={busy}
-                  onChange={(e) => setCourse(e.target.value)}
-                >
-                  <option value="">Choose a class</option>
-                  {courses.map((row) => (
-                    <option key={row.id} value={row.id}>
-                      {row.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                disabled={
-                  busy || !course || !title.trim() || [...text].length > 200000
-                }
-                onClick={() => void save()}
-              >
-                {busy ? "Saving…" : "Save file to this class"}
-              </button>
-            </>
-          ) : (
-            !notice && (
-              <p>
-                <Link href="/classes">Add a class</Link> before saving a course
-                file, or download the text below.
-              </p>
-            )
-          )}
+          <label>
+            File title
+            <input
+              value={title}
+              maxLength={160}
+              disabled={busy}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </label>
+          <label>
+            Save to class
+            <select
+              aria-label="Save to class"
+              value={course}
+              disabled={busy}
+              onChange={(e) => setCourse(e.target.value)}
+            >
+              <option value="">Choose a class</option>
+              {courses.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={
+              busy || !course || !title.trim() || [...text].length > 200000
+            }
+            onClick={() => void save()}
+          >
+            {busy ? "Saving…" : "Save file to this class"}
+          </button>
         </>
+      ) : (
+        !notice && (
+          <p>
+            <Link href="/classes">Add a class</Link> before saving a course
+            file, or download the text below.
+          </p>
+        )
       )}
       {[...text].length > 200000 && (
         <p>

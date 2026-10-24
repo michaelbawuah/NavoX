@@ -6,6 +6,7 @@
 	--nx-text: #f2f4f7;
 	--nx-muted: #a3acb8;
 	--nx-accent: #4fd1b5;
+	--nx-accent-text: #4fd1b5;
 	--nx-warning: #f5b14c;
 	--nx-danger: #f07178;
 	--nx-success: #5bd38c;
@@ -34,6 +35,7 @@
 	--nx-text: #111418;
 	--nx-muted: #5b6470;
 	--nx-accent: #0f9f86;
+	--nx-accent-text: #087b68;
 	--nx-warning: #b7791f;
 	--nx-danger: #c53030;
 	--nx-success: #2f855a;

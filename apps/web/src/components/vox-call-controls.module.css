@@ -412,7 +412,8 @@
 .widget button:focus-visible,
 .widget a:focus-visible,
 .dialog button:focus-visible,
-.dialog a:focus-visible {
+.dialog a:focus-visible,
+.dialog summary:focus-visible {
   outline: 3px solid #d2f4d8;
   outline-offset: 4px;
 }

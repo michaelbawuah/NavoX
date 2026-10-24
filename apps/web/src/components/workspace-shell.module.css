@@ -354,7 +354,7 @@
     font-size: 13px;
   }
   .mobileNavigation [aria-current="page"] {
-    color: var(--nx-accent);
+    color: var(--nx-accent-text);
   }
   .mobileNavigation button:disabled {
     cursor: not-allowed;

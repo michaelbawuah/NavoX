@@ -8,6 +8,7 @@ const base =
 export function useInboxReplyCount(
   accountKey: string | undefined,
   supplied: number | undefined,
+  timezone?: string,
 ) {
   const [snapshot, setSnapshot] = useState<{
     key: string;
@@ -23,15 +24,18 @@ export function useInboxReplyCount(
       try {
         const [connections, response] = await Promise.all([
           loadGoogleConnections(base),
-          fetch(`${base}/today`, {
-            credentials: "include",
-            cache: "no-store",
-            headers: { "X-NavoX-Account": accountKey },
-            signal: AbortSignal.any([
-              controller.signal,
-              AbortSignal.timeout(12000),
-            ]),
-          }),
+          fetch(
+            `${base}/today${timezone ? `?timezone=${encodeURIComponent(timezone)}` : ""}`,
+            {
+              credentials: "include",
+              cache: "no-store",
+              headers: { "X-NavoX-Account": accountKey },
+              signal: AbortSignal.any([
+                controller.signal,
+                AbortSignal.timeout(12000),
+              ]),
+            },
+          ),
         ]);
         if (!response.ok) throw Error("Unavailable");
         const items = readHomeItems(await response.json());
@@ -55,7 +59,7 @@ export function useInboxReplyCount(
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [accountKey, supplied]);
+  }, [accountKey, supplied, timezone]);
   return (
     supplied ?? (snapshot && snapshot.key === accountKey ? snapshot.count : 0)
   );

@@ -113,13 +113,17 @@ export function WorkspaceShell({
   const owner = vox?.state.ownerVerified ? vox.state.owner : null;
   const verifiedKey =
     accountKey || (owner ? `${owner.workspaceId}:${owner.userId}` : undefined);
-  const inboxCount = useInboxReplyCount(verifiedKey, suppliedInboxCount);
   useAppearance(verifiedKey);
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState("");
   const [help, setHelp] = useState(false);
   const [clock, setClock] = useState<Date | null>(null);
   const [savedZone, setSavedZone] = useState<string | null>(null);
+  const inboxCount = useInboxReplyCount(
+    verifiedKey,
+    suppliedInboxCount,
+    timezone ?? savedZone ?? undefined,
+  );
   const profile = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     let live = true;
