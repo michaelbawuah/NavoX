@@ -132,3 +132,38 @@ describe("versioned draft approval", () => {
     expect(markup).not.toContain('value="owned" selected=""');
   });
 });
+
+it("binds draft requests to the visible account and keeps technical errors out of the reply screen", async () => {
+  const { communicationRequest } = await import("./communication-drafts");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json(
+        { detail: "private internal provider response" },
+        { status: 409 },
+      ),
+    ),
+  );
+  try {
+    await expect(
+      communicationRequest(
+        "/communication-drafts",
+        "GET",
+        undefined,
+        "workspace:student",
+      ),
+    ).rejects.toThrow("This email or your account changed");
+    expect(vi.mocked(fetch).mock.calls[0][1]?.headers).toMatchObject({
+      "X-NavoX-Account": "workspace:student",
+    });
+    expect(vi.mocked(fetch).mock.calls[0][1]?.cache).toBe("no-store");
+    vi.mocked(fetch).mockRejectedValueOnce(
+      new TypeError("private transport diagnostics"),
+    );
+    await expect(communicationRequest("/communication-drafts")).rejects.toThrow(
+      "The connection was interrupted",
+    );
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

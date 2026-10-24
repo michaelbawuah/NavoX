@@ -1,0 +1,18 @@
+{
+  "environment": "isolated Linux API image",
+  "synthetic_inputs_only": true,
+  "checks_passed": 11,
+  "checks": [
+    "invalid_image",
+    "image_limit",
+    "png_real_decoder",
+    "jpeg_real_decoder",
+    "webp_real_decoder",
+    "animated_image_rejected",
+    "english_schedule_ocr_review",
+    "text_pdf_real_extraction_review",
+    "pdf_page_limit",
+    "image_only_pdf",
+    "invalid_pdf"
+  ]
+}

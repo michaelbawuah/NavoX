@@ -1,9 +1,11 @@
 """Shared local wake routine and preview-only web alarm groundwork."""
 
 from datetime import UTC, date, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from navox.student.occurrences import local_moment
+from navox.student.schemas import Occurrence
 from navox.student_planning.schemas import Preferences
 
 
@@ -17,10 +19,10 @@ def alarm_schedule(
     preferences: Preferences,
     timezone: str,
     first_day: date,
-    classes: list,
+    classes: list[Occurrence],
     *,
     days: int = 7,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     zone = ZoneInfo(timezone)
     result = []
     for index in range(days):

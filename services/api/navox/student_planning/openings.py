@@ -1,6 +1,7 @@
 """Read-only real openings shared by Today and Planner."""
 
 from datetime import UTC, datetime, time, timedelta
+from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -18,7 +19,7 @@ from navox.student_planning.planner import available_slots
 
 async def openings(
     database: AsyncSession, user_id: UUID, workspace_id: UUID, days: int = 1
-) -> dict:
+) -> dict[str, Any]:
     user = await schedule.owner(database, user_id, workspace_id, lock=True)
     now = utc(await service.database_now(database))
     zone = ZoneInfo(user.timezone)

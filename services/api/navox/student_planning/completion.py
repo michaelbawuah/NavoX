@@ -1,5 +1,6 @@
 """Explicit task completion removes only that task's remaining blocks."""
 
+from typing import Any
 from uuid import UUID
 
 from pydantic import Field
@@ -30,7 +31,7 @@ async def complete(
     payload: CompleteInput,
     *,
     expected_preview: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     await schedule.owner(database, user_id, workspace_id, lock=True)
     body = {"task_id": str(task_id), **payload.model_dump(mode="json")}
     if expected_preview:

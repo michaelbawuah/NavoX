@@ -124,3 +124,42 @@ async def test_alarm_commands_prepare_exact_days_without_saving(vox_env, monkeyp
     )
     assert result["status"] == "review_required"
     assert published[-1]["preferences"]["alarm"]["skip_date"] == "2026-10-20"
+
+
+@pytest.mark.asyncio
+async def test_disable_one_alarm_day_preserves_all_other_days_and_wake_times(vox_env, monkeypatch):
+    from navox.student_planning import service as planning
+
+    reader = await tool(vox_env, monkeypatch)
+    async with vox_env.factory() as database:
+        record = await planning.state(database, vox_env.user_id, vox_env.workspace_id)
+        record.preferences = {
+            **record.preferences,
+            "alarm": {"enabled": True, "days": [0, 1, 2, 3, 4, 5, 6]},
+        }
+        record.preferences_revision = 1
+        await database.commit()
+    published = []
+
+    async def publish(value):
+        published.append(value)
+
+    tools = PlanningTools(
+        reader.check, Settings(_env_file=None, student_planning_enabled=True), publish
+    )
+    response = await tools.execute(
+        "prepare_alarm_change",
+        {
+            "action": "disable_days",
+            "time": None,
+            "weekdays": [5],
+        },
+    )
+    assert response["status"] == "review_required"
+    proposed = published[0]["preferences"]
+    assert proposed["alarm"]["days"] == [0, 1, 2, 3, 4, 6]
+    assert proposed["alarm"]["enabled"] is True
+    assert proposed["wake_time"] == "07:00"
+    async with vox_env.factory() as database:
+        actual = await planning.preferences(database, vox_env.user_id, vox_env.workspace_id)
+        assert actual.alarm.days == [0, 1, 2, 3, 4, 5, 6]

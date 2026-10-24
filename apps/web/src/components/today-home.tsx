@@ -277,20 +277,9 @@ function TodayHomeAccount({
     .filter((b) => !b.complete)
     .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0];
   const hasClasses = !!data?.timetable?.courses.some((c) => !c.archived);
-  const hasCalendar =
-    data?.calendarConnected ||
-    (!connectionsUnavailable &&
-      connections.some(
-        (c) =>
-          c.status === "active" &&
-          c.granted_scopes.some((s) =>
-            [
-              "https://www.googleapis.com/auth/calendar.readonly",
-              "https://www.googleapis.com/auth/calendar.events.readonly",
-              "https://www.googleapis.com/auth/calendar.events",
-            ].includes(s),
-          ),
-      ));
+  // Legacy provider scopes do not prove consent for student calendar access.
+  // Only the purpose-bound calendar API can mark this setup step complete.
+  const hasCalendar = data?.calendarConnected === true;
   const hasEmail =
     !connectionsUnavailable &&
     connections.some(

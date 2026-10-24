@@ -1,6 +1,6 @@
 """Saved Noa appearance and real completed-study streak groundwork."""
 
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -29,7 +29,7 @@ class Appearance(BaseModel):
     revision: int = Field(default=0, ge=0)
 
 
-def study_streak(days, today):
+def study_streak(days: set[date], today: date) -> int:
     """One credit per local day; an unfinished today never breaks yesterday's streak."""
     cursor = today if today in days else today - timedelta(days=1)
     count = 0
@@ -40,7 +40,9 @@ def study_streak(days, today):
 
 
 @router.get("")
-async def get_noa(account: CurrentAccountDependency, database: DatabaseSession, response: Response):
+async def get_noa(
+    account: CurrentAccountDependency, database: DatabaseSession, response: Response
+) -> dict[str, object]:
     user_id, workspace_id = scope(account)
     user = await result(service.owner(database, user_id, workspace_id))
     response.headers["Cache-Control"] = "private, no-store"
@@ -60,7 +62,7 @@ async def get_noa(account: CurrentAccountDependency, database: DatabaseSession, 
         )
     )
     zone = ZoneInfo(user.timezone)
-    days = {utc(value).astimezone(zone).date() for value in completed}
+    days = {utc(value).astimezone(zone).date() for value in completed if value is not None}
     return {
         "look": row.look if row else "girl",
         "vibe": row.vibe if row else "midnight",
@@ -78,7 +80,7 @@ async def save_noa(
     account: CurrentAccountDependency,
     database: DatabaseSession,
     settings: SettingsDependency,
-):
+) -> dict[str, object]:
     require_origin(request, settings.web_origin)
     user_id, workspace_id = scope(account)
     await result(service.owner(database, user_id, workspace_id, lock=True))

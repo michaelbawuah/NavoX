@@ -5,6 +5,8 @@ import {
   type ClassAlertStatus,
   classAlertRequest,
   endpointDigest,
+  NotificationRequestError,
+  notificationError,
   pushSupported,
   readAlertStatus,
   vapidKey,
@@ -23,10 +25,10 @@ export function StudentAppRegistration() {
 }
 
 export function StudentNotifications({ accountId }: { accountId: string }) {
-  return <NotificationControls key={accountId} />;
+  return <NotificationControls key={accountId} accountKey={accountId} />;
 }
 
-function NotificationControls() {
+function NotificationControls({ accountKey }: { accountKey: string }) {
   const [status, setStatus] = useState<ClassAlertStatus | null>(null);
   const [supported, setSupported] = useState(false);
   const [deviceId, setDeviceId] = useState<string | null>(null);
@@ -38,7 +40,9 @@ function NotificationControls() {
   const refresh = useCallback(async () => {
     const current = ++request.current;
     try {
-      const next = readAlertStatus(await classAlertRequest());
+      const next = readAlertStatus(
+        await classAlertRequest("", "GET", undefined, accountKey),
+      );
       let savedId: string | null = null;
       if (pushSupported()) {
         const registration = await navigator.serviceWorker.getRegistration("/");
@@ -57,12 +61,13 @@ function NotificationControls() {
     } catch (cause) {
       if (current === request.current)
         setError(
-          cause instanceof Error
-            ? cause.message
-            : "Notification settings could not be loaded.",
+          notificationError(
+            cause,
+            "Your reminders couldn’t load. Please try again.",
+          ),
         );
     }
-  }, []);
+  }, [accountKey]);
   useEffect(() => {
     setSupported(pushSupported());
     void refresh();
@@ -79,21 +84,27 @@ function NotificationControls() {
     setError("");
     setNotice("");
     try {
-      await classAlertRequest("/settings", "PUT", {
-        enabled: data.has("enabled"),
-        next_class: data.has("next_class"),
-        leave_now: data.has("leave_now"),
-        lead_minutes: Number(data.get("lead_minutes")),
-        quiet_start: data.get("quiet_start"),
-        quiet_end: data.get("quiet_end"),
-        daily_cap: Number(data.get("daily_cap")),
-      });
+      await classAlertRequest(
+        "/settings",
+        "PUT",
+        {
+          enabled: data.has("enabled"),
+          next_class: data.has("next_class"),
+          leave_now: data.has("leave_now"),
+          lead_minutes: Number(data.get("lead_minutes")),
+          quiet_start: data.get("quiet_start"),
+          quiet_end: data.get("quiet_end"),
+          daily_cap: Number(data.get("daily_cap")),
+        },
+        accountKey,
+      );
       setNotice("Class reminder settings saved.");
     } catch (cause) {
       setError(
-        cause instanceof Error
-          ? cause.message
-          : "Could not save settings. Refresh to check.",
+        notificationError(
+          cause,
+          "Your changes couldn’t be confirmed. Check your reminders before trying again.",
+        ),
       );
     } finally {
       await refresh();
@@ -110,7 +121,7 @@ function NotificationControls() {
     try {
       const permission = Notification.requestPermission();
       if ((await permission) !== "granted")
-        throw new Error(
+        throw new NotificationRequestError(
           "Notifications are off in your browser. You can change that in your browser or device settings.",
         );
       const registration = await navigator.serviceWorker.register("/sw.js", {
@@ -124,16 +135,22 @@ function NotificationControls() {
           userVisibleOnly: true,
           applicationServerKey: vapidKey(status.public_key),
         });
-      await classAlertRequest("/subscriptions", "POST", subscription.toJSON());
+      await classAlertRequest(
+        "/subscriptions",
+        "POST",
+        subscription.toJSON(),
+        accountKey,
+      );
       setNotice(
         "This device is connected. Save your reminder settings below to turn reminders on.",
       );
       await refresh();
     } catch (cause) {
       setError(
-        cause instanceof Error
-          ? cause.message
-          : "This device could not be connected. Refresh to check.",
+        notificationError(
+          cause,
+          "This device couldn’t connect. Check notification permissions in your browser or device settings, then try again.",
+        ),
       );
     } finally {
       setBusy(false);
@@ -144,7 +161,12 @@ function NotificationControls() {
     setError("");
     setNotice("");
     try {
-      await classAlertRequest(`/subscriptions/${identifier}`, "DELETE");
+      await classAlertRequest(
+        `/subscriptions/${identifier}`,
+        "DELETE",
+        undefined,
+        accountKey,
+      );
       if (thisDevice && pushSupported()) {
         const registration = await navigator.serviceWorker.getRegistration("/");
         const subscription = await registration?.pushManager.getSubscription();
@@ -156,9 +178,10 @@ function NotificationControls() {
       await refresh();
     } catch (cause) {
       setError(
-        cause instanceof Error
-          ? cause.message
-          : "Could not remove this device. Refresh to check.",
+        notificationError(
+          cause,
+          "Removing this device couldn’t be confirmed. Check its connection before trying again.",
+        ),
       );
     } finally {
       setBusy(false);
@@ -182,7 +205,7 @@ function NotificationControls() {
       {notice && <p role="status">{notice}</p>}
       {!status ? (
         <button type="button" onClick={() => void refresh()} disabled={busy}>
-          Reload reminder settings
+          Try again
         </button>
       ) : (
         <>

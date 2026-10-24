@@ -37,6 +37,15 @@
   background: var(--surface, #14171c);
   color: inherit;
   min-height: 80px;
+  overflow-wrap: anywhere;
+}
+.preview {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.preview strong {
+  color: var(--text, #f2f4f7);
 }
 .row[aria-pressed="true"] {
   border-color: #4fd1b5;

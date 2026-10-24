@@ -17,6 +17,7 @@ import {
   readStudyPreview,
   readStudyTask,
   readStudyTasks,
+  readTaskChangePreview,
   routineRequest,
   type StudyAssignmentDraft,
   type StudyBlock,
@@ -35,6 +36,8 @@ import {
   studyRequest,
   studyTaskDraft,
   studyTaskSourceAcknowledgement,
+  type TaskChangeBody,
+  type TaskChangePreview,
   unfittedStudyReasons,
 } from "../lib/student-planning";
 import {
@@ -57,6 +60,7 @@ import { PlannerOverview } from "./planner-overview";
 import { PlannerWelcome } from "./planner-welcome";
 import { RoutineChangeReview } from "./routine-change-review";
 import styles from "./student-daily-plan.module.css";
+import { TaskChangeReview } from "./task-change-review";
 
 type OutcomeKind = "done" | "took_longer" | "skipped";
 export function StudyUnfittedWork({
@@ -446,8 +450,8 @@ export function StudentStudyAgenda({
                         {Date.parse(event.start) >
                           Date.parse(timetable.server_now) && (
                           <p className={styles.hint}>
-                            Record study progress after this block starts.
-                            Refresh to check the current time.
+                            Record study progress after this block starts. Try
+                            again to check the current time.
                           </p>
                         )}
                       </>
@@ -1140,6 +1144,11 @@ function StudyPreferencesForm({
 
 function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
   const [captureTitle, setCaptureTitle] = useState("");
+  const [taskReview, setTaskReview] = useState<{
+    path: string;
+    body: TaskChangeBody;
+    preview: TaskChangePreview;
+  } | null>(null);
   const [routineReview, setRoutineReview] = useState<{
     body: ReturnType<typeof studyPreferencesDraft> & { request_id: string };
     preview: RoutinePreview;
@@ -1306,7 +1315,8 @@ function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
       if (alive.current) setBusy(false);
     }
   }
-  const locked = busy || loading || uncertain || !!routineReview;
+  const locked =
+    busy || loading || uncertain || !!routineReview || !!taskReview;
   async function reviewRoutine(
     value: ReturnType<typeof studyPreferencesDraft>,
   ): Promise<boolean> {
@@ -1548,25 +1558,38 @@ function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
                     disabled={locked}
                     onClose={() => setTaskEditor(null)}
                     onSave={async (value) => {
-                      const result = await mutate(
+                      if (operation.current || locked) return false;
+                      operation.current = true;
+                      setBusy(true);
+                      setError("");
+                      const path =
                         taskEditor !== "new"
-                          ? `/tasks/${taskEditor.id}`
-                          : "/tasks",
-                        readStudyTask,
-                        taskEditor !== "new" ? "PATCH" : "POST",
-                        {
-                          ...value,
-                          request_id: crypto.randomUUID(),
-                          ...(taskEditor !== "new"
-                            ? { revision: taskEditor.revision }
-                            : {}),
-                        },
-                      );
-                      if (result)
-                        setNotice(
-                          "Study task saved. Preview a plan to arrange your next steps.",
+                          ? "/tasks/" + taskEditor.id
+                          : "/tasks";
+                      const body = {
+                        ...value,
+                        request_id: crypto.randomUUID(),
+                        ...(taskEditor !== "new"
+                          ? { revision: taskEditor.revision }
+                          : {}),
+                      };
+                      try {
+                        const checked = await routineRequest(
+                          accountKey,
+                          path + "/review",
+                          readTaskChangePreview,
+                          "POST",
+                          body,
                         );
-                      return !!result;
+                        if (alive.current)
+                          setTaskReview({ path, body, preview: checked });
+                      } catch (cause) {
+                        if (alive.current) setError(studentError(cause));
+                      } finally {
+                        operation.current = false;
+                        if (alive.current) setBusy(false);
+                      }
+                      return false;
                     }}
                   />
                 )}
@@ -1738,6 +1761,45 @@ function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
               </>
             )}
           </section>
+          {taskReview && (
+            <TaskChangeReview
+              preview={taskReview.preview}
+              courses={timetable.courses}
+              busy={busy || loading}
+              onCancel={() => setTaskReview(null)}
+              onApprove={async () => {
+                if (operation.current) return;
+                operation.current = true;
+                setBusy(true);
+                setError("");
+                try {
+                  await routineRequest(
+                    accountKey,
+                    taskReview.path + "/confirm",
+                    readStudyTask,
+                    "POST",
+                    {
+                      ...taskReview.body,
+                      preview_hash: taskReview.preview.preview_hash,
+                    },
+                  );
+                  if (!alive.current) return;
+                  setTaskReview(null);
+                  setTaskEditor(null);
+                  setTab("plan");
+                  if (!(await load())) setUncertain(true);
+                  setNotice(
+                    "Task saved. Review a new plan to fit your updated work.",
+                  );
+                } catch (cause) {
+                  if (alive.current) setError(studentError(cause));
+                } finally {
+                  operation.current = false;
+                  if (alive.current) setBusy(false);
+                }
+              }}
+            />
+          )}
           {routineReview && (
             <RoutineChangeReview
               preview={routineReview.preview}

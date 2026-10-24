@@ -79,7 +79,10 @@ class InitialTimezone(BaseModel):
     user_id: str
     workspace_id: str
 
-    _valid_timezone = field_validator("timezone")(DisplayPreferences.valid_timezone.__func__)
+    @field_validator("timezone")
+    @classmethod
+    def valid_timezone(cls, value: str) -> str:
+        return DisplayPreferences.valid_timezone(value)
 
 
 @router.post("/timezone/initialize")

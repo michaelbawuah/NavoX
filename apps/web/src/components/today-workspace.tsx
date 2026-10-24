@@ -24,6 +24,7 @@ import { ApprovalPanel } from "./approval-panel";
 import { CommunicationDrafts } from "./communication-drafts";
 import { ConnectionsPanel } from "./connections-panel";
 import { DismissCommitment } from "./dismiss-commitment";
+import { InboxEmailPreview } from "./inbox-email-preview";
 import { InboxMessage } from "./inbox-message";
 import { InboxWelcome } from "./inbox-welcome";
 import inboxStyles from "./inbox-workspace.module.css";
@@ -1257,10 +1258,13 @@ function LegacyTodayWorkspace({
                           setReplySelectionKey((k) => k + 1);
                         }}
                       >
-                        <strong>{item.title}</strong>
-                        {item.description && (
-                          <span>{item.description.slice(0, 180)}</span>
-                        )}
+                        <InboxEmailPreview
+                          key={`${account.workspace.id}:${account.id}:${item.id}`}
+                          commitmentId={item.id}
+                          accountKey={`${account.workspace.id}:${account.id}`}
+                          title={item.title}
+                          description={item.description}
+                        />
                         <small>
                           {item.reasons.slice(0, 2).join(" · ") ||
                             "Review this email request"}
@@ -1305,6 +1309,8 @@ function LegacyTodayWorkspace({
                 >
                   <CommunicationDrafts
                     key={`${account.id}:${account.workspace.id}`}
+                    accountKey={`${account.workspace.id}:${account.id}`}
+                    timezone={timezone}
                     commitments={approvalCommitments}
                     selectedCommitmentId={selectedReplyId}
                     selectionKey={replySelectionKey}

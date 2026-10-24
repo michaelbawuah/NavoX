@@ -1,6 +1,7 @@
 """Review and move exactly one local study block; calendar events remain untouched."""
 
 from datetime import UTC, datetime, time, timedelta
+from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -25,7 +26,7 @@ async def move(
     payload: MoveInput,
     *,
     expected_preview: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     user = await schedule.owner(database, user_id, workspace_id, lock=True)
     body = {
         "block_id": str(block_id),

@@ -562,3 +562,29 @@ async def test_quiet_end_does_not_replay_reminder_from_quiet_hours(env, monkeypa
     async with env.factory() as database:
         await save_settings(database, user_id, workspace_id, AlertSettings(enabled=True))
         assert await queue_owner(database, user_id, workspace_id, now) == 0
+
+
+@pytest.mark.asyncio
+async def test_notification_account_header_rejects_stale_owner_before_read_or_write(env):
+    user_id, workspace_id = await register(env)
+    wrong = {"X-NavoX-Account": f"{workspace_id}:{uuid4()}"}
+    response = await env.client.get("/api/v1/student/notifications", headers=wrong)
+    assert response.status_code == 409
+    response = await env.client.put(
+        "/api/v1/student/notifications/settings",
+        headers=wrong,
+        json=AlertSettings(enabled=True).model_dump(),
+    )
+    assert response.status_code == 409
+    async with env.factory() as database:
+        assert (
+            await database.scalar(
+                select(StudentAlertPreference).where(StudentAlertPreference.user_id == user_id)
+            )
+            is None
+        )
+    response = await env.client.get(
+        "/api/v1/student/notifications",
+        headers={"X-NavoX-Account": f"{workspace_id}:{user_id}"},
+    )
+    assert response.status_code == 200

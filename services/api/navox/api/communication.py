@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -306,7 +307,7 @@ async def read_source_message(
     account: CurrentAccountDependency,
     database: DatabaseSession,
     settings: SettingsDependency,
-) -> dict:
+) -> dict[str, Any]:
     """Fetch exactly the selected, currently authorized message. Never persist its body."""
     import asyncio
     from datetime import UTC, datetime
@@ -403,7 +404,7 @@ async def discard_draft(
     database: DatabaseSession,
     settings: SettingsDependency,
     expected_version: int = Query(ge=1),
-) -> dict:
+) -> dict[str, Any]:
     from navox.db.models import Action, User
 
     require_origin(request, settings.web_origin)
@@ -429,7 +430,7 @@ async def discard_draft(
                 request_id=uuid4(),
             )
             await database.scalar(select(User).where(User.id == account.user.id).with_for_update())
-        draft = await database.scalar(
+        current_draft = await database.scalar(
             select(CommunicationDraft)
             .where(
                 CommunicationDraft.id == draft_id,
@@ -440,12 +441,12 @@ async def discard_draft(
             .execution_options(populate_existing=True)
         )
         if (
-            draft is None
-            or draft.current_version != expected_version
-            or draft.action_id != action_id
+            current_draft is None
+            or current_draft.current_version != expected_version
+            or current_draft.action_id != action_id
         ):
             raise HTTPException(409, "This draft changed. Review it again before discarding")
-        await database.delete(draft)
+        await database.delete(current_draft)
         await database.commit()
         return {"discarded": True}
     except ApprovalServiceError as error:

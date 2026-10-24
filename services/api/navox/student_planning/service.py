@@ -3,7 +3,7 @@
 import hashlib
 import json
 from datetime import UTC, date, datetime, time, timedelta
-from typing import TypeVar
+from typing import Any, TypeVar
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -11,7 +11,8 @@ from pydantic import BaseModel
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from navox.connectors.sync_state import database_now, utc
+from navox.connectors.sync_state import database_now as database_now
+from navox.connectors.sync_state import utc
 from navox.db.lms_feeds import LmsFeedItem
 from navox.db.student import StudentCourse
 from navox.db.student_planning import (
@@ -398,14 +399,26 @@ async def save_task(
     workspace_id: UUID,
     payload: TaskCreate | TaskUpdate | TaskImport,
     task_id: UUID | None = None,
+    *,
+    expected_preview: str | None = None,
 ) -> TaskView:
     await schedule.owner(database, user_id, workspace_id, lock=True)
     action = "task.update" if task_id else "task.create"
     body = {"task_id": str(task_id), "payload": payload.model_dump(mode="json")}
+    if expected_preview is not None:
+        body["preview_hash"] = expected_preview
     previous = await command(database, user_id, workspace_id, payload.request_id, action, body)
     if previous:
         current = await get_task(database, user_id, workspace_id, UUID(str(previous.result["id"])))
         return (await reviewed_task_views(database, user_id, workspace_id, [task_view(current)]))[0]
+    if expected_preview is not None:
+        from navox.student_planning.task_review import review
+
+        checked = await review(database, user_id, workspace_id, payload, task_id)
+        if checked["preview_hash"] != expected_preview:
+            raise schedule.StudentError(
+                409, "The task or affected study blocks changed. Review again"
+            )
     await _course(database, user_id, workspace_id, payload.course_id)
     remaining = (
         payload.remaining_minutes
@@ -568,7 +581,7 @@ async def preferences(database: AsyncSession, user_id: UUID, workspace_id: UUID)
     )
 
 
-def scheduling_preferences(value: dict) -> dict:
+def scheduling_preferences(value: dict[str, Any]) -> dict[str, Any]:
     # Sound/snooze never change study time; enabled smart wake times do.
     # Omitting new defaults preserves source hashes of pre-redesign plans.
     result = {key: item for key, item in value.items() if key != "alarm"}
@@ -1558,7 +1571,7 @@ async def forget_planning_data(database: AsyncSession, user_id: UUID, workspace_
 
 async def preference_preview(
     database: AsyncSession, user_id: UUID, workspace_id: UUID, payload: PreferencesUpdate
-) -> dict:
+) -> dict[str, Any]:
     """Bind routine/alarm consent to every study block it would retire, plus class sources."""
     from navox.student_planning.alarm import alarm_schedule
 

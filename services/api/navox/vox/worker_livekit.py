@@ -27,6 +27,7 @@ from navox.ai.speech_adapters import MAX_SPEECH_AUDIO_BYTES
 from navox.core.settings import Settings, get_settings
 from navox.db.session import get_database_engine, get_session_factory
 from navox.vox.audio_input import AudioInputBuffer
+from navox.vox.capture_tools import CaptureTools
 from navox.vox.context_store import DatabaseContextStore
 from navox.vox.inference_config import load_inference_config
 from navox.vox.inference_http import OpenAICompatiblePipeline, UsageHooks
@@ -389,6 +390,7 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
 
             tools = VoxReadTools(
                 PlanningTools(check, settings, publish_plan),
+                CaptureTools(check, settings, publish_plan),
                 ScheduleTools(check),
                 PublicWebTools(check, inference, settings, usage, publish_web),
             )

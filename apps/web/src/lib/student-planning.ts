@@ -736,3 +736,52 @@ export function readTaskCompletion(value: unknown): TaskCompletion {
     calendar_events_change: false,
   };
 }
+
+export type TaskChangeBody = StudyTaskSave & {
+  request_id: string;
+  revision?: number;
+};
+export interface TaskChangePreview {
+  course_label: string | null;
+  preview_hash: string;
+  timezone: string;
+  before: StudyTask | null;
+  proposed: StudyTaskFields;
+  replaced_blocks: StudyBlock[];
+}
+export function readStudyTaskFields(value: unknown): StudyTaskFields {
+  const v = obj(value);
+  return {
+    title: text(v.title, 200),
+    course_id: nullable(v.course_id, id),
+    due_at: nullable(v.due_at, instant),
+    estimated_minutes: num(v.estimated_minutes, 1, 10080),
+    remaining_minutes: num(
+      v.remaining_minutes ?? v.estimated_minutes,
+      0,
+      10080,
+    ),
+    difficulty: num(v.difficulty, 1, 5),
+    priority: num(v.priority, 1, 5),
+    course_weight: num(v.course_weight, 1, 10),
+    status: en(v.status, ["active", "completed", "archived"]),
+  };
+}
+export function readTaskChangePreview(value: unknown): TaskChangePreview {
+  const v = obj(value),
+    hash = text(v.preview_hash, 64);
+  if (
+    !/^[a-f0-9]{64}$/.test(hash) ||
+    v.alarms_change !== false ||
+    v.calendar_events_change !== false
+  )
+    return invalid();
+  return {
+    preview_hash: hash,
+    course_label: nullable(v.course_label, (value) => text(value, 200)),
+    timezone: zone(v.timezone),
+    before: nullable(v.before, readStudyTask),
+    proposed: readStudyTaskFields(v.proposed),
+    replaced_blocks: list(v.replaced_blocks, readStudyBlock, 5000),
+  };
+}

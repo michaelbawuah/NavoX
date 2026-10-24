@@ -32,7 +32,16 @@ class OpeningArguments(BaseModel):
 
 class AlarmArguments(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    action: Literal["set_wake_time", "enable", "disable", "smart_on", "smart_off", "skip_tomorrow"]
+    action: Literal[
+        "set_wake_time",
+        "enable",
+        "disable",
+        "enable_days",
+        "disable_days",
+        "smart_on",
+        "smart_off",
+        "skip_tomorrow",
+    ]
     time: str | None = None
     weekdays: list[int] | None = Field(default=None, min_length=1, max_length=7)
 
@@ -56,11 +65,13 @@ class PlanningTools:
                 "description": (
                     "Prepare the requested wake/alarm change for exact on-screen approval. "
                     "set_wake_time requires HH:MM and weekdays (Monday 0 through Sunday 6); "
-                    "Other actions require null time and weekdays. "
+                    "enable_days/disable_days require weekdays and null time (for example, "
+                    "no alarm Saturday means disable_days with [5]). Other actions require "
+                    "null time and weekdays. "
                     "skip_tomorrow preserves other days. "
                     "Read back every affected alarm and study block. Never claim an alarm is set "
-                    "until it is approved. Web alarms need NavoX open "
-                    "and cannot ring a locked phone. "
+                    "until it is approved. The web saves alarm setup only; ringing and "
+                    "snooze require the phone app. "
                     "If wake time is ambiguous (seven without morning/evening), ask first."
                 ),
                 "parameters": {
@@ -72,6 +83,8 @@ class PlanningTools:
                                 "set_wake_time",
                                 "enable",
                                 "disable",
+                                "enable_days",
+                                "disable_days",
                                 "smart_on",
                                 "smart_off",
                                 "skip_tomorrow",
@@ -137,15 +150,15 @@ class PlanningTools:
         try:
             if name == "prepare_alarm_change":
                 alarm_query = AlarmArguments.model_validate(arguments)
-                if alarm_query.action == "set_wake_time":
-                    if (
-                        not alarm_query.time
-                        or not alarm_query.weekdays
-                        or any(
-                            type(day) is not int or not 0 <= day <= 6
-                            for day in alarm_query.weekdays
-                        )
+                if alarm_query.action in {"set_wake_time", "enable_days", "disable_days"}:
+                    if not alarm_query.weekdays or any(
+                        type(day) is not int or not 0 <= day <= 6 for day in alarm_query.weekdays
                     ):
+                        raise ValueError
+                    if alarm_query.action == "set_wake_time":
+                        if not alarm_query.time:
+                            raise ValueError
+                    elif alarm_query.time is not None:
                         raise ValueError
                 elif alarm_query.time is not None or alarm_query.weekdays is not None:
                     raise ValueError
@@ -156,6 +169,7 @@ class PlanningTools:
                     candidate = current.model_dump(mode="json", exclude={"timezone"})
                     candidate["request_id"] = str(uuid4())
                     if alarm_query.action == "set_wake_time":
+                        assert alarm_query.weekdays is not None
                         wakes = candidate["wake_times"] or [candidate["wake_time"]] * 7
                         for weekday in alarm_query.weekdays:
                             wakes[weekday] = alarm_query.time
@@ -174,6 +188,18 @@ class PlanningTools:
                         candidate["alarm"]["smart"] = False
                     elif alarm_query.action in {"enable", "disable"}:
                         candidate["alarm"]["enabled"] = alarm_query.action == "enable"
+                    elif alarm_query.action in {"enable_days", "disable_days"}:
+                        selected_days = set(alarm_query.weekdays or [])
+                        existing_days = set(candidate["alarm"]["days"])
+                        if alarm_query.action == "enable_days":
+                            if not candidate["alarm"]["enabled"]:
+                                existing_days = set()
+                            candidate["alarm"]["days"] = sorted(existing_days | selected_days)
+                            candidate["alarm"]["enabled"] = True
+                        else:
+                            candidate["alarm"]["days"] = sorted(existing_days - selected_days)
+                            if not candidate["alarm"]["days"]:
+                                candidate["alarm"]["enabled"] = False
                     elif alarm_query.action in {"smart_on", "smart_off"}:
                         candidate["alarm"]["smart"] = alarm_query.action == "smart_on"
                     else:
@@ -213,8 +239,8 @@ class PlanningTools:
                     "full_readback_on_screen": len(review["replaced_blocks"]) > 12,
                     "warnings": review["warnings"],
                     "message": (
-                        "Review and approve on screen. Keep NavoX open for web alarms; "
-                        "locked-phone ringing is unavailable."
+                        "Review and approve the saved alarm setup on screen. Ringing and "
+                        "snooze require the phone app; this web setup cannot ring your phone."
                     ),
                 }
             if name == "prepare_study_plan":

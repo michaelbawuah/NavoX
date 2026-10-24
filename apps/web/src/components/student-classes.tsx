@@ -1257,6 +1257,16 @@ function StudentClassesAccount({
   const operation = useRef(false);
   const alive = useRef(true);
   const [spokenDraft, setSpokenDraft] = useState("");
+  const [queuedSpokenDraft, setQueuedSpokenDraft] = useState<string | null>(
+    null,
+  );
+  const openSpokenDraft = useCallback((draft: string) => {
+    setSpokenDraft(draft);
+    setScreenshotSuggestion(studentClassPrefill(draft));
+    setTab("courses");
+    setEditor({ kind: "course" });
+    setQueuedSpokenDraft(null);
+  }, []);
   const load = useCallback(
     async (reset = false, quiet = false): Promise<boolean> => {
       const request = ++generation.current;
@@ -1320,17 +1330,16 @@ function StudentClassesAccount({
     alive.current = true;
     let draft: string | null = null;
     try {
-      draft = consumeStudentClassDraft(window.sessionStorage, accountKey);
+      if (!settingsOnly)
+        draft = consumeStudentClassDraft(window.sessionStorage, accountKey);
     } catch {
       /* Timetable loading also works when browser storage is blocked. */
     }
-    if (draft) {
-      setSpokenDraft(draft);
-      setScreenshotSuggestion(studentClassPrefill(draft));
-      setTab("courses");
-      setEditor({ kind: "course" });
-    }
-    if (new URLSearchParams(window.location.search).has("add")) {
+    if (draft) openSpokenDraft(draft);
+    if (
+      !settingsOnly &&
+      new URLSearchParams(window.location.search).has("add")
+    ) {
       window.history.replaceState({}, "", window.location.pathname);
     }
     void load();
@@ -1338,7 +1347,40 @@ function StudentClassesAccount({
       alive.current = false;
       ++generation.current;
     };
-  }, [load, accountKey]);
+  }, [load, accountKey, openSpokenDraft, settingsOnly]);
+  useEffect(() => {
+    if (settingsOnly) return;
+    const receive = () => {
+      let draft: string | null = null;
+      try {
+        draft = consumeStudentClassDraft(window.sessionStorage, accountKey);
+      } catch {
+        /* Keep any existing editor intact when browser storage is unavailable. */
+      }
+      if (!draft) return;
+      if (
+        busy ||
+        uncertain ||
+        editor ||
+        exception ||
+        importMode ||
+        operation.current
+      )
+        setQueuedSpokenDraft(draft);
+      else openSpokenDraft(draft);
+    };
+    window.addEventListener("navox:class-draft-ready", receive);
+    return () => window.removeEventListener("navox:class-draft-ready", receive);
+  }, [
+    accountKey,
+    settingsOnly,
+    busy,
+    uncertain,
+    editor,
+    exception,
+    importMode,
+    openSpokenDraft,
+  ]);
   useEffect(() => {
     if (
       settingsOnly ||
@@ -1513,6 +1555,26 @@ function StudentClassesAccount({
         <p className={styles.notice} role="status">
           {notice}
         </p>
+      )}
+      {queuedSpokenDraft && !settingsOnly && (
+        <section className={styles.notice} aria-label="Class draft from Vox">
+          <p>
+            Your next class draft is ready. Finish or cancel your current edit,
+            then review it. Nothing has been added yet.
+          </p>
+          <div className={styles.actions}>
+            <button
+              type="button"
+              disabled={locked || !!editor || !!exception || !!importMode}
+              onClick={() => openSpokenDraft(queuedSpokenDraft)}
+            >
+              Review class from Vox
+            </button>
+            <button type="button" onClick={() => setQueuedSpokenDraft(null)}>
+              Dismiss draft
+            </button>
+          </div>
+        </section>
       )}
       {!profile ? (
         <section

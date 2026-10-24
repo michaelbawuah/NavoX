@@ -15,7 +15,9 @@ import {
   selectReplyConnection,
   selectReplySource,
 } from "../lib/email-workflow";
+import { productFeatures } from "../lib/product-features";
 import workflowStyles from "./communication-drafts.module.css";
+import { InboxMeetingCheck } from "./inbox-meeting-check";
 import { SavedMemoryPicker } from "./personal-memory";
 import { WatchSentEmail } from "./thread-watch-panel";
 import styles from "./today-workspace.module.css";
@@ -57,26 +59,39 @@ type SendAction = {
   result: { message_id?: string; thread_id?: string | null };
 };
 
-async function request<T>(
+export async function communicationRequest<T>(
   path: string,
   method = "GET",
   body?: unknown,
+  accountKey?: string,
 ): Promise<T> {
   const response = await fetch(`${api}${path}`, {
     method,
     credentials: "include",
     signal: AbortSignal.timeout(method === "POST" ? 65_000 : 10_000),
-    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      ...(accountKey ? { "X-NavoX-Account": accountKey } : {}),
+    },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  }).catch(() => {
+    throw new Error(
+      "The connection was interrupted. Check the current email status before trying again.",
+    );
   });
   const data = await response.json().catch(() => null);
   if (!response.ok)
     throw new Error(
-      typeof data?.detail === "string"
-        ? data.detail
-        : typeof data?.detail?.message === "string"
-          ? data.detail.message
-          : "NavoX could not complete this request.",
+      response.status === 401
+        ? "Sign in again before continuing with this email."
+        : response.status === 409
+          ? "This email or your account changed. Open the latest draft and review it again."
+          : response.status === 403
+            ? "Check your email connection and permissions before continuing."
+            : response.status === 422
+              ? "Check the recipient, subject and message, then try again."
+              : "This email request couldn’t finish. Your text is still here. Please try again.",
     );
   return data as T;
 }
@@ -123,6 +138,8 @@ export function CommunicationDrafts({
   selectedCommitmentId,
   selectionKey,
   onDraftCount,
+  accountKey,
+  timezone,
 }: {
   commitments: { id: string; title: string; description?: string | null }[];
   connections: EmailConnection[];
@@ -131,7 +148,14 @@ export function CommunicationDrafts({
   selectedCommitmentId?: string | null;
   selectionKey?: string | number;
   onDraftCount?: (count: number) => void;
+  accountKey?: string;
+  timezone?: string;
 }) {
+  const request = useCallback(
+    <T,>(path: string, method = "GET", body?: unknown) =>
+      communicationRequest<T>(path, method, body, accountKey),
+    [accountKey],
+  );
   const [commitmentId, setCommitmentId] = useState(
     eligibleReplyCommitment(commitments, selectedCommitmentId)?.id ??
       (!selectedCommitmentId && commitments.length === 1
@@ -253,7 +277,7 @@ export function CommunicationDrafts({
     return () => {
       disposed = true;
     };
-  }, []);
+  }, [request]);
   useEffect(() => {
     let disposed = false;
     setSources([]);
@@ -275,7 +299,7 @@ export function CommunicationDrafts({
     return () => {
       disposed = true;
     };
-  }, [selectedCommitment]);
+  }, [selectedCommitment, request]);
 
   useEffect(() => {
     if (!selectedSourceContext || draft || action || manual) return;
@@ -307,7 +331,7 @@ export function CommunicationDrafts({
       disposed = true;
       clearTimeout(timer);
     };
-  }, [action]);
+  }, [action, request]);
 
   useEffect(() => {
     if (
@@ -317,9 +341,16 @@ export function CommunicationDrafts({
     )
       return;
     notifiedCompletion.current = action.id;
+    setSaved((rows) =>
+      rows.map((row) =>
+        row.action_id === action.id || row.id === action.payload.draft_id
+          ? { ...row, status: "completed" }
+          : row,
+      ),
+    );
     void onStateChanged().catch(() =>
       setError(
-        "The email was verified, but your daily view could not refresh. Refresh the page to update it.",
+        "The email was sent and verified. Your Inbox will update when the connection recovers.",
       ),
     );
   }, [action, onStateChanged]);
@@ -371,7 +402,7 @@ export function CommunicationDrafts({
       live = false;
       clearInterval(timer);
     };
-  }, [action]);
+  }, [action, request]);
   const reviewMatches = manual
     ? manualEmailReviewMatches(
         action,
@@ -606,6 +637,29 @@ export function CommunicationDrafts({
         </label>
         {!manual && (
           <>
+            {productFeatures.studentCalendarAvailability &&
+              accountKey &&
+              timezone && (
+                <InboxMeetingCheck
+                  key={`${selectedCommitment}:${selectedSource}:${accountKey}:${timezone}`}
+                  accountKey={accountKey}
+                  timezone={timezone}
+                  disabled={busy || paused || !!action || !selectedCommitment}
+                  onUseTimes={(value) => {
+                    const updated = [instructions.trim(), value]
+                      .filter(Boolean)
+                      .join("\n\n");
+                    if (updated.length > 4000) {
+                      setError(
+                        "Shorten your reply instructions before adding these times.",
+                      );
+                      return;
+                    }
+                    setInstructions(updated);
+                    setApproved(false);
+                  }}
+                />
+              )}
             <label>
               What should the reply say?
               <textarea

@@ -7,6 +7,10 @@ import { studyRequest } from "../lib/student-planning";
 import { studentRequest } from "../lib/student-schedule";
 import { TodayHome } from "./today-home";
 
+const calendarApi = vi.hoisted(() => ({ calendars: vi.fn() }));
+vi.mock("../lib/student-calendar-api", () => ({
+  createStudentCalendarApi: () => calendarApi,
+}));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
 }));
@@ -55,6 +59,8 @@ beforeEach(() => {
   productFeatures.studentPlanning = true;
   productFeatures.studentGoals = false;
   productFeatures.studentWhiteboard = false;
+  productFeatures.studentCalendarAvailability = true;
+  calendarApi.calendars.mockResolvedValue({ grants: [] });
   vi.mocked(studentRequest).mockResolvedValue(empty);
   vi.mocked(studyRequest).mockImplementation(async (path) =>
     path === "/tasks" ? [] : { revision: 0, blocks: [], needs_review: false },
@@ -128,32 +134,60 @@ describe("Today home", () => {
     expect(host.textContent).not.toContain("Done for today");
     expect(host.textContent).toContain("Show setup checklist");
   });
-  it("does not count calendar read permission as email access", async () => {
-    await act(async () =>
-      root.render(
-        <TodayHome
-          {...props}
-          connections={[
-            {
-              id: "google",
-              provider: "google",
-              external_email: null,
-              status: "active",
-              granted_scopes: [
-                "https://www.googleapis.com/auth/calendar.readonly",
-              ],
-              last_checked_at: null,
-              last_error: null,
-            },
-          ]}
-        />,
-      ),
-    );
+  it.each(["missing", "revoked", "pending", "unavailable"])(
+    "does not count broad provider scopes when purpose-bound calendar consent is %s",
+    async (status) => {
+      calendarApi.calendars.mockResolvedValue({
+        grants: status === "missing" ? [] : [{ status }],
+      });
+      await act(async () =>
+        root.render(
+          <TodayHome
+            {...props}
+            connections={[
+              {
+                id: "google",
+                provider: "google",
+                external_email: null,
+                status: "active",
+                granted_scopes: [
+                  "https://www.googleapis.com/auth/calendar.readonly",
+                ],
+                last_checked_at: null,
+                last_error: null,
+              },
+            ]}
+          />,
+        ),
+      );
+      const rows = [...host.querySelectorAll('[aria-label="Set up NavoX"] li')];
+      expect(rows).toHaveLength(5);
+      expect(rows[1].getAttribute("data-done")).toBe("false");
+      expect(rows[2].getAttribute("data-done")).toBe("false");
+      expect(host.textContent).toContain("0 of 5 done");
+    },
+  );
+  it("counts connected purpose-bound calendar consent independently of legacy scopes", async () => {
+    calendarApi.calendars.mockResolvedValue({
+      grants: [{ status: "connected" }],
+    });
+    await render();
     const rows = [...host.querySelectorAll('[aria-label="Set up NavoX"] li')];
-    expect(rows).toHaveLength(5);
     expect(rows[1].getAttribute("data-done")).toBe("true");
     expect(rows[2].getAttribute("data-done")).toBe("false");
     expect(host.textContent).toContain("1 of 5 done");
+  });
+  it("clears calendar completion when the next canonical lookup finds revoked consent", async () => {
+    calendarApi.calendars.mockResolvedValue({
+      grants: [{ status: "connected" }],
+    });
+    await render();
+    expect(host.textContent).toContain("1 of 5 done");
+    calendarApi.calendars.mockResolvedValue({
+      grants: [{ status: "revoked" }],
+    });
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(host.textContent).toContain("0 of 5 done");
   });
   it("does not present a failed schedule lookup as an empty completed day", async () => {
     vi.mocked(studentRequest).mockRejectedValue(Error("internal details"));

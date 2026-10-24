@@ -1,6 +1,6 @@
 """Disabled-by-default, explicitly accepted study plans. Never writes a calendar."""
 
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -9,7 +9,7 @@ from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDe
 from navox.api.connector_management import require_origin
 from navox.api.student import result, scope
 from navox.student import service as schedule
-from navox.student_planning import completion, service
+from navox.student_planning import completion, service, task_review
 from navox.student_planning.schemas import (
     AcceptInput,
     MoveConfirm,
@@ -252,7 +252,7 @@ async def preview_preferences(
     account: CurrentAccountDependency,
     database: DatabaseSession,
     settings: SettingsDependency,
-) -> dict:
+) -> dict[str, Any]:
     require_origin(request, settings.web_origin)
     return await result(service.preference_preview(database, *scope(account), payload))
 
@@ -296,7 +296,9 @@ async def confirm_preferences(
 
 
 @router.get("/alarm", dependencies=[Depends(expected_routine_owner)])
-async def alarm_view(account: CurrentAccountDependency, database: DatabaseSession) -> dict:
+async def alarm_view(
+    account: CurrentAccountDependency, database: DatabaseSession
+) -> dict[str, Any]:
     current = await result(service.preferences(database, *scope(account)))
     payload = PreferencesUpdate.model_validate(
         {**current.model_dump(exclude={"timezone"}), "request_id": uuid4()}
@@ -317,7 +319,7 @@ async def preview_move(
     account: CurrentAccountDependency,
     database: DatabaseSession,
     settings: SettingsDependency,
-) -> dict:
+) -> dict[str, Any]:
     from navox.student_planning.moving import move
 
     require_origin(request, settings.web_origin)
@@ -332,7 +334,7 @@ async def confirm_move(
     account: CurrentAccountDependency,
     database: DatabaseSession,
     settings: SettingsDependency,
-) -> dict:
+) -> dict[str, Any]:
     from navox.student_planning.moving import move
 
     require_origin(request, settings.web_origin)
@@ -347,7 +349,7 @@ async def get_openings(
     account: CurrentAccountDependency,
     database: DatabaseSession,
     days: Annotated[int, Query(ge=1, le=7)] = 1,
-) -> dict:
+) -> dict[str, Any]:
     from navox.student_planning.openings import openings
 
     return await result(openings(database, *scope(account), days))
@@ -361,7 +363,7 @@ async def preview_task_completion(
     account: CurrentAccountDependency,
     database: DatabaseSession,
     settings: SettingsDependency,
-) -> dict:
+) -> dict[str, Any]:
     require_origin(request, settings.web_origin)
     return await result(completion.complete(database, *scope(account), task_id, payload))
 
@@ -374,7 +376,7 @@ async def confirm_task_completion(
     account: CurrentAccountDependency,
     database: DatabaseSession,
     settings: SettingsDependency,
-) -> dict:
+) -> dict[str, Any]:
     require_origin(request, settings.web_origin)
     candidate = completion.CompleteInput.model_validate(
         payload.model_dump(exclude={"preview_hash"})
@@ -382,5 +384,71 @@ async def confirm_task_completion(
     return await result(
         completion.complete(
             database, *scope(account), task_id, candidate, expected_preview=payload.preview_hash
+        )
+    )
+
+
+@router.post("/tasks/review", dependencies=[Depends(expected_routine_owner)])
+async def review_new_task(
+    payload: TaskCreate,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict[str, Any]:
+    require_origin(request, settings.web_origin)
+    return await result(task_review.review(database, *scope(account), payload))
+
+
+@router.post(
+    "/tasks/confirm", response_model=TaskView, dependencies=[Depends(expected_routine_owner)]
+)
+async def confirm_new_task(
+    payload: task_review.TaskCreateConfirm,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> TaskView:
+    require_origin(request, settings.web_origin)
+    candidate = TaskCreate.model_validate(payload.model_dump(exclude={"preview_hash"}))
+    return await result(
+        service.save_task(
+            database, *scope(account), candidate, expected_preview=payload.preview_hash
+        )
+    )
+
+
+@router.post("/tasks/{task_id}/review", dependencies=[Depends(expected_routine_owner)])
+async def review_existing_task(
+    task_id: UUID,
+    payload: TaskUpdate,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict[str, Any]:
+    require_origin(request, settings.web_origin)
+    return await result(task_review.review(database, *scope(account), payload, task_id))
+
+
+@router.post(
+    "/tasks/{task_id}/confirm",
+    response_model=TaskView,
+    dependencies=[Depends(expected_routine_owner)],
+)
+async def confirm_existing_task(
+    task_id: UUID,
+    payload: task_review.TaskUpdateConfirm,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> TaskView:
+    require_origin(request, settings.web_origin)
+    candidate = TaskUpdate.model_validate(payload.model_dump(exclude={"preview_hash"}))
+    return await result(
+        service.save_task(
+            database, *scope(account), candidate, task_id, expected_preview=payload.preview_hash
         )
     )

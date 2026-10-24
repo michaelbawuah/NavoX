@@ -17,9 +17,11 @@ import {
 } from "../lib/vox-conversation";
 import styles from "./vox-call-controls.module.css";
 import { useVoxCall } from "./vox-call-provider";
+import { VoxClassReview } from "./vox-class-review";
 import { VoxConversation } from "./vox-conversation";
 import { VoxPlanReview } from "./vox-plan-review";
 import { VoxRoutineReview } from "./vox-routine-review";
+import { VoxTaskReview } from "./vox-task-review";
 
 type IconName = "microphone" | "speaker" | "captions" | "hang-up" | "minimize";
 
@@ -413,6 +415,36 @@ function CallDialog({
             }
             proposal={state.planReview}
             accountKey={state.owner.workspaceId + ":" + state.owner.userId}
+            onClose={() => controller.dismissPlanReview()}
+          />
+        )}
+      {state.ownerVerified &&
+        state.owner &&
+        !ended &&
+        state.planReview?.kind === "task" && (
+          <VoxTaskReview
+            key={
+              state.callId +
+              ":" +
+              state.owner.workspaceId +
+              ":" +
+              state.owner.userId +
+              ":" +
+              state.planReview.preview_id
+            }
+            proposal={state.planReview}
+            accountKey={state.owner.workspaceId + ":" + state.owner.userId}
+            onClose={() => controller.dismissPlanReview()}
+          />
+        )}
+      {state.ownerVerified &&
+        state.owner &&
+        !ended &&
+        state.planReview?.kind === "class" && (
+          <VoxClassReview
+            key={`${state.callId}:${state.owner.workspaceId}:${state.owner.userId}:${state.planReview.preview_id}`}
+            proposal={state.planReview}
+            accountKey={`${state.owner.workspaceId}:${state.owner.userId}`}
             onClose={() => controller.dismissPlanReview()}
           />
         )}

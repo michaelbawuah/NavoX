@@ -5,6 +5,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +27,9 @@ class CalendarBusy:
     warnings: tuple[str, ...]
 
 
-async def inventory(database: AsyncSession, user_id: UUID, workspace_id: UUID) -> list[dict]:
+async def inventory(
+    database: AsyncSession, user_id: UUID, workspace_id: UUID
+) -> list[dict[str, Any]]:
     state = await calendars.state(database, user_id, workspace_id)
     result = []
     for grant in await calendars.grants(database, user_id, workspace_id):
@@ -88,7 +91,7 @@ async def collect(
             409, "Resume NavoX to check connected calendars before planning"
         )
     provider = GoogleAvailabilityProvider()
-    intervals = []
+    intervals: list[tuple[datetime, datetime]] = []
 
     async def check() -> None:
         if await inventory(database, user_id, workspace_id) != original:
