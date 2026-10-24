@@ -258,7 +258,7 @@ retain no data-publishing permission. Deploy compatible API/worker images before
 adding these configuration fields. No new client-side key is needed.
 
 Both spoken paths receive the same read-only search tool. Requests send the public
-question, server time and student timezone, not the call history or student
+question and server time, not the call history, student timezone or student
 records. A completed search and valid citations are required before a result is
 accepted. The call displays clickable inline source links; failure asks the
 voice model to acknowledge that it could not verify the answer. Public results

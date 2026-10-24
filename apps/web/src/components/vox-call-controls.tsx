@@ -122,6 +122,21 @@ function phaseDetail(state: VoxCallState) {
   }
 }
 
+// Render only simple emphasis; all other provider text remains escaped React text.
+// Split citation ranges first so formatting never changes provider offsets.
+function webText(text: string): ReactNode[] {
+  let offset = 0;
+  return text.split(/(\*\*[^*\n]+\*\*)/g).map((part) => {
+    const key = offset;
+    offset += part.length;
+    return part.startsWith("**") && part.endsWith("**") ? (
+      <strong key={key}>{part.slice(2, -2)}</strong>
+    ) : (
+      part
+    );
+  });
+}
+
 function WebLookup({ state }: { state: VoxCallState }) {
   const result = state.ownerVerified ? state.webLookup : null;
   if (!result || state.phase === "ended") return null;
@@ -141,7 +156,7 @@ function WebLookup({ state }: { state: VoxCallState }) {
   const content: ReactNode[] = [];
   let offset = 0;
   for (const [index, source] of result.citations.entries()) {
-    content.push(characters.slice(offset, source.start).join(""));
+    content.push(webText(characters.slice(offset, source.start).join("")));
     content.push(
       <a
         key={index}
@@ -154,7 +169,7 @@ function WebLookup({ state }: { state: VoxCallState }) {
     );
     offset = source.end;
   }
-  content.push(characters.slice(offset).join(""));
+  content.push(webText(characters.slice(offset).join("")));
   return (
     <section
       className={styles.webResult}

@@ -14,7 +14,6 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from navox.ai.context import ContextDenied, reject_credentials
 from navox.core.settings import Settings
-from navox.student import service as student
 from navox.vox.inference_config import VoxInferenceConfig
 from navox.vox.inference_http import (
     OpenAICompatiblePipeline,
@@ -175,9 +174,6 @@ class PublicWebTools:
         await self.publish({"status": "searching"})
         try:
             async with asyncio.timeout(25):
-                async with self.check.factory() as database:
-                    owner = await student.owner(database, authority.user_id, authority.workspace_id)
-                    timezone = owner.timezone
                 checked_at = datetime.now(UTC).isoformat()
                 route = self.config.web_search
                 assert route is not None
@@ -201,7 +197,10 @@ class PublicWebTools:
                             "official primary sources, especially official competition or club "
                             "fixtures for sports. Check that events are in the future relative "
                             "to the supplied current time. State the date, competition and "
-                            "timezone for fixtures, and the user's local time when confirmed. "
+                            "source-stated timezone for fixtures. Quote source times exactly. "
+                            "Never calculate UTC offsets or convert times to a user timezone. "
+                            "If the source omits its timezone, say timezone not stated. "
+                            "Do not add other fixtures the user did not ask for. "
                             "Distinguish confirmed kickoff times from tentative dates. Keep the "
                             "answer under 90 words in one or two plain-text paragraphs with source "
                             "citations. Do not use Markdown headings, emphasis or lists. "
@@ -213,7 +212,6 @@ class PublicWebTools:
                             {
                                 "question": query,
                                 "current_time": checked_at,
-                                "user_timezone": timezone,
                             }
                         ),
                     },

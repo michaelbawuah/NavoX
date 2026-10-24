@@ -990,12 +990,12 @@ it("shows clickable inline web citations and removes them at hang-up", async () 
       type: "web-lookup",
       result: {
         status: "complete",
-        text: "Fixture [source]",
+        text: "**Fixture** [source]",
         checkedAt: "2026-10-24T00:00:00Z",
         citations: [
           {
-            start: 8,
-            end: 16,
+            start: 12,
+            end: 20,
             title: "Official fixtures",
             url: "https://example.org/fixtures",
           },
@@ -1009,6 +1009,9 @@ it("shows clickable inline web citations and removes them at hang-up", async () 
   expect(source?.href).toBe("https://example.org/fixtures");
   expect(source?.textContent).toBe("Official fixtures");
   expect(source?.rel).toBe("noopener noreferrer");
+  expect(host.querySelector("[data-vox-web-status] strong")?.textContent).toBe(
+    "Fixture",
+  );
   await click("Hang up");
   expect(host.querySelector('[aria-label="Web lookup sources"]')).toBeNull();
 });
