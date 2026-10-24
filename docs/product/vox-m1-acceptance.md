@@ -18,7 +18,7 @@ This branch is an implementation checkpoint, not a passed milestone. Production 
 - Background context compaction is implemented and tested with real providers; qualify longer calls and correction retention over a larger corpus. Notes are explicitly lossy and recent full turns take precedence.
 - Expand the passed emulated terminal transport replacement to physical devices and longer outages, while preserving logout/reset/ownership revocation; see [the next continuity implementation boundary](vox-m1-continuity-next.md).
 - Supply vendor-approved browser credential handling and licensed Web keyword/language models. Actual SDK and authenticated runtime configuration are implemented but remain disabled pending this setup and device qualification.
-- The server-owned 80-percent notice is now shown once in the dialog or minimized dock. Qualify quota enforcement and the notice against actual paid calls; synthetic UI/status tests do not establish live enforcement.
+- Live budget qualification passed on test runtime `2870af6`: the 80-percent notice appeared during a real paid conversation; all four daily/monthly token/voice limits returned pre-allocation HTTP 429 with no new media admission. Restoring each allowance allowed a new call without reload. Lowering the token allowance during a live call stopped speech and displayed the explicit allowance message. Original policy restored; no usage reset. Physical-phone presentation remains open.
 - Select/test stock voices on real devices. Custom Noa voice follows milestone1.
 - Isolated test link: https://vox-test.66-175-235-169.nip.io/. HTTPS and sign-in now pass from the connected Mac after replacing the failing temporary hostname and rebuilding the app with the new origin. Physical-phone reachability remains unverified. Credentials remain in the private local login file, never in this document.
 - Instrument200-question voice corpus and the specified usage metrics; student/cohort thresholds remain Waiting on real usage.
@@ -46,3 +46,16 @@ forced worker crash, 20-second browser outage and mute/unmute passed their named
 checks. True provider-cap duration and physical-phone recording are not passed.
 Picovoice approval remains pending independently; it is not a blocker to other
 engineering work. There were no UI layout, spacing or mascot design changes.
+
+
+Budget/restart update (`c838100`, `2870af6`): successful asynchronous cleanup now
+refreshes transport availability; the specific pre-allocation allowance denial
+can be retried without quarantining an unknown allocation. Rapid hang-up no
+longer races per-track removal against full-room disconnect. Three consecutive
+live immediate hang-up/restart checks passed, plus the four budget cases above.
+Unknown allocation/cleanup failures remain fenced. No layout, tap-area, spacing,
+mascot or output-buffer changes. The only new copy explains the allowance cutoff
+and offers typed chat. See the verification record for failures and final evidence.
+
+Milestone 2 preparation is recorded in [the shell/Today source checklist](vox-m2-shell-today.md).
+It does not claim an implemented redesign or visual acceptance.

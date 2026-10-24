@@ -46,6 +46,17 @@ Quota policy is separate from inference route selection. The current defaults ar
 
 Authenticated operator endpoints are `GET /api/v1/vox/usage/policy`, `PUT /api/v1/vox/usage/policy`, and `GET /api/v1/vox/usage/daily`. All these endpoints require a freshly valid browser cookie and the matching `X-NavoX-Account: <workspace UUID>:<user UUID>` header. Policy PUT also requires the approved same-origin `Origin` header. Do not paste or log session cookies. Read the current revision before updating; PUT accepts `{ "revision": <current>, "policy": <reviewed policy> }` and checks for conflicting updates. Never blindly publish the example's revision zero over an existing policy. Student-owned reads are `GET /api/v1/vox/usage/status` and `GET /api/v1/vox/usage/calls/{call_id}`.
 
+A configured-mode media preflight denial returns HTTP 429 with stable code
+`vox_allowance_exhausted_before_media`, before any media provision intent or
+Cloud room allocation. The browser uses only this exact response on initial
+`/media` admission to show the allowance message without quarantining an unknown
+allocation. Ordinary 429 errors, renewal denials, timeouts and lost responses are
+not proof of no allocation and keep their existing cleanup safeguards. Once an
+operator raises the allowance or a period resets, the student can start a new
+call without reloading. Never lower global test limits while another student's
+call is active. Preserve the original policy/revision privately, restore with
+revision checking in cleanup, and retain usage/uncertain reservations unchanged.
+
 The [pricing example](vox-m1-usage-policy.example.json) contains the exact `openai` / `gpt-realtime-2.1` token-rate entry. It also includes reviewed transcription-duration, fallback text and speech rates. It does not select a model or establish a LiveKit rate. The text rate has a standard-context ceiling; larger requests remain unknown until a matching tier is configured. Token modality rates are USD per million tokens; transport is USD per connected minute. Add only reviewed, versioned rates for the exact selected provider/model and supported billing modality. Provider duration objects are stored as billed_audio_ms and priced using audio_usd_per_minute, never converted into invented tokens. The example selects tts_stream_format=sse to receive completed speech usage. Other providers can select audio; missing usage stays unknown. Unknown rates, unknown modality, missing usage, and null transport rates mean an incomplete/unknown total, not free service. Provider estimates remain distinct from reconciled invoices. Unknown failed usage can retain a token reservation; do not delete ledger entries to reset quota. Voice activity uses durable credits of at most one second: lower budgets apply to new grants, while an already-issued credit remains usable until its deadline. Per-frame revocation is still fresh. An uncertain crash hold remains reserved, not actual speech. See [credit accounting](../vox-voice-credit-batching.md) for period attribution, checkpoint fencing and estimate limitations.
 
 ## Start the existing processes

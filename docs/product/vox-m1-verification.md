@@ -356,3 +356,72 @@ reset or represented as settled. Complete dollar totals remain unknown because
 transport/search costs and invoice reconciliation are incomplete; configured
 known-component estimates are not actual billed amounts. Phone and long-duration
 acceptance remain open. Full GitHub CI runs separately from the focused checks.
+
+
+### Live budgets and call restart — 2026-10-24 UTC
+
+Implementation: `c838100` (stable pre-allocation allowance response, safe retry,
+post-cleanup availability refresh) and `2870af6` (terminal track-removal race).
+All services on the isolated test deployment run `2870af6`. No main/production
+change, credential disclosure, quota reset, UI layout or audio-buffer change.
+
+- [x] 298 focused frontend tests and 32 PostgreSQL-backed budget/readiness/usage
+  tests passed for the budget change. Four API cases use actual service-created
+  usage to establish daily/monthly tokens/voice limits, assert the stable HTTP
+  429 body/private response headers and zero media/provision-intent/cleanup rows
+  or provider calls, then successfully admit after policy restoration.
+- [x] 242 focused frontend tests passed after the quick-hangup fix, including
+  capture, controller, provider, controls and 84 transport tests. This overlaps
+  the earlier suite and must not be summed as distinct tests. TypeScript and
+  scoped Biome checks passed; deployment builds succeeded.
+- [x] Final 390 x 844 Chromium emulation: a real paid two-turn conversation showed
+  the server's 80-percent daily-token notice, retained the synthetic context,
+  received 62,911 audio bytes with nonzero energy, had no page errors, and ended
+  with HTTP 204 for call/media cleanup. Ledger: 1,936 tokens; 13,160 ms speaking,
+  28,044 ms idle, 41,204 ms connected; zero outstanding call reservations.
+- [x] Daily tokens, monthly tokens, daily voice minutes and monthly voice minutes
+  each returned HTTP 429 with `vox_allowance_exhausted_before_media`. No new
+  HTTP-200 media admission occurred while blocked. Each showed the explicit
+  allowance/typed-chat message, and each admitted successfully on the same page
+  after the original allowance was restored. Each subsequent quick hang-up was
+  clean; no reload was needed.
+- [x] Lowering daily tokens to already-consumed usage during a live call gated
+  the next speech and replacement admission, then showed the allowance-ended
+  message. This does not revoke an already-issued voice credit retroactively;
+  credit expiry and per-frame authorization remain in force.
+- [x] Separate three-cycle rapid-connect/hang-up test passed: all six end/close
+  responses were 204, every captured microphone track ended, every peer closed,
+  no page errors, and the next call remained available without reload.
+- [x] Original policy was restored exactly with revision checking. Verified
+  defaults: 60/600 voice minutes, 300,000/3,000,000 tokens. Temporary private
+  policy backup was removed. Final checks found zero active calls, checkpoints,
+  unfinished cleanup, Cloud rooms and participants. Existing conservative daily
+  uncertainty was not reset.
+
+Failures were investigated rather than counted as passes. The first paid-call
+check found stale UI availability after asynchronous cleanup. After that fix, a
+rapid hang-up immediately after connection exposed competing microphone-removal
+and SDK-disconnect operations. A regression reproduced the failure before the
+fix. Physical capture still stops synchronously; a one-microtask scheduling yield
+lets terminal room shutdown supersede a not-yet-started per-track negotiation.
+Late publication uses the same retirement path. Actual in-call removal errors,
+failed disconnects and server cleanup failures still quarantine the adapter.
+
+The first matrix runner also had an unobserved response-wait rejection that
+terminated before its finally block. The private policy backup was used to verify
+exactly the expected monthly-token edit/revision, restore it and check no live
+calls remained. The runner now observes response waits and clicks together, and
+the final matrix completed its restoration successfully. No student counters
+were fabricated or reset to make these tests pass.
+
+The short denied/startup calls recorded no worker speech/token usage. That is not
+proof of zero LiveKit transport usage or cost. Complete provider/Cloud accounting
+and invoice reconciliation remain open; the measured paid-call ledger above is
+not a claim of complete billing coverage. Real phone/network recording, approved
+wake assets/onset/no-upload checks, actual provider-cap duration, larger correction
+corpus and student usage gates remain open.
+
+Full GitHub CI run 40056292946 passed at `c0e981a`, including Compose integration.
+The `c838100` run was superseded/cancelled by the next code push. The current
+revision's CI is tracked separately in PR #56; local focused passes and live test
+results do not imply that full current CI or physical-phone acceptance has passed.

@@ -60,3 +60,10 @@ offline and answered an immediate contextual follow-up correctly. Mute/unmute al
 retained one admission and context. Both calls received audio and closed with 204;
 all final output segments had zero measured source gaps. See the verification
 record for numeric usage, earlier failed attempts and still-open device gates.
+
+
+Budget and terminal-restart qualification is now recorded in the verification
+file. All four live limits and same-page allowance recovery passed, along with
+three rapid hang-up/restart cycles. Pending external/device/cost/long-duration
+gates remain above. The next product milestone's source checklist is
+[app shell and Today](vox-m2-shell-today.md); it is preparation, not UI acceptance.
