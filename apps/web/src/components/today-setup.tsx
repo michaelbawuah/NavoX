@@ -17,14 +17,14 @@ const steps = [
   },
   {
     title: "Connect your calendar",
-    help: "Google, Outlook or Apple. Choose your calendar in Connections.",
+    help: "Choose an available calendar in Connections so its events can shape your plan.",
     action: "Connect",
     href: "/connections",
     icon: "M4 6h16v15H4zM8 3v6M16 3v6M4 11h16",
   },
   {
     title: "Connect your email",
-    help: "Gmail or Outlook. I’ll flag emails that need a reply and help you draft them. Nothing is sent without your OK.",
+    help: "Connect an available mailbox. I’ll flag emails that need a reply and help you draft them. You review and approve each send.",
     action: "Connect",
     href: "/connections",
     icon: "M3 5h18v14H3zM3 5l9 7 9-7",

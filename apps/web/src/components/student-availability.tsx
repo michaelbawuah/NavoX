@@ -92,12 +92,27 @@ interface AvailabilityProps {
   api?: StudentCalendarApi;
 }
 
-export function StudentAvailability(props: AvailabilityProps) {
-  return (
+export function StudentAvailability({
+  collapsible = false,
+  ...props
+}: AvailabilityProps & { collapsible?: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const content = (
     <AvailabilityWorkspace
       key={`${props.accountId}:${props.timezone}`}
       {...props}
     />
+  );
+  return collapsible ? (
+    <details
+      className={styles.disclosure}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary>Find time for a meeting</summary>
+      {expanded ? content : null}
+    </details>
+  ) : (
+    content
   );
 }
 

@@ -6,9 +6,10 @@ x-api: &api
     context: ./services/api
   image: navox-vox-test-api
   env_file: ${NAVOX_VOX_ENV_FILE:?Set the private test environment file}
-  # M2 uses the existing planning/goals APIs; keep frontend/backend flags paired.
+  # M2 feature controls stay paired between the browser and API.
   environment:
     STUDENT_PLANNING_ENABLED: ${NAVOX_TEST_PLANNING_ENABLED:-true}
+    STUDENT_CALENDAR_AVAILABILITY_ENABLED: ${NAVOX_TEST_CALENDAR_AVAILABILITY_ENABLED:-true}
     STUDENT_GOALS_ENABLED: ${NAVOX_TEST_GOALS_ENABLED:-true}
     STUDENT_COURSEWORK_ENABLED: ${NAVOX_TEST_COURSEWORK_ENABLED:-true}
   volumes:
@@ -75,6 +76,10 @@ services:
       retries: 20
       start_period: 45s
 
+  worker:
+    <<: *api
+    command: ["uv", "run", "--no-sync", "python", "-m", "navox.workflows.worker"]
+
   vox-worker:
     <<: *api
     command: ["uv", "run", "--no-sync", "python", "-m", "navox.vox.worker_livekit", "start"]
@@ -90,6 +95,7 @@ services:
       args:
         NEXT_PUBLIC_API_BASE_URL: ${NAVOX_PUBLIC_ORIGIN}/api/v1
         NEXT_PUBLIC_NAVOX_STUDENT_PLANNING_ENABLED: ${NAVOX_TEST_PLANNING_ENABLED:-true}
+        NEXT_PUBLIC_NAVOX_STUDENT_CALENDAR_AVAILABILITY_ENABLED: ${NAVOX_TEST_CALENDAR_AVAILABILITY_ENABLED:-true}
         NEXT_PUBLIC_NAVOX_STUDENT_GOALS_ENABLED: ${NAVOX_TEST_GOALS_ENABLED:-true}
         NEXT_PUBLIC_NAVOX_STUDENT_COURSEWORK_ENABLED: ${NAVOX_TEST_COURSEWORK_ENABLED:-true}
         NEXT_PUBLIC_NAVOX_STUDENT_VOX_ENABLED: "true"

@@ -444,17 +444,18 @@ export function AccountWorkspace({
               accountName={account.display_name ?? account.email}
               onSignOut={signOut}
             >
+              {productFeatures.studentPlanning && (
+                <StudentDailyPlan
+                  key={`${account.workspace.id}:${account.id}`}
+                  accountId={`${account.workspace.id}:${account.id}`}
+                />
+              )}
               {productFeatures.studentCalendarAvailability && (
                 <StudentAvailability
                   key={`availability:${account.workspace.id}:${account.id}`}
                   accountId={`${account.workspace.id}:${account.id}`}
                   timezone={account.timezone ?? "UTC"}
-                />
-              )}
-              {productFeatures.studentPlanning && (
-                <StudentDailyPlan
-                  key={`${account.workspace.id}:${account.id}`}
-                  accountId={`${account.workspace.id}:${account.id}`}
+                  collapsible={productFeatures.studentPlanning}
                 />
               )}
             </WorkspaceShell>
