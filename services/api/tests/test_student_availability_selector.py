@@ -179,9 +179,7 @@ def test_options_never_overlap_and_fit_their_openings():
 def test_times_align_to_local_half_hours_in_the_students_zone():
     local = availability()
     shifted = local.model_copy(update={"timezone": "America/New_York"})
-    picked = ask("coffee", shifted)
-    for item in picked.suggestions:
-        minute = item.start_at.astimezone(ZoneInfo("America/New_York")).minute
-        assert minute in (0, 30) or "right_after_commitment" in item.reasons or (
-            item.start_at in {opening.start_at for opening in local.confirmed_openings}
-        )
+    edges = {opening.start_at for opening in local.confirmed_openings}
+    zone = ZoneInfo("America/New_York")
+    for item in ask("coffee", shifted).suggestions:
+        assert item.start_at in edges or item.start_at.astimezone(zone).minute in (0, 30)
