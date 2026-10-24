@@ -93,7 +93,7 @@ const preview = {
   expires_at: "2026-10-19T13:20:00Z",
   base_revision: 1,
   result,
-  requires_acceptance: true,
+  requires_acceptance: true, replaced_blocks: [],
 };
 const preferences = {
   wake_time: "07:00",
@@ -110,7 +110,7 @@ describe("study-plan response boundaries", () => {
   it("retains accepted revisions and distinguishes previews from saved plans", () => {
     expect(readStudyPreview(preview)).toMatchObject({
       base_revision: 1,
-      requires_acceptance: true,
+      requires_acceptance: true, replaced_blocks: [],
       result: { planning_only: true },
     });
     expect(readStudyPlan(plan).blocks[0]).toMatchObject({

@@ -217,6 +217,9 @@
   margin-right: 4px;
 }
 .taskCircle {
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
   width: 18px;
   height: 18px;
   border: 2px solid var(--nx-muted);
@@ -502,4 +505,31 @@
 .toolbar nav [aria-pressed="true"] {
   background: var(--nx-raised);
   color: var(--nx-text);
+}
+
+.taskCheck {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+.taskDetails {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  color: inherit;
+}
+.taskDetails > span {
+  min-width: 0;
 }

@@ -132,6 +132,7 @@ export interface StudyPlanResult {
   planning_only: true;
 }
 export interface StudyPlanPreview {
+  replaced_blocks: StudyBlock[];
   preview_id: string;
   preview_hash: string;
   expires_at: string;
@@ -430,6 +431,7 @@ export function readStudyPreview(value: unknown): StudyPlanPreview {
     expires_at: instant(v.expires_at),
     base_revision: num(v.base_revision),
     result: readStudyPlanResult(v.result),
+    replaced_blocks: list(v.replaced_blocks, readStudyBlock, 5000),
     requires_acceptance: true,
   };
 }
@@ -703,3 +705,34 @@ export function readStudyOpenings(value: unknown) {
   };
 }
 export type StudyOpenings = ReturnType<typeof readStudyOpenings>;
+
+export interface TaskCompletion {
+  preview_hash: string;
+  task: StudyTask;
+  removed_blocks: StudyBlock[];
+  credited_minutes: 0;
+  other_blocks_change: false;
+  alarms_change: false;
+  calendar_events_change: false;
+}
+export function readTaskCompletion(value: unknown): TaskCompletion {
+  const v = obj(value),
+    hash = text(v.preview_hash, 64);
+  if (
+    !/^[a-f0-9]{64}$/.test(hash) ||
+    v.credited_minutes !== 0 ||
+    v.other_blocks_change !== false ||
+    v.alarms_change !== false ||
+    v.calendar_events_change !== false
+  )
+    return invalid();
+  return {
+    preview_hash: hash,
+    task: readStudyTask(v.task),
+    removed_blocks: list(v.removed_blocks, readStudyBlock, 5000),
+    credited_minutes: 0,
+    other_blocks_change: false,
+    alarms_change: false,
+    calendar_events_change: false,
+  };
+}

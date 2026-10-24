@@ -206,15 +206,6 @@ class PlanResult(Input):
     planning_only: Literal[True] = True
 
 
-class PreviewView(Input):
-    preview_id: UUID
-    preview_hash: str
-    expires_at: datetime
-    base_revision: int
-    result: PlanResult
-    requires_acceptance: Literal[True] = True
-
-
 class AcceptInput(Input):
     preview_id: UUID
     preview_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -236,6 +227,16 @@ class BlockView(ProposedBlock):
     status: Literal["planned", "done", "took_longer", "skipped", "superseded", "needs_review"]
     actual_minutes: int
     outcome_at: datetime | None
+
+
+class PreviewView(Input):
+    preview_id: UUID
+    preview_hash: str
+    expires_at: datetime
+    base_revision: int
+    result: PlanResult
+    replaced_blocks: list[BlockView]
+    requires_acceptance: Literal[True] = True
 
 
 class PlanView(Input):

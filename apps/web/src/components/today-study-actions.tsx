@@ -133,15 +133,6 @@ export function TodayStudyActions({
     <div className={styles.root}>
       {!kind ? (
         <div className={styles.actions}>
-          {onMoved && (
-            <StudyBlockMove
-              block={block}
-              accountKey={accountKey}
-              timezone={timezone}
-              now={now}
-              onSaved={onMoved}
-            />
-          )}
           {(Object.keys(labels) as Kind[]).map((value) => (
             <button
               key={value}
@@ -157,6 +148,15 @@ export function TodayStudyActions({
               {labels[value]}
             </button>
           ))}
+          {onMoved && (
+            <StudyBlockMove
+              block={block}
+              accountKey={accountKey}
+              timezone={timezone}
+              now={now}
+              onSaved={onMoved}
+            />
+          )}
         </div>
       ) : (
         <form

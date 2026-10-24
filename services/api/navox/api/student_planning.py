@@ -9,7 +9,7 @@ from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDe
 from navox.api.connector_management import require_origin
 from navox.api.student import result, scope
 from navox.student import service as schedule
-from navox.student_planning import service
+from navox.student_planning import completion, service
 from navox.student_planning.schemas import (
     AcceptInput,
     MoveConfirm,
@@ -40,8 +40,16 @@ def enabled(request: Request, settings: SettingsDependency) -> None:
         raise HTTPException(404, "Study planning is not enabled")
 
 
+def expected_planning_owner(request: Request, account: CurrentAccountDependency) -> None:
+    values = request.headers.getlist("X-NavoX-Account")
+    if values and values != [f"{account.workspace.id}:{account.user.id}"]:
+        raise HTTPException(409, "Your account changed. Reopen the plan and try again")
+
+
 router = APIRouter(
-    prefix="/student/planning", tags=["student planning"], dependencies=[Depends(enabled)]
+    prefix="/student/planning",
+    tags=["student planning"],
+    dependencies=[Depends(enabled), Depends(expected_planning_owner)],
 )
 
 
@@ -140,6 +148,17 @@ async def preview_plan(
 ) -> PreviewView:
     require_origin(request, settings.web_origin)
     return await result(service.preview(database, *scope(account), payload))
+
+
+@router.get("/previews/{preview_id}", response_model=PreviewView)
+async def get_plan_preview(
+    preview_id: UUID,
+    response: Response,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+) -> PreviewView:
+    response.headers["Cache-Control"] = "private, no-store"
+    return await result(service.get_preview(database, *scope(account), preview_id))
 
 
 @router.post("/accept", response_model=PlanView)
@@ -332,3 +351,36 @@ async def get_openings(
     from navox.student_planning.openings import openings
 
     return await result(openings(database, *scope(account), days))
+
+
+@router.post("/tasks/{task_id}/complete/preview", dependencies=[Depends(expected_routine_owner)])
+async def preview_task_completion(
+    task_id: UUID,
+    payload: completion.CompleteInput,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict:
+    require_origin(request, settings.web_origin)
+    return await result(completion.complete(database, *scope(account), task_id, payload))
+
+
+@router.post("/tasks/{task_id}/complete/confirm", dependencies=[Depends(expected_routine_owner)])
+async def confirm_task_completion(
+    task_id: UUID,
+    payload: completion.CompleteConfirm,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict:
+    require_origin(request, settings.web_origin)
+    candidate = completion.CompleteInput.model_validate(
+        payload.model_dump(exclude={"preview_hash"})
+    )
+    return await result(
+        completion.complete(
+            database, *scope(account), task_id, candidate, expected_preview=payload.preview_hash
+        )
+    )

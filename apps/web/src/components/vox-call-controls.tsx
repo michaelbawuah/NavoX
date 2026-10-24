@@ -18,6 +18,8 @@ import {
 import styles from "./vox-call-controls.module.css";
 import { useVoxCall } from "./vox-call-provider";
 import { VoxConversation } from "./vox-conversation";
+import { VoxPlanReview } from "./vox-plan-review";
+import { VoxRoutineReview } from "./vox-routine-review";
 
 type IconName = "microphone" | "speaker" | "captions" | "hang-up" | "minimize";
 
@@ -376,6 +378,44 @@ function CallDialog({
         </p>
       </div>
       <WebLookup state={state} />
+      {state.ownerVerified &&
+        state.owner &&
+        !ended &&
+        state.planReview?.kind === "study-plan" && (
+          <VoxPlanReview
+            key={
+              state.callId +
+              ":" +
+              state.owner.workspaceId +
+              ":" +
+              state.owner.userId +
+              ":" +
+              state.planReview.preview_id
+            }
+            proposal={state.planReview}
+            accountKey={state.owner.workspaceId + ":" + state.owner.userId}
+            onClose={() => controller.dismissPlanReview()}
+          />
+        )}
+      {state.ownerVerified &&
+        state.owner &&
+        !ended &&
+        state.planReview?.kind === "routine" && (
+          <VoxRoutineReview
+            key={
+              state.callId +
+              ":" +
+              state.owner.workspaceId +
+              ":" +
+              state.owner.userId +
+              ":" +
+              state.planReview.preview_id
+            }
+            proposal={state.planReview}
+            accountKey={state.owner.workspaceId + ":" + state.owner.userId}
+            onClose={() => controller.dismissPlanReview()}
+          />
+        )}
       {!ended && (
         <VoxConversation
           model={conversation}

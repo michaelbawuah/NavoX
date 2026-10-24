@@ -225,12 +225,14 @@ function TodayHomeAccount({
       tick = window.setInterval(() => setClock(Date.now()), 15000);
     document.addEventListener("visibilitychange", visible);
     window.addEventListener("focus", visible);
+    window.addEventListener("navox:study-plan-changed", visible);
     return () => {
       ++epoch.current;
       window.clearInterval(interval);
       window.clearInterval(tick);
       document.removeEventListener("visibilitychange", visible);
       window.removeEventListener("focus", visible);
+      window.removeEventListener("navox:study-plan-changed", visible);
     };
   }, [load]);
   const zone =

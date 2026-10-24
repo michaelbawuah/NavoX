@@ -935,6 +935,52 @@ async def snapshot(
     return fingerprint, result
 
 
+async def future_blocks(
+    database: AsyncSession, user_id: UUID, workspace_id: UUID, moment: datetime
+) -> list[BlockView]:
+    rows = list(
+        await database.scalars(
+            select(StudentStudyBlock)
+            .where(
+                StudentStudyBlock.user_id == user_id,
+                StudentStudyBlock.workspace_id == workspace_id,
+                StudentStudyBlock.status == "planned",
+                StudentStudyBlock.start_at >= moment,
+            )
+            .order_by(StudentStudyBlock.start_at, StudentStudyBlock.id)
+            .limit(5001)
+        )
+    )
+    if len(rows) > 5000:
+        raise schedule.StudentError(409, "Too many study blocks to review safely")
+    return [block_view(row) for row in rows]
+
+
+async def get_preview(
+    database: AsyncSession, user_id: UUID, workspace_id: UUID, preview_id: UUID
+) -> PreviewView:
+    await schedule.owner(database, user_id, workspace_id)
+    record = await schedule.get_owned(
+        database, StudentPlanningPreview, preview_id, user_id, workspace_id
+    )
+    planning = await state(database, user_id, workspace_id)
+    if (
+        record.accepted_at
+        or utc(record.expires_at) <= await database_now(database)
+        or record.base_revision != planning.revision
+        or record.replaced_blocks is None
+    ):
+        raise schedule.StudentError(409, "This plan preview changed or expired. Preview it again")
+    return PreviewView(
+        preview_id=record.id,
+        preview_hash=record.preview_hash,
+        expires_at=utc(record.expires_at),
+        base_revision=record.base_revision,
+        result=PlanResult.model_validate(record.result),
+        replaced_blocks=[BlockView.model_validate(row) for row in record.replaced_blocks],
+    )
+
+
 async def preview(
     database: AsyncSession,
     user_id: UUID,
@@ -971,8 +1017,15 @@ async def preview(
     )
     await schedule.count_limit(database, StudentPlanningPreview, user_id, workspace_id, 20)
     identifier = uuid4()
+    replaced_blocks = await future_blocks(database, user_id, workspace_id, moment)
+    replacements = [row.model_dump(mode="json") for row in replaced_blocks]
     preview_hash = digest(
-        {"id": str(identifier), "source": source_hash, "result": result.model_dump(mode="json")}
+        {
+            "id": str(identifier),
+            "source": source_hash,
+            "result": result.model_dump(mode="json"),
+            "replaced_blocks": replacements,
+        }
     )
     record = StudentPlanningPreview(
         id=identifier,
@@ -982,6 +1035,7 @@ async def preview(
         preview_hash=preview_hash,
         base_revision=row.revision,
         result=result.model_dump(mode="json"),
+        replaced_blocks=replacements,
         expires_at=moment + timedelta(minutes=20),
     )
     database.add(record)
@@ -992,6 +1046,7 @@ async def preview(
         expires_at=record.expires_at,
         base_revision=row.revision,
         result=result,
+        replaced_blocks=replaced_blocks,
     )
 
 
@@ -1057,6 +1112,7 @@ async def accept(
     planning = await state(database, user_id, workspace_id)
     if (
         record.accepted_at
+        or record.replaced_blocks is None
         or utc(record.expires_at) <= moment
         or record.preview_hash != payload.preview_hash
         or planning.revision != record.base_revision
@@ -1076,6 +1132,9 @@ async def accept(
         raise schedule.StudentError(
             409, "Your schedule, tasks or the current time changed. Preview again"
         )
+    current_replacements = await future_blocks(database, user_id, workspace_id, moment)
+    if [row.model_dump(mode="json") for row in current_replacements] != record.replaced_blocks:
+        raise schedule.StudentError(409, "The affected study blocks changed. Review a new plan")
     await apply_result(database, user_id, workspace_id, result, now=moment, plan_id=record.id)
     planning.revision += 1
     planning.window_start, planning.window_end = result.start_at, result.end_at

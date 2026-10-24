@@ -202,6 +202,16 @@ export function StudentStudyPlanPreview({
           <strong>{studyMinutes(unfitted)}</strong>Work that doesn’t fit
         </div>
       </div>
+      <h3>Study blocks being replaced</h3>
+      {preview.replaced_blocks.length ? (
+        <StudyProposedBlocks
+          blocks={preview.replaced_blocks}
+          timezone={timezone}
+        />
+      ) : (
+        <p>No existing study blocks will be replaced.</p>
+      )}
+      <h3>Proposed study blocks</h3>
       <StudyUnfittedWork result={result} timezone={timezone} />
       {result.blocks.length ? (
         <StudyProposedBlocks blocks={result.blocks} timezone={timezone} />
@@ -250,7 +260,7 @@ export function StudentStudyPlanPreview({
             {busy ? "Saving plan…" : "Use this plan"}
           </button>
           <span className={styles.hint}>
-            No school or Google Calendar events are changed.
+            Classes, calendar events and alarms stay as they are.
           </span>
         </div>
       </div>
@@ -1250,7 +1260,12 @@ function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
   useEffect(() => {
     alive.current = true;
     void load();
+    const changed = () => {
+      void load();
+    };
+    window.addEventListener("navox:study-plan-changed", changed);
     return () => {
+      window.removeEventListener("navox:study-plan-changed", changed);
       alive.current = false;
       ++generation.current;
     };

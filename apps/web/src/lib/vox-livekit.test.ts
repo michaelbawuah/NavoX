@@ -1519,3 +1519,42 @@ it("keeps admission usable after explicit budget denial without claiming cleanup
   expect(env.admission.join).toHaveBeenCalledTimes(2);
   await connection.close();
 });
+
+it("accepts plan reviews only from the current agent, topic and owned lease", async () => {
+  const env = environment();
+  env.request.mayRenewReservation = () => true;
+  const connection = await env.transport.connect(env.request);
+  const result = {
+    kind: "study-plan",
+    preview_id: "11111111-1111-4111-8111-111111111111",
+    preview_hash: "a".repeat(64),
+    timezone: "America/New_York",
+  };
+  const data = new TextEncoder().encode(JSON.stringify(result));
+  const receive = env.room.events?.dataReceived;
+  if (!receive) throw new Error("Expected a data handler");
+  vi.mocked(env.request.onEvent).mockClear();
+  receive(data, "other-agent", "navox.vox.plan-review.v1");
+  receive(data, agent, "wrong-topic");
+  receive(
+    new TextEncoder().encode(
+      JSON.stringify({ ...result, timezone: "invented-zone" }),
+    ),
+    agent,
+    "navox.vox.plan-review.v1",
+  );
+  expect(env.request.onEvent).not.toHaveBeenCalled();
+  receive(data, agent, "navox.vox.plan-review.v1");
+  expect(env.request.onEvent).toHaveBeenCalledWith({
+    type: "plan-review",
+    result,
+  });
+  vi.mocked(env.request.onEvent).mockClear();
+  env.request.mayRenewReservation = () => false;
+  receive(data, agent, "navox.vox.plan-review.v1");
+  expect(env.request.onEvent).not.toHaveBeenCalled();
+  await connection.close();
+  vi.mocked(env.request.onEvent).mockClear();
+  receive(data, agent, "navox.vox.plan-review.v1");
+  expect(env.request.onEvent).not.toHaveBeenCalled();
+});

@@ -25,6 +25,7 @@ import { studentLocalTime } from "../lib/student-time";
 import { dayRows } from "../lib/today-home";
 import { mondayOf } from "./classes-week";
 import styles from "./planner-redesign.module.css";
+import { TaskCompletionReview } from "./task-completion-review";
 import {
   type ProgressReceipt,
   TodayProgressReceipt,
@@ -58,6 +59,7 @@ export function PlannerOverview({
   const router = useRouter();
   const openings = useStudyOpenings(accountKey, 7, plan.revision);
   const [view, setView] = useState<"today" | "tomorrow" | "week">("week");
+  const [completing, setCompleting] = useState<StudyTask | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ProgressReceipt | null>(null);
   const [goals, setGoals] = useState<StudentGoal[]>([]);
@@ -140,11 +142,7 @@ export function PlannerOverview({
   );
   const planned = visibleBlocks.reduce((sum, b) => sum + b.minutes, 0);
   const group = (task: StudyTask) =>
-    (task.due_at && studentDateInZone(task.due_at, zone) <= today) ||
-    active.some(
-      (b) =>
-        b.task_id === task.id && studentDateInZone(b.start_at, zone) === today,
-    )
+    task.due_at && studentDateInZone(task.due_at, zone) <= today
       ? "Today"
       : task.due_at &&
           studentDateInZone(task.due_at, zone) <=
@@ -345,6 +343,20 @@ export function PlannerOverview({
         </div>
         <section className={styles.tasks}>
           <h2>Tasks</h2>
+          {completing && (
+            <TaskCompletionReview
+              key={completing.id + ":" + completing.revision}
+              task={completing}
+              accountKey={accountKey}
+              timezone={zone}
+              onClose={() => setCompleting(null)}
+              onSaved={() => {
+                setCompleting(null);
+                onReload();
+              }}
+            />
+          )}
+
           {["Today", "This week", "Later"].map((label) => {
             const grouped = tasks.filter(
               (t) => t.status === "active" && group(t) === label,
@@ -353,47 +365,60 @@ export function PlannerOverview({
               <div key={label}>
                 <h3>{label}</h3>
                 {grouped.map((task) => (
-                  <button
-                    type="button"
-                    key={task.id}
-                    className={styles.task}
-                    disabled={disabled}
-                    onClick={() => onEdit(task)}
-                  >
-                    <span className={styles.taskCircle} aria-hidden="true" />
-                    <span>
-                      <strong>{task.title}</strong>
-                      <small>
-                        <i
-                          style={{
-                            background: task.course_id
-                              ? courseColor(task.course_id)
-                              : "var(--nx-accent)",
-                          }}
-                        />
-                        {
-                          timetable.courses.find((c) => c.id === task.course_id)
-                            ?.code
-                        }{" "}
-                        · ~{studyMinutes(task.remaining_minutes)} ·{" "}
-                        {active.filter((b) => b.task_id === task.id).length}{" "}
-                        blocks planned
-                      </small>
-                    </span>
-                    {task.due_at && (
-                      <time
-                        dateTime={task.due_at}
-                        data-urgent={Date.parse(task.due_at) - now <= 172800000}
-                      >
-                        {new Intl.DateTimeFormat("en", {
-                          weekday: "short",
-                          month: "short",
-                          day: "numeric",
-                          timeZone: zone,
-                        }).format(new Date(task.due_at))}
-                      </time>
-                    )}
-                  </button>
+                  <div key={task.id} className={styles.task}>
+                    <label className={styles.taskCheck}>
+                      <input
+                        type="checkbox"
+                        checked={false}
+                        aria-label={"Mark " + task.title + " complete"}
+                        className={styles.taskCircle}
+                        disabled={disabled}
+                        onChange={() => setCompleting(task)}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className={styles.taskDetails}
+                      disabled={disabled}
+                      onClick={() => onEdit(task)}
+                    >
+                      <span>
+                        <strong>{task.title}</strong>
+                        <small>
+                          <i
+                            style={{
+                              background: task.course_id
+                                ? courseColor(task.course_id)
+                                : "var(--nx-accent)",
+                            }}
+                          />
+                          {
+                            timetable.courses.find(
+                              (c) => c.id === task.course_id,
+                            )?.code
+                          }{" "}
+                          · ~{studyMinutes(task.remaining_minutes)} ·{" "}
+                          {active.filter((b) => b.task_id === task.id).length}{" "}
+                          blocks planned
+                        </small>
+                      </span>
+                      {task.due_at && (
+                        <time
+                          dateTime={task.due_at}
+                          data-urgent={
+                            Date.parse(task.due_at) - now <= 172800000
+                          }
+                        >
+                          {new Intl.DateTimeFormat("en", {
+                            weekday: "short",
+                            month: "short",
+                            day: "numeric",
+                            timeZone: zone,
+                          }).format(new Date(task.due_at))}
+                        </time>
+                      )}
+                    </button>
+                  </div>
                 ))}
               </div>
             ) : null;
