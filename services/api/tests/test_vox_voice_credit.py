@@ -263,3 +263,102 @@ async def test_grant_adopts_external_final_settlement_before_new_worker_audio(vo
         )
         assert len(settled) == 1 and settled[0].settled_speaking_ms == 20
     await hooks.close()
+
+
+@pytest.mark.asyncio
+async def test_continuous_buffered_speech_renews_without_draining_or_double_billing(
+    vox_env, monkeypatch
+):
+    hooks, check, clock, _ = await prepared(vox_env, monkeypatch)
+    for index in range(250):
+        clock[0] = 1000 + max(0, index - 9) * 0.02
+        before = clock[0]
+        await hooks.note_audio(20, direction="output")
+        assert clock[0] == before  # No deliberate drain/sleep on renewal.
+    assert check.frames >= 250
+    await hooks.close()
+    async with vox_env.factory() as database:
+        totals = await usage.call_totals(
+            database, vox_env.user_id, vox_env.workspace_id, hooks._call_id
+        )
+        assert 4999 <= totals.speaking_ms <= 5000
+        assert totals.speaking_ms + totals.idle_ms == totals.connected_ms
+        status = await usage.budget_status(database, vox_env.user_id, vox_env.workspace_id)
+        assert status.daily.reserved_voice_ms == 0
+        credits = list(await database.scalars(select(VoxVoiceCredit)))
+        assert len(credits) > 4
+        assert all(c.settled_at is not None for c in credits)
+        assert sum(c.settled_speaking_ms for c in credits) == totals.speaking_ms
+
+
+@pytest.mark.asyncio
+async def test_failed_replacement_rolls_back_settlement_and_keeps_queued_credit(
+    vox_env, monkeypatch
+):
+    hooks, _, clock, _ = await prepared(vox_env, monkeypatch)
+    for _ in range(10):
+        await hooks.note_audio(20, direction="output")
+    old = hooks._grant
+    clock[0] += 0.1
+
+    async def refused(*_args, **_kwargs):
+        raise usage.UsageError(429, "Synthetic replacement refusal")
+
+    monkeypatch.setattr(usage, "reserve_voice_credit", refused)
+    with pytest.raises(usage.UsageError):
+        await hooks.check_budget()
+    assert not hooks._credit_uncertain
+    assert hooks._grant.id == old.id
+    async with vox_env.factory() as database:
+        row = await database.get(VoxVoiceCredit, old.id)
+        assert row.settled_at is None
+        assert await database.scalar(select(func.count()).select_from(VoxUsageEvent)) == 0
+    await hooks.close()
+    async with vox_env.factory() as database:
+        totals = await usage.call_totals(
+            database, vox_env.user_id, vox_env.workspace_id, hooks._call_id
+        )
+        assert 199 <= totals.speaking_ms <= 200
+
+
+@pytest.mark.asyncio
+async def test_lost_renewal_commit_ack_stops_audio_without_refunding_unknown_credit(
+    vox_env, monkeypatch
+):
+    from contextlib import asynccontextmanager
+
+    hooks, _, clock, _ = await prepared(vox_env, monkeypatch)
+    for _ in range(10):
+        await hooks.note_audio(20, direction="output")
+    old = hooks._grant
+    clock[0] += 0.1
+    factory = hooks.factory
+
+    @asynccontextmanager
+    async def uncertain_factory():
+        async with factory() as database:
+            commit = database.commit
+
+            async def lost_ack():
+                await commit()
+                raise ConnectionError("Synthetic lost acknowledgement")
+
+            database.commit = lost_ack
+            yield database
+
+    hooks.factory = uncertain_factory
+    with pytest.raises(ConnectionError):
+        await hooks.check_budget()
+    hooks.factory = factory
+    assert hooks._credit_uncertain
+    with pytest.raises(usage.UsageError, match="uncertain"):
+        await hooks.note_audio(20, direction="output")
+    with pytest.raises(usage.UsageError, match="uncertain"):
+        await hooks.close()
+    clock[0] += 2
+    async with vox_env.factory() as database:
+        row = await database.get(VoxVoiceCredit, old.id)
+        assert row.settled_at is not None
+        status = await usage.budget_status(database, vox_env.user_id, vox_env.workspace_id)
+        assert 99 <= status.daily.speaking_ms <= 100
+        assert status.daily.reserved_voice_ms == status.daily.uncertain_voice_ms == 1000

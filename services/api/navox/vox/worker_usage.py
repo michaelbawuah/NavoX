@@ -117,6 +117,7 @@ class WorkerUsageHooks:
         self._grant_voice_base = 0.0
         self._pending_settlement: tuple[VoiceCreditGrant, UsageCounters] | None = None
         self._closed = False
+        self._credit_uncertain = False
 
     async def _ensure_transport(self) -> None:
         if self._transport_id is not None:
@@ -172,7 +173,7 @@ class WorkerUsageHooks:
             self._pending_settlement = None
             self._grant = None
         # Do not refund queued activity, or turn an unknown future grant into
-        # speech. Current RTC output queue is 20 ms; the API admits at most 1000 ms.
+        # speech. Closing drains the bounded RTC tail; the API admits at most 1000 ms.
         end = max((b for _, b in self._windows), default=monotonic())
         delay = max(0.0, end - monotonic())
         if delay:
@@ -240,12 +241,78 @@ class WorkerUsageHooks:
         self._grant_voice_base = self._voice_ms
         await self.check()  # Revoke/logout during a lock wait cannot admit a frame.
 
+    async def _renew_credit(self) -> None:
+        """Move a short queued tail into a new durable grant without draining audio.
+
+        Settlement and replacement debit share one transaction and owner lock.
+        No future activity is refunded unless its replacement credit commits.
+        Long input bursts and billing-period boundaries retain the draining path.
+        """
+        assert self._transport_id is not None
+        now = monotonic()
+        end = max((b for _, b in self._windows), default=now)
+        old = self._grant
+        if (
+            old is None
+            or self._pending_settlement is not None
+            or not 0 < end - now <= 0.250001
+            or old.expires_at in (old.day_end, old.month_end)
+        ):
+            await self._flush()
+            await self._reserve()
+            return
+        self._advance(now)
+        counters = self._counters(now)
+        carry_ms = self._active_seconds(now, end) * 1000
+        spent_ms = counters.speaking_ms - old.base_cumulative.speaking_ms
+        if spent_ms + carry_ms > old.granted_ms + 1:
+            raise usage.UsageError(409, "Queued speech exceeds its reserved voice credit")
+        authority, intent = await self.check.intent()
+        if (intent.connection_id, intent.reservation_id, intent.generation) != (
+            old.connection_id,
+            old.call_id,
+            old.generation,
+        ):
+            raise usage.UsageError(409, "Voice credit epoch changed")
+        requested = monotonic()
+        async with self.factory() as database:
+            await usage.settle_voice_credit(database, old, cumulative=counters)
+            grant = await usage.reserve_voice_credit(
+                database,
+                authority.user_id,
+                authority.workspace_id,
+                intent.reservation_id,
+                stream_id=self._transport_id,
+                connection_id=intent.connection_id,
+                generation=intent.generation,
+                worker_nonce=self._worker_nonce,
+                grant_id=uuid4(),
+            )
+            deadline = requested + (grant.expires_at - grant.granted_at).total_seconds()
+            if grant.base_cumulative != counters or carry_ms > grant.granted_ms or end > deadline:
+                raise usage.UsageError(429, "Queued speech cannot renew its voice credit")
+            try:
+                await database.commit()
+            except BaseException:
+                # A lost commit acknowledgement may have replaced the old grant.
+                # Stop media; retain durable holds rather than guessing a refund
+                # or replaying a settlement against an uncertain checkpoint.
+                self._credit_uncertain = True
+                raise
+        self._grant = grant
+        self._grant_deadline = deadline
+        self._grant_voice_base = self._voice_ms
+        self._last_flush = now
+        await self.check()
+
     async def check_budget(self, *, voice_frame_ms: int = 0, force: bool = True) -> None:
         if type(voice_frame_ms) is not int or not 0 <= voice_frame_ms <= 1000:
             raise usage.UsageError(422, "Voice metering frame is outside its bound")
         async with self._lock:
             if self._closed:
                 raise usage.UsageError(409, "Voice metering ended")
+            if self._credit_uncertain:
+                raise usage.UsageError(503, "Voice credit renewal is uncertain")
             await self.check()
             await self._ensure_transport()
             now = monotonic()
@@ -255,8 +322,7 @@ class WorkerUsageHooks:
                 or now >= self._grant_deadline
                 or now - self._last_flush >= 1
             ):
-                await self._flush()
-                await self._reserve()
+                await self._renew_credit()
             if self._grant is None or self._grant.granted_ms < voice_frame_ms:
                 raise usage.UsageError(429, "Your voice allowance has been reached")
 
@@ -273,6 +339,8 @@ class WorkerUsageHooks:
         async with self._lock:
             if self._closed:
                 raise usage.UsageError(409, "Voice metering ended")
+            if self._credit_uncertain:
+                raise usage.UsageError(503, "Voice credit renewal is uncertain")
             await self.check()
             await self._ensure_transport()
             for attempt in range(3):
@@ -302,14 +370,15 @@ class WorkerUsageHooks:
                     ):
                         raise usage.UsageError(429, "Your voice allowance has been reached")
                     await asyncio.sleep(max(0, self._grant_deadline - now))
-                await self._flush()
-                await self._reserve()
+                await self._renew_credit()
             raise usage.UsageError(429, "Your voice allowance has been reached")
 
     async def begin(self, stream_id: UUID, provider: str, model: str, token_ceiling: int) -> None:
         async with self._lock:
             if self._closed:
                 raise usage.UsageError(409, "Voice metering ended")
+            if self._credit_uncertain:
+                raise usage.UsageError(503, "Voice credit renewal is uncertain")
             await self.check()
             await self._ensure_transport()
             await self._flush()
@@ -373,6 +442,8 @@ class WorkerUsageHooks:
             if self._closed:
                 return
             try:
+                if self._credit_uncertain:
+                    raise usage.UsageError(503, "Voice credit renewal is uncertain")
                 if self._transport_id is not None:
                     await self._flush()
             finally:

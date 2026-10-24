@@ -176,3 +176,21 @@ proof timing without logging audio, transcript text, or credentials.
 starvation, preserve exact resampled waveform samples across chunk boundaries,
 bound the new queue, and verify interruption/revocation cleanup. Scoped lint and
 mypy passed. Live deployment and Safari listening confirmation are still pending.
+
+
+The first live long-response check after the queue increase received audio and
+hung up cleanly, but did NOT pass continuity: 966 output frames had 21 source
+starvations totaling 1,224 ms, with a 269 ms maximum authorization/metering wait.
+The source was deliberately drained by voice-credit settlement roughly once per
+second; a larger queue alone could not fix this recurring pause.
+
+The worker now settles observed usage and reserves replacement credit in one
+transaction while carrying the short queued tail into that replacement grant.
+No queued credit is refunded without its replacement committing. Long input
+bursts and day/month boundaries retain the existing bounded draining behavior.
+Renewal failures roll back settlement; uncertain commit acknowledgements stop
+media and retain conservative quota holds. New tests cover continuous buffered
+speech without deliberate drains or double billing, replacement refusal, and a
+lost commit acknowledgement. The 18 focused audio/credit/worker-usage tests and
+scoped lint/type checks pass. All 53 PostgreSQL credit, usage, concurrency,
+migration and authorization tests pass. Live continuity verification is pending.
