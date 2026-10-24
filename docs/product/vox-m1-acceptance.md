@@ -30,3 +30,10 @@ Web-open calls only in this part; native locked-phone audio later. Noa artwork c
 ## Review before activation
 
 Retain baseline working student/account flows. Keep secrets outside Git and output. A draft code review or synthetic test pass is not permission to label acceptance passed. Publish acceptance results, phone recording supplied by Michael, and deviations before treating this milestone as complete.
+
+
+Speech-quality retest: the user's reported Safari cuts/crackle led to an output
+queue and atomic voice-credit renewal fix. The longer emulated live response now
+has zero measured source-buffer gaps; physical Safari listening acceptance is
+still pending. Details and the initial failed continuity run are recorded in the
+verification document. No UI or mascot design changes were made for this fix.

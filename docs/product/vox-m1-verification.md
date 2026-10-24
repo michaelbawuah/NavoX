@@ -194,3 +194,22 @@ speech without deliberate drains or double billing, replacement refusal, and a
 lost commit acknowledgement. The 18 focused audio/credit/worker-usage tests and
 scoped lint/type checks pass. All 53 PostgreSQL credit, usage, concurrency,
 migration and authorization tests pass. Live continuity verification is pending.
+
+
+After deploying ce2cdcf, the same longer live synthetic-prompt scenario completed
+986 output frames with **zero source starvations / zero starvation milliseconds**;
+maximum combined authorization/metering time fell from 269 ms to 76 ms. The Mac
+browser received 218,685 audio bytes with nonzero energy, zero lost packets, no
+page errors, no API requests to the wrong origin, and HTTP 204 for hang-up/close.
+WebRTC reported 444 concealed samples (about 9.25 ms); that transport measurement
+is separate from the zero source-buffer starvation result. This is a successful
+Chromium mobile-emulation check, not proof of flawless physical Safari playback.
+The user's Safari listening retest is still required.
+
+
+The live interruption retest confirmed speech interruption after 6,087 ms of
+actual submitted-minus-queued output. The interrupted segment (315 frames) and
+replacement response (169 frames) both reported zero source starvations. The
+browser received audio and completed hang-up/close with HTTP 204 and no page
+errors. One network packet was lost and 857 samples were concealed; physical
+Safari/device/network audio quality remains a separate listening acceptance item.
