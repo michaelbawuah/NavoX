@@ -27,7 +27,7 @@ export function RoutineChangeReview({
     wakes = draft.wake_times ?? Array(7).fill(draft.wake_time);
   return (
     <section
-      className={styles.review}
+      className={`${styles.card} ${styles.review}`}
       aria-label="Review routine and alarm changes"
     >
       <h3>Review every change</h3>

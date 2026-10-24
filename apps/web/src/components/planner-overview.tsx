@@ -411,6 +411,7 @@ export function PlannerOverview({
           </Link>
         ))}
         <Link href="/goals">Manage goals</Link>
+        <Link href="/recovery">Catch up on missed work</Link>
         <button type="button" onClick={onRoutine}>
           Your routine
         </button>

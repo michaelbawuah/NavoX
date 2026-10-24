@@ -1243,62 +1243,65 @@ function StudentClassesAccount({
   const operation = useRef(false);
   const alive = useRef(true);
   const [spokenDraft, setSpokenDraft] = useState("");
-  const load = useCallback(async (reset = false): Promise<boolean> => {
-    const request = ++generation.current;
-    setLoading(true);
-    try {
-      const [nextProfile, active, archived, nextTable] = await Promise.all([
-        studentRequest("/profile", readStudentProfile),
-        studentRequest("/courses?archived=false", (value) =>
-          readStudentList(value, "courses", readStudentCourse),
-        ),
-        studentRequest("/courses?archived=true", (value) =>
-          readStudentList(value, "courses", readStudentCourse),
-        ),
-        studentRequest(
-          `/timetable?days=7${dateRef.current ? `&date=${dateRef.current}` : ""}`,
-          readStudentTimetable,
-        ),
-      ]);
-      if (request !== generation.current) return false;
-      setProfile(nextProfile);
-      setCourses([
-        ...new Map(
-          [...active, ...archived].map((row) => [row.id, row]),
-        ).values(),
-      ]);
-      const aligned = mondayOf(nextTable.date);
-      const week =
-        nextTable.date === aligned
-          ? nextTable
-          : await studentRequest(
-              `/timetable?days=7&date=${aligned}`,
-              readStudentTimetable,
-            );
-      if (request !== generation.current) return false;
-      setTimetable(week);
-      setDate(week.date);
-      dateRef.current = week.date;
-      setError("");
-      if (reset) {
-        setUncertain(false);
-        setEditor(null);
-        setException(null);
-        setImportMode(null);
-        setScreenshotSuggestion(null);
-        setEpoch((value) => value + 1);
-        setNotice(
-          "Saved timetable reloaded. Check the saved details before making another change.",
-        );
+  const load = useCallback(
+    async (reset = false, quiet = false): Promise<boolean> => {
+      const request = ++generation.current;
+      if (!quiet) setLoading(true);
+      try {
+        const [nextProfile, active, archived, nextTable] = await Promise.all([
+          studentRequest("/profile", readStudentProfile),
+          studentRequest("/courses?archived=false", (value) =>
+            readStudentList(value, "courses", readStudentCourse),
+          ),
+          studentRequest("/courses?archived=true", (value) =>
+            readStudentList(value, "courses", readStudentCourse),
+          ),
+          studentRequest(
+            `/timetable?days=7${dateRef.current ? `&date=${dateRef.current}` : ""}`,
+            readStudentTimetable,
+          ),
+        ]);
+        if (request !== generation.current) return false;
+        setProfile(nextProfile);
+        setCourses([
+          ...new Map(
+            [...active, ...archived].map((row) => [row.id, row]),
+          ).values(),
+        ]);
+        const aligned = mondayOf(nextTable.date);
+        const week =
+          nextTable.date === aligned
+            ? nextTable
+            : await studentRequest(
+                `/timetable?days=7&date=${aligned}`,
+                readStudentTimetable,
+              );
+        if (request !== generation.current) return false;
+        setTimetable(week);
+        setDate(week.date);
+        dateRef.current = week.date;
+        setError("");
+        if (reset) {
+          setUncertain(false);
+          setEditor(null);
+          setException(null);
+          setImportMode(null);
+          setScreenshotSuggestion(null);
+          setEpoch((value) => value + 1);
+          setNotice(
+            "Saved timetable reloaded. Check the saved details before making another change.",
+          );
+        }
+        return true;
+      } catch (cause) {
+        if (request === generation.current) setError(studentError(cause));
+        return false;
+      } finally {
+        if (request === generation.current && !quiet) setLoading(false);
       }
-      return true;
-    } catch (cause) {
-      if (request === generation.current) setError(studentError(cause));
-      return false;
-    } finally {
-      if (request === generation.current) setLoading(false);
-    }
-  }, []);
+    },
+    [],
+  );
   useEffect(() => {
     alive.current = true;
     let draft: string | null = null;
@@ -1322,6 +1325,39 @@ function StudentClassesAccount({
       ++generation.current;
     };
   }, [load, accountKey]);
+  useEffect(() => {
+    if (
+      settingsOnly ||
+      busy ||
+      loading ||
+      uncertain ||
+      editor ||
+      exception ||
+      importMode
+    )
+      return;
+    const refresh = () => {
+      if (document.visibilityState === "visible" && !operation.current)
+        void load(false, true);
+    };
+    const interval = window.setInterval(refresh, 60000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [
+    settingsOnly,
+    busy,
+    loading,
+    uncertain,
+    editor,
+    exception,
+    importMode,
+    load,
+  ]);
   const mutate: Save = async (path, parse, method, body) => {
     if (operation.current || uncertain) return null;
     operation.current = true;

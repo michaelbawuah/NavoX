@@ -7,7 +7,7 @@
 .shell * {
   box-sizing: border-box;
 }
-.shell a {
+.shell :where(a) {
   color: inherit;
 }
 .shell button {
