@@ -12,6 +12,8 @@ from navox.student import service as schedule
 from navox.student_planning import service
 from navox.student_planning.schemas import (
     AcceptInput,
+    MoveConfirm,
+    MoveInput,
     OutcomeConfirmInput,
     OutcomeInput,
     OutcomeView,
@@ -286,3 +288,47 @@ async def alarm_view(account: CurrentAccountDependency, database: DatabaseSessio
         "alarm_occurrences": preview["alarm_occurrences"],
         "native_ringing_available": False,
     }
+
+
+@router.post("/blocks/{block_id}/move/preview", dependencies=[Depends(expected_routine_owner)])
+async def preview_move(
+    block_id: UUID,
+    payload: MoveInput,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict:
+    from navox.student_planning.moving import move
+
+    require_origin(request, settings.web_origin)
+    return await result(move(database, *scope(account), block_id, payload))
+
+
+@router.post("/blocks/{block_id}/move/confirm", dependencies=[Depends(expected_routine_owner)])
+async def confirm_move(
+    block_id: UUID,
+    payload: MoveConfirm,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict:
+    from navox.student_planning.moving import move
+
+    require_origin(request, settings.web_origin)
+    candidate = MoveInput.model_validate(payload.model_dump(exclude={"preview_hash"}))
+    return await result(
+        move(database, *scope(account), block_id, candidate, expected_preview=payload.preview_hash)
+    )
+
+
+@router.get("/openings", dependencies=[Depends(expected_routine_owner)])
+async def get_openings(
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    days: Annotated[int, Query(ge=1, le=7)] = 1,
+) -> dict:
+    from navox.student_planning.openings import openings
+
+    return await result(openings(database, *scope(account), days))

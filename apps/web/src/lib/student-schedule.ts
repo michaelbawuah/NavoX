@@ -53,6 +53,7 @@ export interface StudentMeeting extends StudentMeetingInput {
   revision: number;
 }
 export interface StudentCourseInput {
+  office_hours?: string | null;
   code: string;
   name: string;
   term_start: string;
@@ -306,6 +307,9 @@ export function readStudentCourse(value: unknown): StudentCourse {
     term_start: date(v.term_start),
     term_end: date(v.term_end),
     professor: nullable(v.professor),
+    ...(v.office_hours !== undefined
+      ? { office_hours: nullable(v.office_hours) }
+      : {}),
     archived: boolean(v.archived),
     revision: number(v.revision),
     meetings: array(v.meetings, readStudentMeeting),
@@ -471,19 +475,26 @@ export async function studentRequest<T>(
   parse: (value: unknown) => T,
   method = "GET",
   body?: unknown,
+  accountKey?: string,
 ): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12_000);
+  const timer = setTimeout(
+    () => controller.abort(),
+    path.startsWith("/planning") ? 60_000 : 12_000,
+  );
   try {
     const response = await fetch(`${apiBaseUrl}/student${path}`, {
       method,
       credentials: "include",
       cache: "no-store",
       signal: controller.signal,
+      headers: {
+        ...(accountKey ? { "X-NavoX-Account": accountKey } : {}),
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
       ...(body === undefined
         ? {}
         : {
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
           }),
     });
@@ -575,6 +586,9 @@ export function studentCourseDraft(
     term_start: value.term_start,
     term_end: value.term_end,
     professor: value.professor,
+    ...(value.office_hours !== undefined
+      ? { office_hours: value.office_hours }
+      : {}),
   };
 }
 export function studentMeetingDraft(

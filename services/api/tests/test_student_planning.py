@@ -1728,3 +1728,209 @@ def test_per_day_wake_times_protect_sleep_in_planner():
     )
     for block in result.blocks:
         assert block.start_at.hour >= (10 if block.start_at.weekday() == 0 else 11)
+
+
+@pytest.mark.asyncio
+async def test_move_preview_is_read_only_approved_and_idempotent(planning_env):
+    env = planning_env
+    await create_task(env)
+    before, _ = await accept(env)
+    block = before["blocks"][0]
+    body = {
+        "request_id": str(uuid4()),
+        "revision": block["revision"],
+        "start_at": (MONDAY + timedelta(days=1, hours=2)).isoformat(),
+    }
+    path = ROOT + f"/blocks/{block['id']}/move"
+    reviewed = await env.client.post(path + "/preview", headers=routine_headers(env), json=body)
+    assert reviewed.status_code == 200, reviewed.text
+    assert (await env.client.get(ROOT + "/plan")).json() == before
+    payload = {**body, "preview_hash": reviewed.json()["preview_hash"]}
+    saved = await env.client.post(path + "/confirm", headers=routine_headers(env), json=payload)
+    assert saved.status_code == 200, saved.text
+    again = await env.client.post(path + "/confirm", headers=routine_headers(env), json=payload)
+    assert again.json() == saved.json()
+    after = (await env.client.get(ROOT + "/plan")).json()
+    assert len(after["blocks"]) == len(before["blocks"])
+    assert not after["needs_review"]
+    assert [b for b in before["blocks"] if b["id"] != block["id"]] == [
+        b for b in after["blocks"] if b["id"] != block["id"]
+    ]
+    assert saved.json()["other_blocks_change"] is False
+    assert saved.json()["alarms_change"] is False
+
+
+@pytest.mark.asyncio
+async def test_move_rejects_sleep_conflicts_bad_owner_and_changed_calendar(
+    planning_env, monkeypatch
+):
+    from navox.student_planning import calendar_busy
+
+    env = planning_env
+    await create_task(env)
+    before, _ = await accept(env)
+    block = before["blocks"][0]
+    path = ROOT + f"/blocks/{block['id']}/move"
+    body = {
+        "request_id": str(uuid4()),
+        "revision": block["revision"],
+        "start_at": (MONDAY + timedelta(days=1, hours=2)).isoformat(),
+    }
+    assert (await env.client.post(path + "/preview", json=body)).status_code == 409
+    sleep = {**body, "start_at": (MONDAY + timedelta(hours=18)).isoformat()}  # 02:00 NY
+    assert (
+        await env.client.post(path + "/preview", headers=routine_headers(env), json=sleep)
+    ).status_code == 409
+
+    async def initial(*args, **kwargs):
+        return calendar_busy.CalendarBusy((), "first", True, ())
+
+    monkeypatch.setattr(calendar_busy, "collect", initial)
+    reviewed = await env.client.post(path + "/preview", headers=routine_headers(env), json=body)
+    assert reviewed.status_code == 200, reviewed.text
+
+    async def changed(*args, **kwargs):
+        return calendar_busy.CalendarBusy((), "changed", True, ())
+
+    monkeypatch.setattr(calendar_busy, "collect", changed)
+    result = await env.client.post(
+        path + "/confirm",
+        headers=routine_headers(env),
+        json={**body, "preview_hash": reviewed.json()["preview_hash"]},
+    )
+    assert result.status_code == 409
+    assert (await env.client.get(ROOT + "/plan")).json() == before
+
+
+@pytest.mark.asyncio
+async def test_calendar_busy_times_exclude_study_and_revalidate_on_accept(
+    planning_env, monkeypatch
+):
+    from navox.student_planning import calendar_busy
+
+    env = planning_env
+    await create_task(env)
+    left, right = MONDAY + timedelta(minutes=1), MONDAY + timedelta(hours=4)
+    version = ["one"]
+
+    async def external(*args, **kwargs):
+        return calendar_busy.CalendarBusy(((left, right),), version[0], True, ())
+
+    monkeypatch.setattr(calendar_busy, "collect", external)
+    proposed = await preview(env)
+    assert proposed["result"]["blocks"]
+    assert all(datetime.fromisoformat(b["start_at"]) >= right for b in proposed["result"]["blocks"])
+    version[0] = "two"
+    refused = await env.client.post(
+        ROOT + "/accept",
+        json={
+            "preview_id": proposed["preview_id"],
+            "preview_hash": proposed["preview_hash"],
+            "request_id": str(uuid4()),
+            "confirmed": True,
+        },
+    )
+    assert refused.status_code == 409
+
+
+def test_smart_alarm_protects_the_actual_wake_boundary():
+    start = MONDAY.replace(hour=0)
+    result = build_plan(
+        [task()],
+        Preferences(),
+        "UTC",
+        start_at=start,
+        end_at=start + timedelta(days=1),
+        busy=[],
+        wake_overrides={start.date(): start.replace(hour=10)},
+    )
+    assert result.blocks and min(b.start_at for b in result.blocks) >= start.replace(hour=10)
+    unresolved = build_plan(
+        [task()],
+        Preferences(),
+        "UTC",
+        start_at=start,
+        end_at=start + timedelta(days=1),
+        busy=[],
+        wake_overrides={start.date(): None},
+    )
+    assert not unresolved.blocks
+    assert unresolved.warnings
+
+
+@pytest.mark.asyncio
+async def test_noa_appearance_is_owned_revisioned_and_readonly_by_default(planning_env):
+    from navox.db.noa import NoaSettings
+
+    env = planning_env
+    path = "/api/v1/student/noa"
+    headers = routine_headers(env)
+    assert (await env.client.get(path)).status_code == 409
+    initial = await env.client.get(path, headers=headers)
+    assert initial.status_code == 200
+    assert initial.json()["study_streak"] == 0
+    assert initial.json()["revision"] == 0
+    async with env.factory() as db:
+        assert await db.scalar(select(func.count()).select_from(NoaSettings)) == 0
+    body = {"look": "boy", "vibe": "lavender", "revision": 0}
+    saved = await env.client.put(path, headers=headers, json=body)
+    assert saved.status_code == 200, saved.text
+    assert (await env.client.get(path, headers=headers)).json()["look"] == "boy"
+    assert (await env.client.put(path, headers=headers, json=body)).status_code == 409
+    assert (
+        await env.client.put(
+            path,
+            headers={**headers, "Origin": "https://foreign.example"},
+            json={**body, "revision": 1},
+        )
+    ).status_code == 403
+    async with env.factory() as db:
+        await service.forget_planning_data(db, env.user_id, env.workspace_id)
+        await db.commit()
+        assert await db.scalar(select(func.count()).select_from(NoaSettings)) == 0
+
+
+def test_study_streak_counts_local_days_once_and_does_not_break_before_today_ends():
+    from datetime import date
+
+    from navox.api.noa import study_streak
+
+    today = date(2026, 10, 24)
+    days = {today - timedelta(days=n) for n in (1, 2, 3)}
+    assert study_streak(days, today) == 3
+    assert study_streak(days | {today}, today) == 4
+    assert study_streak(days, today + timedelta(days=1)) == 0
+
+
+@pytest.mark.asyncio
+async def test_free_openings_never_claim_missing_calendar_is_verified(planning_env):
+    env = planning_env
+    response = await env.client.get(ROOT + "/openings?days=1", headers=routine_headers(env))
+    assert response.status_code == 200, response.text
+    assert response.json()["calendar_checked"] is False
+    assert response.json()["routine_confirmed"] is False
+    assert response.json()["warnings"]
+    assert (await env.client.get(ROOT + "/openings?days=1")).status_code == 409
+
+
+def test_planner_spreads_large_task_across_eligible_days_and_avoids_tiny_gaps():
+    result = build_plan(
+        [task(remaining_minutes=180)],
+        Preferences(),
+        "UTC",
+        start_at=MONDAY,
+        end_at=MONDAY + timedelta(days=3),
+        busy=[],
+    )
+    assert len({b.start_at.date() for b in result.blocks}) == 2
+    assert all(b.minutes <= 90 for b in result.blocks)
+    start = MONDAY.replace(hour=9, minute=0)
+    result = build_plan(
+        [task(remaining_minutes=60)],
+        Preferences(),
+        "UTC",
+        start_at=start,
+        end_at=start + timedelta(hours=3),
+        busy=[(start + timedelta(minutes=7), start + timedelta(hours=1))],
+    )
+    assert result.blocks[0].start_at >= start + timedelta(hours=1)

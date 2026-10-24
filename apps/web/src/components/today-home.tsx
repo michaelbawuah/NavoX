@@ -27,6 +27,7 @@ import {
   routineRequest,
   type StudyPlan,
   type StudyTask,
+  studyMinutes,
   studyRequest,
 } from "../lib/student-planning";
 import {
@@ -37,6 +38,7 @@ import {
 } from "../lib/student-schedule";
 import { studentLocalTime } from "../lib/student-time";
 import {
+  type DayRow,
   dayRows,
   dueSoon,
   type HomeItem,
@@ -45,6 +47,7 @@ import {
   replyItems,
 } from "../lib/today-home";
 import { NoaArtwork } from "./noa-artwork";
+import { noaVibes, useNoaChoice } from "./noa-settings";
 import styles from "./today-home.module.css";
 import { TodayNext } from "./today-next";
 import { TodayEveningAlarm, TodayNightActions } from "./today-night";
@@ -55,6 +58,7 @@ import {
 import { TodaySetup } from "./today-setup";
 import { TodayStudyActions } from "./today-study-actions";
 import type { TodayWorkspaceProps } from "./today-workspace";
+import { useStudyOpenings } from "./use-study-openings";
 import { useVoxRequest } from "./use-vox-request";
 import { useVoxCall } from "./vox-call-provider";
 import { WorkspaceShell } from "./workspace-shell";
@@ -113,6 +117,7 @@ function TodayHomeAccount({
   const [showNightDay, setShowNightDay] = useState(false);
   const call = useVoxCall();
   const voxRequest = useVoxRequest();
+  const openings = useStudyOpenings(accountKey, 1, data?.plan?.revision ?? 0);
   const epoch = useRef(0);
   const setupKey = `navox:setup:${accountKey}`,
     voxKey = `navox:tried-vox:${accountKey}`;
@@ -242,6 +247,24 @@ function TodayHomeAccount({
   const rows = data
     ? dayRows(data.timetable, data.plan, data.tasks, data.items, now, zone)
     : [];
+  const verifiedGaps =
+    openings.data?.calendar_checked && openings.data.routine_confirmed
+      ? openings.data.openings
+      : [];
+  const bestGap = [...verifiedGaps].sort((a, b) => b.minutes - a.minutes)[0];
+  const displayRows: DayRow[] = [
+    ...rows,
+    ...verifiedGaps.slice(0, 3).map((gap) => ({
+      id: `gap:${gap.start_at}`,
+      title: `Free · ${studyMinutes(gap.minutes)}`,
+      start: gap.start_at,
+      end: gap.end_at,
+      courseId: null,
+      detail: "Plan some work here",
+      href: "/planner#add-task",
+      walkMinutes: null,
+    })),
+  ].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
   const next = rows.find((r) => !r.study && Date.parse(r.start) > now);
   const due = data ? dueSoon(data.tasks, data.items, now) : [];
   const replies = replyItems(data?.items ?? [], connections);
@@ -285,6 +308,7 @@ function TodayHomeAccount({
     done = steps.filter(Boolean).length;
   const showSetup = !!data && setupStarted && !dismissed && done < 5;
   const welcoming = !!data && !hasClasses && !rows.length && !hasTask && !error;
+  const noa = useNoaChoice(accountKey, data?.plan?.revision ?? 0);
   const local = clock ? studentLocalTime(now, zone) : null;
   const late = local?.period === "late-night" && !welcoming;
   const firstClass = rows.find(
@@ -349,7 +373,10 @@ function TodayHomeAccount({
                 ? "I’m Noa. Give me about 3 minutes and I’ll know your week: your classes, what’s due, and when you’re actually free."
                 : late && firstClass
                   ? `Your first class is at ${studentClock(firstClass.start, zone)}. Let’s leave some room for sleep.`
-                  : summary}
+                  : summary +
+                    (bestGap
+                      ? ` Best free window: ${studentClock(bestGap.start_at, zone)}–${studentClock(bestGap.end_at, zone)}.`
+                      : "")}
             </p>
             {!welcoming && !late && data && (
               <div className={styles.chips}>
@@ -370,6 +397,11 @@ function TodayHomeAccount({
                     ? "plan my afternoon"
                     : "plan tomorrow"}
                 </button>
+                {!!noa.value?.study_streak && (
+                  <span className={styles.progressChip}>
+                    {noa.value.study_streak} day study streak
+                  </span>
+                )}
                 {rows.some((row) => row.study) && (
                   <span className={styles.progressChip}>
                     {
@@ -417,6 +449,8 @@ function TodayHomeAccount({
             <span className={styles.noaSticker}>{sticker}</span>
             <NoaArtwork
               size={200}
+              look={noa.value?.look}
+              hoodie={noa.value ? noaVibes[noa.value.vibe] : undefined}
               mood={
                 welcoming
                   ? "happy"
@@ -542,7 +576,7 @@ function TodayHomeAccount({
                       </h2>
                     </div>
                     <ol className={styles.list}>
-                      {rows.map((row) => {
+                      {displayRows.map((row) => {
                         const past =
                             (row.end
                               ? Date.parse(row.end)
@@ -555,6 +589,7 @@ function TodayHomeAccount({
                           <li
                             key={row.id}
                             className={styles.row}
+                            data-gap={row.id.startsWith("gap:")}
                             data-past={past}
                             data-current={current}
                             data-shift={row.detail === "Shift"}
@@ -615,6 +650,7 @@ function TodayHomeAccount({
                                   task &&
                                   block && (
                                     <TodayStudyActions
+                                      onMoved={() => void load()}
                                       key={`${row.study.id}:${row.study.revision}:${task.revision}`}
                                       block={block}
                                       task={task}
@@ -639,6 +675,24 @@ function TodayHomeAccount({
                       })}
                     </ol>
                   </section>
+                )}
+                {openings.data && !openings.data.calendar_checked && (
+                  <p className={styles.gapNotice}>
+                    Connect your calendar to verify free-time suggestions.{" "}
+                    <Link href="/connections">Connections</Link>
+                  </p>
+                )}
+                {openings.data && !openings.data.routine_confirmed && (
+                  <p className={styles.gapNotice}>
+                    Review your sleep and routine before planning free time.{" "}
+                    <Link href="/settings#routine-alarm">Review routine</Link>
+                  </p>
+                )}
+                {openings.error && (
+                  <p className={styles.gapNotice}>
+                    Free time couldn’t be checked. Your saved schedule is still
+                    shown.
+                  </p>
                 )}
                 {board && (
                   <section className={styles.section}>

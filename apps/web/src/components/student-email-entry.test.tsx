@@ -61,7 +61,8 @@ describe("email review entry points", () => {
     expect(today).not.toContain("One email, one next step");
     expect(today).toContain("Loading your day…");
     expect(today).not.toContain('href="/email-actions"');
-    expect(inbox).toContain("Turn an email into a clear action");
+    expect(inbox).toContain("Review an email for a task or deadline");
+    expect(inbox).toContain('href="/email-actions"');
     expect(inbox).toContain("Needs reply");
     expect(inbox).not.toContain("Analyze selected message");
   });

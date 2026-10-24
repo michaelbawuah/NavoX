@@ -228,7 +228,10 @@ export function StudentTimetableImport({
     setScreenshot(null);
     setConfirmed(false);
     try {
-      if (mode === "ics") {
+      if (mode === "ics" && file.name.toLowerCase().endsWith(".pdf")) {
+        const result = await readStudentScreenshot(file, true);
+        if (version === generation.current) setScreenshot(result);
+      } else if (mode === "ics") {
         if (file.size > 2_000_000)
           throw new Error("Choose an .ics file smaller than 2 MB.");
         if (!file.name.toLowerCase().endsWith(".ics"))
@@ -319,20 +322,20 @@ export function StudentTimetableImport({
       </div>
       <p className={styles.muted}>
         {mode === "ics"
-          ? "Upload a calendar file from your student portal. Nothing is added until you review and confirm."
+          ? "Upload an .ics or text PDF schedule from your student portal. Nothing is added until you review and confirm."
           : "Choose a clear screenshot. Reading an image can miss details; review each class, its days, times, and location before saving."}
       </p>
       <div className={styles.upload}>
         <label className={styles.field} htmlFor={`${id}-file`}>
           {mode === "ics"
-            ? "Calendar file (.ics, up to 2 MB)"
+            ? "Schedule file (.ics up to 2 MB; PDF up to 5 MB, 10 pages)"
             : "Screenshot (PNG, JPEG, WebP; up to 5 MB)"}
           <input
             id={`${id}-file`}
             type="file"
             accept={
               mode === "ics"
-                ? ".ics,text/calendar"
+                ? ".ics,text/calendar,.pdf,application/pdf"
                 : "image/png,image/jpeg,image/webp"
             }
             disabled={locked}

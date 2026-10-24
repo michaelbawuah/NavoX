@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import TypeVar
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
@@ -23,6 +23,7 @@ from navox.db.student_planning import (
 )
 from navox.student import service as schedule
 from navox.student.occurrences import project
+from navox.student_planning import calendar_busy
 from navox.student_planning.planner import build_plan
 from navox.student_planning.schemas import (
     MAX_TASKS,
@@ -568,11 +569,16 @@ async def preferences(database: AsyncSession, user_id: UUID, workspace_id: UUID)
 
 
 def scheduling_preferences(value: dict) -> dict:
-    # Alarm sounds, enabled days and snooze do not invalidate accepted study work.
+    # Sound/snooze never change study time; enabled smart wake times do.
     # Omitting new defaults preserves source hashes of pre-redesign plans.
     result = {key: item for key, item in value.items() if key != "alarm"}
     if result.get("wake_times") is None:
         result.pop("wake_times", None)
+    if result.get("travel_minutes", 15) == 15:
+        result.pop("travel_minutes", None)
+    alarm = value.get("alarm") or {}
+    if alarm.get("enabled") and alarm.get("smart"):
+        result["smart_wake"] = {k: alarm.get(k) for k in ("days", "prep_minutes", "skip_date")}
     return result
 
 
@@ -627,8 +633,10 @@ async def stable_source_hash(
     )
     task_rows = await tasks(database, user_id, workspace_id)
     eligible = await eligible_tasks(database, user_id, workspace_id, task_rows)
+    access = await calendar_busy.inventory(database, user_id, workspace_id)
     return digest(
         {
+            **({"calendar_access": access} if access else {}),
             "version": 1,
             "timezone": user.timezone,
             "preferences": scheduling_preferences(planning.preferences),
@@ -642,7 +650,7 @@ async def stable_source_hash(
             ),
             "schedule": [
                 [
-                    row.model_dump(mode="json")
+                    row.model_dump(mode="json", exclude={"office_hours"})
                     for row in sorted(collection, key=lambda row: str(row.model_dump()["id"]))
                 ]
                 for collection in source
@@ -775,14 +783,17 @@ async def snapshot(
     now: datetime,
 ) -> tuple[str, PlanResult]:
     user = await schedule.owner(database, user_id, workspace_id)
-    source = await schedule.state_for_window(database, user_id, workspace_id, start_at, end_at)
+    source_start = datetime.combine(
+        start_at.astimezone(ZoneInfo(user.timezone)).date(), time.min, ZoneInfo(user.timezone)
+    ).astimezone(UTC)
+    source = await schedule.state_for_window(database, user_id, workspace_id, source_start, end_at)
     courses, fixed, edits, breaks = source
     occurrences, fixed_occurrences, _, warnings = project(
         courses,
         fixed,
         edits,
         breaks,
-        start_at=start_at,
+        start_at=source_start,
         end_at=end_at,
         include_conflicts=False,
     )
@@ -823,13 +834,48 @@ async def snapshot(
     )
     if len(history) > 620:
         raise schedule.StudentError(409, "Too many preserved study windows to replan safely")
+    prefs = Preferences.model_validate(planning.preferences)
     busy = [
-        (row.start_at - timedelta(minutes=row.walk_minutes or 0), row.end_at)
+        (
+            row.start_at
+            - timedelta(
+                minutes=row.walk_minutes if row.walk_minutes is not None else prefs.travel_minutes
+            ),
+            row.end_at
+            + timedelta(
+                minutes=row.walk_minutes if row.walk_minutes is not None else prefs.travel_minutes
+            ),
+        )
         for row in occurrences
         if not row.cancelled
     ]
-    busy.extend((row.start_at, row.end_at) for row in fixed_occurrences)
-    prefs = Preferences.model_validate(planning.preferences)
+    busy.extend(
+        (
+            row.start_at - timedelta(minutes=prefs.travel_minutes),
+            row.end_at + timedelta(minutes=prefs.travel_minutes),
+        )
+        for row in fixed_occurrences
+    )
+    external = await calendar_busy.collect(
+        database,
+        user_id,
+        workspace_id,
+        start_at=start_at,
+        end_at=end_at,
+        travel_minutes=prefs.travel_minutes,
+    )
+    busy.extend(external.intervals)
+    from navox.student_planning.alarm import alarm_schedule
+
+    day = start_at.astimezone(ZoneInfo(user.timezone)).date()
+    wakes = alarm_schedule(prefs, user.timezone, day, occurrences, days=15)
+    wake_overrides = {
+        date.fromisoformat(row["day"]): datetime.fromisoformat(row["scheduled_at"])
+        if row["scheduled_at"]
+        else None
+        for row in wakes
+        if row["enabled"] and prefs.alarm.smart
+    }
     busy.extend(
         (utc(row.start_at), utc(row.end_at) + timedelta(minutes=prefs.break_minutes))
         for row in history
@@ -837,6 +883,7 @@ async def snapshot(
     fingerprint = digest(
         {
             "version": 1,
+            "calendar": external.digest,
             "revision": planning.revision,
             "timezone": user.timezone,
             "preferences": scheduling_preferences(planning.preferences),
@@ -845,7 +892,7 @@ async def snapshot(
             "current_sources": source_states,
             "schedule": [
                 [
-                    row.model_dump(mode="json")
+                    row.model_dump(mode="json", exclude={"office_hours"})
                     for row in sorted(collection, key=lambda row: str(row.model_dump()["id"]))
                 ]
                 for collection in source
@@ -866,8 +913,19 @@ async def snapshot(
         for task in eligible
     ]
     result = build_plan(
-        planning_tasks, prefs, user.timezone, start_at=start_at, end_at=end_at, busy=busy
+        planning_tasks,
+        prefs,
+        user.timezone,
+        start_at=start_at,
+        end_at=end_at,
+        busy=busy,
+        wake_overrides=wake_overrides,
     )
+    result.warnings.extend(external.warnings)
+    if fixed_occurrences or any(row.walk_minutes is None for row in occurrences):
+        result.warnings.append(
+            f"Unknown walking times use your {prefs.travel_minutes}-minute travel buffer."
+        )
     if any(block.status == "planned" for block in history):
         result.warnings.append(
             "Your in-progress study block stays in place; its planned work is already allocated."
@@ -1424,7 +1482,10 @@ async def forget_planning_data(database: AsyncSession, user_id: UUID, workspace_
     from navox.student_recovery.service import invalidate_recovery_previews
 
     await invalidate_recovery_previews(database, user_id, workspace_id)
+    from navox.db.noa import NoaSettings
+
     for model in (
+        NoaSettings,
         StudentPlanningCommand,
         StudentPlanningPreview,
         StudentStudyBlock,

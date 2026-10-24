@@ -124,6 +124,7 @@ class AlarmPreferences(Input):
 
 
 class Preferences(Input):
+    travel_minutes: int = Field(default=15, ge=0, le=240, strict=True)
     wake_times: list[str] | None = Field(default=None, min_length=7, max_length=7)
     alarm: AlarmPreferences = Field(default_factory=AlarmPreferences)
 
@@ -289,3 +290,14 @@ class UndoInput(Input):
     request_id: UUID
     outcome_request_id: UUID
     revision: int = Field(ge=1)
+
+
+class MoveInput(Input):
+    request_id: UUID
+    revision: int = Field(ge=1)
+    start_at: datetime
+    _instant = field_validator("start_at")(aware)
+
+
+class MoveConfirm(MoveInput):
+    preview_hash: str = Field(pattern=r"^[a-f0-9]{64}$")

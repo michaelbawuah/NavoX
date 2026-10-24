@@ -30,6 +30,7 @@ import {
   TodayProgressReceipt,
 } from "./today-progress-receipt";
 import { TodayStudyActions } from "./today-study-actions";
+import { useStudyOpenings } from "./use-study-openings";
 
 export function PlannerOverview({
   plan,
@@ -55,6 +56,7 @@ export function PlannerOverview({
   onReload: () => void;
 }) {
   const router = useRouter();
+  const openings = useStudyOpenings(accountKey, 7, plan.revision);
   const [view, setView] = useState<"today" | "tomorrow" | "week">("week");
   const [selected, setSelected] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<ProgressReceipt | null>(null);
@@ -178,7 +180,9 @@ export function PlannerOverview({
           </strong>{" "}
           {plan.needs_review
             ? "Your plan needs a fresh review."
-            : "Review a replan to check what fits."}
+            : openings.data?.calendar_checked && openings.data.routine_confirmed
+              ? `${studyMinutes(openings.data.openings.reduce((sum, g) => sum + g.minutes, 0))} free across the next 7 days, after your saved blocks and breaks. Review a replan before adding work.`
+              : "Review a replan to check what fits."}
         </p>
         <button type="button" disabled={disabled} onClick={onReplan}>
           Replan week
@@ -307,6 +311,7 @@ export function PlannerOverview({
               </p>
               {!disabled && !plan.needs_review && (
                 <TodayStudyActions
+                  onMoved={onReload}
                   key={next.id + next.revision}
                   block={next}
                   task={nextTask}

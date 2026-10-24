@@ -1,6 +1,6 @@
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy import select
 
@@ -16,6 +16,8 @@ from navox.api.actions import (
     ensure_workflow,
 )
 from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
+from navox.api.connector_management import require_origin
+from navox.api.student import expected_owner
 from navox.approvals.schemas import ApprovalDecisionRequest
 from navox.approvals.service import ApprovalService, ApprovalServiceError
 from navox.communication.generation import (
@@ -44,7 +46,9 @@ from navox.db.communications import CommunicationDraft, CommunicationDraftVersio
 from navox.providers.google_oauth import GoogleAccessTokenError
 from navox.providers.google_sources import GMAIL_READ_SCOPE, GoogleSourceError
 
-router = APIRouter(prefix="/communication-drafts", tags=["communication"])
+router = APIRouter(
+    prefix="/communication-drafts", tags=["communication"], dependencies=[Depends(expected_owner)]
+)
 _MAILBOX = TypeAdapter(EmailStr)
 
 
@@ -292,6 +296,160 @@ async def list_sources(
             option["account_email"] = mailbox
         result.append(option)
     return result
+
+
+@router.get("/sources/{commitment_id}/{source_id}/message")
+async def read_source_message(
+    commitment_id: UUID,
+    source_id: UUID,
+    response: Response,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict:
+    """Fetch exactly the selected, currently authorized message. Never persist its body."""
+    import asyncio
+    from datetime import UTC, datetime
+    from urllib.parse import quote
+
+    from navox.intelligence.ingestion import authorized_connection
+    from navox.intelligence.source_cooldown import source_retry_after
+    from navox.providers.google_oauth import access_token_for_connection
+    from navox.providers.google_sources import GoogleSourceGateway
+
+    response.headers["Cache-Control"] = "private, no-store"
+    user_id, workspace_id = account.user.id, account.workspace.id
+    sources = await list_sources(commitment_id, account, database)
+    selected = next((row for row in sources if row["id"] == str(source_id)), None)
+    if selected is None:
+        raise HTTPException(404, "This email is no longer available")
+    connection_id = UUID(selected["connection_id"])
+    from navox.communication.service import authorize_source
+
+    scope = CommunicationDraft(
+        id=uuid4(),
+        user_id=user_id,
+        workspace_id=workspace_id,
+        commitment_id=commitment_id,
+        binding_kind="COMMITMENT",
+        source_connection_id=connection_id,
+        source_reference=str(source_id),
+    )
+    try:
+        await authorize_source(database, scope)
+        async with asyncio.timeout(30):
+            connection, _ = await authorized_connection(database, connection_id, "gmail")
+            if await source_retry_after(database, connection_id, "gmail"):
+                raise HTTPException(429, "Gmail is busy. Try again shortly")
+            token = await access_token_for_connection(
+                database, connection=connection, settings=settings
+            )
+            await database.commit()
+            if selected not in await list_sources(commitment_id, account, database):
+                raise HTTPException(409, "This email changed. Open it again")
+            await database.rollback()
+            document = await GoogleSourceGateway().gmail_message(
+                token,
+                workspace_id=workspace_id,
+                connection_id=connection_id,
+                external_id=selected["external_id"],
+                now=datetime.now(UTC),
+            )
+        if (
+            document.workspace_id,
+            document.provider,
+            document.source_type,
+            document.external_id,
+        ) != (
+            workspace_id,
+            "google",
+            "gmail_message",
+            selected["external_id"],
+        ) or document.metadata.get("status") == "deleted":
+            raise HTTPException(404, "This email is no longer available")
+        await database.refresh(account.workspace)
+        await database.refresh(account.user)
+        await authorize_source(database, scope)
+        if selected not in await list_sources(commitment_id, account, database):
+            raise HTTPException(409, "This email changed. Open it again")
+        content = document.content or ""
+        return {
+            "subject": document.subject or "(No subject)",
+            "sender": document.author.identity_value if document.author else None,
+            "body": content[:12000],
+            "truncated": len(content) > 12000,
+            "sent_at": document.occurred_at.isoformat(),
+            "source_id": str(source_id),
+            "open_url": "https://mail.google.com/mail/?authuser="
+            + quote(selected.get("account_email", ""), safe="")
+            + "#all/"
+            + quote(selected["external_id"], safe=""),
+        }
+    except (GoogleSourceError, GoogleAccessTokenError, TimeoutError):
+        raise HTTPException(
+            503,
+            "This email couldn’t load. Try again shortly",
+            headers={"Cache-Control": "private, no-store"},
+        ) from None
+    except ApprovalServiceError as error:
+        raise approval_error(error) from None
+
+
+@router.delete("/{draft_id}")
+async def discard_draft(
+    draft_id: UUID,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    expected_version: int = Query(ge=1),
+) -> dict:
+    from navox.db.models import Action, User
+
+    require_origin(request, settings.web_origin)
+    try:
+        await database.scalar(select(User).where(User.id == account.user.id).with_for_update())
+        draft = await owned_draft(
+            database, draft_id, user_id=account.user.id, workspace_id=account.workspace.id
+        )
+        if draft.current_version != expected_version:
+            raise HTTPException(409, "This draft changed. Review it again before discarding")
+        action_id = draft.action_id
+        if action_id:
+            action = await database.scalar(
+                select(Action).where(Action.id == action_id).with_for_update()
+            )
+            if action is None or action.status != "awaiting_approval":
+                raise HTTPException(409, "Check the send outcome before discarding this draft")
+            await ApprovalService().reject(
+                database,
+                action_id=action_id,
+                user_id=account.user.id,
+                workspace_id=account.workspace.id,
+                request_id=uuid4(),
+            )
+            await database.scalar(select(User).where(User.id == account.user.id).with_for_update())
+        draft = await database.scalar(
+            select(CommunicationDraft)
+            .where(
+                CommunicationDraft.id == draft_id,
+                CommunicationDraft.user_id == account.user.id,
+                CommunicationDraft.workspace_id == account.workspace.id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if (
+            draft is None
+            or draft.current_version != expected_version
+            or draft.action_id != action_id
+        ):
+            raise HTTPException(409, "This draft changed. Review it again before discarding")
+        await database.delete(draft)
+        await database.commit()
+        return {"discarded": True}
+    except ApprovalServiceError as error:
+        raise approval_error(error) from None
 
 
 @router.get("/{draft_id}")

@@ -122,6 +122,7 @@ export function CommunicationDrafts({
   onStateChanged,
   selectedCommitmentId,
   selectionKey,
+  onDraftCount,
 }: {
   commitments: { id: string; title: string; description?: string | null }[];
   connections: EmailConnection[];
@@ -129,6 +130,7 @@ export function CommunicationDrafts({
   onStateChanged: () => Promise<void>;
   selectedCommitmentId?: string | null;
   selectionKey?: string | number;
+  onDraftCount?: (count: number) => void;
 }) {
   const [commitmentId, setCommitmentId] = useState(
     eligibleReplyCommitment(commitments, selectedCommitmentId)?.id ??
@@ -137,6 +139,13 @@ export function CommunicationDrafts({
         : ""),
   );
   const [saved, setSaved] = useState<Draft[]>([]);
+  useEffect(() => {
+    onDraftCount?.(
+      saved.filter(
+        (row) => !["sent", "completed", "discarded"].includes(row.status),
+      ).length,
+    );
+  }, [saved, onDraftCount]);
   const [sources, setSources] = useState<EmailReplySource[]>([]);
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [sourceId, setSourceId] = useState("");
@@ -343,6 +352,26 @@ export function CommunicationDrafts({
       setBusy(false);
     }
   }
+  useEffect(() => {
+    if (
+      !action ||
+      !["approved", "queued", "executing", "uncertain"].includes(action.status)
+    )
+      return;
+    let live = true;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      void request<SendAction>(`/actions/${action.id}`)
+        .then((next) => {
+          if (live) setAction(next);
+        })
+        .catch(() => {});
+    }, 5000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [action]);
   const reviewMatches = manual
     ? manualEmailReviewMatches(
         action,
@@ -449,7 +478,10 @@ export function CommunicationDrafts({
           {error}
         </p>
       )}
-      <p>Send a plain text email to one recipient.</p>
+      <p>
+        Nothing is sent until you approve and tap Send. Use only reasons and
+        facts you have provided.
+      </p>
       {commitmentId && !selectedCommitment && !draft && (
         <p role="alert">
           This request is no longer available. Your text is still here. Choose
@@ -820,6 +852,52 @@ export function CommunicationDrafts({
                 approval.
               </p>
             )}
+            <div>
+              <button
+                type="button"
+                disabled={
+                  busy ||
+                  paused ||
+                  dirty ||
+                  (!!action && action.status !== "awaiting_approval")
+                }
+                onClick={() =>
+                  void perform(async () =>
+                    show(
+                      await request<Draft>(
+                        `/communication-drafts/${draft.id}/regenerate`,
+                        "POST",
+                        {
+                          expected_version: draft.current_version,
+                          instructions:
+                            "Make this draft shorter. Preserve its verified facts and the student's edits. Do not invent personal reasons, availability, promises or deadlines.",
+                        },
+                      ),
+                    ),
+                  )
+                }
+              >
+                Make it shorter
+              </button>
+              <button
+                type="button"
+                disabled={
+                  busy || (!!action && action.status !== "awaiting_approval")
+                }
+                onClick={() =>
+                  void perform(async () => {
+                    await request(
+                      `/communication-drafts/${draft.id}?expected_version=${draft.current_version}`,
+                      "DELETE",
+                    );
+                    setSaved((rows) => rows.filter((r) => r.id !== draft.id));
+                    clearDraftForRequest(selectedCommitment);
+                  })
+                }
+              >
+                Discard draft
+              </button>
+            </div>
             <details>
               <summary>Version history (up to 100 recent versions)</summary>
               {draft.versions.map((v) => (
@@ -920,7 +998,7 @@ export function CommunicationDrafts({
                     )
                   }
                 >
-                  Approve and send now
+                  Send
                 </button>
               </>
             )}
@@ -934,17 +1012,6 @@ export function CommunicationDrafts({
               connections={connections}
               paused={paused}
             />
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                void perform(async () =>
-                  setAction(await request<SendAction>(`/actions/${action.id}`)),
-                )
-              }
-            >
-              Refresh status
-            </button>
           </div>
         )}
       </div>

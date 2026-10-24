@@ -829,3 +829,19 @@
     align-items: start;
   }
 }
+
+.row[data-gap="true"] {
+  border: 1px dashed var(--nx-border);
+  border-radius: 12px;
+  background: transparent;
+}
+.row[data-gap="true"] .rowTitle {
+  color: var(--nx-accent-text);
+}
+.gapNotice {
+  color: var(--nx-muted);
+  font-size: 13px;
+}
+.gapNotice a {
+  color: var(--nx-accent-text);
+}

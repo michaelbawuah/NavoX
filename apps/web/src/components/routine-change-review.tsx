@@ -32,6 +32,11 @@ export function RoutineChangeReview({
     >
       <h3>Review every change</h3>
       <p>
+        Travel buffer: {draft.travel_minutes ?? 15} minutes before and after
+        shifts and calendar meetings; a class uses its saved walk time when
+        available.
+      </p>
+      <p>
         Study blocks: up to {draft.max_study_minutes} minutes, with{" "}
         {draft.break_minutes}-minute breaks.
       </p>

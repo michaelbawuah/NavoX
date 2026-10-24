@@ -51,6 +51,7 @@ import {
   studentWeekdays,
   studentWriteUncertain,
 } from "../lib/student-schedule";
+import { parseStudyCapture } from "../lib/study-capture";
 import { mondayOf } from "./classes-week";
 import { PlannerOverview } from "./planner-overview";
 import { PlannerWelcome } from "./planner-welcome";
@@ -506,6 +507,7 @@ export function StudentStudyTaskForm({
   task,
   assignment,
   captureTitle,
+  captureNow,
   timezone,
   courses,
   disabled,
@@ -515,6 +517,7 @@ export function StudentStudyTaskForm({
   task?: StudyTask;
   assignment?: StudyAssignmentDraft;
   captureTitle?: string;
+  captureNow?: number;
   timezone: string;
   courses: StudentCourse[];
   disabled: boolean;
@@ -522,15 +525,20 @@ export function StudentStudyTaskForm({
   onClose: () => void;
 }) {
   const id = useId();
+  const [capture] = useState(() =>
+    !task && !assignment && captureTitle
+      ? parseStudyCapture(captureTitle, courses, timezone, captureNow)
+      : null,
+  );
   const [value, setValue] = useState<StudyTaskFields>(
     task
       ? studyTaskDraft(task)
       : {
-          title: assignment?.title ?? captureTitle ?? "",
-          course_id: assignment?.course_id ?? null,
+          title: assignment?.title ?? capture?.title ?? captureTitle ?? "",
+          course_id: assignment?.course_id ?? capture?.course_id ?? null,
           due_at: assignment?.due_at ?? null,
-          estimated_minutes: 60,
-          remaining_minutes: 60,
+          estimated_minutes: capture?.estimated_minutes ?? 60,
+          remaining_minutes: capture?.estimated_minutes ?? 60,
           difficulty: 3,
           priority: 3,
           course_weight: 1,
@@ -538,7 +546,9 @@ export function StudentStudyTaskForm({
         },
   );
   const [deadline, setDeadline] = useState(
-    value.due_at ? studyLocalDateTime(value.due_at, timezone) : "",
+    value.due_at
+      ? studyLocalDateTime(value.due_at, timezone)
+      : (capture?.deadlineLocal ?? ""),
   );
   const [deadlineChoice, setDeadlineChoice] = useState(
     value.due_at ? new Date(value.due_at).toISOString() : "",
@@ -610,6 +620,16 @@ export function StudentStudyTaskForm({
           Cancel
         </button>
       </div>
+      {capture && (
+        <section className={styles.notice} aria-label="Review captured task">
+          <strong>Check what NavoX understood</strong>
+          <p>From: {captureTitle}</p>
+          {capture.notes.map((note) => (
+            <p key={note}>{note}</p>
+          ))}
+          <p>Nothing is saved until you confirm the details below.</p>
+        </section>
+      )}
       {task?.source_needs_review && (
         <div className={styles.notice}>
           <h4>Review the school calendar update</h4>
@@ -1505,6 +1525,7 @@ function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
                     key={`${taskEditor === "new" ? "new" : taskEditor.id}-${epoch}`}
                     task={taskEditor === "new" ? undefined : taskEditor}
                     captureTitle={captureTitle}
+                    captureNow={Date.parse(timetable.server_now)}
                     timezone={preferences.timezone}
                     courses={timetable.courses.filter(
                       (course) => !course.archived,

@@ -11,13 +11,18 @@ import {
 } from "../lib/student-planning";
 import {
   addStudentDays,
+  readStudentTimetable,
+  type StudentTimetable,
   studentDateInZone,
+  studentRequest,
   studentWeekdays,
 } from "../lib/student-schedule";
 import styles from "./routine-alarm-settings.module.css";
 import { RoutineChangeReview } from "./routine-change-review";
 
 export function RoutineAlarmSettings({ accountKey }: { accountKey: string }) {
+  const [timetable, setTimetable] = useState<StudentTimetable | null>(null);
+  const [reload, setReload] = useState(0);
   const [saved, setSaved] = useState<StudyPreferences | null>(null);
   const [draft, setDraft] = useState<StudyPreferences | null>(null);
   const [preview, setPreview] = useState<RoutinePreview | null>(null);
@@ -25,6 +30,7 @@ export function RoutineAlarmSettings({ accountKey }: { accountKey: string }) {
     [notice, setNotice] = useState("");
   const request = useRef(crypto.randomUUID());
   const alive = useRef(true);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Retry reloads the saved routine.
   useEffect(() => {
     alive.current = true;
     let current = true;
@@ -32,6 +38,18 @@ export function RoutineAlarmSettings({ accountKey }: { accountKey: string }) {
     setDraft(null);
     setPreview(null);
     setNotice("");
+    setTimetable(null);
+    void studentRequest(
+      "/timetable?days=14",
+      readStudentTimetable,
+      "GET",
+      undefined,
+      accountKey,
+    )
+      .then((value) => {
+        if (current) setTimetable(value);
+      })
+      .catch(() => {});
     void routineRequest(accountKey, "/preferences", readStudyPreferences)
       .then((value) => {
         if (current) {
@@ -49,20 +67,39 @@ export function RoutineAlarmSettings({ accountKey }: { accountKey: string }) {
       current = false;
       alive.current = false;
     };
-  }, [accountKey]);
+  }, [accountKey, reload]);
   if (!saved || !draft)
     return (
       <section id="routine-alarm" className={styles.card}>
         <h2>Routine & alarm</h2>
         <p role="status">{notice || "Loading your routine…"}</p>
+        {notice && (
+          <button type="button" onClick={() => setReload((n) => n + 1)}>
+            Retry
+          </button>
+        )}
       </section>
     );
   const alarm = draft.alarm ?? defaultAlarm,
     wakes = draft.wake_times ?? Array(7).fill(draft.wake_time);
   const tomorrow = addStudentDays(
-    studentDateInZone(new Date().toISOString(), saved.timezone),
+    studentDateInZone(
+      timetable?.server_now ?? new Date().toISOString(),
+      saved.timezone,
+    ),
     1,
   );
+  const classDays = new Set(
+    (timetable?.occurrences ?? [])
+      .filter((row) => !row.cancelled)
+      .map((row) => {
+        const day = studentDateInZone(row.start_at, saved.timezone);
+        return (new Date(`${day}T12:00:00Z`).getUTCDay() + 6) % 7;
+      }),
+  );
+  const firstClassDay = [...classDays].sort()[0] ?? 0;
+  const firstOtherDay =
+    [0, 1, 2, 3, 4, 5, 6].find((day) => !classDays.has(day)) ?? 5;
   const changed = (change: Partial<StudyPreferences>) => {
     setDraft({ ...draft, ...change });
     setPreview(null);
@@ -156,38 +193,60 @@ export function RoutineAlarmSettings({ accountKey }: { accountKey: string }) {
               />
             </label>
           </div>
+          <p>
+            {classDays.size
+              ? `Class days in your next two weeks: ${[...classDays]
+                  .sort()
+                  .map((d) => studentWeekdays[d])
+                  .join(", ")}`
+              : "Add your classes to use class-day wake times. You can adjust every day below."}
+          </p>
           <div className={styles.pair}>
             <label>
-              Weekday wake time
+              Class-day wake time
               <input
                 type="time"
-                value={wakes[0]}
+                value={wakes[firstClassDay]}
+                disabled={!classDays.size}
                 required
                 onChange={(e) =>
                   changed({
                     wake_times: wakes.map((v: string, i: number) =>
-                      i < 5 ? e.target.value : v,
+                      classDays.has(i) ? e.target.value : v,
                     ),
                   })
                 }
               />
             </label>
             <label>
-              Weekend wake time
+              Other-day wake time
               <input
                 type="time"
-                value={wakes[5]}
+                value={wakes[firstOtherDay]}
                 required
                 onChange={(e) =>
                   changed({
                     wake_times: wakes.map((v: string, i: number) =>
-                      i >= 5 ? e.target.value : v,
+                      !classDays.has(i) ? e.target.value : v,
                     ),
                   })
                 }
               />
             </label>
           </div>
+          <label>
+            Travel buffer (minutes)
+            <input
+              type="number"
+              min={0}
+              max={240}
+              required
+              value={draft.travel_minutes ?? 15}
+              onChange={(e) =>
+                changed({ travel_minutes: Number(e.target.value) })
+              }
+            />
+          </label>
           <details>
             <summary>Adjust each day</summary>
             <div className={styles.days}>

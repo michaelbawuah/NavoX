@@ -622,6 +622,7 @@ export function StudentCourseEditor({
           code: suggested?.code ?? "",
           name: suggested?.name ?? "",
           professor: suggested?.professor ?? null,
+          office_hours: suggested?.office_hours ?? null,
           term_start: profile.term_start ?? "",
           term_end: profile.term_end ?? "",
         },
@@ -639,6 +640,7 @@ export function StudentCourseEditor({
         code: value.code.trim(),
         name: value.name.trim(),
         professor: clean(value.professor ?? ""),
+        office_hours: clean(value.office_hours ?? ""),
       })
     )
       onClose();
@@ -716,6 +718,18 @@ export function StudentCourseEditor({
             maxLength={120}
             onChange={(event) =>
               setValue({ ...value, professor: event.target.value })
+            }
+          />
+        </label>
+        <label className={styles.wide} htmlFor={`${id}-office-hours`}>
+          Office hours (optional)
+          <input
+            id={`${id}-office-hours`}
+            maxLength={500}
+            value={value.office_hours ?? ""}
+            placeholder="e.g. Tue 2–4 PM, Phillips 101"
+            onChange={(e) =>
+              setValue({ ...value, office_hours: e.target.value })
             }
           />
         </label>

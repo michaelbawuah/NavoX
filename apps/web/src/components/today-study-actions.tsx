@@ -6,6 +6,7 @@ import {
   type StudyOutcomePreview,
   type StudyTask,
 } from "../lib/student-planning";
+import { StudyBlockMove } from "./study-block-move";
 import styles from "./today-study-actions.module.css";
 
 type Kind = "done" | "took_longer" | "skipped";
@@ -23,6 +24,7 @@ export function TodayStudyActions({
   timezone,
   now,
   onSaved,
+  onMoved,
 }: {
   block: StudyBlock;
   task: StudyTask;
@@ -30,6 +32,7 @@ export function TodayStudyActions({
   timezone: string;
   now: number;
   onSaved: (result: StudyOutcomePreview) => void;
+  onMoved?: () => void;
 }) {
   const [kind, setKind] = useState<Kind | null>(null);
   const [actual, setActual] = useState(block.minutes);
@@ -68,7 +71,7 @@ export function TodayStudyActions({
           method: "POST",
           credentials: "include",
           cache: "no-store",
-          signal: AbortSignal.timeout(12000),
+          signal: AbortSignal.timeout(60000),
           headers: {
             "Content-Type": "application/json",
             "X-NavoX-Account": accountKey,
@@ -130,6 +133,15 @@ export function TodayStudyActions({
     <div className={styles.root}>
       {!kind ? (
         <div className={styles.actions}>
+          {onMoved && (
+            <StudyBlockMove
+              block={block}
+              accountKey={accountKey}
+              timezone={timezone}
+              now={now}
+              onSaved={onMoved}
+            />
+          )}
           {(Object.keys(labels) as Kind[]).map((value) => (
             <button
               key={value}

@@ -284,7 +284,7 @@ export function ClassesWeek({
             </div>
             <div>
               <dt>Office hours</dt>
-              <dd>Not added</dd>
+              <dd>{course.office_hours || "Not added"}</dd>
             </div>
             <div>
               <dt>Lab</dt>

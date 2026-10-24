@@ -238,6 +238,7 @@ async def course_views(
             code=row.code,
             name=row.name,
             professor=row.professor,
+            office_hours=row.office_hours,
             term_start=row.term_start,
             term_end=row.term_end,
             archived=row.archived,
@@ -286,6 +287,8 @@ async def save_course(
         check_revision(row.revision, payload.revision)
         # A shortened term may exclude classes, but never silently destroys them.
         for key, value in payload.model_dump(exclude={"revision"}).items():
+            if key == "office_hours" and key not in payload.model_fields_set:
+                continue
             setattr(row, key, value)
         row.revision += 1
     audit(

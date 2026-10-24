@@ -125,7 +125,7 @@ describe("workspace destinations", () => {
     expect(markup).toContain("Email approvals");
     expect(markup).not.toContain("Send with Gmail");
     expect(markup).toContain("Needs reply");
-    expect(markup).toContain("Follow-ups");
+    expect(markup).toContain("Waiting for reply");
     expect(markup).not.toContain("<summary>Email actions</summary>");
     expect(markup).not.toContain("Approve exact send");
   });
@@ -155,11 +155,14 @@ describe("workspace destinations", () => {
     try {
       const connections = renderView("connections");
       const settings = renderView("settings");
-      expect(connections).toContain("Connected apps");
+      expect(connections).toContain("Your connections. Your control.");
       expect(connections).toContain("Bring your work into focus");
       expect(settings).toContain("AI preferences");
-      expect(settings).toContain("Local time and weather");
-      expect(settings).toContain("Pause assistance");
+      expect(settings).not.toContain("Local time and weather");
+      expect(settings).not.toContain("Pause assistance");
+      expect(settings).toContain("Settings sections");
+      expect(settings).toContain("What NavoX knows about me");
+      expect(settings).toContain("Voice &amp; Noa");
       expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       fetchMock.mockRestore();

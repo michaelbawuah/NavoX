@@ -63,6 +63,7 @@ export const defaultAlarm: AlarmPreferences = {
   skip_date: null,
 };
 export interface StudyPreferences {
+  travel_minutes?: number;
   wake_times?: string[] | null;
   alarm?: AlarmPreferences;
 
@@ -312,6 +313,9 @@ export function readStudyPreferences(value: unknown): StudyPreferences {
   )
     return invalid();
   return {
+    ...(v.travel_minutes !== undefined
+      ? { travel_minutes: num(v.travel_minutes, 0, 240) }
+      : {}),
     ...(v.wake_times !== undefined
       ? {
           wake_times:
@@ -468,6 +472,9 @@ export function studyTaskDraft(value: StudyTaskFields): StudyTaskFields {
 }
 export function studyPreferencesDraft(value: StudyPreferences) {
   return {
+    ...(value.travel_minutes !== undefined
+      ? { travel_minutes: value.travel_minutes }
+      : {}),
     ...(value.wake_times !== undefined ? { wake_times: value.wake_times } : {}),
     ...(value.alarm !== undefined ? { alarm: value.alarm } : {}),
     wake_time: value.wake_time,
@@ -620,14 +627,79 @@ export async function routineRequest<T>(
       "Content-Type": "application/json",
       "X-NavoX-Account": accountKey,
     },
-    signal: AbortSignal.timeout(12000),
+    signal: AbortSignal.timeout(60000),
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   });
-  if (!response.ok)
+  const value: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail =
+      value && typeof value === "object" && "detail" in value
+        ? value.detail
+        : null;
     throw new Error(
-      response.status === 409
-        ? "Your routine or account changed. Reopen Settings and review again."
-        : "Your routine could not be checked. Please try again.",
+      response.status < 500 &&
+        typeof detail === "string" &&
+        detail.length <= 400
+        ? detail
+        : response.status === 409
+          ? "Your schedule or account changed. Review a fresh preview."
+          : "Your schedule could not be checked. Please try again.",
     );
-  return parse(await response.json());
+  }
+  return parse(value);
 }
+
+export function readStudyMove(value: unknown) {
+  const v = obj(value),
+    hash = text(v.preview_hash, 64);
+  if (
+    !/^[a-f0-9]{64}$/.test(hash) ||
+    v.other_blocks_change !== false ||
+    v.alarms_change !== false ||
+    v.calendar_events_change !== false
+  )
+    return invalid();
+  const before = readStudyBlock(v.before),
+    after = readStudyBlock(v.after);
+  if (
+    before.id !== after.id ||
+    before.task_id !== after.task_id ||
+    before.minutes !== after.minutes
+  )
+    return invalid();
+  return {
+    preview_hash: hash,
+    before,
+    after,
+    warnings: list(v.warnings, (item) => text(item, 2000), 50),
+  };
+}
+export type StudyMove = ReturnType<typeof readStudyMove>;
+
+export function readStudyOpenings(value: unknown) {
+  const v = obj(value);
+  return {
+    timezone: zone(v.timezone),
+    checked_at: instant(v.checked_at),
+    expires_at: instant(v.expires_at),
+    calendar_checked: bool(v.calendar_checked),
+    routine_confirmed: bool(v.routine_confirmed),
+    warnings: list(v.warnings, (item) => text(item, 2000), 50),
+    openings: list(
+      v.openings,
+      (item) => {
+        const r = obj(item),
+          start = instant(r.start_at),
+          end = instant(r.end_at);
+        if (Date.parse(end) <= Date.parse(start)) return invalid();
+        return {
+          start_at: start,
+          end_at: end,
+          minutes: num(r.minutes, 15, 1440),
+        };
+      },
+      200,
+    ),
+  };
+}
+export type StudyOpenings = ReturnType<typeof readStudyOpenings>;

@@ -89,12 +89,12 @@ async function click(label: string) {
 it("reads back every affected block and confirms only after explicit approval", async () => {
   await mount();
   await review();
-  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch).toHaveBeenCalledTimes(3);
   expect(host.textContent).toContain("Review calculus");
   expect(host.textContent).toContain("Off →");
   expect(host.textContent).toContain("retire these future study blocks");
   await click("Approve these changes");
-  const [url, options] = vi.mocked(fetch).mock.calls[2];
+  const [url, options] = vi.mocked(fetch).mock.calls[3];
   expect(url).toMatch(/preferences\/confirm$/);
   expect(options?.headers).toMatchObject({
     "X-NavoX-Account": "workspace:student",
@@ -110,7 +110,7 @@ it("cancel never saves, and unresolved time warnings disable approval", async ()
   await mount();
   await review();
   await click("Keep current settings");
-  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch).toHaveBeenCalledTimes(3);
   vi.mocked(fetch).mockResolvedValueOnce(
     Response.json({
       ...preview,
