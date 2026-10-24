@@ -40,6 +40,10 @@ import {
   replyItems,
 } from "../lib/today-home";
 import styles from "./today-home.module.css";
+import {
+  type ProgressReceipt,
+  TodayProgressReceipt,
+} from "./today-progress-receipt";
 import { TodayStudyActions } from "./today-study-actions";
 import type { TodayWorkspaceProps } from "./today-workspace";
 import { useVoxCall } from "./vox-call-provider";
@@ -86,6 +90,7 @@ function TodayHomeAccount({
   onConnectionsChanged,
   accountKey,
 }: TodayWorkspaceProps & { accountKey: string }) {
+  const [receipt, setReceipt] = useState<ProgressReceipt | null>(null);
   const [data, setData] = useState<Data | null>(null),
     [error, setError] = useState(false),
     [busy, setBusy] = useState(false);
@@ -296,6 +301,18 @@ function TodayHomeAccount({
             Loading your day…
           </p>
         )}
+        {receipt && (
+          <TodayProgressReceipt
+            key={receipt.result.undo_request_id}
+            receipt={receipt}
+            timezone={zone}
+            accountKey={accountKey}
+            onClose={() => {
+              setReceipt(null);
+              void load();
+            }}
+          />
+        )}
         {showSetup && (
           <section className={styles.setup} aria-label="Set up NavoX">
             <div className={styles.setupHeader}>
@@ -470,19 +487,29 @@ function TodayHomeAccount({
                           {row.study?.status === "planned" &&
                             !data?.plan?.needs_review &&
                             (() => {
+                              const block = row.study;
                               const task = data?.tasks.find(
-                                (task) => task.id === row.study?.task_id,
+                                (task) => task.id === block?.task_id,
                               );
                               return (
-                                task && (
+                                task &&
+                                block && (
                                   <TodayStudyActions
                                     key={`${row.study.id}:${row.study.revision}:${task.revision}`}
-                                    block={row.study}
+                                    block={block}
                                     task={task}
                                     accountKey={accountKey}
                                     timezone={zone}
                                     now={now}
-                                    onSaved={() => void load()}
+                                    onSaved={(result) => {
+                                      setReceipt({
+                                        result,
+                                        task,
+                                        block,
+                                        savedAt: Date.now(),
+                                      });
+                                      void load();
+                                    }}
                                   />
                                 )
                               );

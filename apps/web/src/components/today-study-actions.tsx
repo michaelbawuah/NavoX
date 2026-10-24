@@ -29,7 +29,7 @@ export function TodayStudyActions({
   accountKey: string;
   timezone: string;
   now: number;
-  onSaved: () => void;
+  onSaved: (result: StudyOutcomePreview) => void;
 }) {
   const [kind, setKind] = useState<Kind | null>(null);
   const [actual, setActual] = useState(block.minutes);
@@ -111,7 +111,7 @@ export function TodayStudyActions({
       const result = readStudyOutcomePreview(await response.json());
       if (!alive.current) return;
       if (confirm) {
-        onSaved();
+        onSaved(result);
         setKind(null);
         setPreview(null);
       } else setPreview(result);

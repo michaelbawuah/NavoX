@@ -123,3 +123,24 @@ async def test_transcript_rejects_wrong_generation_expired_or_corrupt_checkpoint
     response = await env.client.get(f"{ROOT}/{row['client_call_id']}/transcript")
     assert response.status_code in (410, 503)
     assert "Private question" not in response.text and "corrupt" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_same_student_new_signin_cannot_read_or_write_another_session_call(
+    vox_env, monkeypatch
+):
+    env = vox_env
+    row = await seed(env, monkeypatch)
+    login = await env.client.post(
+        "/api/v1/auth/login", json={key: env.credentials[key] for key in ("email", "password")}
+    )
+    assert login.status_code == 200
+    assert env.client.cookies.get(env.settings.session_cookie_name) != env.token
+    root = f"{ROOT}/{row['client_call_id']}"
+    response = await env.client.get(root + "/transcript")
+    assert response.status_code == 410
+    assert "Private question" not in response.text and "Private answer" not in response.text
+    response = await env.client.post(
+        root + "/messages", json={"request_id": str(uuid4()), "text": "Wrong session question"}
+    )
+    assert response.status_code == 410
