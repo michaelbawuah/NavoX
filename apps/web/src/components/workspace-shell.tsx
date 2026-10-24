@@ -8,7 +8,7 @@ import {
   notifyAccountSessionChanging,
 } from "../lib/account-session";
 import { productFeatures } from "../lib/product-features";
-import { StudentVoiceLauncher } from "./student-voice-launcher";
+import { readStudentProfile, studentRequest } from "../lib/student-schedule";
 import styles from "./workspace-shell.module.css";
 
 export type WorkspaceDestination =
@@ -27,16 +27,9 @@ export type WorkspaceDestination =
 const destinations: { label: WorkspaceDestination; href: string }[] = [
   { label: "Today", href: "/" },
   { label: "Classes", href: "/classes" },
-  { label: "Assistant", href: "/navox" },
-  { label: "Inbox", href: "/inbox" },
+  { label: "Board", href: "/board" },
   { label: "Planner", href: "/planner" },
-  ...(productFeatures.studentWhiteboard
-    ? [{ label: "Board" as const, href: "/board" }]
-    : []),
-  ...(productFeatures.news ? [{ label: "News" as const, href: "/news" }] : []),
-  ...(productFeatures.subscriptions
-    ? [{ label: "Subscriptions" as const, href: "/subscriptions" }]
-    : []),
+  { label: "Inbox", href: "/inbox" },
 ];
 
 const iconPaths: Record<
@@ -101,67 +94,69 @@ export function WorkspaceShell({
   accountName,
   accountKey,
   onSignOut,
+  timezone,
+  inboxCount = 0,
 }: {
   current: WorkspaceDestination;
   children: ReactNode;
   accountName?: string;
   accountKey?: string;
   onSignOut?: () => Promise<void> | void;
+  timezone?: string;
+  inboxCount?: number;
 }) {
   const router = useRouter();
-  const [menuOpen, setMenuOpen] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState("");
-  const sidebar = useRef<HTMLElement>(null);
-
+  const [help, setHelp] = useState(false);
+  const [clock, setClock] = useState<Date | null>(null);
+  const [savedZone, setSavedZone] = useState<string | null>(null);
+  const profile = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    let live = true;
+    setSavedZone(null);
+    if (!timezone && accountKey)
+      void studentRequest("/profile", readStudentProfile)
+        .then((value) => {
+          if (live) setSavedZone(value.timezone);
+        })
+        .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [accountKey, timezone]);
+  useEffect(() => {
+    const tick = () => setClock(new Date());
+    tick();
+    const interval = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(interval);
+  }, []);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         router.push("/navox/search");
       }
-      if (event.key === "Escape") setMenuOpen(false);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [router]);
-
-  useEffect(() => {
-    if (!menuOpen) return;
-    const viewport = window.matchMedia("(max-width: 760px)");
-    if (!viewport.matches) {
-      setMenuOpen(false);
-      return;
-    }
-    const previous = document.activeElement;
-    const navigation = sidebar.current;
-    navigation?.querySelector<HTMLButtonElement>("button")?.focus();
-    const trapFocus = (event: KeyboardEvent) => {
-      if (event.key !== "Tab" || !navigation) return;
-      const controls = drawerFocusControls(navigation);
-      const first = controls[0];
-      const last = controls.at(-1);
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first?.focus();
+      if (event.key === "Escape" && profile.current?.open) {
+        profile.current.open = false;
+        profile.current.querySelector("summary")?.focus();
       }
     };
-    const closeOnResize = () => {
-      if (!viewport.matches) setMenuOpen(false);
+    const outside = (event: PointerEvent) => {
+      if (
+        profile.current &&
+        event.target instanceof Node &&
+        !profile.current.contains(event.target)
+      )
+        profile.current.open = false;
     };
-    document.addEventListener("keydown", trapFocus);
-    viewport.addEventListener("change", closeOnResize);
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", outside);
     return () => {
-      document.removeEventListener("keydown", trapFocus);
-      viewport.removeEventListener("change", closeOnResize);
-      if (previous instanceof HTMLElement && previous.isConnected)
-        previous.focus();
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", outside);
     };
-  }, [menuOpen]);
-
+  }, [router]);
   async function signOut() {
     setLeaving(true);
     setError("");
@@ -186,53 +181,67 @@ export function WorkspaceShell({
           notifyAccountSessionChanged(change);
         }
       }
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "We couldn’t sign you out. Please try again.",
-      );
+    } catch {
+      setError("We couldn’t sign you out. Please try again.");
     } finally {
       setLeaving(false);
     }
   }
-
-  const moreActive = !["Today", "Classes", "Assistant"].includes(current);
-
-  return (
-    <div className={styles.shell}>
-      <a className={styles.skip} href="#workspace-content">
-        Skip to workspace
-      </a>
-      {menuOpen && (
-        <button
-          type="button"
-          className={styles.backdrop}
-          aria-label="Close navigation"
-          onClick={() => setMenuOpen(false)}
-        />
-      )}
-      <aside
-        ref={sidebar}
-        id="workspace-navigation"
-        className={styles.sidebar}
-        data-open={menuOpen}
-        {...(menuOpen
-          ? {
-              role: "dialog",
-              "aria-modal": true,
-              "aria-label": "Workspace navigation",
-            }
-          : {})}
-      >
-        <button
-          type="button"
-          className={styles.drawerClose}
-          aria-label="Close navigation"
-          onClick={() => setMenuOpen(false)}
-        >
-          <Icon name="Close" />
+  let date = "";
+  if (clock) {
+    const zone =
+      timezone ?? savedZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+    try {
+      date =
+        new Intl.DateTimeFormat("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+          timeZone: zone,
+        }).format(clock) +
+        " · " +
+        new Intl.DateTimeFormat("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+          timeZone: zone,
+        }).format(clock);
+    } catch {
+      date = "";
+    }
+  }
+  function navItem(label: WorkspaceDestination, href: string) {
+    if (label === "Board" && !productFeatures.studentWhiteboard)
+      return (
+        <button key={label} type="button" disabled title="Board is coming soon">
+          <Icon name={label} />
+          <span>{label}</span>
         </button>
+      );
+    return (
+      <Link
+        key={label}
+        href={href}
+        aria-current={current === label ? "page" : undefined}
+      >
+        <Icon name={label} />
+        <span>{label}</span>
+        {label === "Inbox" && inboxCount > 0 && (
+          <span
+            className={styles.badge}
+            title={`${inboxCount} emails need a reply`}
+          >
+            {inboxCount > 99 ? "99+" : inboxCount}
+          </span>
+        )}
+      </Link>
+    );
+  }
+  return (
+    <div className={styles.shell} data-navox-shell>
+      <a className={styles.skip} href="#workspace-content">
+        Skip to content
+      </a>
+      <aside className={styles.sidebar}>
         <Link href="/" className={styles.brand} aria-label="NavoX home">
           <span className={styles.brandMark} aria-hidden="true">
             <i />
@@ -241,91 +250,93 @@ export function WorkspaceShell({
           </span>
           NavoX
         </Link>
-        <div className={styles.workspaceLabel}>Your student workspace</div>
         <nav className={styles.navigation} aria-label="Main navigation">
-          {destinations.map(({ label, href }) => (
-            <Link
-              key={label}
-              href={href}
-              aria-current={current === label ? "page" : undefined}
-              onClick={() => setMenuOpen(false)}
-            >
-              <Icon name={label} />
-              <span>{label}</span>
-            </Link>
-          ))}
+          {destinations.map(({ label, href }) => navItem(label, href))}
         </nav>
         <div className={styles.sidebarBottom}>
-          <nav
-            className={styles.secondaryNavigation}
-            aria-label="Workspace settings"
-          >
-            <Link
-              href="/connections"
-              aria-current={current === "Connections" ? "page" : undefined}
-              onClick={() => setMenuOpen(false)}
-            >
-              <Icon name="Connections" />
-              Connections
-            </Link>
-            <Link
-              href="/settings"
-              aria-current={current === "Settings" ? "page" : undefined}
-              onClick={() => setMenuOpen(false)}
-            >
-              <Icon name="Settings" />
-              Settings
-            </Link>
-          </nav>
-          <details className={styles.account}>
-            <summary>
+          <details className={styles.account} ref={profile}>
+            <summary aria-label="Open profile menu">
               <span className={styles.avatar} aria-hidden="true">
                 {accountName?.trim().slice(0, 1).toUpperCase() || "N"}
               </span>
               <span>{accountName || "Your account"}</span>
               <Icon name="More" />
             </summary>
-            <button
-              type="button"
-              onClick={() => void signOut()}
-              disabled={leaving}
-            >
-              {leaving ? "Signing out…" : "Sign out"}
-            </button>
+            <div className={styles.profileMenu}>
+              <Link
+                href="/connections"
+                aria-current={current === "Connections" ? "page" : undefined}
+              >
+                Connections
+              </Link>
+              <Link
+                href="/settings"
+                aria-current={current === "Settings" ? "page" : undefined}
+              >
+                Settings
+              </Link>
+              <button
+                type="button"
+                aria-expanded={help}
+                onClick={() => setHelp(!help)}
+              >
+                Help
+              </button>
+              {help && (
+                <p>
+                  Tap Vox to talk. Add your schedule in Classes and your tasks
+                  in Planner.
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                disabled={leaving}
+              >
+                {leaving ? "Signing out…" : "Sign out"}
+              </button>
+              {error && (
+                <p className={styles.error} role="alert">
+                  {error}
+                </p>
+              )}
+            </div>
           </details>
-          {error && (
-            <p className={styles.error} role="alert">
-              {error}
-            </p>
-          )}
         </div>
       </aside>
-      <div className={styles.canvas} inert={menuOpen || undefined}>
+      <div className={styles.canvas}>
         <header className={styles.topbar}>
-          <div className={styles.location}>
-            <button
-              type="button"
-              className={styles.menuButton}
-              aria-label={menuOpen ? "Close navigation" : "Open navigation"}
-              aria-expanded={menuOpen}
-              aria-controls="workspace-navigation"
-              onClick={() => setMenuOpen(!menuOpen)}
-            >
-              <Icon name={menuOpen ? "Close" : "Menu"} />
-            </button>
-            <span>{current}</span>
-          </div>
+          <h1 className={styles.location}>
+            {current === "Assistant" ? "Vox" : current}
+          </h1>
           <div className={styles.topbarActions}>
-            <StudentVoiceLauncher accountKey={accountKey} />
             <Link
               className={styles.search}
               href="/navox/search"
-              aria-label="Search your workspace"
-              aria-current={current === "Search" ? "page" : undefined}
+              aria-label="Search"
             >
               <Icon name="Search" />
-              <span>Search your workspace</span>
-              <kbd>⌘ K</kbd>
+              <span>Search</span>
+              <kbd>⌘K</kbd>
+            </Link>
+            <time className={styles.date} dateTime={clock?.toISOString()}>
+              {date}
+            </time>
+            <Link
+              href="/inbox"
+              className={styles.mobileInbox}
+              aria-label={
+                inboxCount > 0
+                  ? `Inbox, ${inboxCount} emails need a reply`
+                  : "Inbox"
+              }
+            >
+              <Icon name="Inbox" />
+              {inboxCount > 0 && (
+                <span className={styles.badge}>
+                  {inboxCount > 99 ? "99+" : inboxCount}
+                </span>
+              )}
             </Link>
           </div>
         </header>
@@ -333,35 +344,16 @@ export function WorkspaceShell({
           {children}
         </main>
       </div>
-      <nav
-        className={styles.mobileNavigation}
-        aria-label="Mobile navigation"
-        inert={menuOpen || undefined}
-      >
-        {destinations
-          .filter(({ label }) =>
-            ["Today", "Classes", "Assistant"].includes(label),
-          )
-          .map(({ label, href }) => (
-            <Link
-              key={label}
-              href={href}
-              aria-current={current === label ? "page" : undefined}
-            >
-              <Icon name={label} />
-              <span>{label}</span>
-            </Link>
-          ))}
-        <button
-          type="button"
-          onClick={() => setMenuOpen(!menuOpen)}
-          aria-expanded={menuOpen}
-          aria-controls="workspace-navigation"
-          data-active={moreActive}
-        >
-          <Icon name="More" />
-          <span>More</span>
-        </button>
+      <nav className={styles.mobileNavigation} aria-label="Mobile navigation">
+        {navItem("Today", "/")}
+        {navItem("Classes", "/classes")}
+        {productFeatures.studentVox ? (
+          <span aria-hidden="true" />
+        ) : (
+          <Link href="/navox">Vox</Link>
+        )}
+        {navItem("Board", "/board")}
+        {navItem("Planner", "/planner")}
       </nav>
     </div>
   );

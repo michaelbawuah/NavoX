@@ -44,8 +44,9 @@ describe("email review entry points", () => {
     productFeatures.studentEmail = true;
     const today = render("today"),
       inbox = render("inbox");
-    expect(today).toContain("One email, one next step");
-    expect(today).toContain('href="/email-actions"');
+    expect(today).not.toContain("One email, one next step");
+    expect(today).toContain("Loading your day…");
+    expect(today).not.toContain('href="/email-actions"');
     expect(inbox).toContain("Turn an email into a clear action");
     expect(inbox).toContain("Needs reply");
     expect(inbox).not.toContain("Analyze selected message");

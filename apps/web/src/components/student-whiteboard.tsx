@@ -327,28 +327,48 @@ function StudentWhiteboardSession({
     resetLesson(id);
   }
 
-  function openBoard(id: string) {
-    if (pendingNow.current) return;
-    void run(
-      (signal) => api.open(id, signal),
-      (saved) => {
-        setSelected(saved);
-        setRestored(saved.snapshot);
-        setLessonId(saved.lesson_id);
-        setTitle(saved.title);
-        setCourseId(saved.course_id ?? "");
-        setInstance((value) => value + 1);
-        setBlocked(false);
-        setNotice("Saved Board reopened, paused at your saved step.");
-      },
-      () => {
-        setBlocked(true);
-        setNotice(
-          "This saved Board could not be reopened. It may have changed, been erased, or use an older lesson edition. Reload to check it; erasure remains available.",
-        );
-      },
-    );
-  }
+  const openBoard = useCallback(
+    (id: string) => {
+      if (pendingNow.current) return;
+      void run(
+        (signal) => api.open(id, signal),
+        (saved) => {
+          setSelected(saved);
+          setRestored(saved.snapshot);
+          setLessonId(saved.lesson_id);
+          setTitle(saved.title);
+          setCourseId(saved.course_id ?? "");
+          setInstance((value) => value + 1);
+          setBlocked(false);
+          setNotice("Saved Board reopened, paused at your saved step.");
+        },
+        () => {
+          setBlocked(true);
+          setNotice(
+            "This saved Board could not be reopened. It may have changed, been erased, or use an older lesson edition. Reload to check it; erasure remains available.",
+          );
+        },
+      );
+    },
+    [api, run],
+  );
+
+  const linkedBoard = useRef(false);
+  useEffect(() => {
+    if (
+      linkedBoard.current ||
+      !collection ||
+      busy ||
+      masked ||
+      blocked ||
+      !storageEnabled
+    )
+      return;
+    const id = new URLSearchParams(window.location.hash.slice(1)).get("saved");
+    if (!id || !collection.boards.some((board) => board.id === id)) return;
+    linkedBoard.current = true;
+    openBoard(id);
+  }, [collection, busy, masked, blocked, storageEnabled, openBoard]);
 
   function mutate(command: PendingBoardChange) {
     pendingNow.current = command;

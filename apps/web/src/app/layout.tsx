@@ -3,6 +3,8 @@ import { StudentAppRegistration } from "../components/student-notifications";
 import { VoxCallControls } from "../components/vox-call-controls";
 import { VoxCallProvider } from "../components/vox-call-provider";
 import { productFeatures } from "../lib/product-features";
+import "@fontsource-variable/inter";
+import "@navox/ui/tokens.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

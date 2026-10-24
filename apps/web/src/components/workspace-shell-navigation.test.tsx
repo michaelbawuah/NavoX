@@ -200,7 +200,9 @@ describe("fallback logout revocation", () => {
     signOut();
     expect(order).toContain("revoked");
     await act(async () => timeout.abort());
-    expect(host.textContent).toContain("Logout timed out.");
+    expect(host.textContent).toContain(
+      "We couldn’t sign you out. Please try again.",
+    );
     expect(restoreAccess).toHaveBeenCalledTimes(2);
     expect(router.replace).not.toHaveBeenCalled();
   });

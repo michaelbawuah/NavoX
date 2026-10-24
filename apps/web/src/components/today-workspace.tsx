@@ -18,9 +18,7 @@ import { AISettings } from "./ai-settings";
 import { ApprovalPanel } from "./approval-panel";
 import { CommunicationDrafts } from "./communication-drafts";
 import { ConnectionsPanel } from "./connections-panel";
-import { DailyFocus } from "./daily-focus";
 import { DismissCommitment } from "./dismiss-commitment";
-import { GuidedSetup } from "./guided-setup";
 import {
   IntelligenceControls,
   IntelligenceFeedback,
@@ -33,17 +31,14 @@ import { PersonalRoutines } from "./personal-routines";
 import { ProactivePanel } from "./proactive-panel";
 import { SourceReferences } from "./source-references";
 import { StudentCalendarConnections } from "./student-calendar-connections";
-import { StudentDayPanel } from "./student-day-panel";
-import { StudentDayReviewEntry } from "./student-day-review-entry";
 import { StudentEmailCard } from "./student-email-actions";
 import { StudentGoalsCard } from "./student-goals";
 import { StudentLmsFeeds } from "./student-lms-feeds";
 import { StudentNotifications } from "./student-notifications";
-import { StudentPlanToday } from "./student-plan-today";
 import { StudentRecoveryCard } from "./student-recovery";
 import { ThreadWatchPanel } from "./thread-watch-panel";
+import { TodayHome } from "./today-home";
 import styles from "./today-workspace.module.css";
-import { VoxHomeLauncher } from "./vox-call-controls";
 import { VoxUsageReport } from "./vox-usage-report";
 import { WorkspaceShell } from "./workspace-shell";
 
@@ -202,7 +197,7 @@ export type TodayWorkspaceView =
   | "connections"
   | "settings";
 
-interface TodayWorkspaceProps {
+export interface TodayWorkspaceProps {
   view?: TodayWorkspaceView;
   account: Account;
   connections: GoogleConnection[];
@@ -269,7 +264,12 @@ function greeting(timezone: string): string {
   return "Good evening";
 }
 
-export function TodayWorkspace({
+export function TodayWorkspace(props: TodayWorkspaceProps) {
+  if (!props.view || props.view === "today") return <TodayHome {...props} />;
+  return <LegacyTodayWorkspace {...props} />;
+}
+
+function LegacyTodayWorkspace({
   view = "today",
   account,
   connections,
@@ -282,7 +282,7 @@ export function TodayWorkspace({
   const needsConnectionSetup =
     !connectionsUnavailable &&
     !connections.some((connection) => connection.status === "active");
-  const needsReadSetup = !connections.some(
+  const _needsReadSetup = !connections.some(
     (connection) =>
       connection.status === "active" && hasGoogleReadAccess(connection),
   );
@@ -293,7 +293,7 @@ export function TodayWorkspace({
   const [todayError, setTodayError] = useState("");
   const [selectedReplyId, setSelectedReplyId] = useState<string | null>(null);
   const [replySelectionKey, setReplySelectionKey] = useState(0);
-  const [reviewId, setReviewId] = useState<string | null>(null);
+  const [reviewId, _setReviewId] = useState<string | null>(null);
   const handledRouteSelection = useRef(false);
   const [workspaceMessage, setWorkspaceMessage] = useState("");
   const [loadingToday, setLoadingToday] = useState(true);
@@ -731,7 +731,7 @@ export function TodayWorkspace({
         !["completed", "cancelled", "dismissed"].includes(item.status),
     )
     .sort((a, b) => Date.parse(a.due_at ?? "") - Date.parse(b.due_at ?? ""));
-  const renewals = allItems.filter(
+  const _renewals = allItems.filter(
     (item) =>
       item.type === "renewal" &&
       !["completed", "cancelled", "dismissed"].includes(item.status),
@@ -1169,184 +1169,6 @@ export function TodayWorkspace({
               (view !== "today" && todayError) ||
               workspaceMessage ||
               message}
-          </div>
-        )}
-
-        {view === "today" && (
-          <div className={styles.focusLayout}>
-            <div className={styles.focusColumn}>
-              {productFeatures.studentVox && <VoxHomeLauncher />}
-              {productFeatures.studentPlanning && (
-                <StudentPlanToday
-                  accountId={`${account.workspace.id}:${account.id}`}
-                />
-              )}
-              <StudentDayPanel
-                accountId={`${account.workspace.id}:${account.id}`}
-              />
-              {!connectionsUnavailable &&
-                (needsReadSetup || today?.total === 0) && (
-                  <details className={styles.toolDisclosure}>
-                    <summary>Connect email or Calendar (optional)</summary>
-                    <GuidedSetup
-                      key={`${account.id}:${account.workspace.id}`}
-                      connections={connections}
-                      paused={agentPaused}
-                      itemCount={today?.total ?? 0}
-                      loading={loadingToday || !!todayError}
-                      onConnectionsChanged={onConnectionsChanged}
-                      onRefresh={refreshToday}
-                    />
-                  </details>
-                )}
-              <div id="daily-briefing">
-                <DailyFocus
-                  payload={today}
-                  loading={loadingToday}
-                  error={todayError}
-                  now={Date.now()}
-                  paused={agentPaused}
-                  busyItemId={handlingId ?? mutatingId}
-                  canDraftReply={canDraftReply}
-                  onPrepare={handleCommitment}
-                  onReview={(item) => setReviewId(item.id)}
-                  onRefresh={refreshToday}
-                />
-              </div>
-              {reviewItem && (
-                <div id="review-suggestion">
-                  {renderSection("Review suggestion", [reviewItem], "")}
-                </div>
-              )}
-              {sections["Needs your attention"].length > 0 && (
-                <details className={styles.toolDisclosure}>
-                  <summary>
-                    All priorities{" "}
-                    <span>{sections["Needs your attention"].length}</span>
-                  </summary>
-                  {renderSection(
-                    "Needs your attention",
-                    sections["Needs your attention"],
-                    "No active priorities in your saved items.",
-                  )}
-                </details>
-              )}
-              <ThreadWatchPanel
-                key={`${account.id}:${account.workspace.id}`}
-                compact
-                paused={agentPaused}
-                eligibleCommitmentIds={allItems
-                  .filter(canDraftReply)
-                  .map((item) => item.id)}
-                onDraftReply={(id) => {
-                  const item = allItems.find((row) => row.id === id);
-                  if (item && canDraftReply(item)) openReply(item);
-                }}
-              />
-              <section
-                className={styles.quickLinks}
-                aria-label="Continue your day"
-              >
-                <Link href="/inbox">
-                  <strong>Review email</strong>
-                  <span>
-                    Drafts, replies, and approvals{" "}
-                    <span aria-hidden="true">→</span>
-                  </span>
-                </Link>
-                <Link href="/navox">
-                  <strong>Ask NavoX</strong>
-                  <span>
-                    Talk through your next step{" "}
-                    <span aria-hidden="true">→</span>
-                  </span>
-                </Link>
-                <StudentDayReviewEntry enabled={productFeatures.studentCoach} />
-                {productFeatures.studentGoals && (
-                  <Link href="/goals">
-                    <strong>Your goals, at your pace</strong>
-                    <span>
-                      Review your own check-ins{" "}
-                      <span aria-hidden="true">→</span>
-                    </span>
-                  </Link>
-                )}
-                {productFeatures.studentEmail && (
-                  <Link href="/email-actions">
-                    <strong>One email, one next step</strong>
-                    <span>
-                      Review an email action <span aria-hidden="true">→</span>
-                    </span>
-                  </Link>
-                )}
-                {productFeatures.studentRecovery && (
-                  <Link href="/recovery">
-                    <strong>Catch up at your pace</strong>
-                    <span>
-                      Review a proposal from your saved work{" "}
-                      <span aria-hidden="true">→</span>
-                    </span>
-                  </Link>
-                )}
-              </section>
-              {sections.Updates.length > 0 && (
-                <details className={styles.toolDisclosure}>
-                  <summary>
-                    Recent updates <span>{sections.Updates.length}</span>
-                  </summary>
-                  {renderSection(
-                    "Updates",
-                    sections.Updates,
-                    "No recent updates.",
-                  )}
-                </details>
-              )}
-              <details
-                className={styles.toolDisclosure}
-                open={activePlan !== null}
-              >
-                <summary>Activity</summary>
-                {renderActivity()}
-              </details>
-            </div>
-            <aside
-              className={styles.toolsColumn}
-              aria-label="Your day at a glance"
-            >
-              <WorkspaceContext
-                timezone={timezone}
-                onTimezoneChange={setTimezone}
-              />
-              {renderAgenda()}
-              <section
-                className={styles.sectionCard}
-                aria-labelledby="renewals-heading"
-                aria-busy={loadingToday}
-              >
-                <div className={styles.sectionHeading}>
-                  <h2 id="renewals-heading">Upcoming renewals</h2>
-                  <Link href="/subscriptions">View all</Link>
-                </div>
-                {renewals.length > 0 ? (
-                  <ul className={styles.renewalList}>
-                    {renewals.slice(0, 3).map((item) => (
-                      <li key={item.id}>
-                        <strong>{item.title}</strong>
-                        <span>{dueLabel(item.due_at, timezone)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className={styles.emptyState}>
-                    {loadingToday
-                      ? "Loading renewals…"
-                      : todayError
-                        ? "Renewals could not be refreshed."
-                        : "No upcoming renewals in your saved items."}
-                  </p>
-                )}
-              </section>
-            </aside>
           </div>
         )}
 

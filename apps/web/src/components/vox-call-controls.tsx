@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   type KeyboardEvent,
   type ReactNode,
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -222,10 +223,23 @@ function CallDialog({
       active.hasAttribute("data-vox-launcher")
     )
       returnTarget.current = active;
-    if (typeof element.showModal === "function") element.showModal();
-    else element.setAttribute("open", "");
+    const viewport =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia("(max-width: 767px)")
+        : null;
+    const present = () => {
+      if (element.open && typeof element.close === "function") element.close();
+      const phone = viewport?.matches ?? true;
+      element.setAttribute("aria-modal", String(phone));
+      if (phone && typeof element.showModal === "function") element.showModal();
+      else if (typeof element.show === "function") element.show();
+      else element.setAttribute("open", "");
+    };
+    present();
+    viewport?.addEventListener("change", present);
     element.querySelector<HTMLButtonElement>("button")?.focus();
     return () => {
+      viewport?.removeEventListener("change", present);
       if (typeof element.close === "function" && element.open) element.close();
       else element.removeAttribute("open");
     };
@@ -235,7 +249,10 @@ function CallDialog({
     if (event.key === "Escape") {
       event.preventDefault();
       dismiss();
-    } else if (event.key === "Tab") {
+    } else if (
+      event.key === "Tab" &&
+      dialog.current?.getAttribute("aria-modal") === "true"
+    ) {
       const focusable = [
         ...(dialog.current?.querySelectorAll<HTMLElement>(
           "button:not([disabled]),a[href]",
@@ -568,6 +585,47 @@ export function VoxCallControls({
   const launcher = useRef<HTMLButtonElement>(null);
   const [dismissedCallId, setDismissedCallId] = useState<string | null>(null);
   const [startError, setStartError] = useState(false);
+  const [showTip, setShowTip] = useState(false);
+  const tipKey = call?.state.owner
+    ? `navox:vox-tip:${call.state.owner.workspaceId}:${call.state.owner.userId}`
+    : "";
+  useEffect(() => {
+    if (!tipKey) return;
+    try {
+      setShowTip(localStorage.getItem(tipKey) !== "seen");
+    } catch {
+      setShowTip(false);
+    }
+  }, [tipKey]);
+  function dismissTip() {
+    setShowTip(false);
+    try {
+      if (tipKey) localStorage.setItem(tipKey, "seen");
+    } catch {
+      /* Optional hint only. */
+    }
+  }
+  useEffect(() => {
+    const open = (event: globalThis.KeyboardEvent) => {
+      if (
+        !(event.metaKey || event.ctrlKey) ||
+        event.key.toLowerCase() !== "j" ||
+        !call?.state.ownerVerified ||
+        !call.available
+      )
+        return;
+      event.preventDefault();
+      if (
+        ["connecting", "active", "reconnecting", "standby"].includes(
+          call.state.phase,
+        )
+      )
+        call.controller.setMinimized(false);
+      else void call.controller.start().catch(() => setStartError(true));
+    };
+    document.addEventListener("keydown", open);
+    return () => document.removeEventListener("keydown", open);
+  }, [call]);
   const className = `${styles.widget} ${variant === "floating" ? styles.floating : styles.home}`;
   const verified = call?.state.ownerVerified === true;
   const cleanupIncomplete = call?.state.endReason === "cleanup-incomplete";
@@ -640,6 +698,7 @@ export function VoxCallControls({
         aria-expanded={cleanupIncomplete ? undefined : open}
         disabled={!available && !cleanupIncomplete}
         onClick={() => {
+          dismissTip();
           if (cleanupIncomplete) window.location.reload();
           else if (ongoing) controller.setMinimized(false);
           else void start();
@@ -673,7 +732,18 @@ export function VoxCallControls({
           <Link href={chatHref}>Use typed chat</Link>
         </p>
       ) : !ongoing && !open ? (
-        <p className={styles.hint}>A conversation, at your pace.</p>
+        showTip ? (
+          <div className={styles.firstTip}>
+            <span>Talk to NavoX. Ask anything.</span>
+            <button
+              type="button"
+              aria-label="Dismiss Vox tip"
+              onClick={dismissTip}
+            >
+              ×
+            </button>
+          </div>
+        ) : null
       ) : null}
       {startError && !cleanupIncomplete && (
         <p role="alert" className={styles.hint}>

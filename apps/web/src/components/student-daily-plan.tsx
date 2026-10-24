@@ -1256,6 +1256,42 @@ function StudentDailyPlanAccount() {
       setPreferences(nextPreferences);
       setPlan(nextPlan);
       setTimetable(nextTimetable);
+      // A Today link opens a review form, never a write from a URL.
+      const intent = new URLSearchParams(window.location.hash.slice(1));
+      const block = nextPlan.blocks.find(
+        (item) => item.id === intent.get("block") && item.status === "planned",
+      );
+      const kind = intent.get("outcome");
+      if (
+        !reset &&
+        block &&
+        !nextPlan.needs_review &&
+        (kind === "done" || kind === "took_longer")
+      ) {
+        setTab("plan");
+        setOutcome({ block, kind });
+        window.history.replaceState(
+          window.history.state,
+          "",
+          window.location.pathname + window.location.search,
+        );
+      } else if (!reset && block && kind === "skipped") {
+        setTab("plan");
+        setNotice(`Review ${block.title} below, then choose Skip to confirm.`);
+        window.history.replaceState(
+          window.history.state,
+          "",
+          window.location.pathname + window.location.search,
+        );
+      } else if (!reset && window.location.hash === "#add-task") {
+        setTab("tasks");
+        setTaskEditor("new");
+        window.history.replaceState(
+          window.history.state,
+          "",
+          window.location.pathname + window.location.search,
+        );
+      }
       setError("");
       setUndo((current) =>
         !nextPlan.needs_review && current?.revision === nextPlan.revision

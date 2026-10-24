@@ -1,11 +1,11 @@
 # Milestone 2: app shell and Today
 
-Status: source review and implementation preparation; no M2 acceptance claimed.
+Status: first implementation slice; browser verification and remaining panel work pending.
+No full M2 acceptance claimed.
 Source of truth: Michael's `NavoX-UI-Redesign-Brief.pdf`, dated October 22, 2026,
 14 pages (Library file `libfile_6ad06fb9f7e48191adef16516adf16a5`). Full extracted
-text reviewed on October 24 UTC. Visually inspect the page-7 wireframe and the
-supplied prototype/screenshots before implementing and comparing the interface;
-text extraction alone does not establish a visual match. Michael's later explicit
+text and rendered page-7 Today wireframe reviewed on October 24 UTC. Noa artwork
+acceptance remains separate; text extraction alone does not establish a visual match. Michael's later explicit
 decisions override the brief (including prototype styling inside Vox, Apple/iCloud
 in Connections, and phone tests supplied by Michael).
 
@@ -91,10 +91,36 @@ shell migration.
 
 Existing integration points: `workspace-shell.tsx`, `today-workspace.tsx`,
 `student-plan-today.tsx`, `vox-call-provider.tsx`, `vox-call-controls.tsx`.
-`packages/ui/src/index.ts` is currently a placeholder. Inspect the existing Today
-API and action contracts before restructuring; reuse verified data and approvals.
+The shared `packages/ui` now provides tokens and basic components. Today reuses
+existing schedule, planning, goals, saved Board and Today APIs.
 
 Deliver a test link, desktop and mobile-emulation screenshots, acceptance checklist,
 and deviations/spacing changes. Physical-phone testing and recording remain
 waiting on Michael; student targets remain waiting on real usage. No merging on
 a visual approximation or a test-only data fixture.
+
+## First slice evidence and remaining work
+
+Implemented for the next preview: shared dark/light tokens and bundled Inter;
+desktop sidebar/header and mobile tabs/profile/Inbox placement; account-scoped
+first-visit Vox tip and keyboard shortcut; responsive persistent call panel;
+Today greeting, next event, chronological plan, due items, connected Gmail reply
+items, goals, saved lesson continuation and real-state onboarding.
+
+Local verification: 2,498 web tests pass; web/UI TypeScript checks pass; web lint
+passes. Tests include failed-load handling, account-response isolation, local day
+and DST projections, plus the existing voice lifecycle and cleanup suite.
+Browser screenshots and live navigation/call checks are still pending.
+
+Remaining before M2 acceptance: combined typed/transcript Vox conversation,
+empty-state suggestions/settings, 8,000-character typed-message contract audit,
+all-screen reply badge, appearance control and full contrast/visual review.
+Physical phone checks and recordings are waiting on Michael. No real usage
+acceptance is claimed.
+
+Explicit interim differences: Today study outcome links open the existing Planner
+review form; Skip requires confirmation there. This preserves existing validation
+and approval behavior while inline Today actions remain unfinished. The profile
+uses initials until a real photo is available. Board respects the existing release
+flag and is disabled where that feature is unavailable. Noa's current call artwork
+is preserved; this slice does not implement or accept Part 2.

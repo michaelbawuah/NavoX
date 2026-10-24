@@ -40,45 +40,22 @@ function renderView(view: TodayWorkspaceView = "today") {
 
 describe("Home Vox feature entry", () => {
   const originalVox = productFeatures.studentVox;
-  const originalPlanning = productFeatures.studentPlanning;
   afterEach(() => {
     productFeatures.studentVox = originalVox;
-    productFeatures.studentPlanning = originalPlanning;
   });
-
-  it("keeps the study plan when the independent Vox flag is off", () => {
-    productFeatures.studentVox = false;
-    productFeatures.studentPlanning = true;
-    const markup = renderView();
-    expect(markup).not.toContain('data-vox-launcher="home"');
-    expect(markup).toContain("Your work, with time to do it.");
-  });
-
-  it("places the opted-in Home entry above the study plan without opening another owner or dialog", () => {
-    productFeatures.studentVox = true;
-    productFeatures.studentPlanning = true;
-    const fetch = vi.spyOn(globalThis, "fetch");
-    try {
+  it.each([false, true])(
+    "leaves Vox ownership at the root; enabled=%s",
+    (enabled) => {
+      productFeatures.studentVox = enabled;
+      const fetch = vi.spyOn(globalThis, "fetch");
       const markup = renderView();
-      const vox = markup.indexOf('data-vox-launcher="home"');
-      expect(vox).toBeGreaterThan(-1);
-      expect(vox).toBeLessThan(
-        markup.indexOf("Your work, with time to do it."),
-      );
-      expect(markup.match(/data-vox-launcher="home"/g)).toHaveLength(1);
-      expect(markup).toContain("Checking your sign-in");
+      expect(markup).not.toContain('data-vox-launcher="home"');
       expect(markup).not.toContain("<dialog");
+      expect(markup).toContain("Loading your day");
       expect(fetch).not.toHaveBeenCalled();
-    } finally {
       fetch.mockRestore();
-    }
-  });
-
-  it("keeps the large entry on Today while other destinations retain only root controls", () => {
-    productFeatures.studentVox = true;
-    for (const view of ["inbox", "planner", "connections", "settings"] as const)
-      expect(renderView(view)).not.toContain('data-vox-launcher="home"');
-  });
+    },
+  );
 });
 
 describe("workspace destinations", () => {
@@ -93,28 +70,27 @@ describe("workspace destinations", () => {
         onSignOut: vi.fn(async () => {}),
       }),
     );
-    expect(markup).toContain("Connected apps could not be loaded");
-    expect(markup).toContain("Retry connections");
+    expect(markup).toContain("Some of your day couldn’t load.");
+    expect(markup).toContain("Try again");
     expect(markup).toContain('role="alert"');
     expect(markup).not.toContain("Connect your apps");
-    expect(markup).toContain("Upcoming agenda");
+    expect(markup).not.toContain("Upcoming agenda");
   });
-  it("keeps the daily agenda visible and treats loading as unconfirmed data", () => {
+  it("does not fabricate empty sections or completion while Today is loading", () => {
     const markup = renderView();
-    expect(markup).toContain("Upcoming agenda");
-    expect(markup).toContain('id="daily-briefing"');
-    expect(markup).toContain("Your daily focus");
-    expect(markup).toContain("Connect an account");
-    expect(markup).toContain("Review your day");
-    expect(markup).not.toContain("Handle this");
-    expect(markup).toContain("Loading your agenda");
-    expect(markup).toContain('aria-busy="true"');
-    expect(markup).not.toContain("You’re caught up");
+    expect(markup).toContain("Loading your day");
+    expect(markup).toContain('role="status"');
+    for (const removed of [
+      "Upcoming renewals",
+      "Your daily focus",
+      "Refresh",
+      "Done for today",
+      "Let’s set up NavoX",
+    ])
+      expect(markup).not.toContain(removed);
     expect(markup).toContain('href="/connections"');
     expect(markup).toContain('href="/planner"');
     expect(markup.match(/<main\b/g)).toHaveLength(1);
-    expect(markup).not.toContain("Generate draft");
-    expect(markup).not.toContain("Send with Gmail");
   });
 
   it("puts draft and approval controls in the Inbox without a hidden email-actions accordion", () => {
