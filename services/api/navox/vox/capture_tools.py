@@ -286,10 +286,9 @@ class CaptureTools:
                 "estimated_minutes": payload.estimated_minutes,
                 "remaining_minutes": payload.remaining_minutes,
                 "replaced_count": len(proposal["replaced_blocks"]),
-                "replaced_blocks": proposal["replaced_blocks"]
-                if len(proposal["replaced_blocks"]) <= 12
-                else [],
-                "full_readback_on_screen": len(proposal["replaced_blocks"]) > 12,
+                # The UI fetches every affected block using the published hash.
+                # Keep spoken handoffs short even for a small existing plan.
+                "full_readback_on_screen": bool(proposal["replaced_blocks"]),
                 "message": (
                     "The exact task and affected blocks are on screen. Review and approve "
                     "there, then request a new study plan. No focus time is credited."
