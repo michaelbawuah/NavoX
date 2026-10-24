@@ -1,3 +1,4 @@
+import { VoxReservationError } from "./vox-reservations";
 import type { VoxWebLookup } from "./vox-web-results";
 
 /**
@@ -25,6 +26,7 @@ export type VoxEndReason =
   | "disposed"
   | "transport-ended"
   | "connection-failed"
+  | "allowance-reached"
   | "cleanup-incomplete"
   | "transport-unavailable";
 
@@ -545,8 +547,14 @@ export class VoxCallController {
       this.lastActivityAt = now;
       this.state.phase = this.resumeStandby ? "standby" : "active";
       if (this.syncControls()) this.publish();
-    } catch {
-      if (this.live(epoch)) void this.hangUp("connection-failed");
+    } catch (error) {
+      if (this.live(epoch))
+        void this.hangUp(
+          error instanceof VoxReservationError &&
+            error.code === "allowance-exhausted"
+            ? "allowance-reached"
+            : "connection-failed",
+        );
     } finally {
       completeJoin(safelyReleased);
     }
@@ -776,12 +784,13 @@ export class VoxCallController {
       }
     }
     this.publish();
-    if (!(await this.cleanup)) {
-      this.cleanupIncomplete = true;
-      if (terminalEpoch === this.epoch && this.state.phase === "ended") {
-        this.state.endReason = "cleanup-incomplete";
-        this.publish();
-      }
+    const safe = await this.cleanup;
+    if (!safe) this.cleanupIncomplete = true;
+    if (terminalEpoch === this.epoch && this.state.phase === "ended") {
+      if (!safe) this.state.endReason = "cleanup-incomplete";
+      // Transport availability can change when asynchronous retirement finishes.
+      // Refresh the UI after success too, so the next call does not require reload.
+      this.publish();
     }
   }
 

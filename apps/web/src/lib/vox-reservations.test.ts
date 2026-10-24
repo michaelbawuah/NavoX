@@ -535,3 +535,48 @@ describe("reservation wrapper with the actual Vox controller", () => {
     expect(current.inner.connect).not.toHaveBeenCalled();
   });
 });
+
+it.each([true, false])(
+  "recognizes only an explicit pre-allocation allowance denial: %s",
+  async (explicit) => {
+    const test = http();
+    const abort = new AbortController();
+    await test.client.reserve(owner, callId, abort.signal);
+    test.fetcher.mockResolvedValueOnce(
+      json(
+        {
+          detail: {
+            code: explicit
+              ? "vox_allowance_exhausted_before_media"
+              : "another_limit",
+          },
+        },
+        429,
+      ),
+    );
+    await expect(
+      test.client.mediaRequest(
+        owner,
+        callId,
+        7,
+        { action: "join", requestId: anotherCall },
+        abort.signal,
+      ),
+    ).rejects.toMatchObject({
+      code: explicit ? "allowance-exhausted" : "temporary",
+    });
+  },
+);
+
+it("does not interpret a renewal denial as proof that no media was allocated", async () => {
+  const test = http();
+  test.fetcher.mockResolvedValueOnce(
+    json({ detail: { code: "vox_allowance_exhausted_before_media" } }, 429),
+  );
+  await expect(
+    test.client.mediaRequest(owner, callId, 7, {
+      action: "renew",
+      connectionId: anotherCall,
+    }),
+  ).rejects.toMatchObject({ code: "temporary" });
+});

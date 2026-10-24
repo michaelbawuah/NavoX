@@ -1048,10 +1048,16 @@ export function createLiveKitVoxTransport(options: {
           stopPlayback,
           close,
         };
-      } catch {
+      } catch (error) {
+        const unallocatedAllowanceDenial =
+          !lease &&
+          error instanceof VoxReservationError &&
+          error.code === "allowance-exhausted";
+        // Only the server's explicit pre-allocation budget denial proves no room exists.
         // A rejected admission cannot prove that its external side effect was
         // absent. Quarantine this adapter if it never returned a cleanup handle.
-        if (admissionStarted && !lease) cleanupBlocked = true;
+        if (admissionStarted && !lease && !unallocatedAllowanceDenial)
+          cleanupBlocked = true;
         // Admission or SDK join may settle after an abort's first close already
         // finished. Retire a late lease and disconnect a late room independently.
         const results = await Promise.allSettled([
@@ -1061,6 +1067,7 @@ export function createLiveKitVoxTransport(options: {
         ]);
         if (results.some((result) => result.status === "rejected"))
           cleanupBlocked = true;
+        if (unallocatedAllowanceDenial && !cleanupBlocked) throw error;
         throw unavailable();
       } finally {
         // An abort's first close can finish before admission or SDK join does.

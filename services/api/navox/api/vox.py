@@ -133,6 +133,12 @@ async def bounded_json[T: BaseModel](
 async def result[T](operation: Awaitable[T]) -> T:
     try:
         return await operation
+    except readiness.VoxAllowanceExceeded as error:
+        raise HTTPException(
+            429,
+            {"code": "vox_allowance_exhausted_before_media", "message": str(error)},
+            headers=PRIVATE,
+        ) from None
     except service.VoxError as error:
         raise HTTPException(error.status_code, str(error), headers=PRIVATE) from None
     except (ValueError, ValidationError):

@@ -1467,3 +1467,19 @@ it("accepts web results only from the admitted agent and current owned lease", a
   receive(data, agent, "navox.vox.web.v1");
   expect(env.request.onEvent).not.toHaveBeenCalled();
 });
+
+it("keeps admission usable after explicit budget denial without claiming cleanup for unknown errors", async () => {
+  const env = environment();
+  env.admission.join.mockRejectedValueOnce(
+    new VoxReservationError("allowance-exhausted"),
+  );
+  await expect(env.transport.connect(env.request)).rejects.toMatchObject({
+    code: "allowance-exhausted",
+  });
+  expect(env.loadSdk).not.toHaveBeenCalled();
+  expect(env.factory.create).not.toHaveBeenCalled();
+  expect(env.transport.available).toBe(true);
+  const connection = await env.transport.connect(env.request);
+  expect(env.admission.join).toHaveBeenCalledTimes(2);
+  await connection.close();
+});

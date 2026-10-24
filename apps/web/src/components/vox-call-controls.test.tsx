@@ -9,6 +9,7 @@ import {
   type VoxConnection,
   type VoxTransportRequest,
 } from "../lib/vox-call";
+import { VoxReservationError } from "../lib/vox-reservations";
 import { VoxCallControls, VoxHomeLauncher } from "./vox-call-controls";
 import {
   useVoxCall,
@@ -170,6 +171,46 @@ async function clickHome() {
 }
 
 describe("Home entry shares the app-scoped Vox call", () => {
+  it("explains a budget denial once and permits a later manual attempt without reload", async () => {
+    const test = rig();
+    test.transport.connect.mockRejectedValueOnce(
+      new VoxReservationError("allowance-exhausted"),
+    );
+    await test.mount();
+    await click("Talk with NavoX");
+    expect(latest?.state.endReason).toBe("allowance-reached");
+    expect(dialog().textContent).toContain(
+      "Your Vox allowance has been reached",
+    );
+    expect(dialog().textContent).not.toContain(
+      "The connection could not be completed",
+    );
+    await click("Start another call");
+    expect(latest?.state.phase).toBe("active");
+  });
+
+  it("enables another call only after asynchronous transport cleanup completes", async () => {
+    const test = rig();
+    await test.mount();
+    await click("Talk with NavoX");
+    const release = deferred<void>();
+    test.connections[0].close.mockImplementationOnce(async () => {
+      test.transport.available = false;
+      await release.promise;
+      test.transport.available = true;
+    });
+    await click("Hang up");
+    expect(latest?.available).toBe(false);
+    await click("Start another call");
+    expect(test.requests).toHaveLength(1);
+    await act(async () => release.resolve());
+    expect(latest?.available).toBe(true);
+    await click("Start another call");
+    expect(test.requests).toHaveLength(2);
+    expect(test.requests[1].callId).not.toBe(test.requests[0].callId);
+    expect(latest?.state.phase).toBe("active");
+  });
+
   it("never creates a call or another dialog on mount and waits for verified sign-in", async () => {
     const test = rig();
     const check = deferred<AccountAccess>();

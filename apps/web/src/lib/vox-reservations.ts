@@ -44,6 +44,7 @@ export class VoxReservationError extends Error {
       | "unavailable"
       | "temporary"
       | "cleanup-pending"
+      | "allowance-exhausted"
       | "scope-changed"
       | "invalid-response"
       | "cancelled",
@@ -406,9 +407,14 @@ export class VoxReservationClient {
         throw new VoxReservationError("cleanup-pending");
       if (response.status === 401 || response.status === 409)
         throw new VoxReservationError("scope-changed");
-      if (response.status === 429 || response.status >= 500)
+      const admissionDenial =
+        response.status === 429 && method === "POST" && path.endsWith("/media");
+      if (
+        (response.status === 429 && !admissionDenial) ||
+        response.status >= 500
+      )
         throw new VoxReservationError("temporary");
-      if (response.status !== expectedStatus)
+      if (response.status !== expectedStatus && !admissionDenial)
         throw new VoxReservationError("unavailable");
       if (expectedStatus === 204) return null;
       if (
@@ -443,9 +449,24 @@ export class VoxReservationClient {
         bytes.set(chunk, offset);
         offset += chunk.length;
       }
-      return JSON.parse(
+      const body: unknown = JSON.parse(
         new TextDecoder("utf-8", { fatal: true }).decode(bytes),
       );
+      if (admissionDenial) {
+        const detail =
+          body && typeof body === "object" && "detail" in body
+            ? body.detail
+            : null;
+        if (
+          detail &&
+          typeof detail === "object" &&
+          "code" in detail &&
+          detail.code === "vox_allowance_exhausted_before_media"
+        )
+          throw new VoxReservationError("allowance-exhausted");
+        throw new VoxReservationError("temporary");
+      }
+      return body;
     } catch (error) {
       if (reader) void reader.cancel().catch(() => {});
       else if (response) void response.body?.cancel().catch(() => {});

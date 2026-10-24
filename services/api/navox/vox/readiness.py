@@ -46,6 +46,13 @@ from navox.vox.usage import budget_status
 from navox.vox.worker import WorkerAccessLost
 
 
+class VoxAllowanceExceeded(VoxError):
+    """Preflight denial: no media intent, room, token or provider work was allocated."""
+
+    def __init__(self) -> None:
+        super().__init__(429, "Your Vox allowance has been reached")
+
+
 async def _stable_snapshot(
     factory: async_sessionmaker[AsyncSession], task: AITask, snapshot: RoutingSnapshot
 ) -> RoutingSnapshot:
@@ -115,7 +122,7 @@ async def require_voice_models(
             async with factory() as database:
                 status = await budget_status(database, user_id, workspace_id)
             if status.blocked:
-                raise VoxError(429, "Your voice allowance is used up for now")
+                raise VoxAllowanceExceeded()
             return
     except (InferenceConfigurationError, WorkerAccessLost):
         raise MediaUnavailable("Vox inference is not configured") from None

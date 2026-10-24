@@ -112,6 +112,8 @@ function phaseDetail(state: VoxCallState) {
         return "Preparing local wake listening. You can tap to continue.";
       return "Audio transmission is paused. Local wake is unavailable in this browser. Tap to continue.";
     case "ended":
+      if (state.endReason === "allowance-reached")
+        return "Your Vox allowance has been reached. You can continue in typed chat.";
       if (state.endReason === "cleanup-incomplete")
         return "The call ended, but cleanup could not be confirmed. Reload NavoX before starting another call.";
       return state.endReason === "connection-failed"
@@ -310,7 +312,7 @@ function CallDialog({
         </p>
       </div>
       <WebLookup state={state} />
-      {usageNotice && (
+      {usageNotice && state.endReason !== "allowance-reached" && (
         <p role="status" data-vox-usage="true" className={styles.hint}>
           {usageNotice}
         </p>
