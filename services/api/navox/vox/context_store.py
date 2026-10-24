@@ -57,7 +57,12 @@ def encode_checkpoint(
             "binding": _binding(key, session_id, snapshot.revision),
             "configuration_id": configuration_id,
             "turns": [
-                {"question": turn.question, "answer": turn.answer} for turn in snapshot.turns
+                {
+                    "question": turn.question,
+                    "answer": turn.answer,
+                    **({"kind": "summary"} if turn.kind == "summary" else {}),
+                }
+                for turn in snapshot.turns
             ],
         },
         ensure_ascii=False,
@@ -92,9 +97,12 @@ def decode_checkpoint(
             raise ValueError
         turns = []
         for turn in value["turns"]:
-            if not isinstance(turn, dict) or set(turn) != {"question", "answer"}:
+            if not isinstance(turn, dict) or set(turn) not in (
+                {"question", "answer"},
+                {"question", "answer", "kind"},
+            ):
                 raise ValueError
-            turns.append(MemoryTurn(turn["question"], turn["answer"]))
+            turns.append(MemoryTurn(turn["question"], turn["answer"], turn.get("kind", "dialogue")))
         return ContextSnapshot(revision, tuple(turns))
     except (InvalidToken, ValueError, TypeError, KeyError, UnicodeError):
         # Never expose the ciphertext, transcript, key or raw decoder exception.

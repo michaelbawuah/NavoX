@@ -33,6 +33,7 @@ from navox.vox.inference_http import (
     bounded_text,
     usage_counts,
 )
+from navox.vox.session_context import history_messages
 from navox.vox.worker import MemoryTurn
 
 MAX_EVENT_BYTES = 1_048_576
@@ -211,41 +212,46 @@ class OpenAIRealtimeAdapter:
                 else:
                     raise ProviderRejected("The realtime session was not acknowledged")
                 self._context_ceiling = len(INSTRUCTIONS.encode()) + 2048
-                for turn in history:
-                    for role, value in (("user", turn.question), ("assistant", turn.answer)):
-                        self._context_ceiling += len(value.encode()) + 64
-                        if self._context_ceiling > MAX_CONTEXT_TOKENS:
-                            raise ProviderRejected("The call context requires compaction")
-                        await self._send(
-                            {
-                                "type": "conversation.item.create",
-                                "item": {
-                                    "type": "message",
-                                    "role": role,
-                                    "content": [
-                                        {
-                                            "type": "input_text"
-                                            if role == "user"
-                                            else "output_text",
-                                            "text": value,
-                                        }
-                                    ],
-                                },
-                            }
-                        )
+                for message in history_messages(history):
+                    role, value = message["role"], message["content"]
+                    self._context_ceiling += len(value.encode()) + 64
+                    if self._context_ceiling > MAX_CONTEXT_TOKENS:
+                        raise ProviderRejected("The call context requires compaction")
+                    await self._send(
+                        {
+                            "type": "conversation.item.create",
+                            "item": {
+                                "type": "message",
+                                "role": role,
+                                "content": [
+                                    {
+                                        "type": "input_text" if role == "user" else "output_text",
+                                        "text": value,
+                                    }
+                                ],
+                            },
+                        }
+                    )
         except BaseException:
             await self.close()
             raise
 
-    async def rollover_if_quiet(self, history: tuple[MemoryTurn, ...]) -> None:
+    async def rollover_if_quiet(
+        self, history: tuple[MemoryTurn, ...], *, force: bool = False
+    ) -> bool:
         """Warm replacement independently; never block or discard a new speech onset."""
         if (
             self.socket is None
             or self._stream is not None
             or self._response_id is not None
-            or self.clock() - self.opened_at < self.config.rollover_seconds
+            or (
+                not force
+                and self.clock() - self.opened_at < self.config.rollover_seconds
+                and self._context_ceiling < self.config.realtime_context_refresh_tokens
+            )
         ):
-            return
+            return False
+        original = self.socket
         revision = self._heard_revision
         replacement = OpenAIRealtimeAdapter(
             self.config,
@@ -261,16 +267,19 @@ class OpenAIRealtimeAdapter:
             await replacement._connect(history)
             async with self._lock:
                 if (
-                    self._stream is not None
+                    self.socket is not original
+                    or self._stream is not None
                     or self._response_id is not None
                     or revision != self._heard_revision
                 ):
-                    return
+                    return False
                 await self.check()
                 old, self.socket = self.socket, replacement.socket
                 replacement.socket = None
                 self.opened_at = replacement.opened_at
                 self._context_ceiling = replacement._context_ceiling
+                logging.getLogger(__name__).info("Vox provider session renewed")
+                return True
         finally:
             await replacement.close()
             if old is not None:

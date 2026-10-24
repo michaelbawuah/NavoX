@@ -10,9 +10,14 @@ from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 from navox.vox.inference_config import VoxInferenceConfig
-from navox.vox.inference_http import OpenAICompatiblePipeline, ProviderUnavailable, UsageHooks
+from navox.vox.inference_http import (
+    OpenAICompatiblePipeline,
+    ProviderRejected,
+    ProviderUnavailable,
+    UsageHooks,
+)
 from navox.vox.inference_realtime import OpenAIRealtimeAdapter
-from navox.vox.session_context import VoxCallContext
+from navox.vox.session_context import VoxCallContext, compaction_prefix
 from navox.vox.worker import (
     MAX_TURN_BYTES,
     MIN_VOICE_SAMPLES,
@@ -63,6 +68,7 @@ class ConfiguredVoiceWorker:
         self._fallback_until = 0.0
         self._maintenance: asyncio.Task[None] | None = None
         self._maintenance_retry_at = 0.0
+        self._context_refresh_required = False
 
     async def _authority(self) -> None:
         current = await self.check()
@@ -94,21 +100,45 @@ class ConfiguredVoiceWorker:
         if self._maintenance and self._maintenance.done():
             try:
                 self._maintenance.result()
-            except ProviderUnavailable:
+            except (ProviderUnavailable, ProviderRejected, TimeoutError, ValueError):
+                logging.getLogger(__name__).info("Vox context maintenance deferred")
                 self._maintenance_retry_at = time.monotonic() + 30
             self._maintenance = None
         if (
             not self._closed
             and not self.failed
-            and self._primary()
             and self._task is None
             and not self._pcm
             and self._maintenance is None
             and time.monotonic() >= self._maintenance_retry_at
         ):
-            self._maintenance = asyncio.create_task(
-                self.realtime.rollover_if_quiet(self._history())
+            self._maintenance = asyncio.create_task(self._maintain_context())
+
+    async def _maintain_context(self) -> None:
+        await self._authority()
+        prefix = (
+            compaction_prefix(
+                self._history(),
+                threshold=self.config.context_compact_after_bytes,
+                keep_recent=self.config.context_keep_recent_turns,
             )
+            if self.config.context_compaction_enabled
+            else ()
+        )
+        if prefix:
+            async with asyncio.timeout(20):
+                summary = await self.pipeline.summarize(prefix)
+                await self._authority()
+                if await self.context.compact(self.assignment.connection_id, prefix, summary):
+                    self._context_refresh_required = True
+                    logging.getLogger(__name__).info("Vox call context compacted")
+        if self._primary():
+            renewed = await self.realtime.rollover_if_quiet(
+                self._history(),
+                force=self._context_refresh_required,
+            )
+            if renewed:
+                self._context_refresh_required = False
 
     async def receive(self, participant_identity: str, pcm: bytes) -> None:
         if self._closed or self.failed or participant_identity != self.assignment.client_identity:

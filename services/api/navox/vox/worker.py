@@ -329,6 +329,7 @@ class DatabaseAuthority:
 class MemoryTurn:
     question: str
     answer: str
+    kind: str = "dialogue"
 
 
 class TransientConversationContext:

@@ -42,5 +42,9 @@
   "end_of_turn_silence_ms": 1200,
   "llm_reasoning_effort": "none",
   "web_search": null,
-  "web_search_reasoning_effort": "low"
+  "web_search_reasoning_effort": "low",
+  "context_compaction_enabled": true,
+  "context_compact_after_bytes": 48000,
+  "context_keep_recent_turns": 6,
+  "realtime_context_refresh_tokens": 64000
 }

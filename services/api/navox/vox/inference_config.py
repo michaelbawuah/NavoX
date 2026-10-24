@@ -82,6 +82,10 @@ class VoxInferenceConfig(BaseModel):
     llm_reasoning_effort: (
         Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | None
     ) = "none"
+    context_compaction_enabled: bool = True
+    context_compact_after_bytes: int = Field(default=48_000, strict=True, ge=8000, le=64_000)
+    context_keep_recent_turns: int = Field(default=6, strict=True, ge=2, le=16)
+    realtime_context_refresh_tokens: int = Field(default=64_000, strict=True, ge=8000, le=96_000)
     web_search: ProviderRoute | None = None
     web_search_reasoning_effort: Literal["none", "low", "medium"] = "low"
     tts_stream_format: Literal["audio", "sse"] = "audio"

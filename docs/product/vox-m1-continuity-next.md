@@ -19,3 +19,34 @@ Implemented on the M1 draft branch on 2026-10-23. Real phone/network acceptance 
 - Dedicated worker/cleanup test deployment, live cost reconciliation, licensed wake assets and immediate post-keyword speech qualification.
 
 Migration 0056 adds checkpoint storage; its populated downgrade guard refuses silent data loss. See the acceptance checklist and verification record for measured gates. Do not claim forensic erasure from historical backups.
+
+
+## Long-call implementation update
+
+Picovoice approval remains external and does not block this work, per Michael.
+The configured worker now summarizes an older prefix in the background at an
+operator-configured UTF-8 context threshold (48,000 bytes by default), retaining
+recent full turns. The summary is a typed, explicitly lossy context note, not a
+fabricated user/assistant exchange or an approval. It uses the existing metered
+text route with no tools and no provider storage request. An incomplete/oversized
+result leaves the original context intact and defers retry.
+
+Compaction commits through the existing encrypted, owner/session/epoch-fenced
+checkpoint. Concurrently completed turns are preserved; stale results cannot
+overwrite a replaced prefix. Summaries share the active call's expiry and Forget/
+hang-up cleanup, and are not cross-call memory. Recent full turns take precedence.
+The persisted format reads existing dialogue-only checkpoints; old deployments
+cannot read a summary checkpoint. End active test calls before deployment/rollback.
+
+Provider replacement now also runs under context pressure (64,000 reported/
+conservatively estimated tokens by default), not only session age. A warmed
+replacement cannot displace newly started speech or reopen a closed connection.
+After compaction it switches to the compacted history at the next quiet boundary.
+No greeting or automatic response is requested during replacement.
+
+64 PostgreSQL-backed/context/inference tests passed, including encrypted summary
+restore and terminal purge. Nine focused compaction tests cover pending speech,
+stale results, preserved corrections, invalid summaries and close-during-warmup.
+Scoped lint and type checking passed. Live accelerated rollover/compaction and
+worker-crash checks are pending. True provider-cap and physical-phone acceptance
+remain open; this change does not promise verbatim recall indefinitely.

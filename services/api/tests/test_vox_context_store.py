@@ -535,3 +535,42 @@ async def test_owned_schedule_source_erasure_retires_context_but_rejected_erasur
             await store.load(key)
         async with env.factory() as observer:
             assert await observer.get(VoxCallCheckpoint, key.call_id) is None
+
+
+@pg
+@pytest.mark.asyncio
+async def test_compacted_checkpoint_survives_worker_replacement_then_is_purged(vox_env):
+    from navox.vox.session_context import SUMMARY_LABEL
+
+    env = vox_env
+    intent, base, settings, key = await setup(env)
+    original = tuple(
+        MemoryTurn(f"Synthetic question {i}", "Synthetic details " * 30) for i in range(8)
+    )
+    async with store_for(env, base, settings) as (store, _):
+        await store.load(key)
+        assert await store.compare_and_set(key, 0, original)
+        context = await VoxCallContext.load(key, store)
+        context.begin_epoch(intent.connection_id)
+        assert await context.compact(
+            intent.connection_id, original[:-2], "The room was corrected to 42."
+        )
+        context.close()
+    async with store_for(env, base, settings) as (successor, _):
+        snapshot = await successor.load(key)
+        assert snapshot.turns == (
+            MemoryTurn(SUMMARY_LABEL, "The room was corrected to 42.", "summary"),
+            *original[-2:],
+        )
+        async with env.factory() as db:
+            await service.end(
+                db,
+                env.user_id,
+                env.workspace_id,
+                env.token_hash,
+                intent.client_call_id,
+                VoxLease(generation=key.generation),
+            )
+            assert await db.get(VoxCallCheckpoint, key.call_id) is None
+        with pytest.raises(WorkerAccessLost):
+            await successor.load(key)
