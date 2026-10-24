@@ -13,10 +13,10 @@ Implemented on the M1 draft branch on 2026-10-23. Real phone/network acceptance 
 
 ## Remaining
 
-- Real LiveKit/OpenAI worker-process crash, terminal room replacement, network loss and device tests. The test suite proves database/browser transitions using synthetic providers, not physical audio continuity.
+- Physical-phone/network tests and true provider-cap duration. Live provider and emulated-browser evidence is recorded below; it does not qualify physical audio continuity.
 - A crash after playout but before commit may lose the last turn; server playout is not proof of physical hearing. A call whose renewable lease has expired must end.
-- Explicit long-context compaction remains unimplemented; the current hard ceiling fails safely. Provider rollover alone does not solve context capacity.
-- Dedicated worker/cleanup test deployment, live cost reconciliation, licensed wake assets and immediate post-keyword speech qualification.
+- Long-duration and larger-corpus qualification of the implemented lossy context compaction. Provider rollover does not promise verbatim recall indefinitely.
+- Live cost reconciliation, licensed wake assets and immediate post-keyword speech qualification. The dedicated worker/cleanup test deployment is running.
 
 Migration 0056 adds checkpoint storage; its populated downgrade guard refuses silent data loss. See the acceptance checklist and verification record for measured gates. Do not claim forensic erasure from historical backups.
 
@@ -47,6 +47,16 @@ No greeting or automatic response is requested during replacement.
 64 PostgreSQL-backed/context/inference tests passed, including encrypted summary
 restore and terminal purge. Nine focused compaction tests cover pending speech,
 stale results, preserved corrections, invalid summaries and close-during-warmup.
-Scoped lint and type checking passed. Live accelerated rollover/compaction and
-worker-crash checks are pending. True provider-cap and physical-phone acceptance
-remain open; this change does not promise verbatim recall indefinitely.
+Scoped lint and type checking passed. Live accelerated rollover, real-provider
+compaction and worker-crash checks passed as detailed below. True provider-cap
+and physical-phone acceptance remain open; this change does not promise
+verbatim recall indefinitely.
+
+See the [long-call verification record](vox-m1-verification.md) for measured live
+provider/browser results, the failed offline test and the remaining acceptance gates.
+
+Final live network verification retained one media admission across 20 seconds
+offline and answered an immediate contextual follow-up correctly. Mute/unmute also
+retained one admission and context. Both calls received audio and closed with 204;
+all final output segments had zero measured source gaps. See the verification
+record for numeric usage, earlier failed attempts and still-open device gates.

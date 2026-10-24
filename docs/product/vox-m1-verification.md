@@ -46,7 +46,7 @@ At commit `090578c`, static quality, dependency security, evaluation/hardening, 
 - A real LiveKit/OpenAI call, live fallback, naturalness or accurate billed usage.
 - Physical-phone wake, barge-in, no-upload silence, microphone release, echo/Bluetooth or mobile network recovery.
 - True provider-cap rollover with continuing audio and no repeated greeting.
-- Real provider/device qualification of the implemented terminal worker/room replacement path; outages past the live authority lease remain terminal. Long-context compaction remains unimplemented.
+- Real provider/device qualification of the implemented terminal worker/room replacement path; outages past the live authority lease remain terminal. Long-context compaction was pending at this earlier checkpoint; see the later implementation and live evidence below.
 - Frame-level accounting throughput/latency at realistic call load.
 - A deployed test URL or any student/cohort usage target. Student targets are **Waiting on real usage**.
 
@@ -266,3 +266,93 @@ with the affected UI tests rerun after formatting changes, plus scoped lint,
 type checking and successful deployment builds. Full GitHub CI is tracked in
 the draft PR and is not represented here as a completed pass. Production and
 main are unchanged; the test site is https://vox-test.66-175-235-169.nip.io/.
+
+
+### Long calls and crash recovery — 2026-10-24 UTC
+
+Implementation commits: `1b90e60` (bounded context compaction and quiet provider
+replacement), `c094b96` (deferred offline track removal), and `3656673` (owned
+microphone handoff). Test deployment only;
+main and production are unchanged. Picovoice approval is an external pending
+item and does not block these checks, as explicitly directed by Michael.
+
+- [x] 64 focused tests passed against isolated PostgreSQL, covering encrypted
+  summary checkpoint restore, stale revisions, worker ownership and terminal purge.
+- [x] Nine compaction tests cover concurrent new turns, retained corrections,
+  malformed/oversized summaries, late results after close and speech during warmup.
+- [x] Real-provider probe reduced 13,701 UTF-8 history bytes to 2,905, kept the
+  recent turns unchanged and retained the corrected synthetic room/project fact
+  after restoring a checkpoint and replacing the realtime socket. Provider audio
+  output was 103,200 bytes. Its synthetic metering hook counted 2,365 summary and
+  860 realtime tokens; this probe was not a student-ledger billing test.
+- [x] Live mobile-emulated call with an accelerated 60-second renewal retained the
+  earlier fact, produced a correct follow-up without a repeated greeting, stayed
+  on one media admission, received 70,019 audio bytes with nonzero energy and
+  returned HTTP 204 for cleanup. The normal 3,300-second setting was restored.
+- [x] Forced isolated worker SIGKILL/restart after a completed checkpoint recovered
+  through a second media admission in the same conversation. The follow-up used
+  the earlier fact without repeating it in the question, with no repeated
+  greeting. Audio energy was nonzero; cleanup returned 204 and no page errors.
+- [x] 246 focused frontend tests passed, plus TypeScript and scoped Biome checks.
+  Offline signalling is deferred while local capture stops synchronously. Full
+  room teardown can supersede deferred per-track removal only when SDK disconnect
+  and server lease cleanup succeed. Expiry/logout gates and uncertain-cleanup
+  quarantine remain in force.
+
+The accelerated renewal follow-up measured two source-buffer gaps totalling
+45 ms (124 output frames; max proof latency 229 ms). The crash-recovery segments
+measured zero gaps (129/111 frames). This does not close physical listening or
+long-call audio quality acceptance, nor establish the cause of the two gaps.
+The output/audio-buffer implementation was not changed in this work.
+
+A 20-second offline browser test initially failed. Browser-only diagnostics
+identified a LiveKit NegotiationError during microphone-track removal while
+signalling was disconnected. The fix stops raw/processed capture immediately,
+waits for browser connectivity plus the SDK's connected state before negotiating,
+and cancels that wait when whole-room cleanup takes ownership. No raw speech,
+account credentials, SDK error body or provider token was logged.
+
+Open: actual provider-cap duration, physical-phone recording/network changes,
+licensed wake/no-upload/onset checks, broader summary/correction corpus, last-turn
+crash-before-commit window, complete cost reconciliation and real student usage.
+Active-call summaries do not add cross-call memory; that remains milestone 4.
+No UI/spec design substitution was introduced.
+
+
+The first deferred-removal retest stayed alive but lost a prompt spoken during a
+brief ready/reconnect transition. A diagnostic retest with a ten-second pause
+recovered via a second admission and retained context, but that delay was not
+accepted as the fix. The worker was still treating a new microphone track as an
+unauthorized overlap after the old one had been unpublished. It now releases the
+exact retired publication on unsubscribe/unpublish, drops its queued input and
+accepts one fresh microphone from the same authenticated participant/epoch. Late
+old retirement events cannot clear the replacement; simultaneous tracks and
+foreign/changed ownership still fail. Muting the microphone does not cancel the
+assistant's output. Eight handoff regression cases plus existing input/output,
+compaction and inference checks passed (54 focused tests); lint/mypy also passed.
+
+
+Final runtime checks (API/worker `3656673`, web `c094b96`):
+
+- [x] Twenty seconds fully offline in Chromium mobile emulation, followed by an
+  immediate spoken question when the dialog reports ready. One media admission
+  throughout; two completed turns; earlier room/project facts retained; no repeated
+  greeting; 70,445 inbound audio bytes with nonzero energy. Both output segments
+  had zero source-buffer gaps (134/136 frames, max proof 77/87 ms).
+- [x] Microphone mute/unmute followed immediately by the same unrepeated question.
+  One media admission; correct retained facts; 61,909 inbound audio bytes with
+  nonzero energy. Zero source-buffer gaps (131/116 frames, max proof 66/75 ms).
+- [x] Both calls ended with HTTP 204 for call/media cleanup and no page errors.
+  Their usage records contained 1,935 / 1,944 tokens and 64,875 / 43,669 ms of
+  connected time respectively. Speaking plus idle exactly matched connected time;
+  each final call had zero reserved tokens, voice or uncertain voice credit.
+- [x] Final cleanup: zero active calls, checkpoints, unfinished media cleanup,
+  test Cloud rooms and participants. Realtime/search remain enabled, licensed
+  wake disabled, normal 3,300-second rollover restored.
+
+The daily QA total still conservatively retains 9,778 reserved tokens and 1,000 ms
+of uncertain voice credit from earlier interrupted/crashed checks. These were not
+reset or represented as settled. Complete dollar totals remain unknown because
+transport/search costs and invoice reconciliation are incomplete; configured
+known-component estimates are not actual billed amounts. Phone and long-duration
+acceptance remain open. Full GitHub CI runs separately from the focused checks.

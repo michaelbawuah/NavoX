@@ -85,7 +85,7 @@ The configured worker suppresses long silence locally and uses short preroll/han
 
 - Configured workers persist encrypted completed-turn checkpoints for the same active call. A replacement worker loads them only under its physical PostgreSQL worker lock and fresh joined authority, with User-serialized revision checks. The browser retires old audio/JWTs and obtains fresh admission; it waits up to 20 attempts for an explicit HTTP 425 pre-allocation cleanup response. Unknown join outcomes and authentication errors are not automatically retried. Missing, corrupted or expired context fails rather than pretending continuity. A configuration fingerprint also prevents a replacement from silently changing the active voice/model; drain active calls before changing the inference configuration. The legacy gateway has no durable checkpoint and cannot resume a replacement conversation. Real terminal-room/worker replacement remains unqualified on phones.
 - Checkpoint expiry follows the renewable reservation (at most 120 seconds without a fresh renewal). Hang-up, logout and reset purge it; source Forget clears the active call and retires its media, preventing stale provider RAM from continuing. The reconciler erases expired ciphertext independently. A crash between physical playout and checkpoint commit can lose the last turn. No raw audio or ordinary saved conversation-history API is added. Historical backups are outside the runtime deletion guarantee. Drain active calls before a rollback; migration 0056 refuses to drop nonempty checkpoint storage.
-- Automatic context compaction is not implemented. Context limits fail closed rather than promising indefinite multi-hour conversation. Quiet socket rollover has synthetic coverage; real long-duration and physical-network behavior remain unqualified.
+- Automatic context compaction summarizes an older prefix at 48,000 UTF-8 bytes by default, retaining up to six recent turns. Summary requests are metered and cannot call tools. Invalid/incomplete summaries leave the original intact. The encrypted checkpoint retains typed summary notes and is purged with the active call. Quiet socket renewal defaults to 3,300 seconds and can also follow compaction/context pressure (64,000 tokens by default). These values are operator configuration, not a promise of indefinite exact recall. Real-provider compaction, accelerated socket renewal and forced-worker recovery passed; true-cap duration and physical-network behavior remain unqualified. Old deployments cannot read summary checkpoints: drain active calls before rollback.
 - Heard-prefix tracking uses the local RTC playout estimate and provider truncation result, not physical proof of sound reaching the listener. Real microphone quality, VAD boundaries, naturalness, echo/barge-in, and phone latency require device tests.
 - Wake-command API/queue plumbing does not qualify the browser's local keyword assets/runtime, spoken-question capture, or user-visible completion/retry behavior. Verify those in the actual signed-in browser; do not claim a local wake test from a synthetic text enqueue.
 - Token/transport metering has synthetic server tests. Complete provider usage reconciliation, configured fallback pricing, actual provider failover, LiveKit cleanup/revocation, and cost accuracy still require live qualification. This document does not certify paid audio, locked-screen/native-phone operation, or end-to-end M1 completion.
@@ -270,3 +270,18 @@ label is suffixed `-web-search` so combined model and search-tool fees remain
 explicitly unknown rather than silently pricing only model tokens. Do not treat
 the current estimate as a complete search-inclusive bill. Pricing/reconciliation
 is still required before cost acceptance can pass.
+
+
+### Offline microphone handoff
+
+Local raw/processed capture stops synchronously on offline/privacy suspension.
+Track-removal negotiation waits for browser online and SDK Connected state; it
+must not fail an otherwise recoverable call merely because signalling is down.
+Whole-room teardown may supersede deferred removal only when SDK disconnect and
+server lease cleanup succeed. Unknown teardown still quarantines new admission.
+The worker releases only the exact unpublished/unsubscribed owned microphone;
+late old events cannot release its replacement, and simultaneous or foreign
+tracks are rejected. It does not cancel assistant playback merely on mic mute.
+A 20-second live browser outage and mute/unmute passed with one media admission
+and retained context; expired authority remains terminal. See verification for
+physical-phone and true-cap duration limitations.

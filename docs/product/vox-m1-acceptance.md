@@ -8,14 +8,14 @@ This branch is an implementation checkpoint, not a passed milestone. Production 
 | Interrupt mid-sentence | Live generated interruption accepted during active output after 6,382 ms of playout; next answer correctly returned fifteen; provider cancel/truncate and heard-prefix tests | Waiting on phone speaker/mic/Bluetooth latency and echo testing |
 | Correct real classes and schedule | Live spoken query returned the saved QA course, 10:00 time and Lab 42; fixture meeting removed and course archived afterward | Waiting on spoken queries against the student's real account |
 | Two-minute silence, local Hey NavoX, same conversation | Standby/wake lifecycle, supported local ASR, actual lazy Porcupine Web SDK, authenticated connection-bound configuration and private queued wake question | Not done: vendor-approved configuration/keyword/language assets, cold startup and question-onset behavior, phone wake and actual no-upload measurement |
-| Lose/regain network without lost context | A browser-container network disconnect for six seconds triggered cleanup and replacement; an unrepeated follow-up correctly used the first answer after recovery | Waiting on physical-network/device testing. Expired call leases cannot be revived; a crash before checkpoint commit can lose the last turn |
+| Lose/regain network without lost context | Final mobile-emulated 20-second outage recovered on one media admission; immediate spoken follow-up retained the earlier facts. Forced worker crash recovered through fresh admission with the same context. No repeated greeting; see the continuity verification record | Waiting on physical-network/device testing. Expired call leases cannot be revived; a crash before checkpoint commit can lose the last turn |
 | Hang up cleanly | Live browser end/close returned HTTP 204 and Call ended; final checks found no active calls, checkpoints, pending cleanup, Cloud rooms or participants | Waiting on phone microphone release and device checks |
 | Per-call and daily per-student cost logging | Live calls logged speech/idle/connected milliseconds, provider tokens and known model cost; successful turns settled reservations. Live daily operator report returned matching totals; owner isolation covered by tests | Partial: LiveKit price and invoice reconciliation pending; unknown components remain explicitly unknown |
 
 ## Additional launch work still required
 
 - Test proactive provider rollover at real provider limits with no repeated greeting, no lost speech onset and continuing audio output.
-- Long context beyond the provider ceiling needs explicit compaction; current hard limit fails safely rather than silently dropping conversation.
+- Background context compaction is implemented and tested with real providers; qualify longer calls and correction retention over a larger corpus. Notes are explicitly lossy and recent full turns take precedence.
 - Expand the passed emulated terminal transport replacement to physical devices and longer outages, while preserving logout/reset/ownership revocation; see [the next continuity implementation boundary](vox-m1-continuity-next.md).
 - Supply vendor-approved browser credential handling and licensed Web keyword/language models. Actual SDK and authenticated runtime configuration are implemented but remain disabled pending this setup and device qualification.
 - The server-owned 80-percent notice is now shown once in the dialog or minimized dock. Qualify quota enforcement and the notice against actual paid calls; synthetic UI/status tests do not establish live enforcement.
@@ -37,3 +37,12 @@ queue and atomic voice-credit renewal fix. The longer emulated live response now
 has zero measured source-buffer gaps; physical Safari listening acceptance is
 still pending. Details and the initial failed continuity run are recorded in the
 verification document. No UI or mascot design changes were made for this fix.
+
+
+Long-call/recovery update: bounded older-context summaries, quiet provider
+replacement, offline track-removal deferral and exact owned-microphone handoff
+are implemented. Real-provider compaction, accelerated 60-second renewal,
+forced worker crash, 20-second browser outage and mute/unmute passed their named
+checks. True provider-cap duration and physical-phone recording are not passed.
+Picovoice approval remains pending independently; it is not a blocker to other
+engineering work. There were no UI layout, spacing or mascot design changes.
