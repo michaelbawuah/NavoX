@@ -170,6 +170,12 @@
   font-size: 15px;
   margin: 0;
 }
+.replyScope {
+  color: var(--nx-muted);
+  font-size: var(--nx-small-size);
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
 .failure {
   display: flex;
   align-items: center;

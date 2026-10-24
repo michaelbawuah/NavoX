@@ -2,12 +2,17 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadOutlookReplySummary } from "../lib/outlook-summary";
 import { productFeatures } from "../lib/product-features";
 import { studyRequest } from "../lib/student-planning";
 import { studentRequest } from "../lib/student-schedule";
 import { TodayHome } from "./today-home";
 
 const calendarApi = vi.hoisted(() => ({ calendars: vi.fn() }));
+vi.mock("../lib/outlook-summary", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/outlook-summary")>()),
+  loadOutlookReplySummary: vi.fn(),
+}));
 vi.mock("../lib/student-calendar-api", () => ({
   createStudentCalendarApi: () => calendarApi,
 }));
@@ -53,6 +58,24 @@ const props = {
 };
 let host: HTMLDivElement, root: Root;
 const flags = { ...productFeatures };
+const emptyOutlook = {
+  connected: false,
+  messages: [],
+  checked_mailboxes: 0,
+  available_mailboxes: 0,
+  limited: false,
+  unavailable: false,
+};
+const outlookMessage = {
+  id: "opaque/+id=",
+  connection_id: "11111111-1111-4111-8111-111111111111",
+  sender: "professor@example.test",
+  subject: "Choose an office-hour time",
+  preview: "Please choose a time",
+  reason: "Asked for a reply",
+  sent_at: "2026-10-23T17:00:00Z",
+  open_url: null,
+};
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   localStorage.clear();
@@ -61,6 +84,7 @@ beforeEach(() => {
   productFeatures.studentWhiteboard = false;
   productFeatures.studentCalendarAvailability = true;
   calendarApi.calendars.mockResolvedValue({ grants: [] });
+  vi.mocked(loadOutlookReplySummary).mockResolvedValue(emptyOutlook);
   vi.mocked(studentRequest).mockResolvedValue(empty);
   vi.mocked(studyRequest).mockImplementation(async (path) =>
     path === "/tasks" ? [] : { revision: 0, blocks: [], needs_review: false },
@@ -188,6 +212,156 @@ describe("Today home", () => {
     });
     await act(async () => window.dispatchEvent(new Event("focus")));
     expect(host.textContent).toContain("0 of 5 done");
+  });
+  it("completes email setup and shows an owned Outlook reply with a scoped Inbox shortcut", async () => {
+    vi.mocked(loadOutlookReplySummary).mockResolvedValue({
+      ...emptyOutlook,
+      connected: true,
+      checked_mailboxes: 1,
+      available_mailboxes: 1,
+      messages: [outlookMessage],
+      limited: true,
+    });
+    await render();
+    const steps = [...host.querySelectorAll('[aria-label="Set up NavoX"] li')];
+    expect(steps[2].getAttribute("data-done")).toBe("true");
+    expect(host.textContent).toContain("1 of 5 done");
+    expect(host.textContent).toContain("Needs a reply");
+    expect(host.textContent).toContain(outlookMessage.subject);
+    expect(host.textContent).toContain("Outlook: recent checked messages only");
+    const link = host.querySelector<HTMLAnchorElement>(
+      'a[href*="outlook_reply="]',
+    );
+    const target = new URL(link!.href);
+    expect(target.pathname).toBe("/inbox");
+    expect(target.searchParams.get("outlook_owner")).toBe("personal:qa");
+    expect(target.searchParams.get("outlook_mailbox")).toBe(
+      outlookMessage.connection_id,
+    );
+    expect(target.searchParams.get("outlook_reply")).toBe(outlookMessage.id);
+    expect(link!.textContent).toContain("Draft reply");
+    expect(
+      host.querySelector('[title="1 possible reply in checked mail"]'),
+    ).not.toBeNull();
+  });
+  it("clears Outlook completion and candidate rows after consent is revoked", async () => {
+    vi.mocked(loadOutlookReplySummary).mockResolvedValue({
+      ...emptyOutlook,
+      connected: true,
+      checked_mailboxes: 1,
+      available_mailboxes: 1,
+      messages: [outlookMessage],
+    });
+    await render();
+    vi.mocked(loadOutlookReplySummary).mockResolvedValue(emptyOutlook);
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(host.textContent).toContain("0 of 5 done");
+    expect(host.textContent).not.toContain(outlookMessage.subject);
+    expect(
+      host.querySelector('[title="1 possible reply in checked mail"]'),
+    ).toBeNull();
+  });
+  it("preserves Google reply rows and completion when Outlook is not configured", async () => {
+    localStorage.setItem("navox:setup:personal:qa", "yes");
+    vi.mocked(fetch).mockImplementation(async () =>
+      Response.json({
+        completed_recently: [],
+        coming_up: [],
+        waiting_on: [],
+        needs_attention: [
+          {
+            id: "google-reply",
+            title: "Reply to the lab partner",
+            type: "follow_up",
+            status: "active",
+            due_at: null,
+            sources: [
+              {
+                provider: "google",
+                source_type: "gmail_message",
+                connection_id: "google",
+                external_resource_id: "source",
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    await act(async () =>
+      root.render(
+        <TodayHome
+          {...props}
+          connections={[
+            {
+              id: "google",
+              provider: "google",
+              external_email: "student@example.test",
+              status: "active",
+              granted_scopes: [
+                "https://www.googleapis.com/auth/gmail.readonly",
+              ],
+              last_checked_at: null,
+              last_error: null,
+            },
+          ]}
+        />,
+      ),
+    );
+    const steps = [...host.querySelectorAll('[aria-label="Set up NavoX"] li')];
+    expect(steps[2].getAttribute("data-done")).toBe("true");
+    expect(
+      host.querySelector('a[href="/inbox?reply=google-reply#drafts"]')
+        ?.textContent,
+    ).toContain("Reply to the lab partner");
+    expect(
+      host.querySelector('[title="1 possible reply in checked mail"]'),
+    ).not.toBeNull();
+  });
+  it("discloses limited Outlook coverage without claiming an empty inbox", async () => {
+    vi.mocked(loadOutlookReplySummary).mockResolvedValue({
+      ...emptyOutlook,
+      connected: true,
+      checked_mailboxes: 3,
+      available_mailboxes: 4,
+      limited: true,
+    });
+    await render();
+    expect(host.textContent).toContain("recent checked messages only");
+    expect(host.textContent).toContain("More mail or mailboxes are available");
+    expect(host.textContent).not.toContain("Done for today");
+    expect(
+      host.querySelector('[title="0 possible replies in checked mail"]'),
+    ).toBeNull();
+  });
+  it("suppresses a late Outlook summary after switching owner", async () => {
+    let finish!: (
+      value: Awaited<ReturnType<typeof loadOutlookReplySummary>>,
+    ) => void;
+    vi.mocked(loadOutlookReplySummary).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await render();
+    await render({
+      ...props,
+      account: { ...account, id: "other", display_name: "Taylor" },
+    });
+    await act(async () =>
+      finish({
+        ...emptyOutlook,
+        connected: true,
+        checked_mailboxes: 1,
+        available_mailboxes: 1,
+        messages: [outlookMessage],
+      }),
+    );
+    expect(host.textContent).toContain("Taylor");
+    expect(host.textContent).not.toContain(outlookMessage.subject);
+    expect(vi.mocked(loadOutlookReplySummary).mock.calls[0][1]?.aborted).toBe(
+      true,
+    );
   });
   it("does not present a failed schedule lookup as an empty completed day", async () => {
     vi.mocked(studentRequest).mockRejectedValue(Error("internal details"));

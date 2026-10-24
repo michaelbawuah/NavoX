@@ -17,6 +17,9 @@ export function StudyBlockMove({
   onSaved,
   suggestedStart,
   onKeepCurrent,
+  requireCalendar = false,
+  windowEndAt,
+  onReviewChange,
 }: {
   block: StudyBlock;
   accountKey: string;
@@ -25,6 +28,9 @@ export function StudyBlockMove({
   onSaved: () => void;
   suggestedStart?: string;
   onKeepCurrent?: () => void;
+  requireCalendar?: boolean;
+  windowEndAt?: string;
+  onReviewChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false),
     [busy, setBusy] = useState(false),
@@ -45,6 +51,10 @@ export function StudyBlockMove({
       alive.current = false;
     };
   }, []);
+  useEffect(() => {
+    onReviewChange?.(open);
+    return () => onReviewChange?.(false);
+  }, [onReviewChange, open]);
   const choices = (() => {
     try {
       return studyDeadlineChoices(local, timezone);
@@ -82,6 +92,8 @@ export function StudyBlockMove({
           request_id: request.current,
           revision: block.revision,
           start_at: start,
+          ...(requireCalendar ? { require_calendar: true } : {}),
+          ...(windowEndAt ? { window_end_at: windowEndAt } : {}),
           ...(confirm && preview ? { preview_hash: preview.preview_hash } : {}),
         },
       );

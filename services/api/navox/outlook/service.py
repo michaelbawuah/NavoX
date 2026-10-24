@@ -37,7 +37,7 @@ from navox.db.models import (
 from navox.db.outlook import OutlookMailDraft
 from navox.intelligence.contracts import SourceDocument, SourceIdentity
 from navox.intelligence.extraction import source_document_hash
-from navox.outlook.cleanup import lock_for_reset
+from navox.outlook.cleanup import clear_private_data, lock_for_reset
 from navox.outlook.schemas import Connect, Content, Generate, Preview, Revise, Send
 from navox.providers.microsoft_mail import (
     READ_CAPABILITY,
@@ -46,12 +46,14 @@ from navox.providers.microsoft_mail import (
     MailIdentity,
     MailMessage,
     MicrosoftMailError,
-    MicrosoftMailGateway,
     action_reason,
     authorization_url,
     build_mime,
     oauth_endpoint,
     receipt_fingerprint,
+)
+from navox.providers.microsoft_mail import (
+    MicrosoftMailGateway as MicrosoftMailGateway,
 )
 
 KEY = "microsoft-outlook"
@@ -435,7 +437,9 @@ async def finish_connect(
     requested, target_id = set(attempt.requested_scopes), attempt.connection_id
     await database.commit()  # One-shot before calling Microsoft; replay never exchanges a code.
     gateway = MicrosoftMailGateway()
-    tokens = await gateway.token(settings, code=code, verifier=verifier)
+    tokens = await gateway.token(
+        settings, code=code, verifier=verifier, fallback_scopes=frozenset(requested)
+    )
     identity = await gateway.identity(tokens.access_token)
     granted = tokens.scopes.intersection(requested)
     if not {"User.Read", "Mail.Read"}.issubset(granted) or (
@@ -568,15 +572,14 @@ async def disconnect(
     database: AsyncSession, settings: Settings, scope: Scope, connection_id: UUID
 ) -> None:
     row = await connection(database, scope, connection_id, active=False)
-    # Cancels even an already exchanged attempt still waiting for Microsoft's identity.
-    await database.execute(
-        update(OAuthAuthorizationAttempt)
-        .where(
-            OAuthAuthorizationAttempt.user_id == scope.user_id,
-            OAuthAuthorizationAttempt.workspace_id == scope.workspace_id,
-            OAuthAuthorizationAttempt.provider == "microsoft",
-        )
-        .values(purpose="outlook-cancelled")
+    from navox.student_email.service import invalidate_email_reviews
+
+    await invalidate_email_reviews(
+        database, user_id=scope.user_id, workspace_id=scope.workspace_id, connector_ids=[row.id]
+    )
+    # Shared cleanup also cancels used callbacks still awaiting provider identity.
+    await clear_private_data(
+        database, user_id=scope.user_id, workspace_id=scope.workspace_id, connector_ids=[row.id]
     )
     if row.credential_reference is not None:
         try:
@@ -614,22 +617,6 @@ async def disconnect(
         if provenance:
             provenance.status = "disconnected"
             provenance.granted_scopes = []
-    await database.execute(
-        update(OutlookMailDraft)
-        .where(
-            OutlookMailDraft.connection_id == row.id,
-            OutlookMailDraft.user_id == scope.user_id,
-            OutlookMailDraft.workspace_id == scope.workspace_id,
-        )
-        .values(
-            status=case(
-                (OutlookMailDraft.status == "review", "discarded"),
-                (OutlookMailDraft.status == "executing", "uncertain"),
-                else_=OutlookMailDraft.status,
-            ),
-            encrypted_payload="",
-        )
-    )
     audit(database, scope, "disconnected", row.id)
     await database.commit()
 
@@ -645,6 +632,11 @@ async def access(
     if not configured(settings):
         raise OutlookError("Outlook connection setup is pending for this deployment", 503)
     row = await connection(database, scope, connection_id, send=send)
+    previous_scopes = row.config.get("scopes")
+    if not isinstance(previous_scopes, list) or not all(
+        isinstance(item, str) for item in previous_scopes
+    ):
+        raise OutlookError("Reconnect Outlook before continuing", 403)
     broker = SecretBroker(settings)
     with await broker.lease(
         database,
@@ -655,18 +647,15 @@ async def access(
         names={"MICROSOFT_REFRESH_TOKEN"},
     ) as lease:
         tokens = await MicrosoftMailGateway().token(
-            settings, refresh=lease.get("MICROSOFT_REFRESH_TOKEN")
+            settings,
+            refresh=lease.get("MICROSOFT_REFRESH_TOKEN"),
+            fallback_scopes=frozenset(previous_scopes),
         )
     identity = await MicrosoftMailGateway().identity(tokens.access_token)
     if not same_identity(row, identity) or identity.email.casefold() != mailbox(row).casefold():
         raise OutlookError(
             "The Microsoft mailbox changed. Reconnect Outlook before continuing", 403
         )
-    previous_scopes = row.config.get("scopes")
-    if not isinstance(previous_scopes, list) or not all(
-        isinstance(item, str) for item in previous_scopes
-    ):
-        raise OutlookError("Reconnect Outlook before continuing", 403)
     granted = tokens.scopes.intersection(previous_scopes)
     required = {"User.Read", "Mail.Read", *(["Mail.Send"] if send else [])}
     if not required.issubset(granted):
@@ -742,15 +731,13 @@ async def messages(
                     "reason": reason,
                 }
             )
-    return {
-        "messages": candidates,
-        "has_more": has_more,
-        "notice": (
-            "Possible requests and your follow-up flags from the latest 50 Inbox "
-            "messages. Review the email to decide what needs a reply. Older mail and "
-            "later replies are not automatically monitored."
-        ),
-    }
+    notice = (
+        "Possible requests and your follow-up flags from the latest 50 Inbox messages. "
+        "Review the email to decide what needs a reply. Older mail is outside this check."
+    )
+    if has_more:
+        notice += " Coverage is incomplete: older or unreadable messages may remain in Outlook."
+    return {"messages": candidates, "has_more": has_more, "notice": notice}
 
 
 def message_view(message: MailMessage) -> dict[str, object]:
@@ -837,6 +824,8 @@ def content_of(settings: Settings, draft: OutlookMailDraft) -> dict[str, Any]:
 def draft_view(
     settings: Settings, draft: OutlookMailDraft, *, connection_id: UUID | None = None
 ) -> dict[str, object]:
+    from navox.outlook.replies import view as reply_view
+
     available = bool(draft.encrypted_payload) and utc(draft.payload_expires_at) > now()
     content = (
         content_of(settings, draft)
@@ -855,8 +844,8 @@ def draft_view(
             "Outlook; this draft cannot be sent again."
         ),
         "completed": (
-            "The matching message was verified in Outlook Sent. This does not prove "
-            "recipient delivery; later replies are not monitored."
+            "The matching message was verified in Outlook Sent. "
+            "This does not prove recipient delivery."
         ),
     }
     return {
@@ -873,6 +862,7 @@ def draft_view(
         "expires_at": utc(draft.expires_at).isoformat(),
         "verified_at": utc(draft.verified_at).isoformat() if draft.verified_at else None,
         "content_available": available,
+        **reply_view(draft),
         "notice": notices.get(draft.status, "This draft is unavailable.")
         + (
             (" Private reply content was cleared; only a content-free send receipt remains.")
@@ -900,9 +890,10 @@ async def owned_draft(database: AsyncSession, scope: Scope, draft_id: UUID) -> O
         row.encrypted_payload = ""
         if row.status == "review":
             row.status = "discarded"
-        await database.commit()
-        if row.status == "discarded":
+            await database.commit()
             raise OutlookError("This saved draft expired. Open its email to start again", 404)
+        # A receipt writer still needs these owner/connection/draft locks.
+        # Its enclosing transaction commits the erasure with the checked result.
     return row
 
 
@@ -1103,6 +1094,7 @@ async def send(
         raise OutlookError("This draft changed. Review its latest version before sending", 409)
     if draft.status in {"executing", "uncertain", "completed"}:
         # Neither duplicate requests nor a fresh request UUID can retransmit.
+        await database.commit()
         return draft_view(settings, draft)
     if draft.status != "review" or utc(draft.expires_at) <= now():
         raise OutlookError(
@@ -1116,6 +1108,7 @@ async def send(
     row = await recheck(database, scope, connection_id, generation, send=True)
     draft = await owned_draft(database, scope, draft_id)
     if draft.status != "review":
+        await database.commit()
         return draft_view(settings, draft)
     if (
         draft.revision != payload.expected_revision
@@ -1191,7 +1184,9 @@ async def send(
     )
     if claimed is None:
         await database.rollback()
-        return draft_view(settings, await owned_draft(database, scope, draft_id))
+        current_draft = await owned_draft(database, scope, draft_id)
+        await database.commit()
+        return draft_view(settings, current_draft)
     await database.refresh(draft)
     audit(database, scope, "send_claimed", draft.id)
     await database.commit()  # Durable claim precedes the only provider send.
@@ -1199,6 +1194,7 @@ async def send(
         await recheck(database, scope, connection_id, generation, send=True)
         draft = await owned_draft(database, scope, draft_id)
         if draft.status != "executing" or draft.send_request_id != payload.request_id:
+            await database.commit()
             return draft_view(settings, draft)
         # Keep the owner/connection lock through transmission. A concurrent
         # disconnect winning before this point stops the send; later disconnects wait.
@@ -1236,8 +1232,11 @@ async def mark_uncertain(database: AsyncSession, scope: Scope, draft_id: UUID) -
 async def check(
     database: AsyncSession, settings: Settings, scope: Scope, draft_id: UUID
 ) -> dict[str, object]:
+    from navox.outlook.replies import AuthorizedMailbox, reconcile, record_receipt
+
     draft = await owned_draft(database, scope, draft_id)
     if draft.status in {"completed", "review"}:
+        await database.commit()
         return draft_view(settings, draft)
     if not draft.receipt_hash:
         raise OutlookError(
@@ -1274,13 +1273,21 @@ async def check(
         return draft_view(settings, draft, connection_id=connection_id)
     draft = await owned_draft(database, scope, draft_id)
     if receipt is not None:
-        draft.sent_message_id = receipt
+        record_receipt(draft, receipt)
         draft.verified_at = now()
         draft.status = "completed"
         audit(database, scope, "send_verified", draft.id)
     elif draft.status != "completed":
         draft.status = "uncertain"
     await database.commit()
+    if receipt is not None:
+        return await reconcile(
+            database,
+            settings,
+            scope,
+            draft_id,
+            authorized=AuthorizedMailbox(connection_id, token, generation),
+        )
     return draft_view(settings, draft, connection_id=connection_id)
 
 

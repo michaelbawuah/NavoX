@@ -1,10 +1,12 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
+import { setupWakeTimes } from "../lib/routine-setup";
 import {
   type StudyPreferences,
   studyPreferencesDraft,
 } from "../lib/student-planning";
+import { studentWeekdays } from "../lib/student-schedule";
 import { NoaArtwork } from "./noa-artwork";
 import styles from "./planner-redesign.module.css";
 import { useVoxRequest } from "./use-vox-request";
@@ -12,12 +14,14 @@ import { useVoxRequest } from "./use-vox-request";
 export function PlannerWelcome({
   preferences,
   hasClasses,
+  classDays = [],
   disabled,
   onCapture,
   onRoutine,
 }: {
   preferences: StudyPreferences;
   hasClasses: boolean;
+  classDays?: number[];
   disabled: boolean;
   onCapture: (text: string) => void;
   onRoutine: (
@@ -25,7 +29,14 @@ export function PlannerWelcome({
   ) => Promise<boolean>;
 }) {
   const [text, setText] = useState("");
-  const [wake, setWake] = useState(preferences.wake_time);
+  const wakes =
+    preferences.wake_times ?? Array<string>(7).fill(preferences.wake_time);
+  const [classWake, setClassWake] = useState(wakes[classDays[0] ?? 0]);
+  const [otherWake, setOtherWake] = useState(
+    wakes[[5, 6, 0, 1, 2, 3, 4].find((day) => !classDays.includes(day)) ?? 5],
+  );
+  const [classWakeChanged, setClassWakeChanged] = useState(false);
+  const [otherWakeChanged, setOtherWakeChanged] = useState(false);
   const [sleep, setSleep] = useState(preferences.sleep_time);
   const [focus, setFocus] = useState("");
   const [saved, setSaved] = useState(false);
@@ -138,11 +149,12 @@ export function PlannerWelcome({
             setSaved(
               await onRoutine({
                 ...studyPreferencesDraft(preferences),
-                wake_time: wake,
-                wake_times:
-                  wake !== preferences.wake_time
-                    ? null
-                    : preferences.wake_times,
+                wake_times: setupWakeTimes(
+                  preferences,
+                  classDays,
+                  classWakeChanged ? classWake : null,
+                  otherWakeChanged ? otherWake : null,
+                ),
                 sleep_time: sleep,
                 focus_windows: windows,
               }),
@@ -152,19 +164,40 @@ export function PlannerWelcome({
           <h3>Your routine</h3>
           <p>So plans leave room for sleep and your best focus hours.</p>
           <label>
-            I usually wake up at
+            Class-day wake time
             <input
-              aria-label="I usually wake up at"
+              aria-label="Class-day wake time"
               type="time"
               required
-              value={wake}
+              value={classWake}
               onChange={(e) => {
-                setWake(e.target.value);
+                setClassWake(e.target.value);
+                setClassWakeChanged(true);
                 setSaved(false);
               }}
-              disabled={disabled}
+              disabled={disabled || classDays.length === 0}
             />
           </label>
+          <label>
+            Weekend &amp; non-class-day wake time
+            <input
+              aria-label="Weekend and non-class-day wake time"
+              type="time"
+              required
+              value={otherWake}
+              disabled={disabled || classDays.length === 7}
+              onChange={(event) => {
+                setOtherWake(event.target.value);
+                setOtherWakeChanged(true);
+                setSaved(false);
+              }}
+            />
+          </label>
+          <p>
+            {classDays.length
+              ? `Your upcoming class days: ${classDays.map((day) => studentWeekdays[day]).join(", ")}. A weekend with class uses your class-day time.`
+              : "Add your class times to choose class-day wake times. For now, the non-class-day time applies every day."}
+          </p>
           <label>
             I’m usually asleep by
             <input

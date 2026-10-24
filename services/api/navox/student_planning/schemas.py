@@ -297,7 +297,14 @@ class MoveInput(Input):
     request_id: UUID
     revision: int = Field(ge=1)
     start_at: datetime
+    require_calendar: bool = Field(default=False, strict=True)
+    window_end_at: datetime | None = None
     _instant = field_validator("start_at")(aware)
+
+    @field_validator("window_end_at")
+    @classmethod
+    def window_end(cls, value: datetime | None) -> datetime | None:
+        return aware(value) if value is not None else None
 
 
 class MoveConfirm(MoveInput):

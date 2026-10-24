@@ -2,6 +2,9 @@
 
 import base64
 from datetime import UTC, datetime, timedelta
+from email import policy
+from email.parser import BytesParser
+from email.utils import getaddresses
 from hashlib import sha256
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
@@ -23,6 +26,8 @@ from navox.providers.microsoft_mail import (
     READ_SCOPES,
     MailIdentity,
     MailMessage,
+    MailReceipt,
+    MailReplyScan,
     MailToken,
     MicrosoftMailError,
     receipt_fingerprint,
@@ -39,6 +44,14 @@ class FakeMicrosoft:
         self.read_calls = 0
         self.send_calls = 0
         self.receipt_calls = 0
+        self.reply_calls = 0
+        self.receipt_sent_at = datetime.now(UTC) - timedelta(minutes=1)
+        self.receipt_conversation = "verified-sent-conversation"
+        self.reply_scan = MailReplyScan((), 0, False, False)
+        self.after_replies = None
+        self.fail_replies = False
+        self.omit_scope = False
+        self.fallback_requests = []
         self.identity_value = MailIdentity(
             "fixture-pairwise-subject", "fixture-graph-id", "owner@example.com"
         )
@@ -64,7 +77,8 @@ class FakeMicrosoft:
             is_draft=False,
         )
 
-    async def token(self, settings, *, code=None, verifier="", refresh=""):
+    async def token(self, settings, *, code=None, verifier="", refresh="", fallback_scopes=None):
+        self.fallback_requests.append((code is not None, fallback_scopes))
         if code is not None:
             self.exchange_calls += 1
             assert len(verifier) >= 43
@@ -74,6 +88,9 @@ class FakeMicrosoft:
         scopes = set(self.scopes)
         if self.allow_send:
             scopes.add("Mail.Send")
+        if self.omit_scope:
+            assert fallback_scopes is not None
+            scopes = set(fallback_scopes)
         return MailToken("fixture-access-token", "fixture-refresh-token", frozenset(scopes))
 
     async def identity(self, token):
@@ -104,7 +121,25 @@ class FakeMicrosoft:
         self.receipt_calls += 1
         assert receipt_fingerprint(self.last_mime) == expected_hash
         assert message_id.encode() in self.last_mime
-        return "verified-sent-id" if self.receipt_ready else None
+        if not self.receipt_ready:
+            return None
+        parsed = BytesParser(policy=policy.default).parsebytes(self.last_mime)
+        recipient = getaddresses(parsed.get_all("to", []))[0][1]
+        return MailReceipt(
+            "verified-sent-id", self.receipt_sent_at, self.receipt_conversation, recipient
+        )
+
+    async def conversation_replies(self, token, conversation_id, sent_at):
+        self.reply_calls += 1
+        assert token == "fixture-access-token"
+        assert conversation_id == self.receipt_conversation
+        assert sent_at == self.receipt_sent_at
+        if self.after_replies:
+            callback, self.after_replies = self.after_replies, None
+            await callback()
+        if self.fail_replies:
+            raise MicrosoftMailError()
+        return self.reply_scan
 
 
 @pytest_asyncio.fixture
@@ -609,3 +644,47 @@ async def test_discard_clears_private_review_and_disconnect_works_without_key(ou
         assert row.status == "DISCONNECTED"
         assert row.credential_reference is None
     assert env.provider.send_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_scope_fallback_comes_from_verified_consent_or_stored_grant_only(outlook_env):
+    env = outlook_env
+    env.provider.omit_scope = True
+    connection_id = await connect(env)
+    exchange, consent_scopes = env.provider.fallback_requests[0]
+    assert exchange is True and consent_scopes == frozenset(READ_SCOPES)
+    # A provider refresh cannot use omission as a reason to add send authority.
+    env.provider.allow_send = True
+    response = await env.client.get(
+        f"/api/v1/outlook/connections/{connection_id}/messages", headers=env.headers
+    )
+    assert response.status_code == 200, response.text
+    exchange, retained = env.provider.fallback_requests[-1]
+    assert exchange is False and "Mail.Send" not in retained
+    status = (await env.client.get("/api/v1/outlook/status", headers=env.headers)).json()
+    assert status["connections"][0]["read_enabled"] is True
+    assert status["connections"][0]["send_enabled"] is False
+    draft, _ = await preview(env, connection_id)
+    response = await env.client.post(
+        f"/api/v1/outlook/drafts/{draft['id']}/send", json=send_payload(draft), headers=env.headers
+    )
+    assert response.status_code == 403
+    assert env.provider.send_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_empty_checked_candidate_page_discloses_unsupported_or_unexamined_mail(outlook_env):
+    env = outlook_env
+    connection_id = await connect(env)
+
+    async def limited(_token):
+        return [], True
+
+    env.provider.messages = limited
+    response = await env.client.get(
+        f"/api/v1/outlook/connections/{connection_id}/messages", headers=env.headers
+    )
+    assert response.status_code == 200
+    assert response.json()["messages"] == []
+    assert response.json()["has_more"] is True
+    assert "Coverage is incomplete" in response.json()["notice"]

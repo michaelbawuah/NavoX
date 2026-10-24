@@ -288,3 +288,41 @@
     scroll-behavior: auto;
   }
 }
+
+.panel.inboxTheme {
+  --email-muted: var(--nx-muted);
+  --email-border: var(--nx-border);
+  color: var(--nx-text);
+}
+.inboxTheme .card,
+.inboxTheme .inset,
+.inboxTheme .evidence figure,
+.inboxTheme .warning {
+  background: var(--nx-surface);
+  border-color: var(--nx-border);
+  color: var(--nx-text);
+}
+.panel.inboxTheme label,
+.inboxTheme .notice,
+.inboxTheme .badge {
+  color: var(--nx-text);
+}
+.panel.inboxTheme input,
+.panel.inboxTheme select,
+.panel.inboxTheme button {
+  background: var(--nx-raised);
+  border-color: var(--nx-border);
+  color: var(--nx-text);
+  color-scheme: normal;
+}
+.panel.inboxTheme .primary {
+  background: var(--nx-accent);
+  color: var(--nx-on-accent);
+}
+.panel.inboxTheme .eyebrow,
+.panel.inboxTheme a {
+  color: var(--nx-accent-text);
+}
+.panel.inboxTheme :is(button, input, select, a, summary):focus-visible {
+  outline-color: var(--nx-accent);
+}

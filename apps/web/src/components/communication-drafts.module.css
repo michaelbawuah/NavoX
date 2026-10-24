@@ -69,3 +69,22 @@
   width: 1.2rem;
   min-height: 1.2rem;
 }
+
+.meetingEvidence {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.meetingEvidence blockquote {
+  margin: 0.35rem 0;
+  padding: 0.5rem 0.8rem;
+  border-left: 3px solid var(--nx-accent);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.meetingEvidence ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}

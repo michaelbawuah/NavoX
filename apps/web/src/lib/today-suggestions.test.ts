@@ -59,6 +59,22 @@ describe("late-night study suggestion", () => {
     expect(result?.start_at).toBe("2026-10-24T18:00:00.000Z");
     expect(result?.block.start_at).toBe("2026-10-24T12:30:00Z");
   });
+  it("accepts the informational travel-buffer note from a complete live calendar check", () => {
+    expect(
+      lateNightStudyMove(
+        plan,
+        [task],
+        {
+          ...openings,
+          warnings: [
+            "Calendar meetings include your 15-minute travel buffer on both sides.",
+          ],
+        },
+        now,
+        timezone,
+      )?.start_at,
+    ).toBe("2026-10-24T18:00:00.000Z");
+  });
   it.each([
     { calendar_checked: false },
     { routine_confirmed: false },

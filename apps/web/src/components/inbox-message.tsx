@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { GmailMeetingSource } from "../lib/inbox-meeting-proposal";
 import {
   studentClock,
   studentDateInZone,
@@ -19,20 +20,30 @@ type Message = {
 type Source = { id: string; label: string };
 const api =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
-export function InboxMessage({
-  id,
-  accountKey,
-  timezone,
-}: {
+interface Props {
   id: string;
   accountKey: string;
   timezone: string;
-}) {
+  onReadSource?: (source: GmailMeetingSource | null) => void;
+}
+export function InboxMessage(props: Props) {
+  return (
+    <InboxMessageContent key={`${props.accountKey}:${props.id}`} {...props} />
+  );
+}
+function InboxMessageContent({
+  id,
+  accountKey,
+  timezone,
+  onReadSource,
+}: Props) {
   const [sources, setSources] = useState<Source[]>([]);
   const [selected, setSelected] = useState("");
   const [message, setMessage] = useState<Message | null>(null);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
+  const readSource = useRef(onReadSource);
+  readSource.current = onReadSource;
   // biome-ignore lint/correctness/useExhaustiveDependencies: Retry reloads the exact selected request.
   useEffect(() => {
     const abort = new AbortController();
@@ -40,6 +51,7 @@ export function InboxMessage({
     setSources([]);
     setSelected("");
     setMessage(null);
+    readSource.current?.(null);
     setError("");
     void fetch(`${api}/communication-drafts/sources/${id}`, {
       credentials: "include",
@@ -78,6 +90,7 @@ export function InboxMessage({
     const abort = new AbortController();
     let live = true;
     setMessage(null);
+    readSource.current?.(null);
     if (!selected) return;
     setError("");
     void fetch(
@@ -95,12 +108,27 @@ export function InboxMessage({
         if (
           typeof value.subject !== "string" ||
           typeof value.body !== "string" ||
+          typeof value.truncated !== "boolean" ||
+          typeof value.sent_at !== "string" ||
+          !Number.isFinite(Date.parse(value.sent_at)) ||
           typeof value.open_url !== "string" ||
           !value.open_url.startsWith("https://mail.google.com/") ||
           value.source_id !== selected
         )
           throw Error();
-        if (live) setMessage(value);
+        if (live) {
+          setMessage(value);
+          readSource.current?.({
+            accountKey,
+            commitmentId: id,
+            sourceId: selected,
+            key: `google:${id}:${selected}`,
+            subject: value.subject,
+            body: value.body,
+            sentAt: value.sent_at,
+            truncated: value.truncated,
+          });
+        }
       })
       .catch(() => {
         if (live) setError("This message couldn’t load.");
@@ -108,6 +136,7 @@ export function InboxMessage({
     return () => {
       live = false;
       abort.abort();
+      readSource.current?.(null);
     };
   }, [id, selected, accountKey]);
   return (
@@ -117,7 +146,11 @@ export function InboxMessage({
           Email
           <select
             value={selected}
-            onChange={(e) => setSelected(e.target.value)}
+            onChange={(e) => {
+              setMessage(null);
+              readSource.current?.(null);
+              setSelected(e.target.value);
+            }}
           >
             <option value="">Choose the message</option>
             {sources.map((s) => (

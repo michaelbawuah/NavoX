@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { setupClassDays } from "../lib/routine-setup";
 import {
   type ProposedStudyBlock,
   type RoutinePreview,
@@ -55,11 +56,17 @@ import {
   studentWriteUncertain,
 } from "../lib/student-schedule";
 import { parseStudyCapture } from "../lib/study-capture";
+import {
+  consumeStudyWindow,
+  type StudyPlacement,
+  type StudyWindowIntent,
+} from "../lib/study-placement";
 import { mondayOf } from "./classes-week";
 import { PlannerOverview } from "./planner-overview";
 import { PlannerWelcome } from "./planner-welcome";
 import { RoutineChangeReview } from "./routine-change-review";
 import styles from "./student-daily-plan.module.css";
+import { StudyWindowPlacement } from "./study-window-placement";
 import { TaskChangeReview } from "./task-change-review";
 
 type OutcomeKind = "done" | "took_longer" | "skipped";
@@ -1143,6 +1150,11 @@ function StudyPreferencesForm({
 }
 
 function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
+  const [placement, setPlacement] = useState<StudyWindowIntent | null>(null);
+  const [pendingPlacement, setPendingPlacement] =
+    useState<StudyWindowIntent | null>(null);
+  const [placementReceipt, setPlacementReceipt] =
+    useState<StudyPlacement | null>(null);
   const [captureTitle, setCaptureTitle] = useState("");
   const [taskReview, setTaskReview] = useState<{
     path: string;
@@ -1176,109 +1188,170 @@ function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
     alive = useRef(true),
     operation = useRef(false),
     acceptId = useRef("");
-  const load = useCallback(async (reset = false) => {
-    const request = ++generation.current;
-    setLoading(true);
-    try {
-      const [nextTasks, nextPreferences, nextPlan, nextTimetable] =
-        await Promise.all([
-          studyRequest("/tasks", readStudyTasks),
-          studyRequest("/preferences", readStudyPreferences),
-          studyRequest("/plan", readStudyPlan),
-          studentRequest("/timetable?days=14", readStudentTimetable),
-        ]);
-      if (request !== generation.current) return false;
-      setTasks(nextTasks);
-      setPreferences(nextPreferences);
-      setPlan(nextPlan);
-      const aligned = mondayOf(nextTimetable.date);
-      const week =
-        nextTimetable.date === aligned
-          ? nextTimetable
-          : await studentRequest(
-              `/timetable?days=14&date=${aligned}`,
-              readStudentTimetable,
-            );
-      if (request !== generation.current) return false;
-      setTimetable(week);
-      // A Today link opens a review form, never a write from a URL.
-      const intent = new URLSearchParams(window.location.hash.slice(1));
-      const block = nextPlan.blocks.find(
-        (item) => item.id === intent.get("block") && item.status === "planned",
-      );
-      const kind = intent.get("outcome");
-      if (
-        !reset &&
-        block &&
-        !nextPlan.needs_review &&
-        (kind === "done" || kind === "took_longer")
-      ) {
-        setTab("plan");
-        setNotice(
-          `Choose ${kind === "done" ? "Done" : "Took longer"} below to review every affected change.`,
+  const content = useRef<HTMLDivElement>(null);
+  const quietLoading = useRef(false);
+  const refreshBlocked = useRef(true);
+  refreshBlocked.current =
+    loading ||
+    busy ||
+    uncertain ||
+    !!taskEditor ||
+    !!preview ||
+    !!routineReview ||
+    !!taskReview ||
+    !!placement ||
+    tab === "rhythm";
+  const canRefresh = useCallback(
+    () =>
+      alive.current &&
+      !operation.current &&
+      !refreshBlocked.current &&
+      // Child move/progress forms and completion/undo reviews own their exact
+      // request state. Keep their current props until the student finishes.
+      !content.current?.querySelector("form, [data-planner-review]"),
+    [],
+  );
+  const load = useCallback(
+    async (reset = false, quiet = false) => {
+      if (quiet && (quietLoading.current || !canRefresh())) return false;
+      const request = ++generation.current;
+      if (quiet) quietLoading.current = true;
+      else setLoading(true);
+      try {
+        const [nextTasks, nextPreferences, nextPlan, nextTimetable] =
+          await Promise.all([
+            studyRequest("/tasks", readStudyTasks),
+            studyRequest("/preferences", readStudyPreferences),
+            studyRequest("/plan", readStudyPlan),
+            studentRequest("/timetable?days=14", readStudentTimetable),
+          ]);
+        if (request !== generation.current) return false;
+        const aligned = mondayOf(nextTimetable.date);
+        const week =
+          nextTimetable.date === aligned
+            ? nextTimetable
+            : await studentRequest(
+                `/timetable?days=14&date=${aligned}`,
+                readStudentTimetable,
+              );
+        if (request !== generation.current || (quiet && !canRefresh()))
+          return false;
+        setTasks(nextTasks);
+        setPreferences(nextPreferences);
+        setPlan(nextPlan);
+        setTimetable(week);
+        // A Today link opens a review form, never a write from a URL.
+        const intent = new URLSearchParams(window.location.hash.slice(1));
+        const block = nextPlan.blocks.find(
+          (item) =>
+            item.id === intent.get("block") && item.status === "planned",
         );
-        window.history.replaceState(
-          window.history.state,
-          "",
-          window.location.pathname + window.location.search,
+        const kind = intent.get("outcome");
+        if (
+          !reset &&
+          block &&
+          !nextPlan.needs_review &&
+          (kind === "done" || kind === "took_longer")
+        ) {
+          setTab("plan");
+          setNotice(
+            `Choose ${kind === "done" ? "Done" : "Took longer"} below to review every affected change.`,
+          );
+          window.history.replaceState(
+            window.history.state,
+            "",
+            window.location.pathname + window.location.search,
+          );
+        } else if (!reset && block && kind === "skipped") {
+          setTab("plan");
+          setNotice(
+            `Review ${block.title} below, then choose Skip to confirm.`,
+          );
+          window.history.replaceState(
+            window.history.state,
+            "",
+            window.location.pathname + window.location.search,
+          );
+        } else if (!reset && window.location.hash === "#add-task") {
+          setTab("tasks");
+          setTaskEditor("new");
+          window.history.replaceState(
+            window.history.state,
+            "",
+            window.location.pathname + window.location.search,
+          );
+        }
+        setError("");
+        setUndo((current) =>
+          !nextPlan.needs_review && current?.revision === nextPlan.revision
+            ? current
+            : null,
         );
-      } else if (!reset && block && kind === "skipped") {
-        setTab("plan");
-        setNotice(`Review ${block.title} below, then choose Skip to confirm.`);
-        window.history.replaceState(
-          window.history.state,
-          "",
-          window.location.pathname + window.location.search,
-        );
-      } else if (!reset && window.location.hash === "#add-task") {
-        setTab("tasks");
-        setTaskEditor("new");
-        window.history.replaceState(
-          window.history.state,
-          "",
-          window.location.pathname + window.location.search,
-        );
+        if (nextPlan.needs_review) setLastResult(null);
+        if (reset) {
+          setUncertain(false);
+          setTaskEditor(null);
+          setPreview(null);
+          setConfirmed(false);
+          setLastResult(null);
+          setUndo(null);
+          setEpoch((value) => value + 1);
+          setNotice(
+            "Saved tasks and plan reloaded. Review them before making another change.",
+          );
+        }
+        return true;
+      } catch (cause) {
+        if (request === generation.current && !quiet)
+          setError(studentError(cause));
+        return false;
+      } finally {
+        if (quiet) quietLoading.current = false;
+        else if (request === generation.current) setLoading(false);
       }
-      setError("");
-      setUndo((current) =>
-        !nextPlan.needs_review && current?.revision === nextPlan.revision
-          ? current
-          : null,
-      );
-      if (nextPlan.needs_review) setLastResult(null);
-      if (reset) {
-        setUncertain(false);
-        setTaskEditor(null);
-        setPreview(null);
-        setConfirmed(false);
-        setLastResult(null);
-        setUndo(null);
-        setEpoch((value) => value + 1);
-        setNotice(
-          "Saved tasks and plan reloaded. Review them before making another change.",
-        );
-      }
-      return true;
-    } catch (cause) {
-      if (request === generation.current) setError(studentError(cause));
-      return false;
-    } finally {
-      if (request === generation.current) setLoading(false);
-    }
-  }, []);
+    },
+    [canRefresh],
+  );
   useEffect(() => {
     alive.current = true;
+    const receiveWindow = (initial = false) => {
+      let intent: StudyWindowIntent | null = null;
+      try {
+        intent = consumeStudyWindow(sessionStorage, accountKey);
+      } catch {
+        /* Optional handoff storage may be unavailable. */
+      }
+      if (!intent) return;
+      if (initial) setPlacement(intent);
+      else setPendingPlacement(intent);
+      if (window.location.hash === "#study-window")
+        window.history.replaceState(
+          window.history.state,
+          "",
+          window.location.pathname + window.location.search,
+        );
+    };
+    if (window.location.hash === "#study-window") receiveWindow(true);
+    const received = () => receiveWindow();
+    window.addEventListener("navox:study-window-ready", received);
     void load();
     const changed = () => {
-      void load();
+      if (document.visibilityState === "visible") void load(false, true);
     };
     window.addEventListener("navox:study-plan-changed", changed);
+    window.addEventListener("focus", changed);
+    document.addEventListener("visibilitychange", changed);
+    const interval = window.setInterval(changed, 60000);
     return () => {
       window.removeEventListener("navox:study-plan-changed", changed);
+      window.removeEventListener("focus", changed);
+      document.removeEventListener("visibilitychange", changed);
+      window.clearInterval(interval);
+      window.removeEventListener("navox:study-window-ready", received);
       alive.current = false;
       ++generation.current;
     };
-  }, [load]);
+  }, [load, accountKey]);
   async function mutate<T>(
     path: string,
     parse: (value: unknown) => T,
@@ -1394,8 +1467,105 @@ function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
       if (alive.current) setBusy(false);
     }
   }
+  const placementRemaining =
+    placementReceipt?.unplanned_tasks.flatMap((row) => {
+      const task = tasks.find(
+        (item) => item.id === row.task_id && item.status === "active",
+      );
+      if (!task) return [];
+      const minutes = Math.max(
+        0,
+        task.remaining_minutes -
+          (plan?.blocks ?? [])
+            .filter(
+              (block) =>
+                block.task_id === task.id &&
+                ["planned", "needs_review"].includes(block.status),
+            )
+            .reduce((sum, block) => sum + block.minutes, 0),
+      );
+      return minutes ? [{ task_id: task.id, title: task.title, minutes }] : [];
+    }) ?? [];
   return (
-    <div className={tab === "plan" ? styles.planRoot : styles.panel}>
+    <div
+      ref={content}
+      className={tab === "plan" ? styles.planRoot : styles.panel}
+    >
+      {pendingPlacement && (
+        <p role="status">
+          A free window from Today is ready to review.
+          <button
+            type="button"
+            disabled={locked || !!taskEditor || !!preview || !!placement}
+            onClick={() => {
+              setPlacement(pendingPlacement);
+              setPendingPlacement(null);
+            }}
+          >
+            Review selected window
+          </button>
+        </p>
+      )}
+      {placementReceipt && (
+        <section
+          className={styles.notice}
+          aria-label="Saved placement and remaining work"
+        >
+          <h3>Study time saved in your selected window</h3>
+          {placementReceipt.recovery_required && (
+            <p>
+              This starts the reviewed plan. Previously retired blocks have not
+              been restored.
+            </p>
+          )}
+          {placementRemaining.length ? (
+            <>
+              <p>Work still needing time:</p>
+              <ul>
+                {placementRemaining.map((row) => (
+                  <li key={row.task_id}>
+                    {row.title} · {studyMinutes(row.minutes)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p>All work from this review is now allocated.</p>
+          )}
+          <button type="button" onClick={() => setPlacementReceipt(null)}>
+            Close summary
+          </button>
+        </section>
+      )}
+      {placement && plan && preferences && (
+        <StudyWindowPlacement
+          key={`${accountKey}:${placement.created_at}:${placement.task_id}`}
+          intent={placement}
+          tasks={tasks}
+          plan={plan}
+          preferences={preferences}
+          creating={!!taskEditor}
+          disabled={locked || !!preview}
+          onAddTask={() => {
+            setCaptureTitle("");
+            setTaskEditor("new");
+            setTab("tasks");
+          }}
+          onClose={() => {
+            setPlacement(null);
+            void load();
+          }}
+          onReplan={() => void previewPlan()}
+          onSaved={async (result) => {
+            setPlacement(null);
+            setNotice("Study time saved in the selected window.");
+            if (!(await load())) setUncertain(true);
+            if (!alive.current) return;
+            setPlacementReceipt(result ?? null);
+            window.dispatchEvent(new Event("navox:study-plan-changed"));
+          }}
+        />
+      )}
       {error && (
         <p className={styles.error} role="alert">
           {error}
@@ -1498,6 +1668,7 @@ function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
                   key={preferences.revision}
                   preferences={preferences}
                   hasClasses={timetable.courses.some((c) => !c.archived)}
+                  classDays={setupClassDays(timetable)}
                   disabled={locked}
                   onCapture={(text) => {
                     setCaptureTitle(text);
@@ -1773,7 +1944,7 @@ function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
                 setBusy(true);
                 setError("");
                 try {
-                  await routineRequest(
+                  const savedTask = await routineRequest(
                     accountKey,
                     taskReview.path + "/confirm",
                     readStudyTask,
@@ -1784,6 +1955,8 @@ function StudentDailyPlanAccount({ accountKey }: { accountKey: string }) {
                     },
                   );
                   if (!alive.current) return;
+                  if (placement && taskReview.path === "/tasks")
+                    setPlacement({ ...placement, task_id: savedTask.id });
                   setTaskReview(null);
                   setTaskEditor(null);
                   setTab("plan");

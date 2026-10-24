@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { loadGoogleConnections } from "./account-access";
+import { loadOutlookReplySummary } from "./outlook-summary";
 import { readHomeItems, replyItems } from "./today-home";
 
 const base =
@@ -22,27 +23,38 @@ export function useInboxReplyCount(
       if (loading || document.visibilityState === "hidden") return;
       loading = true;
       try {
-        const [connections, response] = await Promise.all([
-          loadGoogleConnections(base),
-          fetch(
-            `${base}/today${timezone ? `?timezone=${encodeURIComponent(timezone)}` : ""}`,
-            {
-              credentials: "include",
-              cache: "no-store",
-              headers: { "X-NavoX-Account": accountKey },
-              signal: AbortSignal.any([
-                controller.signal,
-                AbortSignal.timeout(12000),
-              ]),
-            },
-          ),
+        const [google, outlook] = await Promise.allSettled([
+          Promise.all([
+            loadGoogleConnections(base),
+            fetch(
+              `${base}/today${timezone ? `?timezone=${encodeURIComponent(timezone)}` : ""}`,
+              {
+                credentials: "include",
+                cache: "no-store",
+                headers: { "X-NavoX-Account": accountKey },
+                signal: AbortSignal.any([
+                  controller.signal,
+                  AbortSignal.timeout(12000),
+                ]),
+              },
+            ),
+          ]).then(async ([connections, response]) => {
+            if (!response.ok) throw Error("Unavailable");
+            return replyItems(readHomeItems(await response.json()), connections)
+              .length;
+          }),
+          loadOutlookReplySummary(accountKey, controller.signal),
         ]);
-        if (!response.ok) throw Error("Unavailable");
-        const items = readHomeItems(await response.json());
+        if (google.status === "rejected" && outlook.status === "rejected")
+          throw Error("Unavailable");
         if (!controller.signal.aborted)
           setSnapshot({
             key: accountKey,
-            count: replyItems(items, connections).length,
+            count:
+              (google.status === "fulfilled" ? google.value : 0) +
+              (outlook.status === "fulfilled"
+                ? outlook.value.messages.length
+                : 0),
           });
       } catch {
         if (!controller.signal.aborted) setSnapshot(null);
@@ -54,10 +66,12 @@ export function useInboxReplyCount(
     const timer = window.setInterval(() => void refresh(), 60000);
     const visible = () => void refresh();
     document.addEventListener("visibilitychange", visible);
+    window.addEventListener("focus", visible);
     return () => {
       controller.abort();
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", visible);
+      window.removeEventListener("focus", visible);
     };
   }, [accountKey, supplied, timezone]);
   return (

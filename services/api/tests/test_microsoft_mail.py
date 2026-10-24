@@ -2,6 +2,7 @@
 
 import base64
 from dataclasses import replace
+from datetime import UTC, datetime
 from urllib.parse import parse_qs
 
 import httpx
@@ -265,6 +266,7 @@ async def test_202_is_not_a_receipt_and_exact_verification_only_reads():
                         "internetMessageId": message_id,
                         "isDraft": False,
                         "sentDateTime": "2026-10-24T10:00:00Z",
+                        "conversationId": "sent-thread",
                     }
                 ]
                 if visible
@@ -277,7 +279,11 @@ async def test_202_is_not_a_receipt_and_exact_verification_only_reads():
     expected_hash = receipt_fingerprint(reviewed)
     assert await gateway.sent_receipt("fixture", message_id, expected_hash) is None
     visible = True
-    assert await gateway.sent_receipt("fixture", message_id, expected_hash) == "receipt"
+    receipt = await gateway.sent_receipt("fixture", message_id, expected_hash)
+    assert receipt.id == "receipt"
+    assert receipt.sent_at == datetime(2026, 10, 24, 10, tzinfo=UTC)
+    assert receipt.conversation_id == "sent-thread"
+    assert receipt.recipient == "teacher@example.com"
     assert sum(method == "POST" for method, _ in calls) == 1
     assert sum(method == "GET" for method, _ in calls) == 3
 
@@ -304,3 +310,197 @@ async def test_provider_failures_are_bounded_sanitized_and_never_retried(failure
     assert "SECRET" not in str(caught.value)
     assert "fixture-secret-token" not in str(caught.value)
     assert calls == 1
+
+
+def reply_headers(**overrides):
+    return {
+        "id": "later-message",
+        "conversationId": "conversation'opaque",
+        "from": {"emailAddress": {"address": "teacher@example.com"}},
+        "sender": {"emailAddress": {"address": "teacher@example.com"}},
+        "toRecipients": [{"emailAddress": {"address": "owner@example.com"}}],
+        "ccRecipients": [],
+        "isDraft": False,
+        "receivedDateTime": "2026-10-24T10:05:00Z",
+        "internetMessageHeaders": [
+            {
+                "name": "In-Reply-To",
+                "value": "<navox-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1@mail.navox.app>",
+            },
+            {"name": "Auto-Submitted", "value": "no"},
+        ],
+        **overrides,
+    }
+
+
+@pytest.mark.asyncio
+async def test_conversation_check_reads_one_fixed_bounded_metadata_page_and_no_body():
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        assert request.method == "GET" and str(request.url).startswith(GRAPH + "/me/messages?")
+        assert request.url.params["$top"] == "50"
+        assert request.url.params["$filter"] == (
+            "receivedDateTime gt 2026-10-24T10:00:00Z and conversationId eq 'conversation''opaque'"
+        )
+        assert request.url.params["$orderby"] == "receivedDateTime desc"
+        fields = request.url.params["$select"].split(",")
+        assert "body" not in fields and "bodyPreview" not in fields
+        assert "internetMessageHeaders" in fields
+        assert 'IdType="ImmutableId"' in request.headers["prefer"]
+        return httpx.Response(
+            200,
+            json={
+                "value": [reply_headers()],
+                "@odata.nextLink": "https://untrusted.example/collect-token",
+            },
+        )
+
+    gateway = MicrosoftMailGateway(httpx.MockTransport(handler))
+    scan = await gateway.conversation_replies(
+        "fixture", "conversation'opaque", datetime(2026, 10, 24, 10, tzinfo=UTC)
+    )
+    assert scan.has_more is True and scan.unreadable is False
+    assert scan.checked_count == 1
+    assert scan.messages[0].sender == "teacher@example.com"
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"internetMessageHeaders": None},
+        {"sender": None},
+        {"receivedDateTime": "2026-10-24T10:05:00"},
+        {"internetMessageHeaders": [{"name": "References", "value": "<one@example.com>"}] * 2},
+    ],
+)
+async def test_missing_or_ambiguous_reply_metadata_marks_scan_incomplete(changes):
+    gateway = MicrosoftMailGateway(
+        httpx.MockTransport(
+            lambda _request: httpx.Response(200, json={"value": [reply_headers(**changes)]})
+        )
+    )
+    scan = await gateway.conversation_replies(
+        "fixture", "conversation'opaque", datetime(2026, 10, 24, 10, tzinfo=UTC)
+    )
+    assert scan.unreadable is True
+    assert scan.messages == ()
+    assert scan.checked_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exchange", [True, False])
+async def test_absent_token_scope_inherits_only_explicit_verified_fallback(exchange):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "access_token": "fixture-access",
+                "refresh_token": "fixture-refresh",
+                "token_type": "Bearer",
+            },
+        )
+
+    settings = Settings(
+        _env_file=None, microsoft_oauth_client_id="fixture", microsoft_oauth_client_secret="fixture"
+    )
+    gateway = MicrosoftMailGateway(httpx.MockTransport(handler))
+    retained = frozenset({"openid", "User.Read", "Mail.Read"})
+    value = await gateway.token(
+        settings,
+        code="fixture-code" if exchange else None,
+        refresh="" if exchange else "fixture-refresh",
+        verifier="v" * 64,
+        fallback_scopes=retained,
+    )
+    assert value.scopes == retained
+    assert "Mail.Send" not in value.scopes
+    assert len(calls) == 1
+    with pytest.raises(MicrosoftMailError):
+        await gateway.token(settings, code="fixture-code", verifier="v" * 64)
+    with pytest.raises(MicrosoftMailError):
+        await gateway.token(
+            settings, refresh="fixture-refresh", fallback_scopes=frozenset({"Mail.ReadWrite"})
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", [None, "", "  ", [], 12])
+async def test_explicit_empty_or_invalid_token_scope_never_uses_fallback(scope):
+    gateway = MicrosoftMailGateway(
+        httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={
+                    "access_token": "fixture-access",
+                    "refresh_token": "fixture-refresh",
+                    "token_type": "Bearer",
+                    "scope": scope,
+                },
+            )
+        )
+    )
+    settings = Settings(
+        _env_file=None, microsoft_oauth_client_id="fixture", microsoft_oauth_client_secret="fixture"
+    )
+    with pytest.raises(MicrosoftMailError):
+        await gateway.token(
+            settings,
+            refresh="fixture-refresh",
+            fallback_scopes=frozenset({"User.Read", "Mail.Read"}),
+        )
+
+
+@pytest.mark.asyncio
+async def test_explicit_narrowed_scope_is_respected_instead_of_retaining_a_broader_grant():
+    gateway = MicrosoftMailGateway(
+        httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={
+                    "access_token": "fixture-access",
+                    "refresh_token": "fixture-refresh",
+                    "token_type": "Bearer",
+                    "scope": "User.Read",
+                },
+            )
+        )
+    )
+    settings = Settings(
+        _env_file=None, microsoft_oauth_client_id="fixture", microsoft_oauth_client_secret="fixture"
+    )
+    value = await gateway.token(
+        settings,
+        refresh="fixture-refresh",
+        fallback_scopes=frozenset({"User.Read", "Mail.Read", "Mail.Send"}),
+    )
+    assert value.scopes == {"User.Read"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("malformed", [False, True])
+async def test_skipped_candidate_rows_always_mark_mailbox_coverage_incomplete(malformed):
+    row = (
+        source(
+            replyTo=[
+                {"emailAddress": {"address": "first@example.com"}},
+                {"emailAddress": {"address": "second@example.com"}},
+            ]
+        )
+        if not malformed
+        else {"id": "unreadable"}
+    )
+    gateway = MicrosoftMailGateway(
+        httpx.MockTransport(lambda _request: httpx.Response(200, json={"value": [row]}))
+    )
+    messages, incomplete = await gateway.messages("fixture")
+    assert messages == []
+    assert incomplete is True
+    with pytest.raises(MicrosoftMailError):
+        parse_message(row)

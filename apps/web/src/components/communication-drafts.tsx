@@ -15,6 +15,7 @@ import {
   selectReplyConnection,
   selectReplySource,
 } from "../lib/email-workflow";
+import type { GmailMeetingSource } from "../lib/inbox-meeting-proposal";
 import { productFeatures } from "../lib/product-features";
 import workflowStyles from "./communication-drafts.module.css";
 import { InboxMeetingCheck } from "./inbox-meeting-check";
@@ -140,6 +141,7 @@ export function CommunicationDrafts({
   onDraftCount,
   accountKey,
   timezone,
+  readMeetingSource,
 }: {
   commitments: { id: string; title: string; description?: string | null }[];
   connections: EmailConnection[];
@@ -150,6 +152,7 @@ export function CommunicationDrafts({
   onDraftCount?: (count: number) => void;
   accountKey?: string;
   timezone?: string;
+  readMeetingSource?: GmailMeetingSource | null;
 }) {
   const request = useCallback(
     <T,>(path: string, method = "GET", body?: unknown) =>
@@ -644,6 +647,13 @@ export function CommunicationDrafts({
                   key={`${selectedCommitment}:${selectedSource}:${accountKey}:${timezone}`}
                   accountKey={accountKey}
                   timezone={timezone}
+                  source={
+                    readMeetingSource?.accountKey === accountKey &&
+                    readMeetingSource.commitmentId === selectedCommitment &&
+                    readMeetingSource.sourceId === selectedSource
+                      ? readMeetingSource
+                      : null
+                  }
                   disabled={busy || paused || !!action || !selectedCommitment}
                   onUseTimes={(value) => {
                     const updated = [instructions.trim(), value]
@@ -1062,6 +1072,7 @@ export function CommunicationDrafts({
                 <p>Gmail confirmed the sent message.</p>
               )}
             <WatchSentEmail
+              timezone={timezone}
               action={action}
               connections={connections}
               paused={paused}

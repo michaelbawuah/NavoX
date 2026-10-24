@@ -1,4 +1,6 @@
 import type { EmailConnection } from "./email-workflow";
+import { studyDeadlineChoices } from "./student-planning";
+import { studentLocalTime } from "./student-time";
 
 export type ThreadWatchStatus =
   | "watching"
@@ -116,9 +118,24 @@ export function reminderAt(
   choice: ReminderChoice,
   customLocalTime: string,
   now: number,
+  timezone?: string,
 ): string {
   let selected: number;
-  if (choice === "custom") {
+  if (choice === "custom" && timezone) {
+    let choices: string[];
+    try {
+      choices = studyDeadlineChoices(customLocalTime, timezone);
+    } catch {
+      throw new Error("Choose a valid reminder date and time.");
+    }
+    if (choices.length !== 1)
+      throw new Error(
+        choices.length === 0
+          ? "That time is skipped by a clock change. Choose another reminder time."
+          : "That time happens twice during a clock change. Choose another reminder time.",
+      );
+    selected = Date.parse(choices[0]);
+  } else if (choice === "custom") {
     const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(
       customLocalTime,
     );
@@ -145,8 +162,15 @@ export function reminderAt(
   return new Date(selected).toISOString();
 }
 
-export function threadWatchTime(value: string | null): string {
+export function threadWatchTime(
+  value: string | null,
+  timezone?: string,
+): string {
   if (!value || !Number.isFinite(Date.parse(value))) return "Not checked yet";
+  if (timezone) {
+    const local = studentLocalTime(value, timezone);
+    return `${local.header} · ${local.clock}`;
+  }
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short",

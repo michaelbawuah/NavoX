@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { GmailMeetingSource } from "../lib/inbox-meeting-proposal";
 import { productFeatures } from "../lib/product-features";
 import { hasGoogleReadAccess } from "../lib/setup-progress";
 import type { TodaySource } from "../lib/source-references";
@@ -327,6 +328,8 @@ function LegacyTodayWorkspace({
   );
   const [draftCount, setDraftCount] = useState(0);
   const [selectedReplyId, setSelectedReplyId] = useState<string | null>(null);
+  const [readMeetingSource, setReadMeetingSource] =
+    useState<GmailMeetingSource | null>(null);
   const [replySelectionKey, setReplySelectionKey] = useState(0);
   const [reviewId, _setReviewId] = useState<string | null>(null);
   const handledRouteSelection = useRef(false);
@@ -1310,6 +1313,7 @@ function LegacyTodayWorkspace({
                     id={selectedReplyId}
                     accountKey={`${account.workspace.id}:${account.id}`}
                     timezone={timezone}
+                    onReadSource={setReadMeetingSource}
                   />
                 )}
                 <div
@@ -1323,6 +1327,13 @@ function LegacyTodayWorkspace({
                     timezone={timezone}
                     commitments={approvalCommitments}
                     selectedCommitmentId={selectedReplyId}
+                    readMeetingSource={
+                      readMeetingSource?.accountKey ===
+                        `${account.workspace.id}:${account.id}` &&
+                      readMeetingSource.commitmentId === selectedReplyId
+                        ? readMeetingSource
+                        : null
+                    }
                     selectionKey={replySelectionKey}
                     connections={connections}
                     paused={agentPaused}
@@ -1336,6 +1347,7 @@ function LegacyTodayWorkspace({
                   hidden={inboxTab !== "drafts"}
                 >
                   <ApprovalPanel
+                    timezone={timezone}
                     showComposer={false}
                     agentPaused={agentPaused}
                     commitments={approvalCommitments}
@@ -1348,6 +1360,7 @@ function LegacyTodayWorkspace({
                   hidden={inboxTab !== "waiting"}
                 >
                   <ThreadWatchPanel
+                    timezone={timezone}
                     key={`${account.id}:${account.workspace.id}`}
                     paused={agentPaused}
                     eligibleCommitmentIds={allItems

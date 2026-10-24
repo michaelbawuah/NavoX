@@ -4,8 +4,18 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { loadGoogleConnections } from "./account-access";
 import { useInboxReplyCount } from "./inbox-reply-count";
+import { loadOutlookReplySummary } from "./outlook-summary";
 
 vi.mock("./account-access", () => ({ loadGoogleConnections: vi.fn() }));
+vi.mock("./outlook-summary", () => ({ loadOutlookReplySummary: vi.fn() }));
+const emptyOutlook = {
+  connected: false,
+  messages: [],
+  checked_mailboxes: 0,
+  available_mailboxes: 0,
+  limited: false,
+  unavailable: false,
+};
 const connection = {
   id: "google",
   provider: "google" as const,
@@ -45,6 +55,7 @@ function Count({ owner, supplied }: { owner: string; supplied?: number }) {
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.mocked(loadGoogleConnections).mockResolvedValue([connection]);
+  vi.mocked(loadOutlookReplySummary).mockResolvedValue(emptyOutlook);
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => Response.json(feed([item]))),
@@ -93,4 +104,52 @@ it("reuses Today's loaded count without a second feed request", async () => {
   );
   expect(host.textContent).toBe("3");
   expect(fetch).not.toHaveBeenCalled();
+  expect(loadOutlookReplySummary).not.toHaveBeenCalled();
+});
+it("adds only checked Outlook candidates to the existing Gmail count", async () => {
+  vi.mocked(loadOutlookReplySummary).mockResolvedValue({
+    ...emptyOutlook,
+    connected: true,
+    checked_mailboxes: 1,
+    available_mailboxes: 4,
+    limited: true,
+    unavailable: true,
+    messages: [
+      {
+        id: "source",
+        connection_id: "mailbox",
+        sender: "professor@example.test",
+        subject: "Reply needed",
+        preview: "",
+        reason: "Asked for a reply",
+        sent_at: null,
+        open_url: null,
+      },
+    ],
+  });
+  await act(async () => root.render(<Count owner="workspace:student" />));
+  expect(host.textContent).toBe("2");
+});
+it("retains checked Outlook candidates if the Google feed is unavailable", async () => {
+  vi.mocked(loadGoogleConnections).mockRejectedValue(new Error("unavailable"));
+  vi.mocked(loadOutlookReplySummary).mockResolvedValue({
+    ...emptyOutlook,
+    connected: true,
+    checked_mailboxes: 1,
+    available_mailboxes: 1,
+    messages: [
+      {
+        id: "source",
+        connection_id: "mailbox",
+        sender: "professor@example.test",
+        subject: "Reply needed",
+        preview: "",
+        reason: "Asked for a reply",
+        sent_at: null,
+        open_url: null,
+      },
+    ],
+  });
+  await act(async () => root.render(<Count owner="workspace:student" />));
+  expect(host.textContent).toBe("1");
 });

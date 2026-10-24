@@ -5,11 +5,19 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
-from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
+from navox.api.auth import (
+    CurrentAccountDependency,
+    DatabaseSession,
+    SettingsDependency,
+    authentication_required,
+    hash_session_token,
+    request_session_token,
+)
 from navox.api.connector_management import require_origin
 from navox.api.student import result, scope
 from navox.student import service as schedule
 from navox.student_planning import completion, service, task_review
+from navox.student_planning.placement import PlacementConfirm, PlacementInput, place
 from navox.student_planning.schemas import (
     AcceptInput,
     MoveConfirm,
@@ -44,6 +52,13 @@ def expected_planning_owner(request: Request, account: CurrentAccountDependency)
     values = request.headers.getlist("X-NavoX-Account")
     if values and values != [f"{account.workspace.id}:{account.user.id}"]:
         raise HTTPException(409, "Your account changed. Reopen the plan and try again")
+
+
+def initiating_session(request: Request, settings: SettingsDependency) -> str:
+    token = request_session_token(request, settings)
+    if token is None:
+        raise authentication_required()
+    return hash_session_token(token)
 
 
 router = APIRouter(
@@ -323,7 +338,15 @@ async def preview_move(
     from navox.student_planning.moving import move
 
     require_origin(request, settings.web_origin)
-    return await result(move(database, *scope(account), block_id, payload))
+    return await result(
+        move(
+            database,
+            *scope(account),
+            block_id,
+            payload,
+            session_hash=initiating_session(request, settings),
+        )
+    )
 
 
 @router.post("/blocks/{block_id}/move/confirm", dependencies=[Depends(expected_routine_owner)])
@@ -340,7 +363,14 @@ async def confirm_move(
     require_origin(request, settings.web_origin)
     candidate = MoveInput.model_validate(payload.model_dump(exclude={"preview_hash"}))
     return await result(
-        move(database, *scope(account), block_id, candidate, expected_preview=payload.preview_hash)
+        move(
+            database,
+            *scope(account),
+            block_id,
+            candidate,
+            expected_preview=payload.preview_hash,
+            session_hash=initiating_session(request, settings),
+        )
     )
 
 
@@ -353,6 +383,46 @@ async def get_openings(
     from navox.student_planning.openings import openings
 
     return await result(openings(database, *scope(account), days))
+
+
+@router.post("/placements/preview", dependencies=[Depends(expected_routine_owner)])
+async def preview_placement(
+    payload: PlacementInput,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict[str, Any]:
+    require_origin(request, settings.web_origin)
+    return await result(
+        place(
+            database, *scope(account), payload, session_hash=initiating_session(request, settings)
+        )
+    )
+
+
+@router.post("/placements/confirm", dependencies=[Depends(expected_routine_owner)])
+async def confirm_placement(
+    payload: PlacementConfirm,
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict[str, Any]:
+    require_origin(request, settings.web_origin)
+    candidate = PlacementInput.model_validate(
+        payload.model_dump(exclude={"preview_hash", "confirmed", "recovery_acknowledged"})
+    )
+    return await result(
+        place(
+            database,
+            *scope(account),
+            candidate,
+            expected_preview=payload.preview_hash,
+            acknowledge_recovery=payload.recovery_acknowledged,
+            session_hash=initiating_session(request, settings),
+        )
+    )
 
 
 @router.post("/tasks/{task_id}/complete/preview", dependencies=[Depends(expected_routine_owner)])

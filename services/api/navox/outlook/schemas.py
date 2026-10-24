@@ -50,8 +50,19 @@ class Send(Input):
     confirmed: Literal[True]
 
 
+class ReplyCheck(Input):
+    automatic: bool = False
+
+
 class Generate(Input):
     connection_id: UUID
     source_message_id: str = Field(min_length=1, max_length=512)
     instructions: str = Field(min_length=1, max_length=2000)
     previous: Content | None = None
+
+
+class TaskPreview(Input):
+    request_id: UUID
+    connection_id: UUID
+    source_message_id: str = Field(min_length=1, max_length=512)
+    confirmed: Literal[True]

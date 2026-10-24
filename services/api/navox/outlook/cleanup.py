@@ -3,7 +3,7 @@
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import case, select, update
+from sqlalchemy import case, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.db.models import ConnectorConnection, OAuthAuthorizationAttempt
@@ -58,6 +58,18 @@ async def clear_private_data(
     identifiers = list(await database.scalars(query))
     if connector_ids is not None and not identifiers:
         return
+    from navox.outlook.service import mailbox_binding
+
+    connections = (
+        await database.scalars(
+            select(ConnectorConnection).where(
+                ConnectorConnection.id.in_(identifiers),
+                ConnectorConnection.user_id == user_id,
+                ConnectorConnection.workspace_id == workspace_id,
+            )
+        )
+    ).all()
+    bindings = [value for row in connections if (value := mailbox_binding(row)) is not None]
     await database.execute(
         update(OAuthAuthorizationAttempt)
         .where(
@@ -72,10 +84,22 @@ async def clear_private_data(
         .where(
             OutlookMailDraft.user_id == user_id,
             OutlookMailDraft.workspace_id == workspace_id,
-            OutlookMailDraft.connection_id.in_(identifiers),
+            or_(
+                OutlookMailDraft.connection_id.in_(identifiers),
+                OutlookMailDraft.mailbox_binding.in_(bindings),
+            ),
         )
         .values(
             encrypted_payload="",
+            sent_at=None,
+            reply_conversation_id=None,
+            reply_recipient_hash=None,
+            reply_state="not_checked",
+            reply_checked_at=None,
+            reply_message_id=None,
+            reply_received_at=None,
+            reply_scan_count=None,
+            reply_scan_complete=None,
             status=case(
                 (OutlookMailDraft.status == "review", "discarded"),
                 (OutlookMailDraft.status == "executing", "uncertain"),

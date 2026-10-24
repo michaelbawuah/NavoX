@@ -52,6 +52,7 @@ export function TodayNightSuggestions({
         timezone={timezone}
         now={now}
         suggestedStart={suggestion.start_at}
+        requireCalendar
         onSaved={onSaved}
         onKeepCurrent={() => setDismissed(key)}
       />

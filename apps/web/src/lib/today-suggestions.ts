@@ -24,7 +24,12 @@ export function lateNightStudyMove(
     !openings ||
     !openings.calendar_checked ||
     !openings.routine_confirmed ||
-    openings.warnings.length ||
+    openings.warnings.some(
+      (warning) =>
+        !/^Calendar meetings include your \d+-minute travel buffer on both sides\.$/.test(
+          warning,
+        ),
+    ) ||
     openings.timezone !== timezone ||
     Date.parse(openings.expires_at) <= now ||
     studentLocalTime(now, timezone).period !== "late-night"

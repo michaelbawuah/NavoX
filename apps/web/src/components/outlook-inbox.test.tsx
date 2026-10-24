@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { outlookReplyHref } from "../lib/outlook-summary";
 import { InboxWelcome } from "./inbox-welcome";
 import { OutlookInbox } from "./outlook-inbox";
 import { outlookSendKey } from "./outlook-reply-editor";
@@ -45,6 +46,7 @@ let host: HTMLDivElement, root: Root;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   sessionStorage.clear();
+  window.history.replaceState({}, "", "/inbox");
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -146,16 +148,13 @@ it("keeps unavailable status distinct from a disconnected mailbox", async () => 
   expect(host.textContent).not.toContain("Never miss an email that needs you");
   expect(host.querySelector("textarea")).toBeNull();
 });
-it("keeps an uncertain source in Waiting without offering a second send or a new draft", async () => {
+it("keeps an uncertain source separate from Waiting without offering a second send or a new draft", async () => {
   mockMailbox([draft]);
   await mount();
   expect(host.textContent).toContain("Needs reply · 0");
   expect(host.textContent).not.toContain(message.preview);
-  await act(async () =>
-    [...host.querySelectorAll("button")]
-      .find((button) => button.textContent === "Waiting · 1")!
-      .click(),
-  );
+  expect(host.textContent).toContain("Waiting · 0");
+  expect(host.textContent).toContain("Unconfirmed sends · 1");
   await act(async () =>
     [...host.querySelectorAll("button")]
       .find((button) => button.textContent?.includes(draft.subject))!
@@ -194,7 +193,8 @@ it("keeps locally unconfirmed sends out of Needs reply even before the server re
   mockMailbox([{ ...draft, status: "review" }]);
   await mount();
   expect(host.textContent).toContain("Needs reply · 0");
-  expect(host.textContent).toContain("Waiting · 1");
+  expect(host.textContent).toContain("Waiting · 0");
+  expect(host.textContent).toContain("Unconfirmed sends · 1");
   expect(host.textContent).not.toContain(message.preview);
 });
 it("refreshes mailbox reads on focus without replacing an unfinished reply", async () => {
@@ -219,4 +219,168 @@ it("refreshes mailbox reads on focus without replacing an unfinished reply", asy
   expect(
     vi.mocked(fetch).mock.calls.every(([, init]) => init?.method === "GET"),
   ).toBe(true);
+});
+it("opens Today's exact Outlook source and reuses its pending receipt without generating or sending", async () => {
+  window.history.replaceState(
+    {},
+    "",
+    outlookReplyHref("workspace:student", id, message.id),
+  );
+  mockMailbox([draft]);
+  await mount();
+  expect(host.textContent).toContain("Please choose a time to meet.");
+  expect(host.textContent).toContain("Check your reply’s outcome");
+  expect(host.querySelector("textarea")?.value).toBe(draft.body);
+  expect(host.textContent).not.toContain("Send this reply");
+  expect(new URLSearchParams(window.location.search).has("outlook_reply")).toBe(
+    false,
+  );
+  expect(
+    vi.mocked(fetch).mock.calls.every(([, init]) => init?.method === "GET"),
+  ).toBe(true);
+});
+it("ignores a Today source hint captured for another owner", async () => {
+  window.history.replaceState(
+    {},
+    "",
+    outlookReplyHref("workspace:old", id, message.id),
+  );
+  mockMailbox();
+  await mount("workspace:new");
+  expect(host.querySelector("textarea")).toBeNull();
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.some(([url]) =>
+        String(url).endsWith(`/messages/${encodeURIComponent(message.id)}`),
+      ),
+  ).toBe(false);
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.every(
+        ([, init]) =>
+          new Headers(init?.headers).get("X-NavoX-Account") === "workspace:new",
+      ),
+  ).toBe(true);
+});
+
+it("counts only checked waiting replies and keeps unknown checks and replied receipts distinct", async () => {
+  const sent = {
+    ...draft,
+    status: "completed",
+    verified_at: "2026-10-24T10:01:00Z",
+    sent_at: "2026-10-24T10:00:00Z",
+  };
+  mockMailbox([
+    {
+      ...sent,
+      reply_state: "waiting",
+      reply_checked_at: "2026-10-24T10:02:00Z",
+      reply_scan_count: 0,
+      reply_scan_complete: true,
+    },
+    {
+      ...sent,
+      id: "22222222-2222-4222-8222-222222222222",
+      subject: "Unchecked reply",
+      reply_state: "unknown",
+      reply_scan_complete: false,
+    },
+    {
+      ...sent,
+      id: "33333333-3333-4333-8333-333333333333",
+      subject: "A reply arrived",
+      reply_state: "replied",
+      reply_received_at: "2026-10-24T10:03:00Z",
+    },
+  ]);
+  await mount();
+  expect(host.textContent).toContain("Waiting · 1");
+  expect(host.textContent).toContain("Sent replies · 1");
+  expect(host.textContent).toContain("Reply status needs checking · 1");
+  expect(host.textContent).not.toContain("Unconfirmed sends ·");
+  await act(async () =>
+    [...host.querySelectorAll("button")]
+      .find((button) => button.textContent === "Sent replies · 1")!
+      .click(),
+  );
+  expect(host.textContent).toContain("A reply arrived");
+  expect(host.textContent).toContain("not your full Outlook Sent folder");
+  expect(
+    vi.mocked(fetch).mock.calls.every(([, init]) => init?.method === "GET"),
+  ).toBe(true);
+});
+
+it("retires a waiting reply only after the explicit owner-bound reply check returns evidence", async () => {
+  let saved = {
+    ...draft,
+    status: "completed",
+    verified_at: "2026-10-24T10:01:00Z",
+    sent_at: "2026-10-24T10:00:00Z",
+    reply_state: "waiting",
+    reply_checked_at: "2026-10-24T10:02:00Z",
+    reply_received_at: null as string | null,
+    reply_scan_count: 0,
+    reply_scan_complete: true,
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: unknown, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/status"))
+        return Response.json({
+          configured: true,
+          connections: [connection],
+          notice: "",
+        });
+      if (path.endsWith("/drafts")) return Response.json([saved]);
+      if (path.endsWith("/messages"))
+        return Response.json({ messages: [], has_more: false, notice: "" });
+      if (path.includes("/messages/"))
+        return Response.json({
+          ...message,
+          to: connection.email,
+          body: "Please choose a time.",
+        });
+      if (path.endsWith(`/drafts/${id}/check-replies`)) {
+        expect(init?.method).toBe("POST");
+        expect(new Headers(init?.headers).get("X-NavoX-Account")).toBe(
+          "workspace:student",
+        );
+        expect(JSON.parse(String(init?.body))).toEqual({});
+        saved = {
+          ...saved,
+          reply_state: "replied",
+          reply_scan_count: 1,
+          reply_received_at: "2026-10-24T10:03:00Z",
+        };
+        return Response.json(saved);
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    }),
+  );
+  await mount();
+  await act(async () =>
+    [...host.querySelectorAll("button")]
+      .find((button) => button.textContent === "Waiting · 1")!
+      .click(),
+  );
+  await act(async () =>
+    [...host.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes(draft.subject))!
+      .click(),
+  );
+  expect(host.textContent).toContain("read up to 50 later messages");
+  await act(async () =>
+    [...host.querySelectorAll("button")]
+      .find((button) => button.textContent === "Check for replies")!
+      .click(),
+  );
+  expect(host.textContent).toContain("Waiting · 0");
+  expect(host.textContent).toContain("Sent replies · 1");
+  expect(host.textContent).toContain("Reply found");
+  expect(
+    vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith("/send")),
+  ).toBe(false);
 });

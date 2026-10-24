@@ -23,9 +23,13 @@ from navox.api.auth import (
 )
 from navox.connectors.secrets import SecretBrokerError
 from navox.core.settings import Settings
-from navox.outlook import service
-from navox.outlook.schemas import Connect, Generate, Preview, Revise, Send
+from navox.coursework.service import CourseworkError
+from navox.outlook import replies, service, tasks
+from navox.outlook.schemas import Connect, Generate, Preview, ReplyCheck, Revise, Send, TaskPreview
 from navox.providers.microsoft_mail import MicrosoftMailError
+from navox.student.service import StudentError
+from navox.student_email.schemas import AcceptInput, CorrectionInput, EraseInput
+from navox.student_email.service import EmailError
 
 PRIVATE = {"Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer"}
 
@@ -48,7 +52,7 @@ class PrivateOutlookRoute(APIRoute):
                 raise HTTPException(
                     error.status_code, error.detail, headers={**(error.headers or {}), **PRIVATE}
                 ) from None
-            except service.OutlookError as error:
+            except (service.OutlookError, EmailError, CourseworkError, StudentError) as error:
                 raise HTTPException(error.status_code, str(error), headers=PRIVATE) from None
             except MicrosoftMailError as error:
                 status = {
@@ -270,6 +274,18 @@ async def check(
     return await service.check(database, settings, scope, draft_id)
 
 
+@router.post("/drafts/{draft_id}/check-replies")
+async def check_replies(
+    draft_id: UUID,
+    request: Request,
+    scope: ScopeDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict[str, object]:
+    payload = await read_input(request, ReplyCheck)
+    return await replies.reconcile(database, settings, scope, draft_id, automatic=payload.automatic)
+
+
 @router.post("/generate")
 async def generate(
     request: Request,
@@ -278,3 +294,67 @@ async def generate(
     settings: SettingsDependency,
 ) -> dict[str, object]:
     return await service.generate(database, settings, scope, await read_input(request, Generate))
+
+
+@router.get("/task-context")
+async def task_context(
+    scope: ScopeDependency, database: DatabaseSession, settings: SettingsDependency
+) -> dict[str, Any]:
+    return await tasks.context(database, settings, scope)
+
+
+@router.post("/task-reviews")
+async def task_preview(
+    request: Request,
+    scope: ScopeDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict[str, Any]:
+    return await tasks.preview(database, settings, scope, await read_input(request, TaskPreview))
+
+
+@router.get("/task-reviews/{review_id}")
+async def task_review(
+    review_id: UUID, scope: ScopeDependency, database: DatabaseSession, settings: SettingsDependency
+) -> dict[str, Any]:
+    return await tasks.read(database, settings, scope, review_id)
+
+
+@router.patch("/task-reviews/{review_id}")
+async def task_correct(
+    review_id: UUID,
+    request: Request,
+    scope: ScopeDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict[str, Any]:
+    return await tasks.correct(
+        database, settings, scope, review_id, await read_input(request, CorrectionInput)
+    )
+
+
+@router.post("/task-reviews/{review_id}/accept-task")
+async def task_accept(
+    review_id: UUID,
+    request: Request,
+    scope: ScopeDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict[str, Any]:
+    return await tasks.accept(
+        database, settings, scope, review_id, await read_input(request, AcceptInput)
+    )
+
+
+@router.delete("/task-reviews/{review_id}")
+async def task_erase(
+    review_id: UUID, request: Request, scope: ScopeDependency, database: DatabaseSession
+) -> dict[str, object]:
+    return await tasks.erase(database, scope, review_id, await read_input(request, EraseInput))
+
+
+@router.delete("/task-sources/{source_id}")
+async def task_forget(
+    source_id: UUID, scope: ScopeDependency, database: DatabaseSession
+) -> dict[str, object]:
+    return await tasks.forget(database, scope, source_id)

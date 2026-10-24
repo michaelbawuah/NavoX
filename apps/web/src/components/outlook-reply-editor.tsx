@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { InboxMeetingSource } from "../lib/inbox-meeting-proposal";
 import {
   type OutlookConnection,
   type OutlookDraft,
@@ -81,6 +82,20 @@ export function OutlookReplyEditor({
   const unexpired =
     !!draft?.expires_at && Date.parse(draft.expires_at) > Date.now();
   const sourceId = draft?.source_message_id ?? message?.id;
+  const meetingSource = useMemo<InboxMeetingSource | null>(
+    () =>
+      message && message.id === sourceId
+        ? {
+            accountKey,
+            key: `microsoft:${connection.id}:${message.id}`,
+            subject: message.subject,
+            body: message.body,
+            sentAt: message.sent_at,
+            truncated: message.truncated,
+          }
+        : null,
+    [accountKey, connection.id, message, sourceId],
+  );
   function apply(value: OutlookDraft) {
     setDraft(value);
     setSubject(value.subject);
@@ -301,6 +316,7 @@ export function OutlookReplyEditor({
               accountKey={accountKey}
               timezone={timezone}
               disabled={busy}
+              source={meetingSource}
               onUseTimes={(value) => {
                 setInstructions(value);
                 setConfirmed(false);

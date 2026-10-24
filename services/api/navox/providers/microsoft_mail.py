@@ -35,6 +35,11 @@ _SELECT = (
     "id,subject,from,toRecipients,replyTo,body,bodyPreview,receivedDateTime,"
     "sentDateTime,internetMessageId,conversationId,webLink,flag,isDraft"
 )
+REPLY_SCAN_LIMIT = 50
+_REPLY_SELECT = (
+    "id,conversationId,from,sender,toRecipients,ccRecipients,receivedDateTime,"
+    "isDraft,internetMessageHeaders"
+)
 
 
 class MicrosoftMailError(ValueError):
@@ -57,6 +62,35 @@ class MailIdentity:
     subject: str
     account_id: str
     email: str
+
+
+@dataclass(frozen=True)
+class MailReceipt:
+    id: str
+    sent_at: datetime
+    conversation_id: str
+    recipient: str
+
+
+@dataclass(frozen=True)
+class MailReply:
+    id: str
+    conversation_id: str
+    sender: str
+    from_address: str
+    recipients: tuple[str, ...]
+    received_at: datetime
+    is_draft: bool
+    references: tuple[str, ...]
+    automated: bool
+
+
+@dataclass(frozen=True)
+class MailReplyScan:
+    messages: tuple[MailReply, ...]
+    checked_count: int
+    has_more: bool
+    unreadable: bool
 
 
 @dataclass(frozen=True)
@@ -97,7 +131,7 @@ def email_address(value: object) -> str:
 
 
 def normalize_scopes(value: object) -> frozenset[str]:
-    if not isinstance(value, str) or len(value) > 8192:
+    if not isinstance(value, str) or not value.strip() or len(value) > 8192:
         raise MicrosoftMailError("invalid_response")
     accepted = {item.casefold(): item for item in (*READ_SCOPES, "Mail.Send")}
     scopes = set()
@@ -172,6 +206,61 @@ def _short(value: object, maximum: int, *, optional: bool = False) -> str:
     if not isinstance(value, str) or len(value) > maximum or "\x00" in value:
         raise MicrosoftMailError("invalid_response")
     return value
+
+
+def _timestamp(value: object) -> datetime:
+    try:
+        timestamp = datetime.fromisoformat(_short(value, 64).replace("Z", "+00:00"))
+        if timestamp.tzinfo is None:
+            raise ValueError
+        return timestamp.astimezone(UTC)
+    except ValueError:
+        raise MicrosoftMailError("invalid_response") from None
+
+
+def parse_reply(raw: object) -> MailReply:
+    """Header-only reply evidence; ambiguous participant formats are not proof."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("isDraft"), bool):
+        raise MicrosoftMailError("invalid_response")
+    to, cc = raw.get("toRecipients"), raw.get("ccRecipients")
+    if not isinstance(to, list) or not isinstance(cc, list) or len(to) + len(cc) > 500:
+        raise MicrosoftMailError("invalid_response")
+    headers = raw.get("internetMessageHeaders")
+    if not isinstance(headers, list) or len(headers) > 200:
+        raise MicrosoftMailError("invalid_response")
+    references: list[str] = []
+    automated = False
+    seen: set[str] = set()
+    for header in headers:
+        if not isinstance(header, dict):
+            raise MicrosoftMailError("invalid_response")
+        name = _short(header.get("name"), 128).casefold()
+        value = _short(header.get("value"), 16_000)
+        if name in {"in-reply-to", "references", "auto-submitted"}:
+            if name in seen:
+                raise MicrosoftMailError("invalid_response")
+            seen.add(name)
+        if name in {"in-reply-to", "references"}:
+            references.extend(re.findall(r"<[^<>\s]{1,998}>", value))
+        if name == "auto-submitted" and value.strip().casefold() != "no":
+            automated = True
+        if name == "content-type" and "multipart/report" in value.casefold():
+            automated = True
+    identifier = _short(raw.get("id"), 512)
+    conversation = _short(raw.get("conversationId"), 512)
+    if not identifier or not conversation:
+        raise MicrosoftMailError("invalid_response")
+    return MailReply(
+        id=identifier,
+        conversation_id=conversation,
+        sender=_address(raw.get("sender")),
+        from_address=_address(raw.get("from")),
+        recipients=tuple(_address(row) for row in [*to, *cc]),
+        received_at=_timestamp(raw.get("receivedDateTime")),
+        is_draft=raw["isDraft"],
+        references=tuple(references),
+        automated=automated,
+    )
 
 
 def parse_message(raw: object) -> MailMessage:
@@ -382,7 +471,13 @@ class MicrosoftMailGateway:
         return result
 
     async def token(
-        self, settings: Settings, *, code: str | None = None, verifier: str = "", refresh: str = ""
+        self,
+        settings: Settings,
+        *,
+        code: str | None = None,
+        verifier: str = "",
+        refresh: str = "",
+        fallback_scopes: frozenset[str] | None = None,
     ) -> MailToken:
         secret = settings.microsoft_oauth_client_secret
         if (
@@ -409,7 +504,15 @@ class MicrosoftMailGateway:
         rotated = _short(raw.get("refresh_token") or refresh, 16_000)
         if not access or not rotated or str(raw.get("token_type", "")).casefold() != "bearer":
             raise MicrosoftMailError("invalid_response")
-        return MailToken(access, rotated, normalize_scopes(raw.get("scope")))
+        if "scope" in raw:
+            scopes = normalize_scopes(raw["scope"])
+        else:
+            # Only the verified consent request or previously stored grant supplies
+            # absence-only fallback (OAuth 2.0 sections 5.1 and 6). Never widen it.
+            if not fallback_scopes or not fallback_scopes.issubset({*READ_SCOPES, "Mail.Send"}):
+                raise MicrosoftMailError("invalid_response")
+            scopes = fallback_scopes
+        return MailToken(access, rotated, scopes)
 
     async def identity(self, token: str) -> MailIdentity:
         # Provider-protected identity, never unverified claims decoded from a token.
@@ -440,13 +543,15 @@ class MicrosoftMailGateway:
         if not isinstance(rows, list) or len(rows) > 50:
             raise MicrosoftMailError("invalid_response")
         messages = []
+        incomplete = bool(raw.get("@odata.nextLink"))
         for row in rows:
             try:
                 messages.append(parse_message(row))
             except MicrosoftMailError:
                 # Unsupported/malformed sender formats cannot authorize a reply.
+                incomplete = True
                 continue
-        return messages, bool(raw.get("@odata.nextLink"))
+        return messages, incomplete
 
     async def message(self, token: str, identifier: str) -> MailMessage:
         if not identifier or len(identifier) > 512 or any(ord(c) < 32 for c in identifier):
@@ -465,7 +570,9 @@ class MicrosoftMailGateway:
     async def send(self, token: str, mime: bytes) -> None:
         await self._request("POST", GRAPH + "/me/sendMail", token=token, mime=mime, maximum=32_000)
 
-    async def sent_receipt(self, token: str, message_id: str, expected_hash: str) -> str | None:
+    async def sent_receipt(
+        self, token: str, message_id: str, expected_hash: str
+    ) -> MailReceipt | None:
         if not re.fullmatch(r"<navox-[0-9a-f]{32}-[1-9][0-9]*@mail\.navox\.app>", message_id):
             raise MicrosoftMailError("invalid_message")
         raw = await self._json(
@@ -474,7 +581,7 @@ class MicrosoftMailGateway:
             token=token,
             params={
                 "$filter": f"internetMessageId eq '{message_id}'",
-                "$select": "id,isDraft,internetMessageId,sentDateTime",
+                "$select": "id,isDraft,internetMessageId,sentDateTime,conversationId",
                 "$top": "2",
             },
         )
@@ -495,4 +602,55 @@ class MicrosoftMailGateway:
             GRAPH + "/me/messages/" + quote(identifier, safe="") + "/$value",
             token=token,
         )
-        return identifier if receipt_fingerprint(receipt) == expected_hash else None
+        if receipt_fingerprint(receipt) != expected_hash:
+            return None
+        parsed = BytesParser(policy=policy.default).parsebytes(receipt)
+        recipients = getaddresses(parsed.get_all("to", []))
+        if len(recipients) != 1:
+            return None
+        return MailReceipt(
+            id=identifier,
+            sent_at=_timestamp(row.get("sentDateTime")),
+            conversation_id=_short(row.get("conversationId"), 512, optional=True),
+            recipient=email_address(recipients[0][1]),
+        )
+
+    async def conversation_replies(
+        self, token: str, conversation_id: str, sent_at: datetime
+    ) -> MailReplyScan:
+        if (
+            not conversation_id
+            or len(conversation_id) > 512
+            or any(ord(c) < 32 for c in conversation_id)
+        ):
+            raise MicrosoftMailError("invalid_message")
+        if sent_at.tzinfo is None:
+            raise MicrosoftMailError("invalid_message")
+        # The ordered property precedes other filter properties, as Graph requires.
+        # One metadata-only page is checked; no provider nextLink is followed.
+        after = sent_at.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        quoted = conversation_id.replace("'", "''")
+        raw = await self._json(
+            "GET",
+            GRAPH + "/me/messages",
+            token=token,
+            params={
+                "$filter": f"receivedDateTime gt {after} and conversationId eq '{quoted}'",
+                "$orderby": "receivedDateTime desc",
+                "$top": str(REPLY_SCAN_LIMIT),
+                "$select": _REPLY_SELECT,
+            },
+        )
+        rows = raw.get("value")
+        if not isinstance(rows, list) or len(rows) > REPLY_SCAN_LIMIT:
+            raise MicrosoftMailError("invalid_response")
+        messages: list[MailReply] = []
+        unreadable = False
+        for row in rows:
+            try:
+                messages.append(parse_reply(row))
+            except MicrosoftMailError:
+                unreadable = True
+        return MailReplyScan(
+            tuple(messages), len(rows), bool(raw.get("@odata.nextLink")), unreadable
+        )

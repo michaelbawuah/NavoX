@@ -40,6 +40,15 @@ export interface OutlookDraft {
   verified_at: string | null;
   notice: string | null;
   content_available: boolean;
+  sent_at?: string | null;
+  reply_state?: "not_checked" | "waiting" | "replied" | "unknown";
+  reply_checked_at?: string | null;
+  reply_received_at?: string | null;
+  reply_scan_count?: number | null;
+  reply_scan_complete?: boolean | null;
+  reply_scan_limit?: number;
+  reply_notice?: string | null;
+  reply_tracking_ready?: boolean;
 }
 const api =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
@@ -186,6 +195,48 @@ export function readOutlookDraft(value: unknown): OutlookDraft {
     v.status !== "discarded"
   )
     return invalid();
+  const replyState = v.reply_state ?? "not_checked";
+  if (
+    !["not_checked", "waiting", "replied", "unknown"].includes(
+      String(replyState),
+    )
+  )
+    return invalid();
+  const sentAt = instant(v.sent_at),
+    checkedAt = instant(v.reply_checked_at),
+    receivedAt = instant(v.reply_received_at);
+  const scanCount =
+    v.reply_scan_count === undefined || v.reply_scan_count === null
+      ? null
+      : v.reply_scan_count;
+  if (
+    scanCount !== null &&
+    (!Number.isSafeInteger(scanCount) ||
+      Number(scanCount) < 0 ||
+      Number(scanCount) > 50)
+  )
+    return invalid();
+  const scanComplete =
+    v.reply_scan_complete === undefined || v.reply_scan_complete === null
+      ? null
+      : boolean(v.reply_scan_complete);
+  if (v.reply_scan_limit !== undefined && v.reply_scan_limit !== 50)
+    return invalid();
+  if (
+    ["waiting", "replied"].includes(String(replyState)) &&
+    (v.status !== "completed" || !instant(v.verified_at))
+  )
+    return invalid();
+  if (
+    replyState === "waiting" &&
+    (!sentAt || !checkedAt || scanComplete !== true || scanCount === null)
+  )
+    return invalid();
+  if (
+    replyState === "replied" &&
+    (!sentAt || !receivedAt || Date.parse(receivedAt) <= Date.parse(sentAt))
+  )
+    return invalid();
   return {
     id: identifier(v.id),
     revision: Number(v.revision),
@@ -200,6 +251,18 @@ export function readOutlookDraft(value: unknown): OutlookDraft {
     expires_at: instant(v.expires_at),
     verified_at: instant(v.verified_at),
     notice: optionalText(v.notice, 2000),
+    sent_at: sentAt,
+    reply_state: replyState as OutlookDraft["reply_state"],
+    reply_checked_at: checkedAt,
+    reply_received_at: receivedAt,
+    reply_scan_count: scanCount === null ? null : Number(scanCount),
+    reply_scan_complete: scanComplete,
+    reply_scan_limit: 50,
+    reply_notice: optionalText(v.reply_notice, 2000),
+    reply_tracking_ready:
+      v.reply_tracking_ready === undefined
+        ? false
+        : boolean(v.reply_tracking_ready),
     content_available:
       v.content_available === undefined ? true : boolean(v.content_available),
   };

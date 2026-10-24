@@ -72,16 +72,27 @@ it("shows two explicitly synthetic provider-backed rows without sending, generat
 });
 
 it("reads the selected live message and switches without showing the previous body", async () => {
+  const onReadSource = vi.fn();
   await act(async () =>
     root.render(
       <InboxMessage
         id={inboxFixture[0].id}
         accountKey="workspace:student"
         timezone="America/New_York"
+        onReadSource={onReadSource}
       />,
     ),
   );
   expect(host.textContent).toContain(inboxFixture[0].body);
+  expect(onReadSource).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      accountKey: "workspace:student",
+      commitmentId: inboxFixture[0].id,
+      sourceId: inboxFixture[0].sourceId,
+      body: inboxFixture[0].body,
+      sentAt: inboxFixture[0].sent_at,
+    }),
+  );
   expect(host.querySelector("a")?.getAttribute("href")).toBe(
     inboxFixture[0].open_url,
   );
@@ -91,11 +102,86 @@ it("reads the selected live message and switches without showing the previous bo
         id={inboxFixture[1].id}
         accountKey="workspace:student"
         timezone="America/New_York"
+        onReadSource={onReadSource}
       />,
     ),
   );
   expect(host.textContent).toContain(inboxFixture[1].body);
   expect(host.textContent).not.toContain(inboxFixture[0].body);
+  expect(onReadSource).toHaveBeenCalledWith(null);
+  expect(onReadSource).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      sourceId: inboxFixture[1].sourceId,
+      body: inboxFixture[1].body,
+    }),
+  );
+});
+
+it("never forwards a late provider body from the previous owner into meeting review", async () => {
+  let finish!: (value: Response) => void;
+  const onReadSource = vi.fn();
+  const fixture = inboxFixture[0];
+  vi.mocked(fetch).mockImplementation(async (url, init) => {
+    if (!String(url).endsWith("/message"))
+      return Response.json([
+        { id: fixture.sourceId, label: "Synthetic QA source" },
+      ]);
+    if (
+      new Headers(init?.headers).get("X-NavoX-Account") === "workspace:student"
+    )
+      return new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+    return Response.json({
+      ...fixture,
+      body: "New owner source",
+      source_id: fixture.sourceId,
+      truncated: false,
+    });
+  });
+  await act(async () =>
+    root.render(
+      <InboxMessage
+        id={fixture.id}
+        accountKey="workspace:student"
+        timezone="America/New_York"
+        onReadSource={onReadSource}
+      />,
+    ),
+  );
+  await act(async () =>
+    root.render(
+      <InboxMessage
+        id={fixture.id}
+        accountKey="workspace:new"
+        timezone="America/New_York"
+        onReadSource={onReadSource}
+      />,
+    ),
+  );
+  await act(async () =>
+    finish(
+      Response.json({
+        ...fixture,
+        body: "Late private body",
+        source_id: fixture.sourceId,
+        truncated: false,
+      }),
+    ),
+  );
+  expect(host.textContent).toContain("New owner source");
+  expect(host.textContent).not.toContain("Late private body");
+  expect(
+    onReadSource.mock.calls.every(
+      ([value]) => value === null || value.accountKey === "workspace:new",
+    ),
+  ).toBe(true);
+  expect(onReadSource).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      accountKey: "workspace:new",
+      body: "New owner source",
+    }),
+  );
 });
 
 it("keeps failed provider details private and offers a retry", async () => {

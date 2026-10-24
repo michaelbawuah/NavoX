@@ -14,6 +14,7 @@ from navox.student import service as schedule
 from navox.student.occurrences import project
 from navox.student_planning import calendar_busy, service
 from navox.student_planning.alarm import alarm_schedule
+from navox.student_planning.authority import require_session
 from navox.student_planning.planner import build_plan
 from navox.student_planning.schemas import MoveInput, Preferences
 
@@ -25,9 +26,11 @@ async def move(
     block_id: UUID,
     payload: MoveInput,
     *,
+    session_hash: str,
     expected_preview: str | None = None,
 ) -> dict[str, Any]:
     user = await schedule.owner(database, user_id, workspace_id, lock=True)
+    await require_session(database, user_id, session_hash)
     body = {
         "block_id": str(block_id),
         "input": payload.model_dump(mode="json"),
@@ -51,6 +54,10 @@ async def move(
     ):
         raise schedule.StudentError(409, "Only an unchanged future study block can move")
     start, end = payload.start_at, payload.start_at + timedelta(minutes=block.minutes)
+    if payload.window_end_at and end > payload.window_end_at:
+        raise schedule.StudentError(422, "The block does not fit inside the selected free window")
+    if payload.require_calendar and planning.preferences_revision < 1:
+        raise schedule.StudentError(409, "Review your routine before using this free window")
     if start <= now or start > now + timedelta(days=14) or (task.due_at and end > utc(task.due_at)):
         raise schedule.StudentError(
             422, "Choose a future time within 14 days and before the deadline"
@@ -98,6 +105,10 @@ async def move(
         travel_minutes=prefs.travel_minutes,
     )
     busy.extend(external.intervals)
+    if payload.require_calendar and not external.connected:
+        raise schedule.StudentError(
+            409, "Connect your calendar before confirming this free-time suggestion"
+        )
     wake = alarm_schedule(prefs, user.timezone, day, classes, days=1)[0]
     overrides = (
         {day: datetime.fromisoformat(wake["scheduled_at"]) if wake["scheduled_at"] else None}
@@ -107,6 +118,10 @@ async def move(
     capacity = build_plan(
         [], prefs, user.timezone, start_at=left, end_at=right, busy=busy, wake_overrides=overrides
     )
+    if capacity.warnings:
+        raise schedule.StudentError(
+            409, "Resolve routine clock-change warnings before moving study time"
+        )
     others = list(
         await database.scalars(
             select(StudentStudyBlock)
@@ -127,6 +142,37 @@ async def move(
     allowance = sum(r.free_minutes - r.buffer_minutes for r in capacity.capacities)
     if sum(r.minutes for r in others) + block.minutes > allowance:
         raise schedule.StudentError(409, "That day has too little free time after its study buffer")
+    deadline = min(right, utc(task.due_at)) if task.due_at else right
+    remaining_capacity = build_plan(
+        [],
+        prefs,
+        user.timezone,
+        start_at=start,
+        end_at=deadline,
+        busy=busy,
+        wake_overrides=overrides,
+    )
+    if remaining_capacity.warnings:
+        raise schedule.StudentError(
+            409, "Resolve routine clock-change warnings before moving study time"
+        )
+    remaining_allowance = sum(
+        row.free_minutes - row.buffer_minutes for row in remaining_capacity.capacities
+    )
+    remaining_used = sum(
+        max(
+            0,
+            int(
+                (min(utc(row.end_at), deadline) - max(utc(row.start_at), start)).total_seconds()
+                // 60
+            ),
+        )
+        for row in others
+    )
+    if remaining_used + block.minutes > remaining_allowance:
+        raise schedule.StudentError(
+            409, "That move would use the 15% buffer before the deadline. Choose an earlier window"
+        )
     rest = timedelta(minutes=prefs.break_minutes)
     busy.extend((utc(r.start_at) - rest, utc(r.end_at) + rest) for r in others)
     proposed = service.task_view(task).model_copy(update={"remaining_minutes": block.minutes})
@@ -177,6 +223,7 @@ async def move(
         "alarms_change": False,
         "calendar_events_change": False,
     }
+    await require_session(database, user_id, session_hash)
     if expected_preview:
         if fingerprint != expected_preview:
             raise schedule.StudentError(409, "The schedule changed. Review the move again")

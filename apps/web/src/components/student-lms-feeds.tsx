@@ -494,11 +494,31 @@ function StudentLmsFeedsAccount({
     operation = useRef(false),
     confirmId = useRef("");
   const uncertainPlanning = useRef(false);
+  const reading = useRef(false);
+  const backgroundBlocked = useRef(false);
+  backgroundBlocked.current =
+    busy ||
+    uncertain ||
+    adding ||
+    !!preview ||
+    !!deleting ||
+    !!matchEditor ||
+    !!assignment;
   const id = useId();
   const load = useCallback(
-    async (reset = false) => {
+    async (reset = false, quiet = false) => {
+      const protectedView = () =>
+        backgroundBlocked.current || operation.current;
+      if (
+        quiet &&
+        (document.visibilityState === "hidden" ||
+          reading.current ||
+          protectedView())
+      )
+        return false;
       const request = ++generation.current;
-      setLoading(true);
+      reading.current = true;
+      if (!quiet) setLoading(true);
       try {
         const [nextFeeds, page, nextCourses, nextProfile, nextTasks] =
           await Promise.all([
@@ -513,6 +533,7 @@ function StudentLmsFeedsAccount({
               : Promise.resolve([]),
           ]);
         if (request !== generation.current) return false;
+        if (quiet && protectedView()) return false;
         setFeeds(nextFeeds);
         setItems(page.items);
         setCursor(page.next_cursor);
@@ -555,11 +576,14 @@ function StudentLmsFeedsAccount({
           setError(
             cause instanceof LmsFeedRequestError
               ? cause.message
-              : "Saved calendars could not be loaded. Reload to try again.",
+              : "Saved calendars could not load. Try again in a moment.",
           );
         return false;
       } finally {
-        if (request === generation.current) setLoading(false);
+        if (request === generation.current) {
+          reading.current = false;
+          if (!quiet) setLoading(false);
+        }
       }
     },
     [planningEnabled],
@@ -567,9 +591,17 @@ function StudentLmsFeedsAccount({
   useEffect(() => {
     alive.current = true;
     void load();
+    const quiet = () => void load(false, true);
+    window.addEventListener("focus", quiet);
+    document.addEventListener("visibilitychange", quiet);
+    const timer = window.setInterval(quiet, 60_000);
     return () => {
       alive.current = false;
       ++generation.current;
+      reading.current = false;
+      window.removeEventListener("focus", quiet);
+      document.removeEventListener("visibilitychange", quiet);
+      window.clearInterval(timer);
     };
   }, [load]);
   const locked = loading || busy || uncertain;
@@ -775,7 +807,7 @@ function StudentLmsFeedsAccount({
               disabled={busy || loading}
               onClick={() => void load()}
             >
-              Reload saved calendars
+              Try again
             </button>
           )}
         </p>
@@ -793,7 +825,7 @@ function StudentLmsFeedsAccount({
             disabled={busy || loading}
             onClick={() => void load(true)}
           >
-            Reload saved connections
+            Check saved connections
           </button>
         </div>
       )}
@@ -973,13 +1005,6 @@ function StudentLmsFeedsAccount({
               need.
             </p>
           </div>
-          <button
-            type="button"
-            disabled={busy || loading}
-            onClick={() => void load(uncertain)}
-          >
-            {loading ? "Refreshing…" : "Refresh saved status"}
-          </button>
         </div>
         {loading && !profile ? (
           <p className={styles.muted}>Opening your saved connections…</p>
@@ -1062,7 +1087,7 @@ function StudentLmsFeedsAccount({
                             setNotice(
                               result.state === "paused"
                                 ? "Calendar paused. No automatic updates will run."
-                                : "Calendar resumed. Refresh its saved status to check the next update.",
+                                : "Calendar resumed. New dates will appear here when they are ready.",
                             );
                         }}
                       >
@@ -1083,7 +1108,7 @@ function StudentLmsFeedsAccount({
                           );
                           if (result)
                             setNotice(
-                              "A calendar check was requested. Refresh saved status in a moment to see its result.",
+                              "A calendar check was requested. New dates will appear here when they are ready.",
                             );
                         }}
                       >

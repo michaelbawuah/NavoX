@@ -137,6 +137,7 @@ export function WorkspaceShell({
     suppliedInboxCount,
     timezone ?? savedZone ?? undefined,
   );
+  const inboxCountLabel = `${inboxCount} possible ${inboxCount === 1 ? "reply" : "replies"} in checked mail`;
   const profile = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     let live = true;
@@ -259,10 +260,7 @@ export function WorkspaceShell({
         <Icon name={label} />
         <span>{label}</span>
         {label === "Inbox" && inboxCount > 0 && (
-          <span
-            className={styles.badge}
-            title={`${inboxCount} emails need a reply`}
-          >
+          <span className={styles.badge} title={inboxCountLabel}>
             {inboxCount > 99 ? "99+" : inboxCount}
           </span>
         )}
@@ -368,9 +366,7 @@ export function WorkspaceShell({
               href="/inbox"
               className={styles.mobileInbox}
               aria-label={
-                inboxCount > 0
-                  ? `Inbox, ${inboxCount} emails need a reply`
-                  : "Inbox"
+                inboxCount > 0 ? `Inbox, ${inboxCountLabel}` : "Inbox"
               }
             >
               <Icon name="Inbox" />

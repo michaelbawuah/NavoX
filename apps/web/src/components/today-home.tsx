@@ -8,6 +8,11 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  loadOutlookReplySummary,
+  type OutlookReplySummary,
+  outlookReplyHref,
+} from "../lib/outlook-summary";
 import { productFeatures } from "../lib/product-features";
 import {
   createSavedBoardsApi,
@@ -49,6 +54,7 @@ import {
 import { NoaArtwork } from "./noa-artwork";
 import { noaVibes, useNoaChoice } from "./noa-settings";
 import { TodayEarlyAlarm } from "./today-early-alarm";
+import { TodayFreeWindow } from "./today-free-window";
 import styles from "./today-home.module.css";
 import { TodayNext } from "./today-next";
 import { TodayEveningAlarm, TodayNightActions } from "./today-night";
@@ -75,6 +81,7 @@ type Data = {
   goals: StudentGoal[];
   boards: SavedBoardSummary[];
   calendarConnected: boolean;
+  outlook: OutlookReplySummary | null;
   alarms: AlarmOccurrence[];
   complete: boolean;
   receivedAt: number;
@@ -121,6 +128,7 @@ function TodayHomeAccount({
   const voxRequest = useVoxRequest();
   const openings = useStudyOpenings(accountKey, 1, data?.plan?.revision ?? 0);
   const epoch = useRef(0);
+  const loadController = useRef<AbortController | null>(null);
   const setupKey = `navox:setup:${accountKey}`,
     voxKey = `navox:tried-vox:${accountKey}`;
   useEffect(() => {
@@ -145,10 +153,12 @@ function TodayHomeAccount({
   ]);
   const load = useCallback(async () => {
     const turn = ++epoch.current;
+    loadController.current?.abort();
     setBusy(true);
     const zone =
       account.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
     const controller = new AbortController();
+    loadController.current = controller;
     const results = await Promise.allSettled([
       studentRequest("/timetable?days=1", readStudentTimetable),
       productFeatures.studentPlanning
@@ -180,10 +190,20 @@ function TodayHomeAccount({
       productFeatures.studentPlanning
         ? routineRequest(accountKey, "/alarm", readAlarmView).catch(() => null)
         : Promise.resolve(null),
+      loadOutlookReplySummary(accountKey, controller.signal),
     ] as const);
-    if (turn !== epoch.current) return;
-    const [timetable, plan, tasks, items, goals, boards, calendar, alarms] =
-      results;
+    if (turn !== epoch.current || controller.signal.aborted) return;
+    const [
+      timetable,
+      plan,
+      tasks,
+      items,
+      goals,
+      boards,
+      calendar,
+      alarms,
+      outlook,
+    ] = results;
     const value: Data = {
       alarms:
         alarms.status === "fulfilled"
@@ -198,7 +218,10 @@ function TodayHomeAccount({
       calendarConnected:
         calendar.status === "fulfilled" &&
         !!calendar.value?.grants.some((g) => g.status === "connected"),
-      complete: results.every((r) => r.status === "fulfilled"),
+      outlook: outlook.status === "fulfilled" ? outlook.value : null,
+      complete:
+        results.every((r) => r.status === "fulfilled") &&
+        !(outlook.status === "fulfilled" && outlook.value.unavailable),
       receivedAt: Date.now(),
     };
     setData(value);
@@ -230,6 +253,7 @@ function TodayHomeAccount({
     window.addEventListener("navox:study-plan-changed", visible);
     return () => {
       ++epoch.current;
+      loadController.current?.abort();
       window.clearInterval(interval);
       window.clearInterval(tick);
       document.removeEventListener("visibilitychange", visible);
@@ -271,7 +295,29 @@ function TodayHomeAccount({
   ].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
   const next = rows.find((r) => !r.study && Date.parse(r.start) > now);
   const due = data ? dueSoon(data.tasks, data.items, now) : [];
-  const replies = replyItems(data?.items ?? [], connections);
+  const replies = [
+    ...replyItems(data?.items ?? [], connections).map((item) => ({
+      id: `google:${item.id}`,
+      title: item.title,
+      due_at: item.due_at,
+      detail: null as string | null,
+      href: `/inbox?reply=${encodeURIComponent(item.id)}#drafts`,
+    })),
+    ...(data?.outlook?.messages ?? []).map((message) => ({
+      id: `outlook:${message.connection_id}:${message.id}`,
+      title: message.subject,
+      due_at: null,
+      detail: `Outlook · ${message.sender}`,
+      href: outlookReplyHref(accountKey, message.connection_id, message.id),
+    })),
+  ];
+  const outlookScope = data?.outlook?.connected
+    ? "Outlook: recent checked messages only." +
+      (data.outlook.limited
+        ? " More mail or mailboxes are available in Inbox and Outlook."
+        : "") +
+      (data.outlook.unavailable ? " Some mailboxes couldn’t be checked." : "")
+    : "";
   const goals = (data?.goals ?? [])
     .filter((g) => g.status === "active")
     .slice(0, 3);
@@ -283,17 +329,18 @@ function TodayHomeAccount({
   // Only the purpose-bound calendar API can mark this setup step complete.
   const hasCalendar = data?.calendarConnected === true;
   const hasEmail =
-    !connectionsUnavailable &&
-    connections.some(
-      (c) =>
-        c.status === "active" &&
-        c.granted_scopes.some((s) =>
-          [
-            "https://www.googleapis.com/auth/gmail.readonly",
-            "https://www.googleapis.com/auth/gmail.modify",
-          ].includes(s),
-        ),
-    );
+    data?.outlook?.connected === true ||
+    (!connectionsUnavailable &&
+      connections.some(
+        (c) =>
+          c.status === "active" &&
+          c.granted_scopes.some((s) =>
+            [
+              "https://www.googleapis.com/auth/gmail.readonly",
+              "https://www.googleapis.com/auth/gmail.modify",
+            ].includes(s),
+          ),
+      ));
   const hasTask =
     !!data?.tasks.length ||
     !!data?.items.some((i) => ["task", "deadline"].includes(i.type));
@@ -476,6 +523,13 @@ function TodayHomeAccount({
             Loading your day…
           </p>
         )}
+        {!!outlookScope &&
+          !replies.length &&
+          (data?.outlook?.limited || data?.outlook?.unavailable) && (
+            <p className={styles.replyScope}>
+              {outlookScope} <Link href="/inbox">Open Inbox</Link>
+            </p>
+          )}
         {receipt && (
           <TodayProgressReceipt
             key={receipt.result.undo_request_id}
@@ -574,6 +628,7 @@ function TodayHomeAccount({
           !rows.length &&
           !due.length &&
           !replies.length &&
+          !data.outlook?.limited &&
           !goals.length &&
           !board &&
           !error &&
@@ -581,21 +636,26 @@ function TodayHomeAccount({
             <p className={styles.message}>Done for today</p>
           )}
         {(!late || showNightDay) &&
-          (rows.length > 0 ||
+          (displayRows.length > 0 ||
             due.length > 0 ||
             replies.length > 0 ||
             goals.length > 0 ||
             board) && (
             <div className={styles.grid}>
               <div className={styles.column}>
-                {rows.length > 0 && (
+                {displayRows.length > 0 && (
                   <section
                     className={styles.section}
                     aria-labelledby="today-plan"
                   >
                     <div className={styles.heading}>
                       <h2 id="today-plan">
-                        Your day <small>{rows.length} things</small>
+                        Your day{" "}
+                        <small>
+                          {rows.length
+                            ? `${rows.length} things`
+                            : "Free windows"}
+                        </small>
                       </h2>
                     </div>
                     <ol className={styles.list}>
@@ -617,50 +677,60 @@ function TodayHomeAccount({
                             data-current={current}
                             data-shift={row.detail === "Shift"}
                           >
-                            <Link href={row.href} className={styles.rowTop}>
-                              <time dateTime={row.start}>
-                                {studentClock(row.start, zone)}
-                              </time>
-                              <span
-                                className="nx-dot"
-                                style={
-                                  {
-                                    "--nx-course": row.courseId
-                                      ? courseColor(row.courseId)
-                                      : row.detail === "Shift"
-                                        ? "var(--nx-warning)"
-                                        : undefined,
-                                  } as CSSProperties
-                                }
+                            {row.id.startsWith("gap:") && row.end ? (
+                              <TodayFreeWindow
+                                accountKey={accountKey}
+                                start={row.start}
+                                end={row.end}
+                                timezone={zone}
+                                tasks={data?.tasks ?? []}
                               />
-                              <span className={styles.rowText}>
-                                <strong className={styles.rowTitle}>
-                                  {row.title}
-                                </strong>
-                                {row.detail && (
-                                  <span className={styles.rowDetail}>
-                                    {row.detail}
-                                    {row.end &&
-                                      ` · ${studentClock(row.start, zone)} – ${studentClock(row.end, zone)}`}
-                                  </span>
-                                )}
-                              </span>
-                              <span className={styles.status}>
-                                {row.study && row.study.status !== "planned"
-                                  ? {
-                                      done: "Done",
-                                      took_longer: "Done",
-                                      skipped: "Skipped",
-                                      needs_review: "Review",
-                                      superseded: "",
-                                    }[row.study.status]
-                                  : current
-                                    ? "Now"
-                                    : next?.id === row.id
-                                      ? "Next"
-                                      : ""}
-                              </span>
-                            </Link>
+                            ) : (
+                              <Link href={row.href} className={styles.rowTop}>
+                                <time dateTime={row.start}>
+                                  {studentClock(row.start, zone)}
+                                </time>
+                                <span
+                                  className="nx-dot"
+                                  style={
+                                    {
+                                      "--nx-course": row.courseId
+                                        ? courseColor(row.courseId)
+                                        : row.detail === "Shift"
+                                          ? "var(--nx-warning)"
+                                          : undefined,
+                                    } as CSSProperties
+                                  }
+                                />
+                                <span className={styles.rowText}>
+                                  <strong className={styles.rowTitle}>
+                                    {row.title}
+                                  </strong>
+                                  {row.detail && (
+                                    <span className={styles.rowDetail}>
+                                      {row.detail}
+                                      {row.end &&
+                                        ` · ${studentClock(row.start, zone)} – ${studentClock(row.end, zone)}`}
+                                    </span>
+                                  )}
+                                </span>
+                                <span className={styles.status}>
+                                  {row.study && row.study.status !== "planned"
+                                    ? {
+                                        done: "Done",
+                                        took_longer: "Done",
+                                        skipped: "Skipped",
+                                        needs_review: "Review",
+                                        superseded: "",
+                                      }[row.study.status]
+                                    : current
+                                      ? "Now"
+                                      : next?.id === row.id
+                                        ? "Next"
+                                        : ""}
+                                </span>
+                              </Link>
+                            )}
                             {current &&
                               row.study?.status === "planned" &&
                               !data?.plan?.needs_review &&
@@ -784,16 +854,20 @@ function TodayHomeAccount({
                   <section className={`${styles.section} ${styles.sideCard}`}>
                     <div className={styles.heading}>
                       <h2>Needs a reply</h2>
+                      {replies.length > 3 && (
+                        <Link href="/inbox">Open Inbox</Link>
+                      )}
                     </div>
+                    {!!outlookScope && (
+                      <p className={styles.replyScope}>{outlookScope}</p>
+                    )}
                     <ul className={styles.list}>
                       {replies.slice(0, 3).map((item) => (
                         <li key={item.id}>
-                          <Link
-                            className={styles.compact}
-                            href="/inbox#needs-reply"
-                          >
+                          <Link className={styles.compact} href={item.href}>
                             <span>
                               <strong>{item.title}</strong>
+                              {item.detail && <small>{item.detail}</small>}
                               {item.due_at && (
                                 <small>
                                   {relativeTime(item.due_at, now, zone)}

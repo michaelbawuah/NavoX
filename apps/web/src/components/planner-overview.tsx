@@ -150,7 +150,10 @@ export function PlannerOverview({
         ? "This week"
         : "Later";
   return (
-    <div className={styles.overview}>
+    <div
+      className={styles.overview}
+      data-planner-review={completing || receipt ? true : undefined}
+    >
       <div className={styles.toolbar}>
         <nav aria-label="Planner time range">
           {(
