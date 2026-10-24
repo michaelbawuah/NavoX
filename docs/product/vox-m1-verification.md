@@ -227,10 +227,42 @@ listening issue; it does not pass every M1 physical-phone acceptance item.
 - [x] Clear results at hang-up/account change; no transcript retention change.
 - [x] Reserve and log search request/token usage; combined cost explicitly unknown.
 - [x] 75 focused backend and 189 focused frontend tests; scoped lint/type checks.
-- [ ] Live deployment and spoken El Clasico lookup.
+- [x] Live deployment and synthetic spoken El Clasico lookup on both voice paths.
 - [ ] Physical-phone lookup/listening test (user).
 - [ ] Search-inclusive cost reconciliation.
 
 UI addition: a bounded, scrollable source panel inside the existing call controls,
 with source-link tap areas at least 44 px high. No mascot or audio-playout changes.
 Persistent memory remains a separate, unfinished milestone.
+
+
+Live web lookup evidence (runtime 26683ba, 2026-10-24 UTC): the synthetic
+question asked for the next Real Madrid / Barcelona El Clasico and requested
+the current official schedule. The realtime call displayed an FC Barcelona
+official fixture citation and received 269,743 inbound audio bytes with nonzero
+energy. The forced cascade call displayed the same official article and received
+172,883 inbound audio bytes with nonzero energy. Both completed hang-up/close
+with HTTP 204, cleared their source panel, and had no page errors or wrong-origin
+API requests. The 390 x 844 mobile layout had no horizontal overflow and source
+links measured 44 px high. The final screenshot was inspected for legibility.
+This verifies the browser/data/audio flow; physical-phone listening remains open.
+
+An earlier cascade lookup introduced a wrong UTC conversion. Search requests no
+longer receive the student's timezone; both search and speech instructions now
+quote source-stated times without deriving offsets/local conversions. The final
+answers quote the source's own timezone label. Deterministic local-time conversion
+is not implemented by this search feature. Source labels can themselves be
+inconsistent; the citation remains available for inspection. Provider emphasis
+is safely rendered as React text/strong elements without changing citation offsets.
+
+The final primary/cascade search streams completed with 8,839 / 13,109 tokens
+respectively. Their dollar estimates remain null (unknown), not zero. No reset
+of existing quota was performed. After the checks, realtime mode was restored
+with search enabled; active calls, saved call checkpoints, unfinished cleanup,
+LiveKit rooms and participants all measured zero.
+
+Local verification remains 75 backend and 189 frontend focused tests passed,
+with the affected UI tests rerun after formatting changes, plus scoped lint,
+type checking and successful deployment builds. Full GitHub CI is tracked in
+the draft PR and is not represented here as a completed pass. Production and
+main are unchanged; the test site is https://vox-test.66-175-235-169.nip.io/.
