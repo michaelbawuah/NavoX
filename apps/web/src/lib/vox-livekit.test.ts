@@ -67,6 +67,7 @@ class FakeRoom implements VoxLiveKitRoom {
   events: VoxRoomEvents | null = null;
   participants = new Set([agent]);
   name = vi.fn(() => "navox-room");
+  isConnected = vi.fn(() => true);
   identity = vi.fn(() => participant);
   hasParticipant = (identity: string) => this.participants.has(identity);
   connect = vi.fn(async () => {});
@@ -910,6 +911,100 @@ describe("qualified LiveKit Vox adapter", () => {
     await connection.close();
   });
 
+  it("stops capture immediately while offline and retires it after SDK recovery", async () => {
+    const env = environment();
+    const connection = await env.transport.connect(env.request);
+    connection.setMicrophoneEnabled(true);
+    await settle();
+    await env.voice(true);
+    env.room.isConnected.mockReturnValue(false);
+    env.room.events?.reconnecting();
+    expect(env.media.enabled).toBe(false);
+    expect(env.capture.stop).toHaveBeenCalled();
+    await settle();
+    expect(env.room.unpublishAudio).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(env.request.onEvent).not.toHaveBeenCalledWith({ type: "ended" });
+    expect(env.room.unpublishAudio).not.toHaveBeenCalled();
+    env.room.isConnected.mockReturnValue(true);
+    env.room.events?.reconnected();
+    await settle();
+    expect(env.room.unpublishAudio).toHaveBeenCalledTimes(1);
+    expect(env.request.onEvent).toHaveBeenCalledWith({ type: "reconnected" });
+    await connection.close();
+  });
+
+  it("defers removal on browser offline before SDK notification and keeps auth gates closed", async () => {
+    const env = environment();
+    const connection = await env.transport.connect(env.request);
+    connection.setMicrophoneEnabled(true);
+    await settle();
+    const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    vi.mocked(env.request.mayTransmitAudio).mockReturnValue(false);
+    connection.setMicrophoneEnabled(false);
+    await settle();
+    expect(env.capture.stop).toHaveBeenCalled();
+    expect(env.room.unpublishAudio).not.toHaveBeenCalled();
+    online.mockReturnValue(true);
+    env.room.isConnected.mockReturnValue(false);
+    window.dispatchEvent(new Event("online"));
+    await settle();
+    expect(env.room.unpublishAudio).not.toHaveBeenCalled();
+    env.room.isConnected.mockReturnValue(true);
+    env.room.events?.reconnected();
+    connection.setMicrophoneEnabled(true);
+    await settle();
+    expect(env.room.unpublishAudio).toHaveBeenCalledTimes(1);
+    expect(env.factory.create).toHaveBeenCalledTimes(1);
+    expect(env.media.enabled).toBe(false);
+    await connection.close();
+  });
+
+  it("expires while signalling is down and cannot revive capture on a late online event", async () => {
+    const env = environment();
+    const connection = await env.transport.connect(env.request);
+    connection.setMicrophoneEnabled(true);
+    await settle();
+    env.request.mayRenewReservation = () => false;
+    env.room.isConnected.mockReturnValue(false);
+    env.room.events?.reconnecting();
+    await vi.advanceTimersByTimeAsync(120_001);
+    await settle();
+    expect(env.request.onEvent).toHaveBeenCalledWith({ type: "ended" });
+    expect(env.lease.close).toHaveBeenCalledTimes(1);
+    env.room.isConnected.mockReturnValue(true);
+    window.dispatchEvent(new Event("online"));
+    connection.setMicrophoneEnabled(true);
+    await settle();
+    expect(env.factory.create).toHaveBeenCalledTimes(1);
+    expect(env.media.enabled).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([false, true])(
+    "whole-room cleanup supersedes deferred removal; disconnect failure=%s still blocks replacement",
+    async (disconnectFails) => {
+      const env = environment();
+      const connection = await env.transport.connect(env.request);
+      connection.setMicrophoneEnabled(true);
+      await settle();
+      env.room.isConnected.mockReturnValue(false);
+      env.room.events?.reconnecting();
+      if (disconnectFails)
+        env.room.disconnect.mockRejectedValue(
+          new Error("synthetic cleanup failure"),
+        );
+      const closing = connection.close();
+      if (disconnectFails) await expect(closing).rejects.toThrow("unavailable");
+      else await closing;
+      expect(env.room.unpublishAudio).not.toHaveBeenCalled();
+      expect(env.room.disconnect).toHaveBeenCalledTimes(1);
+      expect(env.lease.close).toHaveBeenCalledTimes(1);
+      expect(env.transport.available).toBe(!disconnectFails);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
   it.each(["disconnect", "unpublish"] as const)(
     "surfaces %s cleanup failure after synchronously stopping local capture",
     async (failure) => {
@@ -1202,6 +1297,7 @@ describe("qualified LiveKit Vox adapter", () => {
           },
         ) {}
         name = "navox-room";
+        state = "connected";
         localParticipant = { identity: participant };
         remoteParticipants = new Map([
           [agent, { trackPublications: new Map() }],
@@ -1224,6 +1320,7 @@ describe("qualified LiveKit Vox adapter", () => {
       LocalAudioTrack: class {},
       setLogLevel: vi.fn(),
       LogLevel: { silent: 5 },
+      ConnectionState: { Connected: "connected" },
       Track: { Kind: { Audio: "audio" }, Source: { Microphone: "microphone" } },
       RoomEvent: {
         ParticipantConnected: "participantConnected",

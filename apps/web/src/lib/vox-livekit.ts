@@ -84,6 +84,7 @@ export interface VoxRoomEvents {
 /** Narrow test seam; the production implementation below uses the actual SDK. */
 export interface VoxLiveKitRoom {
   name(): string;
+  isConnected(): boolean;
   identity(): string;
   hasParticipant(identity: string): boolean;
   connect(url: string, token: string): Promise<void>;
@@ -133,6 +134,7 @@ async function loadLiveKit(): Promise<VoxLiveKitSDK> {
       };
       return {
         name: () => room.name,
+        isConnected: () => room.state === sdk.ConnectionState.Connected,
         identity: () => room.localParticipant.identity,
         hasParticipant: (identity) => room.remoteParticipants.has(identity),
         connect: (url, token) =>
@@ -449,6 +451,29 @@ export function createLiveKitVoxTransport(options: {
         if (capture) capture.track.enabled = false;
         if (local) local.mediaStreamTrack.enabled = false;
       };
+      // Local capture is revoked synchronously. Signalling a track removal while
+      // offline can itself fail LiveKit negotiation and destroy a recoverable call.
+      const signallingWaiters = new Set<() => void>();
+      const canSignal = () =>
+        (typeof navigator === "undefined" || navigator.onLine !== false) &&
+        room?.isConnected() === true;
+      const resumeSignalling = () => {
+        if (!closed && !canSignal()) return;
+        for (const resume of signallingWaiters) resume();
+        signallingWaiters.clear();
+      };
+      const retireTrack = async (track: LocalAudioTrack) => {
+        if (!canSignal()) {
+          if (!closed)
+            await new Promise<void>((resolve) =>
+              signallingWaiters.add(resolve),
+            );
+          // Closing the whole room supersedes a deferred per-track removal.
+          // close() still requires successful SDK disconnect and server lease close.
+          if (closed) return;
+        }
+        await room?.unpublishAudio(track);
+      };
       const silence = () => {
         ++captureEpoch;
         const retiredCapture = capture;
@@ -473,7 +498,7 @@ export function createLiveKitVoxTransport(options: {
         if (retired || cleanupFailed)
           retiring = Promise.allSettled([
             retiring,
-            retired ? attempt(() => room?.unpublishAudio(retired)) : undefined,
+            retired ? attempt(() => retireTrack(retired)) : undefined,
           ]).then((results) => {
             if (
               cleanupFailed ||
@@ -526,6 +551,7 @@ export function createLiveKitVoxTransport(options: {
           reject = failed;
         });
         closed = true;
+        resumeSignalling();
         joined = false;
         microphone = speaker = speech = false;
         cleanup(() => abort.abort());
@@ -535,6 +561,8 @@ export function createLiveKitVoxTransport(options: {
         cleanup(() => activity?.reset());
         remoteTracks.clear();
         cleanup(unlisten);
+        if (typeof window !== "undefined")
+          cleanup(() => window.removeEventListener("online", resumeSignalling));
         cleanup(() => request.signal.removeEventListener("abort", aborted));
         if (typeof document !== "undefined")
           cleanup(() =>
@@ -666,6 +694,8 @@ export function createLiveKitVoxTransport(options: {
           });
       };
       request.signal.addEventListener("abort", aborted, { once: true });
+      if (typeof window !== "undefined")
+        window.addEventListener("online", resumeSignalling);
       if (typeof document !== "undefined")
         document.addEventListener("visibilitychange", hidden);
       ++pendingConnections;
@@ -763,6 +793,7 @@ export function createLiveKitVoxTransport(options: {
             request.onEvent({ type: "reconnecting" });
           },
           reconnected() {
+            resumeSignalling();
             if (
               !fresh() ||
               !joined ||
@@ -848,6 +879,7 @@ export function createLiveKitVoxTransport(options: {
         room.subscribeAgent(lease.agentIdentity);
         if (!fresh() || !joined) throw unavailable();
         timer = setInterval(() => {
+          resumeSignalling();
           wake?.refresh();
           activity?.refresh();
           if (!fresh()) {
