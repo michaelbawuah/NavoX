@@ -9,6 +9,7 @@ import {
   type VoxConnection,
   type VoxTransportRequest,
 } from "../lib/vox-call";
+import { VoxReservationError } from "../lib/vox-reservations";
 import { VoxCallControls, VoxHomeLauncher } from "./vox-call-controls";
 import {
   useVoxCall,
@@ -170,6 +171,46 @@ async function clickHome() {
 }
 
 describe("Home entry shares the app-scoped Vox call", () => {
+  it("explains a budget denial once and permits a later manual attempt without reload", async () => {
+    const test = rig();
+    test.transport.connect.mockRejectedValueOnce(
+      new VoxReservationError("allowance-exhausted"),
+    );
+    await test.mount();
+    await click("Talk with NavoX");
+    expect(latest?.state.endReason).toBe("allowance-reached");
+    expect(dialog().textContent).toContain(
+      "Your Vox allowance has been reached",
+    );
+    expect(dialog().textContent).not.toContain(
+      "The connection could not be completed",
+    );
+    await click("Start another call");
+    expect(latest?.state.phase).toBe("active");
+  });
+
+  it("enables another call only after asynchronous transport cleanup completes", async () => {
+    const test = rig();
+    await test.mount();
+    await click("Talk with NavoX");
+    const release = deferred<void>();
+    test.connections[0].close.mockImplementationOnce(async () => {
+      test.transport.available = false;
+      await release.promise;
+      test.transport.available = true;
+    });
+    await click("Hang up");
+    expect(latest?.available).toBe(false);
+    await click("Start another call");
+    expect(test.requests).toHaveLength(1);
+    await act(async () => release.resolve());
+    expect(latest?.available).toBe(true);
+    await click("Start another call");
+    expect(test.requests).toHaveLength(2);
+    expect(test.requests[1].callId).not.toBe(test.requests[0].callId);
+    expect(latest?.state.phase).toBe("active");
+  });
+
   it("never creates a call or another dialog on mount and waits for verified sign-in", async () => {
     const test = rig();
     const check = deferred<AccountAccess>();
@@ -651,6 +692,78 @@ describe("Vox call interface with real provider and controller", () => {
     expect(test.transport.connect).toHaveBeenCalledOnce();
   });
 
+  it("offers Hey NavoX only after local listening is confirmed and describes wake input as queued", async () => {
+    vi.useFakeTimers();
+    const test = rig();
+    await test.mount();
+    await click("Talk with NavoX");
+    test.setNow(120_000);
+    await act(async () => vi.advanceTimersByTime(1_000));
+    await act(async () =>
+      test.requests[0].onEvent({ type: "wake-status", status: "starting" }),
+    );
+    expect(dialog().textContent).toContain("Preparing local wake listening");
+    expect(dialog().textContent).not.toContain("Hey NavoX");
+    await act(async () =>
+      test.requests[0].onEvent({ type: "wake-status", status: "listening" }),
+    );
+    expect(dialog().textContent).toContain("Say “Hey NavoX”");
+    expect(dialog().textContent).toContain("Keep NavoX open");
+    await act(async () =>
+      test.requests[0].onEvent({ type: "wake-status", status: "unavailable" }),
+    );
+    expect(dialog().textContent).not.toContain("Hey NavoX");
+    expect(dialog().textContent).toContain("Local wake is unavailable");
+    await click("Resume conversation");
+    await act(async () =>
+      test.requests[0].onEvent({ type: "wake-input", status: "queued" }),
+    );
+    expect(dialog().textContent).toContain(
+      "Your question is queued in this conversation",
+    );
+    await act(async () =>
+      test.requests[0].onEvent({ type: "wake-input", status: "failed" }),
+    );
+    expect(dialog().textContent).toContain("please say it again");
+  });
+
+  it("shows one quiet server allowance notice in the call and while minimized", async () => {
+    vi.useFakeTimers();
+    const notice = "You have used at least 80% of your daily voice allowance.";
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      Response.json({ notices: [notice], blocked: false, policy_revision: 3 }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    const test = rig();
+    await test.mount();
+    await click("Talk with NavoX");
+    expect(dialog().querySelector("[data-vox-usage]")?.textContent).toBe(
+      notice,
+    );
+    expect(host.querySelectorAll("[data-vox-usage]")).toHaveLength(1);
+    const originalNotice = dialog().querySelector("[data-vox-usage]");
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(dialog().querySelector("[data-vox-usage]")).toBe(originalNotice);
+    await click("Minimize call");
+    expect(host.querySelectorAll("[data-vox-usage]")).toHaveLength(1);
+    expect(host.querySelector("[data-vox-usage]")?.textContent).toBe(notice);
+    fetcher.mockResolvedValue(
+      Response.json({ notices: [notice], blocked: true, policy_revision: 3 }),
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(host.querySelector("[data-vox-usage]")?.textContent).toContain(
+      "allowance has been reached",
+    );
+    expect(host.querySelector("[data-vox-usage]")?.textContent).toContain(
+      "after your allowance resets",
+    );
+    expect(
+      fetcher.mock.calls.every(
+        ([, init]) => init?.method === "GET" && init?.body === undefined,
+      ),
+    ).toBe(true);
+  });
+
   it("reconnecting is visible while the old lease cannot send or play audio", async () => {
     const test = rig();
     await test.mount();
@@ -907,4 +1020,39 @@ describe("Vox call interface with real provider and controller", () => {
     await click("Start another call");
     expect(test.transport.connect).toHaveBeenCalledTimes(2);
   });
+});
+
+it("shows clickable inline web citations and removes them at hang-up", async () => {
+  const test = rig();
+  await test.mount("Today", "floating", true);
+  await clickHome();
+  await act(async () =>
+    test.requests[0].onEvent({
+      type: "web-lookup",
+      result: {
+        status: "complete",
+        text: "**Fixture** [source]",
+        checkedAt: "2026-10-24T00:00:00Z",
+        citations: [
+          {
+            start: 12,
+            end: 20,
+            title: "Official fixtures",
+            url: "https://example.org/fixtures",
+          },
+        ],
+      },
+    }),
+  );
+  const source = host.querySelector<HTMLAnchorElement>(
+    '[aria-label="Web lookup sources"] a',
+  );
+  expect(source?.href).toBe("https://example.org/fixtures");
+  expect(source?.textContent).toBe("Official fixtures");
+  expect(source?.rel).toBe("noopener noreferrer");
+  expect(host.querySelector("[data-vox-web-status] strong")?.textContent).toBe(
+    "Fixture",
+  );
+  await click("Hang up");
+  expect(host.querySelector('[aria-label="Web lookup sources"]')).toBeNull();
 });

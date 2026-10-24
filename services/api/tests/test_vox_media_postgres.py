@@ -117,7 +117,7 @@ async def test_parallel_connection_intents_never_create_two_current_media_epochs
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("boundary", ["reset", "logout", "pause"])
-@pytest.mark.parametrize("operation", ["begin", "confirm", "finalize"])
+@pytest.mark.parametrize("operation", ["begin", "confirm", "finalize", "renew"])
 async def test_terminal_boundary_wins_over_queued_intent_or_late_confirmation(
     postgres_vox_env, boundary, operation
 ):
@@ -127,6 +127,11 @@ async def test_terminal_boundary_wins_over_queued_intent_or_late_confirmation(
     else:
         row, _ = await start(env)
         intent = None
+    if operation == "renew":
+        async with env.factory() as database:
+            await media.confirm_connection(
+                database, env.user_id, env.workspace_id, env.token_hash, intent.connection_id
+            )
     async with (
         env.factory() as eraser,
         env.factory() as writer,
@@ -143,12 +148,21 @@ async def test_terminal_boundary_wins_over_queued_intent_or_late_confirmation(
         assert stale_user.agent_paused is False and stale_session.revoked_at is None
         assert stale_call.status == "reserved" and stale_state.generation == row["generation"]
         if stale_connection:
-            assert stale_connection.status == "preparing"
+            assert stale_connection.status == ("confirmed" if operation == "renew" else "preparing")
         writer_pid = await writer.scalar(text("SELECT pg_backend_pid()"))
         eraser_pid = await eraser.scalar(text("SELECT pg_backend_pid()"))
         await schedule.owner(eraser, env.user_id, env.workspace_id, lock=True)
         if operation == "finalize":
             command = media.finalize_provision(writer, intent)
+        elif operation == "renew":
+            command = media.renew_connection(
+                writer,
+                env.user_id,
+                env.workspace_id,
+                env.token_hash,
+                intent.connection_id,
+                generation=row["generation"],
+            )
         elif intent:
             command = media.confirm_connection(
                 writer, env.user_id, env.workspace_id, env.token_hash, intent.connection_id
@@ -265,3 +279,55 @@ async def test_confirmation_rechecks_database_time_after_observed_user_lock_wait
     async with env.factory() as database:
         assert (await database.get(VoxMediaConnection, intent.connection_id)).status == "revoked"
         assert (await cleanup_row(database, intent.connection_id)).status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_media_renewal_waits_for_cleanup_lock_and_never_rearms_a_claim(postgres_vox_env):
+    env = postgres_vox_env
+    row, intent = await begin(env)
+    async with env.factory() as database:
+        await media.confirm_connection(
+            database, env.user_id, env.workspace_id, env.token_hash, intent.connection_id
+        )
+    async with env.factory() as cleaner, env.factory() as writer, env.factory() as observer:
+        cleaner_pid = await cleaner.scalar(text("SELECT pg_backend_pid()"))
+        writer_pid = await writer.scalar(text("SELECT pg_backend_pid()"))
+        cleanup = await cleaner.scalar(
+            select(VoxMediaCleanup)
+            .where(VoxMediaCleanup.connection_id == intent.connection_id)
+            .with_for_update()
+        )
+        work = asyncio.create_task(
+            outcome(
+                media.renew_connection(
+                    writer,
+                    env.user_id,
+                    env.workspace_id,
+                    env.token_hash,
+                    intent.connection_id,
+                    generation=row["generation"],
+                )
+            )
+        )
+        try:
+            await wait_for_lock(observer, [writer_pid], cleaner_pid)
+            assert not work.done()
+            now = await database_now(cleaner)
+            # Explicit cleaner-state fixture; a claim can never become armed
+            # merely because the browser heartbeat queued behind its row lock.
+            cleanup.status = "claimed"
+            cleanup.requested_at = now
+            cleanup.next_attempt_at = now
+            cleanup.claim_id = uuid4()
+            cleanup.claim_expires_at = now + timedelta(seconds=30)
+            await cleaner.commit()
+            result = await asyncio.wait_for(work, 15)
+            assert isinstance(result, service.VoxError) and result.status_code == 410
+        finally:
+            await cleaner.rollback()
+            await cancel_pending([work])
+    async with env.factory() as database:
+        connection = await database.get(VoxMediaConnection, intent.connection_id)
+        cleanup = await cleanup_row(database, intent.connection_id)
+        assert connection.status == "revoked" and cleanup.status == "claimed"
+        assert connection.expires_at == cleanup.connection_expires_at

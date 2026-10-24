@@ -67,13 +67,18 @@ async def _ensure_state(
     return boundary.state
 
 
-def _finish(call: VoxCall, state: VoxState, now: datetime, reason: str) -> None:
+async def _finish(
+    database: AsyncSession, call: VoxCall, state: VoxState, now: datetime, reason: str
+) -> None:
     if call.status != "reserved":
         return
     call.status = "ended"
     call.end_reason = reason
     call.ended_at = now
     _advance(state)
+    from navox.vox.context_store import purge_call_checkpoint
+
+    await purge_call_checkpoint(database, call.id)
 
 
 async def _locked(
@@ -110,7 +115,7 @@ async def _locked(
     )
     if reserved is not None and utc(reserved.expires_at) <= now:
         state = await _ensure_state(database, boundary, user_id, workspace_id)
-        _finish(reserved, state, now, "expired")
+        await _finish(database, reserved, state, now, "expired")
         from navox.vox.media import revoke_call_connections
 
         await revoke_call_connections(database, reserved.id, now=now, reason="expired")
@@ -284,6 +289,9 @@ async def renew(
         call.expires_at = min(
             boundary.now + timedelta(seconds=LEASE_SECONDS), utc(boundary.session.expires_at)
         )
+        from navox.vox.context_store import renew_call_checkpoint
+
+        await renew_call_checkpoint(database, call, now=boundary.now)
         await database.flush()
         return _view(call)
 
@@ -309,7 +317,7 @@ async def end(
             if call.generation != payload.generation:
                 raise VoxError(409, "This call belongs to a different call state")
             state = await _ensure_state(database, boundary, user_id, workspace_id)
-            _finish(call, state, boundary.now, "hang-up")
+            await _finish(database, call, state, boundary.now, "hang-up")
             from navox.vox.media import revoke_call_connections
 
             await revoke_call_connections(database, call.id, now=boundary.now, reason="hang-up")
@@ -357,7 +365,7 @@ async def revoke_session_calls(
         if state is None:
             state = VoxState(user_id=call.user_id, workspace_id=call.workspace_id, generation=0)
             database.add(state)
-        _finish(call, state, now, "sign-out")
+        await _finish(database, call, state, now, "sign-out")
     from navox.vox.media import revoke_session_connections
 
     await revoke_session_connections(database, auth_session_id, now=now)
@@ -380,3 +388,17 @@ async def forget_vox_data(database: AsyncSession, user_id: UUID, workspace_id: U
         delete(VoxCall).where(VoxCall.user_id == user_id, VoxCall.workspace_id == workspace_id)
     )
     await database.flush()
+
+
+async def invalidate_active_context(
+    database: AsyncSession, user_id: UUID, workspace_id: UUID
+) -> None:
+    """Source Forget: no turn provenance exists, so clear the active call entirely.
+
+    Caller already holds the User lock. Commit with source erasure; revoke the
+    media epoch as well so a worker cannot keep speaking from stale provider RAM.
+    No call is created, and durable content-free usage accounting is preserved.
+    """
+    active = await _reserved(database, user_id, workspace_id)
+    if active is not None:
+        await forget_vox_data(database, user_id, workspace_id)

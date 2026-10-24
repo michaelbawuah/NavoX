@@ -15,6 +15,7 @@ import {
   type VoxTransport,
 } from "../lib/vox-call";
 import { createDefaultVoxTransport } from "../lib/vox-transport";
+import { VoxUsageMonitor, type VoxUsageNotice } from "../lib/vox-usage";
 
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
@@ -57,6 +58,7 @@ export interface VoxCallContextValue {
   controller: VoxCallController;
   state: VoxCallState;
   available: boolean;
+  usageNotice?: VoxUsageNotice | null;
 }
 
 const VoxContext = createContext<VoxCallContextValue | null>(null);
@@ -101,15 +103,33 @@ export function VoxCallProvider({
       newCallId: createCallId,
       now,
     });
-    const publish = (state: VoxCallState) => {
+    let usageNotice: VoxUsageNotice | null = null;
+    const draw = (state: VoxCallState) => {
       if (!live) return;
       setBinding({
         transport,
         restoreAccess,
         createCallId,
         now,
-        value: { controller, state, available: transport.available },
+        value: {
+          controller,
+          state,
+          available: transport.available,
+          usageNotice,
+        },
       });
+    };
+    const usage = new VoxUsageMonitor({
+      apiBaseUrl,
+      onChange: (notice) => {
+        usageNotice = notice;
+        draw(controller.current());
+      },
+    });
+    const publish = (state: VoxCallState) => {
+      if (!live) return;
+      usage.update(state);
+      draw(state);
       const ongoing = ["active", "standby", "reconnecting"].includes(
         state.phase,
       );
@@ -170,6 +190,7 @@ export function VoxCallProvider({
     window.addEventListener("online", checkAgain);
     return () => {
       live = false;
+      usage.dispose();
       observer.dispose();
       unsubscribe();
       if (timer !== null) clearInterval(timer);

@@ -1,3 +1,6 @@
+import { VoxReservationError } from "./vox-reservations";
+import type { VoxWebLookup } from "./vox-web-results";
+
 /**
  * Transport-independent Vox lifecycle groundwork. This module opens no microphone,
  * calls no provider and retains no audio or conversation text. A future app-level
@@ -23,6 +26,7 @@ export type VoxEndReason =
   | "disposed"
   | "transport-ended"
   | "connection-failed"
+  | "allowance-reached"
   | "cleanup-incomplete"
   | "transport-unavailable";
 
@@ -37,6 +41,9 @@ export interface VoxCallState {
   speakerEnabled: boolean;
   /** Browser playback needs another user gesture; microphone authority is separate. */
   speakerBlocked: boolean;
+  wakeStatus?: "off" | "starting" | "listening" | "unavailable";
+  webLookup?: VoxWebLookup | null;
+  wakeInputStatus?: "queued" | "failed" | null;
   captionsEnabled: boolean;
   minimized: boolean;
   startedAt: number | null;
@@ -47,8 +54,16 @@ export interface VoxCallState {
 export type VoxTransportEvent =
   | { type: "activity"; activity: VoxActivity }
   | { type: "disconnected" }
+  | { type: "reconnecting" }
+  | { type: "reconnected" }
   | { type: "playback-blocked" }
   | { type: "playback-ready" }
+  | {
+      type: "wake-status";
+      status: "off" | "starting" | "listening" | "unavailable";
+    }
+  | { type: "web-lookup"; result: VoxWebLookup }
+  | { type: "wake-input"; status: "queued" | "failed" }
   | { type: "ended" };
 
 export interface VoxTransportRequest {
@@ -118,6 +133,9 @@ function sameOwner(left: VoxOwner | null, right: VoxOwner | null): boolean {
  * account loss/change, reset, or logout must call bindOwner(null) or hangUp first.
  * No browser storage, durable session, provider grant or memory consent is created.
  */
+const MAX_TERMINAL_RECOVERIES = 3;
+const TERMINAL_RECOVERY_WINDOW_MS = 120_000;
+
 export class VoxCallController {
   private state: VoxCallState;
   private epoch = 0;
@@ -134,7 +152,11 @@ export class VoxCallController {
   private resumeStandby = false;
   private deferredJoin = false;
   private reconnectAfterCheck = false;
+  private mediaReconnecting = false;
+  private mediaReconnected = false;
+  private mediaResumeStandby = false;
   private cleanupIncomplete = false;
+  private terminalRecoveries: number[] = [];
   private callIntent: {
     owner: Readonly<VoxOwner>;
     callId: string;
@@ -340,16 +362,40 @@ export class VoxCallController {
       elapsedMs: 0,
       endReason: null,
       speakerBlocked: false,
+      wakeStatus: "off",
+      wakeInputStatus: null,
+      webLookup: null,
     };
     this.resumeStandby = false;
     this.deferredJoin = false;
     this.reconnectAfterCheck = false;
+    this.terminalRecoveries = [];
     await this.join(false);
   }
 
   async reconnect(): Promise<void> {
-    if (this.disposed || !this.state.ownerVerified || !this.joined()) return;
-    this.resumeStandby = this.state.phase === "standby";
+    if (
+      this.disposed ||
+      !this.state.ownerVerified ||
+      !(
+        this.joined() ||
+        (this.mediaReconnecting && this.state.phase === "reconnecting")
+      )
+    )
+      return;
+    const now = this.moment();
+    this.terminalRecoveries = this.terminalRecoveries.filter(
+      (at) => now - at < TERMINAL_RECOVERY_WINDOW_MS,
+    );
+    if (this.terminalRecoveries.length >= MAX_TERMINAL_RECOVERIES) {
+      // Persistent worker/provider failures must not create an endless paid loop.
+      await this.hangUp("connection-failed");
+      return;
+    }
+    this.terminalRecoveries.push(now);
+    this.resumeStandby = this.mediaReconnecting
+      ? this.mediaResumeStandby
+      : this.state.phase === "standby";
     await this.join(true);
   }
 
@@ -358,6 +404,7 @@ export class VoxCallController {
     const callId = this.state.callId;
     if (!scope || !callId) return;
     this.deferredJoin = false;
+    this.mediaReconnecting = this.mediaReconnected = false;
     const epoch = ++this.epoch;
     const previousAbort = this.abort;
     const controller = new AbortController();
@@ -411,11 +458,45 @@ export class VoxCallController {
           void this.hangUp("transport-ended");
           return;
         }
-        if (!this.joined()) return;
+        if (event.type === "reconnecting") {
+          if (this.mediaReconnecting || !this.joined()) return;
+          this.mediaResumeStandby = this.state.phase === "standby";
+          this.mediaReconnecting = true;
+          this.mediaReconnected = false;
+          this.state.phase = "reconnecting";
+          this.state.activity = "quiet";
+          if (this.syncControls()) this.publish();
+          return;
+        }
+        if (event.type === "reconnected") {
+          if (!this.mediaReconnecting) return;
+          this.mediaReconnected = true;
+          this.finishMediaReconnect();
+          return;
+        }
         if (event.type === "disconnected") {
           if (this.state.ownerVerified) void this.reconnect();
           else this.reconnectAfterCheck = true;
-        } else if (
+          return;
+        }
+        if (!this.joined()) return;
+        if (event.type === "wake-status") {
+          this.state.wakeStatus = event.status;
+          this.publish();
+          return;
+        }
+        if (event.type === "web-lookup") {
+          if (!this.state.ownerVerified) return;
+          this.state.webLookup = event.result;
+          this.publish();
+          return;
+        }
+        if (event.type === "wake-input") {
+          this.state.wakeInputStatus = event.status;
+          this.publish();
+          return;
+        }
+        if (
           event.type === "playback-blocked" ||
           event.type === "playback-ready"
         ) {
@@ -434,6 +515,7 @@ export class VoxCallController {
           if (activity !== "quiet" || this.state.activity !== "quiet")
             this.lastActivityAt = this.moment();
           this.state.activity = activity;
+          if (activity !== "quiet") this.state.wakeInputStatus = null;
           this.publish();
         }
       },
@@ -465,11 +547,32 @@ export class VoxCallController {
       this.lastActivityAt = now;
       this.state.phase = this.resumeStandby ? "standby" : "active";
       if (this.syncControls()) this.publish();
-    } catch {
-      if (this.live(epoch)) void this.hangUp("connection-failed");
+    } catch (error) {
+      if (this.live(epoch))
+        void this.hangUp(
+          error instanceof VoxReservationError &&
+            error.code === "allowance-exhausted"
+            ? "allowance-reached"
+            : "connection-failed",
+        );
     } finally {
       completeJoin(safelyReleased);
     }
+  }
+
+  private finishMediaReconnect(): void {
+    if (
+      !this.mediaReconnecting ||
+      !this.mediaReconnected ||
+      !this.state.ownerVerified ||
+      this.state.phase !== "reconnecting"
+    )
+      return;
+    this.mediaReconnecting = this.mediaReconnected = false;
+    this.state.phase = this.mediaResumeStandby ? "standby" : "active";
+    this.state.activity = "quiet";
+    this.lastActivityAt = this.moment();
+    if (this.syncControls()) this.publish();
   }
 
   setMicrophoneMuted(muted: boolean): void {
@@ -577,9 +680,14 @@ export class VoxCallController {
       if (!checked || this.state.ownerVerified) return;
       this.state.ownerVerified = true;
       this.lastActivityAt = this.moment();
-      if (this.reconnectAfterCheck && this.joined()) {
+      if (
+        this.reconnectAfterCheck &&
+        (this.joined() || this.mediaReconnecting)
+      ) {
         this.reconnectAfterCheck = false;
         await this.reconnect();
+      } else if (this.mediaReconnecting && this.mediaReconnected) {
+        this.finishMediaReconnect();
       } else if (this.deferredJoin && this.ongoing()) {
         await this.join(this.state.phase === "reconnecting");
       } else if (this.syncControls()) this.publish();
@@ -617,6 +725,7 @@ export class VoxCallController {
     const terminalEpoch = ++this.epoch;
     this.deferredJoin = false;
     this.reconnectAfterCheck = false;
+    this.mediaReconnecting = this.mediaReconnected = false;
     const previousAbort = this.abort;
     this.abort = null;
     const connection = this.connection;
@@ -631,6 +740,9 @@ export class VoxCallController {
       this.state.activity = "quiet";
       this.state.minimized = false;
       this.state.speakerBlocked = false;
+      this.state.wakeStatus = "off";
+      this.state.wakeInputStatus = null;
+      this.state.webLookup = null;
       this.state.endReason = reason;
     }
     if (rebind) {
@@ -672,12 +784,13 @@ export class VoxCallController {
       }
     }
     this.publish();
-    if (!(await this.cleanup)) {
-      this.cleanupIncomplete = true;
-      if (terminalEpoch === this.epoch && this.state.phase === "ended") {
-        this.state.endReason = "cleanup-incomplete";
-        this.publish();
-      }
+    const safe = await this.cleanup;
+    if (!safe) this.cleanupIncomplete = true;
+    if (terminalEpoch === this.epoch && this.state.phase === "ended") {
+      if (!safe) this.state.endReason = "cleanup-incomplete";
+      // Transport availability can change when asynchronous retirement finishes.
+      // Refresh the UI after success too, so the next call does not require reload.
+      this.publish();
     }
   }
 

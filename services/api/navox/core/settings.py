@@ -53,12 +53,22 @@ class Settings(BaseSettings):
     student_vox_enabled: bool = False
     # Media is a separate release gate. A URL/key alone never admits a call.
     student_vox_media_enabled: bool = False
+    # Browser delivery of a vendor wake key requires separate operator approval.
+    student_vox_local_wake_enabled: bool = False
+    student_vox_porcupine_browser_credential_approved: bool = False
+    student_vox_porcupine_access_key: SecretStr | None = None
+    student_vox_porcupine_keyword_public_path: str = ""
+    student_vox_porcupine_model_public_path: str = ""
     student_vox_worker_qualified: bool = False
     student_vox_livekit_cloud_qualified: bool = False
     student_vox_livekit_url: str = ""
     student_vox_livekit_api_key: SecretStr | None = None
     student_vox_livekit_api_secret: SecretStr | None = None
     student_vox_livekit_agent_name: str = "navox-vox"
+    # Operator-owned JSON is reloaded for new calls; credentials remain in secret storage.
+    student_vox_inference_config_path: str = ""
+    # Account IDs permitted to inspect aggregate usage and edit runtime budgets.
+    student_vox_operator_user_ids: list[str] = Field(default_factory=list, repr=False)
     student_recovery_enabled: bool = False
     student_email_enabled: bool = False
     student_goals_enabled: bool = False

@@ -6,6 +6,7 @@ interface PcmMessage {
   type: string;
   id?: number;
   frame?: Float32Array;
+  reason?: string;
 }
 
 interface Processor {
@@ -119,7 +120,7 @@ describe("Vox AudioWorklet PCM bridge", () => {
     expect(stoppedAt).toBeGreaterThan(0);
     // The oldest complete 1024-sample input is retained for at most 350 ms.
     expect(stoppedAt).toBeLessThanOrEqual(1024 + 16_000 * 0.35 + 128);
-    expect(fake.messages.at(-1)).toEqual({ type: "fault" });
+    expect(fake.messages.at(-1)).toMatchObject({ type: "fault" });
     expect(fake.emit().running).toBe(false);
   });
 
@@ -146,7 +147,7 @@ describe("Vox AudioWorklet PCM bridge", () => {
           invalid === "nan" ? Number.NaN : 0.75,
         ),
       });
-      expect(fake.messages.at(-1)).toEqual({ type: "fault" });
+      expect(fake.messages.at(-1)).toMatchObject({ type: "fault" });
       expect(fake.emit().running).toBe(false);
       expect(silent(fake.emit().output)).toBe(true);
     }
@@ -166,12 +167,36 @@ describe("Vox AudioWorklet PCM bridge", () => {
     expect(fake.emit().running).toBe(false);
   });
 
+  it.each([1.25, -1.25])(
+    "keeps finite microphone peaks at %s alive and gated",
+    (peak) => {
+      const fake = bridge();
+      fake.send({ type: "enabled" });
+      for (let index = 0; index < 8; index += 1) {
+        const result = fake.emit(peak);
+        expect(result.running).toBe(true);
+        expect(silent(result.output)).toBe(true);
+      }
+      expect(fake.frames()).toHaveLength(1);
+      expect(
+        fake.frames()[0].frame?.every((value) => value === Math.sign(peak)),
+      ).toBe(true);
+      expect(fake.messages.some((message) => message.type === "fault")).toBe(
+        false,
+      );
+    },
+  );
+
   it("fails silent for corrupt input and unsupported channel layouts", () => {
-    for (const invalid of ["nan", "clipped", "stereo", "missing"]) {
+    for (const invalid of ["nan", "infinite", "stereo", "missing"]) {
       const fake = bridge();
       fake.send({ type: "enabled" });
       const input = new Float32Array(128).fill(
-        invalid === "nan" ? Number.NaN : invalid === "clipped" ? 1.1 : 0.25,
+        invalid === "nan"
+          ? Number.NaN
+          : invalid === "infinite"
+            ? Infinity
+            : 0.25,
       );
       const output = new Float32Array(128).fill(1);
       const channels =
@@ -182,7 +207,7 @@ describe("Vox AudioWorklet PCM bridge", () => {
             : [input];
       expect(fake.processor.process([channels], [[output]])).toBe(false);
       expect(silent(output)).toBe(true);
-      expect(fake.messages.at(-1)).toEqual({ type: "fault" });
+      expect(fake.messages.at(-1)).toMatchObject({ type: "fault" });
     }
   });
 });

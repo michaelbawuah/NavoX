@@ -2,8 +2,9 @@
 
 This module does not connect RTC by itself. The production bridge is in
 ``worker_livekit``; tests can replace only its audio transport and model boundary.
-Conversation bodies and PCM live in this process only. Existing gateway traces
-remain content-free and existing grants, evaluations and speech quotas still apply.
+Legacy gateway conversation bodies and PCM live in this process only. Configured
+Vox workers additionally use encrypted, expiring active-call checkpoints. Gateway
+traces remain content-free; existing grants, evaluations and speech quotas apply.
 """
 
 from __future__ import annotations
@@ -14,7 +15,8 @@ import json
 import math
 import struct
 import wave
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import UUID
@@ -162,71 +164,117 @@ class DatabaseAuthority:
         async with (
             self.factory(bind=self.connection) if self.connection is not None else self.factory()
         ) as database:
-            clock = (
-                func.clock_timestamp()
-                if database.get_bind().dialect.name == "postgresql"
-                else func.current_timestamp()
-            )
-            states = ("confirmed", "preparing") if allow_preparing else ("confirmed",)
-            row = (
-                await database.execute(
-                    select(VoxMediaConnection, VoxCall, UserSession.expires_at, clock)
-                    .select_from(VoxMediaConnection)
-                    .join(User, User.id == VoxMediaConnection.user_id)
-                    .join(UserSession, UserSession.id == VoxMediaConnection.auth_session_id)
-                    .join(VoxCall, VoxCall.id == VoxMediaConnection.call_id)
-                    .join(VoxState, VoxState.id == VoxMediaConnection.owner_scope_id)
-                    .join(Workspace, Workspace.id == VoxMediaConnection.workspace_id)
-                    .join(
-                        WorkspaceMembership,
-                        (WorkspaceMembership.workspace_id == Workspace.id)
-                        & (WorkspaceMembership.user_id == User.id),
-                    )
-                    .join(VoxMediaCleanup, VoxMediaCleanup.connection_id == VoxMediaConnection.id)
-                    .where(
-                        VoxMediaConnection.id == self.assignment.connection_id,
-                        VoxMediaConnection.status.in_(states),
-                        VoxMediaConnection.room_name == self.assignment.room_name,
-                        VoxMediaConnection.client_identity == self.assignment.client_identity,
-                        VoxMediaConnection.agent_identity == self.assignment.agent_identity,
-                        User.agent_paused.is_(False),
-                        UserSession.user_id == User.id,
-                        UserSession.client_type == "web",
-                        UserSession.revoked_at.is_(None),
-                        VoxCall.status == "reserved",
-                        VoxCall.auth_session_id == UserSession.id,
-                        VoxCall.user_id == User.id,
-                        VoxCall.workspace_id == Workspace.id,
-                        VoxCall.generation == VoxMediaConnection.generation,
-                        VoxState.user_id == User.id,
-                        VoxState.workspace_id == Workspace.id,
-                        VoxState.generation == VoxMediaConnection.generation,
-                        WorkspaceMembership.role == "owner",
-                        Workspace.workspace_type == "personal",
-                        VoxMediaCleanup.status == "armed",
-                        VoxMediaCleanup.owner_scope_id == VoxState.id,
-                        VoxMediaCleanup.room_name == VoxMediaConnection.room_name,
-                        VoxMediaCleanup.client_identity == VoxMediaConnection.client_identity,
-                        VoxMediaCleanup.agent_identity == VoxMediaConnection.agent_identity,
-                        VoxMediaCleanup.connection_expires_at == VoxMediaConnection.expires_at,
-                        VoxMediaCleanup.created_at == VoxMediaConnection.created_at,
-                    )
+            return await self._intent_in(database, allow_preparing=allow_preparing)
+
+    async def _intent_in(
+        self, database: AsyncSession, *, allow_preparing: bool = False
+    ) -> tuple[WorkerAuthority, media.ConnectionIntent]:
+        clock = (
+            func.clock_timestamp()
+            if database.get_bind().dialect.name == "postgresql"
+            else func.current_timestamp()
+        )
+        states = ("confirmed", "preparing") if allow_preparing else ("confirmed",)
+        row = (
+            await database.execute(
+                select(VoxMediaConnection, VoxCall, UserSession.expires_at, clock)
+                .select_from(VoxMediaConnection)
+                .join(User, User.id == VoxMediaConnection.user_id)
+                .join(UserSession, UserSession.id == VoxMediaConnection.auth_session_id)
+                .join(VoxCall, VoxCall.id == VoxMediaConnection.call_id)
+                .join(VoxState, VoxState.id == VoxMediaConnection.owner_scope_id)
+                .join(Workspace, Workspace.id == VoxMediaConnection.workspace_id)
+                .join(
+                    WorkspaceMembership,
+                    (WorkspaceMembership.workspace_id == Workspace.id)
+                    & (WorkspaceMembership.user_id == User.id),
                 )
-            ).one_or_none()
-            if row is None:
-                raise WorkerAccessLost("The voice connection has ended")
-            connection, call, session_expires_at, checked_at = row
-            now = utc(checked_at)
-            if (
-                utc(connection.expires_at) <= now
-                or utc(call.expires_at) <= now
-                or utc(connection.expires_at) > min(utc(call.expires_at), utc(session_expires_at))
-            ):
-                raise WorkerAccessLost("The voice connection has ended")
-            return (
-                WorkerAuthority(connection.user_id, connection.workspace_id),
-                media._intent(connection, call),
+                .join(VoxMediaCleanup, VoxMediaCleanup.connection_id == VoxMediaConnection.id)
+                .where(
+                    VoxMediaConnection.id == self.assignment.connection_id,
+                    VoxMediaConnection.status.in_(states),
+                    VoxMediaConnection.room_name == self.assignment.room_name,
+                    VoxMediaConnection.client_identity == self.assignment.client_identity,
+                    VoxMediaConnection.agent_identity == self.assignment.agent_identity,
+                    User.agent_paused.is_(False),
+                    UserSession.user_id == User.id,
+                    UserSession.client_type == "web",
+                    UserSession.revoked_at.is_(None),
+                    VoxCall.status == "reserved",
+                    VoxCall.auth_session_id == UserSession.id,
+                    VoxCall.user_id == User.id,
+                    VoxCall.workspace_id == Workspace.id,
+                    VoxCall.generation == VoxMediaConnection.generation,
+                    VoxState.user_id == User.id,
+                    VoxState.workspace_id == Workspace.id,
+                    VoxState.generation == VoxMediaConnection.generation,
+                    WorkspaceMembership.role == "owner",
+                    Workspace.workspace_type == "personal",
+                    VoxMediaCleanup.status == "armed",
+                    VoxMediaCleanup.owner_scope_id == VoxState.id,
+                    VoxMediaCleanup.room_name == VoxMediaConnection.room_name,
+                    VoxMediaCleanup.client_identity == VoxMediaConnection.client_identity,
+                    VoxMediaCleanup.agent_identity == VoxMediaConnection.agent_identity,
+                    VoxMediaCleanup.connection_expires_at == VoxMediaConnection.expires_at,
+                    VoxMediaCleanup.created_at == VoxMediaConnection.created_at,
+                )
             )
+        ).one_or_none()
+        if row is None:
+            raise WorkerAccessLost("The voice connection has ended")
+        connection, call, session_expires_at, checked_at = row
+        now = utc(checked_at)
+        if (
+            utc(connection.expires_at) <= now
+            or utc(call.expires_at) <= now
+            or utc(connection.expires_at) > min(utc(call.expires_at), utc(session_expires_at))
+        ):
+            raise WorkerAccessLost("The voice connection has ended")
+        return (
+            WorkerAuthority(connection.user_id, connection.workspace_id),
+            media._intent(connection, call),
+        )
+
+    @asynccontextmanager
+    async def context_session(
+        self,
+    ) -> AsyncIterator[tuple[AsyncSession, WorkerAuthority, media.ConnectionIntent]]:
+        """Short local checkpoint transaction on the physical worker-lock session.
+
+        Never perform provider I/O while holding this boundary. An invalidated
+        connection stays terminal, even if SQLAlchemy could reconnect it.
+        """
+        try:
+            async with asyncio.timeout(2), self._connection_lock:
+                connection = self.connection
+                if (
+                    self._connection_failed
+                    or connection is None
+                    or connection.closed
+                    or connection.invalidated
+                    or connection.dialect.name != "postgresql"
+                ):
+                    raise WorkerAccessLost("The exclusive voice worker connection ended")
+                async with self.factory(bind=connection) as database:
+                    user_id = await database.scalar(
+                        select(VoxMediaConnection.user_id).where(
+                            VoxMediaConnection.id == self.assignment.connection_id
+                        )
+                    )
+                    if user_id is None:
+                        raise WorkerAccessLost("The voice connection has ended")
+                    await database.scalar(
+                        select(User.id).where(User.id == user_id).with_for_update()
+                    )
+                    authority, intent = await self._intent_in(database)
+                    yield database, authority, intent
+                    # Serialization prevents revocation races; repeat the DB
+                    # clock proof so encryption/flush cannot cross lease expiry.
+                    await self._intent_in(database)
+                    await database.commit()
+        except (SQLAlchemyError, TimeoutError):
+            self._connection_failed = True
+            raise WorkerAccessLost("The exclusive voice worker connection ended") from None
 
     async def retire(self) -> None:
         """Retire only through the physical session that still owns the worker lock.
@@ -281,6 +329,7 @@ class DatabaseAuthority:
 class MemoryTurn:
     question: str
     answer: str
+    kind: str = "dialogue"
 
 
 class TransientConversationContext:

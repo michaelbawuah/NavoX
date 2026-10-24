@@ -35,8 +35,11 @@ from navox.db import (
     student_recovery,  # noqa: F401 - registers expiring private recovery proposals
     thread_watches,  # noqa: F401 - registers verified-send follow-up watches
     vox,  # noqa: F401 - registers content-free Vox reservations and generation fences
+    vox_commands,  # noqa: F401 - registers short-lived encrypted question delivery
+    vox_context,  # noqa: F401 - registers temporary encrypted call checkpoints
     vox_media,  # noqa: F401 - registers media epochs and independent cleanup instructions
     vox_provision,  # noqa: F401 - registers independent uncertain provider outcomes
+    vox_usage,  # noqa: F401 - registers content-free metering and server quota reservations
 )
 from navox.db.base import Base
 

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import {
   type KeyboardEvent,
+  type ReactNode,
   useId,
   useLayoutEffect,
   useRef,
@@ -103,8 +104,16 @@ function phaseDetail(state: VoxCallState) {
     case "reconnecting":
       return "Audio is paused while the connection returns.";
     case "standby":
-      return "Audio transmission is paused. Tap to continue.";
+      if (state.microphoneMuted)
+        return "Microphone muted. Tap to resume when you are ready.";
+      if (state.wakeStatus === "listening")
+        return "Audio transmission is paused. Say “Hey NavoX” or tap to continue. Keep NavoX open.";
+      if (state.wakeStatus === "starting")
+        return "Preparing local wake listening. You can tap to continue.";
+      return "Audio transmission is paused. Local wake is unavailable in this browser. Tap to continue.";
     case "ended":
+      if (state.endReason === "allowance-reached")
+        return "Your Vox allowance has been reached. You can continue in typed chat.";
       if (state.endReason === "cleanup-incomplete")
         return "The call ended, but cleanup could not be confirmed. Reload NavoX before starting another call.";
       return state.endReason === "connection-failed"
@@ -115,6 +124,66 @@ function phaseDetail(state: VoxCallState) {
   }
 }
 
+// Render only simple emphasis; all other provider text remains escaped React text.
+// Split citation ranges first so formatting never changes provider offsets.
+function webText(text: string): ReactNode[] {
+  let offset = 0;
+  return text.split(/(\*\*[^*\n]+\*\*)/g).map((part) => {
+    const key = offset;
+    offset += part.length;
+    return part.startsWith("**") && part.endsWith("**") ? (
+      <strong key={key}>{part.slice(2, -2)}</strong>
+    ) : (
+      part
+    );
+  });
+}
+
+function WebLookup({ state }: { state: VoxCallState }) {
+  const result = state.ownerVerified ? state.webLookup : null;
+  if (!result || state.phase === "ended") return null;
+  if (result.status !== "complete")
+    return (
+      <p
+        role="status"
+        className={styles.hint}
+        data-vox-web-status={result.status}
+      >
+        {result.status === "searching"
+          ? "Checking the web…"
+          : "The online lookup could not be verified."}
+      </p>
+    );
+  const characters = Array.from(result.text);
+  const content: ReactNode[] = [];
+  let offset = 0;
+  for (const [index, source] of result.citations.entries()) {
+    content.push(webText(characters.slice(offset, source.start).join("")));
+    content.push(
+      <a
+        key={index}
+        href={source.url}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        {source.title}
+      </a>,
+    );
+    offset = source.end;
+  }
+  content.push(webText(characters.slice(offset).join("")));
+  return (
+    <section
+      className={styles.webResult}
+      aria-label="Web lookup sources"
+      data-vox-web-status="complete"
+    >
+      <p className={styles.eyebrow}>From the web</p>
+      <p>{content}</p>
+    </section>
+  );
+}
+
 function CallDialog({
   controller,
   state,
@@ -122,6 +191,7 @@ function CallDialog({
   onMinimize,
   onDone,
   onStart,
+  usageNotice,
 }: {
   controller: VoxCallController;
   state: VoxCallState;
@@ -129,6 +199,7 @@ function CallDialog({
   onMinimize: () => void;
   onDone: () => void;
   onStart: () => void;
+  usageNotice?: string;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const returnTarget = useRef<HTMLElement | null>(null);
@@ -240,6 +311,19 @@ function CallDialog({
           {phaseDetail(state)}
         </p>
       </div>
+      <WebLookup state={state} />
+      {usageNotice && state.endReason !== "allowance-reached" && (
+        <p role="status" data-vox-usage="true" className={styles.hint}>
+          {usageNotice}
+        </p>
+      )}
+      {state.wakeInputStatus && (
+        <p role="status" className={styles.hint}>
+          {state.wakeInputStatus === "queued"
+            ? "Your question is queued in this conversation."
+            : "Conversation resumed. Your question could not be queued; please say it again."}
+        </p>
+      )}
       {!ended ? (
         <>
           {state.phase === "standby" && (
@@ -596,6 +680,11 @@ export function VoxCallControls({
           The call could not be started. Please try again.
         </p>
       )}
+      {!open && call.usageNotice?.message && (
+        <p role="status" data-vox-usage="true" className={styles.hint}>
+          {call.usageNotice.message}
+        </p>
+      )}
       {open && (
         <CallDialog
           controller={controller}
@@ -604,6 +693,7 @@ export function VoxCallControls({
           onMinimize={minimize}
           onDone={done}
           onStart={() => void start()}
+          usageNotice={call.usageNotice?.message}
         />
       )}
     </section>

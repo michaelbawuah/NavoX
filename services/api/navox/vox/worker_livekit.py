@@ -12,6 +12,8 @@ import asyncio
 import hashlib
 import io
 import json
+import logging
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -24,23 +26,49 @@ from navox.ai.configured import build_runtime
 from navox.ai.speech_adapters import MAX_SPEECH_AUDIO_BYTES
 from navox.core.settings import Settings, get_settings
 from navox.db.session import get_database_engine, get_session_factory
+from navox.vox.audio_input import AudioInputBuffer
+from navox.vox.context_store import DatabaseContextStore
+from navox.vox.inference_config import load_inference_config
+from navox.vox.inference_http import OpenAICompatiblePipeline, UsageHooks
+from navox.vox.inference_realtime import OpenAIRealtimeAdapter
+from navox.vox.inference_worker import ConfiguredVoiceWorker
 from navox.vox.provider import cloud_config
+from navox.vox.schedule_tools import ScheduleTools
+from navox.vox.session_context import CallContextKey, VoxCallContext
+from navox.vox.web_tools import WEB_TOPIC, PublicWebTools, VoxReadTools
 from navox.vox.worker import (
     DatabaseAuthority,
     PolicyVoiceGateway,
     VoiceTurnWorker,
     WorkerAccessLost,
     WorkerAssignment,
+    is_voice,
 )
 
 MAX_OUTPUT_SAMPLES = 48_000 * 60
+# Absorb short provider/DB scheduling stalls; interruption still clears immediately.
+OUTPUT_QUEUE_MS = 200
+
+
+def log_worker_failure(stage: str, error: BaseException) -> None:
+    """Log only code location and type, never provider text, payloads or locals."""
+    trace = error.__traceback__
+    location = "unknown"
+    while trace is not None:
+        if "/navox/" in trace.tb_frame.f_code.co_filename:
+            location = f"{trace.tb_frame.f_code.co_name}:{trace.tb_lineno}"
+        trace = trace.tb_next
+    logging.getLogger(__name__).warning(
+        "Vox worker stopped",
+        extra={"stage": stage, "error_type": type(error).__name__, "failure_site": location},
+    )
 
 
 @asynccontextmanager
 async def exclusive_epoch(
     engine: AsyncEngine, assignment: WorkerAssignment
 ) -> AsyncIterator[AsyncConnection]:
-    """One physical PG connection, one epoch, at most the immutable 120 s lease.
+    """One physical PG connection, one epoch, while the bounded renewable authority lease survives.
 
     No transaction or row lock spans RTC/provider I/O. A process crash releases
     the session lock. A duplicate dispatch cannot connect and replace the agent.
@@ -83,9 +111,67 @@ async def exclusive_epoch(
 class LiveKitAudioOutput:
     def __init__(self, source: rtc.AudioSource):
         self.source = source
+        self._pcm_resampler: av.AudioResampler | None = None
+        self._pcm_samples = 0
+        self._pcm_decoded_samples = 0
+        self._output_frames = 0
+        self._starvations = 0
+        self._starvation_seconds = 0.0
+        self._max_proof_seconds = 0.0
+        self._queued_until: float | None = None
+        self.usage: UsageHooks | None = None
+
+    def played_pcm_ms(self) -> int:
+        return max(0, int(self._pcm_samples / 48 - self.source.queued_duration * 1000))
+
+    def _report_playout(self) -> None:
+        if self._output_frames:
+            logging.getLogger(__name__).info(
+                "Vox audio playout totals",
+                extra={
+                    "output_frames": self._output_frames,
+                    "starvations": self._starvations,
+                    "starvation_ms": round(self._starvation_seconds * 1000),
+                    "max_proof_ms": round(self._max_proof_seconds * 1000),
+                },
+            )
+        self._output_frames = self._starvations = 0
+        self._starvation_seconds = self._max_proof_seconds = 0.0
+        self._queued_until = None
 
     async def clear(self) -> None:
         self.source.clear_queue()
+        self._report_playout()
+        self._pcm_resampler = None
+        self._pcm_samples = self._pcm_decoded_samples = 0
+
+    async def _capture_raw(self, raw: bytes, check: Callable[[], Awaitable[None]]) -> None:
+        for start in range(0, len(raw), 1920):
+            # Each <=20 ms frame still needs fresh authorization and committed
+            # usage credit before entering the bounded, interruptible RTC queue.
+            began = time.monotonic()
+            await check()
+            data = raw[start : start + 1920]
+            if self.usage:
+                await self.usage.note_audio(max(1, len(data) * 1000 // 96000), direction="output")
+            now = time.monotonic()
+            self._max_proof_seconds = max(self._max_proof_seconds, now - began)
+            if self._queued_until is not None and now - self._queued_until > 0.002:
+                self._starvations += 1
+                self._starvation_seconds += now - self._queued_until
+            await self.source.capture_frame(
+                rtc.AudioFrame(
+                    data=data,
+                    sample_rate=48_000,
+                    num_channels=1,
+                    samples_per_channel=len(data) // 2,
+                )
+            )
+            # Count only submitted samples, not the rest of a provider chunk
+            # which may still be waiting for proof when the student interrupts.
+            self._pcm_samples += len(data) // 2
+            self._output_frames += 1
+            self._queued_until = time.monotonic() + getattr(self.source, "queued_duration", 0.0)
 
     async def play(self, mp3: bytes, check: Callable[[], Awaitable[None]]) -> None:
         if not isinstance(mp3, bytes) or not 0 < len(mp3) <= MAX_SPEECH_AUDIO_BYTES:
@@ -101,18 +187,40 @@ class LiveKitAudioOutput:
                     if produced > MAX_OUTPUT_SAMPLES:
                         raise ValueError("The voice response exceeds the playback duration bound")
                     raw = bytes(frame.planes[0])[: frame.samples * 2]
-                    for start in range(0, len(raw), 1920):  # At most 20 ms queued per fresh proof.
-                        await check()
-                        data = raw[start : start + 1920]
-                        await self.source.capture_frame(
-                            rtc.AudioFrame(
-                                data=data,
-                                sample_rate=48_000,
-                                num_channels=1,
-                                samples_per_channel=len(data) // 2,
-                            )
-                        )
+                    await self._capture_raw(raw, check)
         await self.source.wait_for_playout()
+        self._report_playout()
+        self._pcm_samples = 0
+
+    async def _capture_pcm(
+        self, frames: list[av.AudioFrame], check: Callable[[], Awaitable[None]]
+    ) -> None:
+        for frame in frames:
+            self._pcm_decoded_samples += frame.samples
+            if self._pcm_decoded_samples > MAX_OUTPUT_SAMPLES:
+                raise ValueError("The voice response exceeds the playback duration bound")
+            raw = bytes(frame.planes[0])[: frame.samples * 2]
+            await self._capture_raw(raw, check)
+
+    async def play_pcm(self, pcm: bytes, check: Callable[[], Awaitable[None]]) -> None:
+        if not pcm or len(pcm) % 2 or len(pcm) > 1_048_576:
+            raise ValueError("The realtime audio frame is outside its bound")
+        if self._pcm_resampler is None:
+            self._pcm_resampler = av.AudioResampler(format="s16", layout="mono", rate=48_000)
+            self._pcm_samples = self._pcm_decoded_samples = 0
+        frame = av.AudioFrame(format="s16", layout="mono", samples=len(pcm) // 2)
+        frame.sample_rate = 24_000
+        frame.planes[0].update(pcm)
+        await self._capture_pcm(self._pcm_resampler.resample(frame), check)
+
+    async def finish_pcm(self, check: Callable[[], Awaitable[None]]) -> None:
+        if self._pcm_resampler is not None:
+            await self._capture_pcm(self._pcm_resampler.resample(None), check)
+        await self.source.wait_for_playout()
+        await check()
+        self._report_playout()
+        self._pcm_resampler = None
+        self._pcm_samples = self._pcm_decoded_samples = 0
 
 
 def participant_metadata(value: str, assignment: WorkerAssignment, generation: int) -> bool:
@@ -155,6 +263,52 @@ async def _active_epoch(
             await bound.retire()
 
 
+class InputTrackBinding:
+    """One exact owned microphone; late retirement cannot clear its replacement."""
+
+    def __init__(self, assignment: WorkerAssignment, generation: int, audio: AudioInputBuffer):
+        self.assignment = assignment
+        self.generation = generation
+        self.audio = audio
+        self.sid: str | None = None
+
+    def _owner(self, participant: rtc.RemoteParticipant) -> None:
+        if participant.identity != self.assignment.client_identity or not participant_metadata(
+            participant.metadata, self.assignment, self.generation
+        ):
+            raise WorkerAccessLost("The voice participant is outside its assignment")
+
+    def subscribe(
+        self,
+        track: rtc.Track,
+        publication: rtc.RemoteTrackPublication,
+        participant: rtc.RemoteParticipant,
+    ) -> bool:
+        self._owner(participant)
+        if (
+            track.kind != rtc.TrackKind.KIND_AUDIO
+            or publication.source != rtc.TrackSource.SOURCE_MICROPHONE
+        ):
+            raise WorkerAccessLost("The voice track is outside its assignment")
+        if self.sid == publication.sid:
+            return False
+        if self.sid is not None:
+            raise WorkerAccessLost("Another microphone track is still active")
+        self.sid = publication.sid
+        return True
+
+    def release(
+        self, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant
+    ) -> None:
+        self._owner(participant)
+        if self.sid == publication.sid:
+            self.clear()
+
+    def clear(self) -> None:
+        self.sid = None
+        self.audio.discard()
+
+
 async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
     """No subscription, RTC connection or provider request before exact DB proof."""
     assignment = WorkerAssignment.from_metadata(ctx.job.metadata)
@@ -166,7 +320,7 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
     cloud_config(settings)  # Runtime kill switch/config remains authoritative.
     check = DatabaseAuthority(get_session_factory(), assignment)
     await _confirmed(check)
-    async with _active_epoch(check, assignment) as check, asyncio.timeout(125):
+    async with _active_epoch(check, assignment) as check:
         _, intent = await check.intent()
         await ctx.connect(auto_subscribe=agents.AutoSubscribe.SUBSCRIBE_NONE)
         if (ctx.room.name, ctx.room.local_participant.identity) != (
@@ -177,54 +331,148 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
         ):
             raise WorkerAccessLost("The voice participant binding changed")
         await check()
-        source = rtc.AudioSource(48_000, 1, queue_size_ms=20)
+        source = rtc.AudioSource(48_000, 1, queue_size_ms=OUTPUT_QUEUE_MS)
         output = LiveKitAudioOutput(source)
-        runtime = await build_runtime(settings, get_session_factory())
-        worker = VoiceTurnWorker(
-            assignment, check, PolicyVoiceGateway(runtime, settings, check), output
-        )
+        inference = load_inference_config(settings)
+        worker: VoiceTurnWorker | ConfiguredVoiceWorker
+        if inference is None:
+            runtime = await build_runtime(settings, get_session_factory())
+            worker = VoiceTurnWorker(
+                assignment, check, PolicyVoiceGateway(runtime, settings, check), output
+            )
+        else:
+            # New routes are operator-owned and remain behind the same exact DB proof.
+            from navox.vox.worker_usage import WorkerUsageHooks
+
+            authority = await check()
+            context_key = CallContextKey(
+                authority.user_id, authority.workspace_id, intent.reservation_id, intent.generation
+            )
+            context = await VoxCallContext.load(
+                context_key,
+                DatabaseContextStore(
+                    check,
+                    settings,
+                    configuration_id=hashlib.sha256(
+                        inference.model_dump_json().encode()
+                    ).hexdigest(),
+                ),
+                max_characters=inference.max_context_characters,
+            )
+
+            async def inference_check() -> None:
+                current = await check()
+                if current != authority:
+                    raise WorkerAccessLost("The voice call owner changed")
+
+            usage = WorkerUsageHooks(check)
+            output.usage = usage
+
+            async def publish_web(result: dict[str, object]) -> None:
+                await inference_check()
+                await ctx.room.local_participant.publish_data(
+                    json.dumps(result, ensure_ascii=False).encode(),
+                    reliable=True,
+                    destination_identities=[assignment.client_identity],
+                    topic=WEB_TOPIC,
+                )
+
+            tools = VoxReadTools(
+                ScheduleTools(check),
+                PublicWebTools(check, inference, settings, usage, publish_web),
+            )
+            realtime = OpenAIRealtimeAdapter(inference, settings, inference_check, usage, tools)
+            pipeline = OpenAICompatiblePipeline(inference, settings, inference_check, usage, tools)
+            worker = ConfiguredVoiceWorker(
+                assignment, check, output, inference, context, realtime, pipeline, usage=usage
+            )
         stopped = asyncio.Event()
         streams: set[asyncio.Task[None]] = set()
         handlers: list[tuple[str, Callable[..., None]]] = []
-        subscribed_sid: str | None = None
         seen_client = False
 
-        async def pump(track: rtc.Track, participant: rtc.RemoteParticipant) -> None:
+        audio_input = AudioInputBuffer()
+        input_track = InputTrackBinding(assignment, intent.generation, audio_input)
+        frames = voiced_frames = slow_frames = 0
+        receive_seconds = max_receive_seconds = 0.0
+
+        async def receive_frame(pcm: bytes) -> None:
+            nonlocal frames, voiced_frames, slow_frames, receive_seconds, max_receive_seconds
+            frames += 1
+            voiced_frames += int(is_voice(pcm))
+            started = time.monotonic()
+            await worker.receive(assignment.client_identity, pcm)
+            elapsed = time.monotonic() - started
+            receive_seconds += elapsed
+            max_receive_seconds = max(max_receive_seconds, elapsed)
+            slow_frames += int(elapsed > 0.1)
+
+        async def interrupt_input() -> None:
+            audio_input.discard()
+            async with audio_input.lock:
+                audio_input.discard()
+                await worker.interrupt()
+
+        async def pump(
+            track: rtc.Track, participant: rtc.RemoteParticipant, track_sid: str
+        ) -> None:
             stream = rtc.AudioStream(
                 track, capacity=5, sample_rate=16_000, num_channels=1, frame_size_ms=20
             )
             try:
                 async for event in stream:
-                    if stopped.is_set():
+                    if stopped.is_set() or input_track.sid != track_sid:
                         break
-                    await worker.receive(participant.identity, bytes(event.frame.data))
-            except Exception:
-                stopped.set()
+                    # Drain RTC promptly; DB and provider admission run separately.
+                    audio_input.put(bytes(event.frame.data))
+            except Exception as error:
+                log_worker_failure("audio_receive", error)
+                if input_track.sid == track_sid:
+                    stopped.set()
             finally:
                 await stream.aclose()
+
+        def completed(task: asyncio.Task[None]) -> None:
+            streams.discard(task)
+            if task.cancelled():
+                return
+            error = task.exception()
+            if error is not None:
+                log_worker_failure("background", error)
+                stopped.set()
 
         def spawn(coroutine: Awaitable[None]) -> None:
             task = asyncio.ensure_future(coroutine)
             streams.add(task)
-            task.add_done_callback(streams.discard)
+            task.add_done_callback(completed)
 
         def subscribed(
             track: rtc.Track,
             publication: rtc.RemoteTrackPublication,
             participant: rtc.RemoteParticipant,
         ) -> None:
-            nonlocal subscribed_sid
-            if (
-                participant.identity != assignment.client_identity
-                or track.kind != rtc.TrackKind.KIND_AUDIO
-                or publication.source != rtc.TrackSource.SOURCE_MICROPHONE
-                or subscribed_sid is not None
-                or not participant_metadata(participant.metadata, assignment, intent.generation)
-            ):
+            try:
+                if input_track.subscribe(track, publication, participant):
+                    spawn(pump(track, participant, publication.sid))
+            except WorkerAccessLost:
                 stopped.set()
-                return
-            subscribed_sid = publication.sid
-            spawn(pump(track, participant))
+
+        def track_unpublished(
+            publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant
+        ) -> None:
+            try:
+                # Mute/reconnect retires capture without leaving the participant.
+                # Do not cancel an assistant reply just because its mic is muted.
+                input_track.release(publication, participant)
+            except WorkerAccessLost:
+                stopped.set()
+
+        def track_unsubscribed(
+            track: rtc.Track,
+            publication: rtc.RemoteTrackPublication,
+            participant: rtc.RemoteParticipant,
+        ) -> None:
+            track_unpublished(publication, participant)
 
         async def subscribe(participant: rtc.RemoteParticipant) -> None:
             nonlocal seen_client
@@ -242,7 +490,8 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                     ):
                         raise WorkerAccessLost("The voice track is outside its assignment")
                     publication.set_subscribed(True)
-            except Exception:
+            except Exception as error:
+                log_worker_failure("subscribe", error)
                 stopped.set()
 
         def participant_connected(participant: rtc.RemoteParticipant) -> None:
@@ -254,7 +503,15 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             participant_connected(participant)
 
         def participant_disconnected(participant: rtc.RemoteParticipant) -> None:
-            stopped.set()
+            if participant.identity != assignment.client_identity:
+                stopped.set()
+                return
+            input_track.clear()
+            # Same-call SDK reconnect may resume only while fresh DB authority survives.
+            spawn(interrupt_input())
+
+        def reconnecting(*args: object) -> None:
+            spawn(interrupt_input())
 
         def metadata_changed(previous: str, participant: rtc.Participant) -> None:
             stopped.set()
@@ -270,9 +527,20 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                         return
                     cloud_config(get_settings())
                     await check()
-                    await worker.flush_idle()
+                    await audio_input.flush_idle(worker.flush_idle)
+                    if isinstance(worker, ConfiguredVoiceWorker):
+                        await worker.maintain()
+                        from navox.vox.commands import take_wake_commands
+
+                        # Serialize accepted commands; never overwrite a prior accepted question.
+                        if worker._task is None:
+                            commands = await take_wake_commands(check, settings)
+                            for command in commands:
+                                async with audio_input.lock:
+                                    await worker.text_turn(command.text)
                     await asyncio.sleep(0.25)
-            except Exception:
+            except Exception as error:
+                log_worker_failure("watch", error)
                 stopped.set()
 
         def on(event: str, callback: Callable[..., None]) -> None:
@@ -280,12 +548,16 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             handlers.append((event, callback))
 
         try:
+            if isinstance(worker, ConfiguredVoiceWorker):
+                await worker.warm()
             on("track_subscribed", subscribed)
+            on("track_unsubscribed", track_unsubscribed)
+            on("track_unpublished", track_unpublished)
             on("participant_connected", participant_connected)
             on("track_published", track_published)
             on("participant_disconnected", participant_disconnected)
             on("participant_metadata_changed", metadata_changed)
-            on("reconnecting", disconnected)
+            on("reconnecting", reconnecting)
             on("disconnected", disconnected)
             track = rtc.LocalAudioTrack.create_audio_track("navox-vox", source)
             await check()
@@ -294,7 +566,10 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             )
             for participant in ctx.room.remote_participants.values():
                 participant_connected(participant)
+            spawn(audio_input.consume(receive_frame))
             spawn(watch())
+            if isinstance(worker, ConfiguredVoiceWorker):
+                spawn(usage.heartbeat())
             # An unused dispatch must not occupy the single worker indefinitely.
             try:
                 await asyncio.wait_for(stopped.wait(), timeout=20)
@@ -306,8 +581,24 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             stopped.set()
             for event, callback in handlers:
                 ctx.room.off(event, callback)  # type: ignore[arg-type]
+            for task in tuple(streams):
+                task.cancel()
+            await asyncio.gather(*streams, return_exceptions=True)
+            audio_input.discard()
+            logging.getLogger(__name__).info(
+                "Vox input processing totals",
+                extra={
+                    "frames": frames,
+                    "voiced_frames": voiced_frames,
+                    "slow_frames": slow_frames,
+                    "receive_ms": round(receive_seconds * 1000),
+                    "max_receive_ms": round(max_receive_seconds * 1000),
+                },
+            )
             try:
                 await worker.close()
+                if isinstance(worker, ConfiguredVoiceWorker):
+                    await usage.close()
             finally:
                 for task in tuple(streams):
                     task.cancel()
@@ -316,8 +607,22 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                 await ctx.room.disconnect()
 
 
+async def job_entrypoint(ctx: agents.JobContext) -> None:
+    """Importable entry point for LiveKit's spawned/forkserver job processes."""
+    try:
+        # Resolve private configuration in the child; do not pickle credentials.
+        await serve_job(ctx, get_settings())
+    except Exception as error:
+        log_worker_failure("job", error)
+        # SDK logs must not receive provider exception bodies or media data.
+        await ctx.room.disconnect()
+    finally:
+        ctx.shutdown("The bounded NavoX voice session ended")
+
+
 def build_server(settings: Settings) -> agents.AgentServer:
     config = cloud_config(settings)
+    inference = load_inference_config(settings)
     server = agents.AgentServer(
         ws_url=config.server_url,
         api_key=config.api_key,
@@ -332,7 +637,7 @@ def build_server(settings: Settings) -> agents.AgentServer:
         permissions=agents.WorkerPermissions(
             can_publish=True,
             can_subscribe=True,
-            can_publish_data=False,
+            can_publish_data=inference is not None and inference.web_search is not None,
             can_update_metadata=False,
             can_publish_sources=[rtc.TrackSource.SOURCE_MICROPHONE],  # type: ignore[list-item]
         ),
@@ -361,15 +666,7 @@ def build_server(settings: Settings) -> agents.AgentServer:
         except Exception:
             await req.reject()
 
-    @server.rtc_session(agent_name=config.agent_name, on_request=request)
-    async def entrypoint(ctx: agents.JobContext) -> None:
-        try:
-            await serve_job(ctx, settings)
-        except Exception:
-            # SDK logs must not receive provider exception bodies or media data.
-            await ctx.room.disconnect()
-        finally:
-            ctx.shutdown("The bounded NavoX voice session ended")
+    server.rtc_session(job_entrypoint, agent_name=config.agent_name, on_request=request)
 
     return server
 

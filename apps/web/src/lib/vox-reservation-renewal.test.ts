@@ -138,6 +138,48 @@ afterEach(async () => {
 });
 
 describe("bounded native Vox lease renewal", () => {
+  it("never extends or revives a lease while temporary HTTP failures persist", async () => {
+    const current = rig();
+    await current.call.start();
+    const original = implementation(current.fetcher);
+    current.fetcher.mockImplementation((input, init) =>
+      String(input).endsWith("/renew")
+        ? Promise.resolve(new Response(null, { status: 503 }))
+        : original(input, init),
+    );
+    await vi.advanceTimersByTimeAsync(119_999);
+    expect(current.call.current().phase).toBe("active");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(current.call.current()).toMatchObject({
+      phase: "ended",
+      endReason: "transport-ended",
+    });
+    expect(current.inner.connect).toHaveBeenCalledTimes(1);
+    expect(current.ends()).toHaveLength(1);
+  });
+
+  it("retries a temporary HTTP renewal within the existing lease without replacing the call", async () => {
+    const current = rig();
+    await current.call.start();
+    const original = implementation(current.fetcher);
+    let fail = true;
+    current.fetcher.mockImplementation(async (input, init) => {
+      if (String(input).endsWith("/renew") && fail) {
+        fail = false;
+        return new Response(null, { status: 503 });
+      }
+      return original(input, init);
+    });
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(current.call.current().phase).toBe("active");
+    expect(current.renewals()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(current.renewals()).toHaveLength(2);
+    expect(current.inner.connect).toHaveBeenCalledTimes(1);
+    expect(current.call.current().phase).toBe("active");
+    expect(current.ends()).toHaveLength(0);
+  });
+
   it("never renews without the synchronous ownership observer and disposes a registered observer on close", async () => {
     const current = rig();
     const events = vi.fn();
@@ -371,7 +413,7 @@ describe("bounded native Vox lease renewal", () => {
     },
   );
 
-  it.each([401, 404, 409, 410, 503])(
+  it.each([401, 404, 409, 410])(
     "fails closed on renewal status %i",
     async (status) => {
       const current = rig();

@@ -1,7 +1,10 @@
 /** Cookie-bound media admission. Construction never opens a room or microphone. */
 import type { VoxTransportRequest } from "./vox-call";
 import type { VoxMediaAdmission, VoxMediaLease } from "./vox-livekit";
-import type { VoxReservationClient } from "./vox-reservations";
+import {
+  type VoxReservationClient,
+  VoxReservationError,
+} from "./vox-reservations";
 
 const uuid =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -100,21 +103,67 @@ export function createVoxMediaAdmission(options: {
       const callId = request.callId;
       const authority = options.reservations.mediaAuthority(owner, callId);
       const requestId = (options.requestId ?? (() => crypto.randomUUID()))();
-      const value = record(
-        await options.reservations.mediaRequest(
-          owner,
-          callId,
-          authority.generation,
-          { action: "join", requestId },
-          request.signal,
-        ),
-        [...bindingKeys, "server_url", "token"],
+      // Wait only for an explicit pre-allocation cleanup response. Keep the
+      // same request ID, never retry a timeout or unknown provider side effect.
+      let raw: unknown;
+      const started = now();
+      for (let attempt = 0; ; attempt++) {
+        if (request.signal.aborted) throw unavailable();
+        const current = options.reservations.mediaAuthority(owner, callId);
+        if (
+          current.generation !== authority.generation ||
+          current.expiresAt <= now()
+        )
+          throw unavailable();
+        try {
+          raw = await options.reservations.mediaRequest(
+            owner,
+            callId,
+            authority.generation,
+            { action: "join", requestId },
+            request.signal,
+          );
+          break;
+        } catch (error) {
+          if (
+            !(error instanceof VoxReservationError) ||
+            error.code !== "cleanup-pending" ||
+            attempt >= 19 ||
+            now() - started >= 20_000
+          )
+            throw error;
+          await new Promise<void>((resolve, reject) => {
+            const abort = () => {
+              clearTimeout(timer);
+              request.signal.removeEventListener("abort", abort);
+              reject(unavailable());
+            };
+            const timer = setTimeout(() => {
+              request.signal.removeEventListener("abort", abort);
+              resolve();
+            }, 1_000);
+            request.signal.addEventListener("abort", abort, { once: true });
+            if (request.signal.aborted) abort();
+          });
+        }
+      }
+      const value = record(raw, [
+        ...bindingKeys,
+        "server_url",
+        "token",
+        "token_expires_at",
+      ]);
+      const latestAuthority = options.reservations.mediaAuthority(
+        owner,
+        callId,
       );
+      if (latestAuthority.generation !== authority.generation)
+        throw unavailable();
       const admitted = binding(
         value,
         request,
         authority.generation,
-        authority.expiresAt,
+        latestAuthority.expiresAt,
         now(),
       );
       if (
@@ -135,8 +184,20 @@ export function createVoxMediaAdmission(options: {
         url.hash
       )
         throw unavailable();
-      // Keep this snapshot immutable even when the enclosing reservation renews.
       const expiresAt = Date.parse(admitted.expires_at);
+      const tokenExpiresAt =
+        typeof value.token_expires_at === "string" &&
+        date.test(value.token_expires_at)
+          ? Date.parse(value.token_expires_at)
+          : NaN;
+      if (
+        !Number.isFinite(tokenExpiresAt) ||
+        tokenExpiresAt <= now() ||
+        tokenExpiresAt > now() + 120_000 ||
+        tokenExpiresAt > expiresAt
+      )
+        throw unavailable();
+      let liveExpiresAt = expiresAt;
       let closing: Promise<void> | null = null;
       const lease: VoxMediaLease = {
         owner,
@@ -148,9 +209,13 @@ export function createVoxMediaAdmission(options: {
         agentIdentity: admitted.agent_identity,
         serverUrl: value.server_url,
         token: value.token,
+        tokenExpiresAt,
         expiresAt,
         async renew(signal) {
-          if (closing || signal.aborted) throw unavailable();
+          if (closing || signal.aborted || liveExpiresAt <= now())
+            throw unavailable();
+          const current = options.reservations.mediaAuthority(owner, callId);
+          if (current.generation !== admitted.generation) throw unavailable();
           const renewed = binding(
             record(
               await options.reservations.mediaRequest(
@@ -164,20 +229,157 @@ export function createVoxMediaAdmission(options: {
             ),
             request,
             admitted.generation,
-            expiresAt,
+            current.expiresAt,
             now(),
+          );
+          const nextExpiresAt = Date.parse(renewed.expires_at);
+          const latest = options.reservations.mediaAuthority(owner, callId);
+          if (
+            closing ||
+            signal.aborted ||
+            liveExpiresAt <= now() ||
+            latest.generation !== admitted.generation ||
+            nextExpiresAt < liveExpiresAt ||
+            nextExpiresAt > latest.expiresAt ||
+            bindingKeys.some(
+              (key) => key !== "expires_at" && renewed[key] !== admitted[key],
+            )
+          )
+            throw unavailable();
+          liveExpiresAt = nextExpiresAt;
+          return {
+            connectionId: admitted.connection_id,
+            generation: admitted.generation,
+            expiresAt: nextExpiresAt,
+          };
+        },
+        async loadWakeConfig(signal) {
+          const current = options.reservations.mediaAuthority(owner, callId);
+          if (
+            closing ||
+            signal.aborted ||
+            request.signal.aborted ||
+            liveExpiresAt <= now() ||
+            !request.mayListenForWake() ||
+            current.generation !== admitted.generation
+          )
+            throw unavailable();
+          const raw = await options.reservations.mediaRequest(
+            owner,
+            callId,
+            admitted.generation,
+            { action: "wake-config", connectionId: admitted.connection_id },
+            signal,
+          );
+          const latest = options.reservations.mediaAuthority(owner, callId);
+          if (
+            closing ||
+            signal.aborted ||
+            request.signal.aborted ||
+            liveExpiresAt <= now() ||
+            !request.mayListenForWake() ||
+            latest.generation !== admitted.generation
+          )
+            throw unavailable();
+          if (raw === null) return null;
+          const config = record(raw, [
+            "client_call_id",
+            "connection_id",
+            "generation",
+            "expires_at",
+            "engine",
+            "access_key",
+            "keyword_public_path",
+            "model_public_path",
+            "label",
+          ]);
+          const expiry =
+            typeof config.expires_at === "string" &&
+            date.test(config.expires_at)
+              ? Date.parse(config.expires_at)
+              : NaN;
+          const asset = (value: unknown, suffix: string) => {
+            if (
+              typeof value !== "string" ||
+              value.length > 512 ||
+              !/^\/[A-Za-z0-9_./-]+$/.test(value) ||
+              value.includes("//") ||
+              !value.endsWith(suffix)
+            )
+              return false;
+            const parts = value.slice(1).split("/");
+            return (
+              parts.every((part) => !["", ".", ".."].includes(part)) &&
+              /^[A-Za-z0-9]/.test(parts[parts.length - 1] ?? "") &&
+              parts.some((part) =>
+                /(?:^|[._-])v[1-9][0-9]*(?:[._-]|$)/.test(part),
+              )
+            );
+          };
+          if (
+            config.client_call_id !== callId ||
+            config.connection_id !== admitted.connection_id ||
+            config.generation !== admitted.generation ||
+            config.engine !== "porcupine" ||
+            config.label !== "Hey NavoX" ||
+            !Number.isFinite(expiry) ||
+            expiry <= now() ||
+            expiry > liveExpiresAt ||
+            expiry > latest.expiresAt ||
+            expiry > now() + 120_000 ||
+            typeof config.access_key !== "string" ||
+            !config.access_key.trim() ||
+            config.access_key.length > 1024 ||
+            /[\r\n]/.test(config.access_key) ||
+            !asset(config.keyword_public_path, ".ppn") ||
+            !asset(config.model_public_path, ".pv")
+          )
+            throw unavailable();
+          return {
+            accessKey: config.access_key,
+            keywordPublicPath: config.keyword_public_path as string,
+            modelPublicPath: config.model_public_path as string,
+            label: "Hey NavoX",
+          };
+        },
+        async submitWakeText(text, signal) {
+          if (
+            closing ||
+            signal.aborted ||
+            liveExpiresAt <= now() ||
+            !request.mayTransmitAudio() ||
+            !text.trim() ||
+            text.length > 4000
+          )
+            throw unavailable();
+          const current = options.reservations.mediaAuthority(owner, callId);
+          if (current.generation !== admitted.generation) throw unavailable();
+          const requestId = (
+            options.requestId ?? (() => crypto.randomUUID())
+          )();
+          const result = record(
+            await options.reservations.mediaRequest(
+              owner,
+              callId,
+              admitted.generation,
+              {
+                action: "wake",
+                connectionId: admitted.connection_id,
+                requestId,
+                text,
+              },
+              signal,
+            ),
+            ["request_id", "status", "delivery"],
           );
           if (
             closing ||
             signal.aborted ||
-            bindingKeys.some((key) => renewed[key] !== admitted[key])
+            result.request_id !== requestId ||
+            result.status !== "accepted" ||
+            result.delivery !== "queued"
           )
             throw unavailable();
-          return {
-            connectionId: admitted.connection_id,
-            generation: admitted.generation,
-            expiresAt,
-          };
         },
         close() {
           // Cleanup has an independent bounded lifetime, including after the

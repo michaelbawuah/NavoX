@@ -642,3 +642,37 @@ async def test_voice_answer_denies_shadow_even_when_operator_and_qualified_assig
         )
         assert len(runs) == 1 and not runs[0].shadow and runs[0].status == "COMPLETED"
         assert runs[0].prompt == runs[0].schema == "vox_spoken_answer@v1"
+
+
+@pytest.mark.asyncio
+async def test_livekit_job_entrypoint_can_cross_the_process_boundary():
+    import pickle
+    from multiprocessing.reduction import ForkingPickler
+
+    from navox.vox.worker_livekit import job_entrypoint
+
+    # LiveKit uses multiprocessing on Linux; nested entry points fail before
+    # any session starts, even when registration and dispatch both succeed.
+    server = build_server(
+        Settings(
+            _env_file=None,
+            student_vox_enabled=True,
+            student_vox_media_enabled=True,
+            student_vox_worker_qualified=True,
+            student_vox_livekit_cloud_qualified=True,
+            student_vox_livekit_url="wss://test.livekit.cloud",
+            student_vox_livekit_api_key="synthetic-test-key",
+            student_vox_livekit_api_secret="synthetic-test-secret-" * 2,
+        )
+    )
+    encoded = ForkingPickler.dumps(server._entrypoint_fnc)
+    assert pickle.loads(encoded) is job_entrypoint
+
+
+def test_worker_diagnostics_never_log_exception_content(caplog):
+    from navox.vox.worker_livekit import log_worker_failure
+
+    log_worker_failure("job", ValueError("sensitive-provider-body"))
+    assert "sensitive-provider-body" not in caplog.text
+    assert caplog.records[-1].error_type == "ValueError"
+    assert caplog.records[-1].exc_info is None

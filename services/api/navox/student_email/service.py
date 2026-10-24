@@ -921,6 +921,9 @@ async def forget_email_data(
         state = await planning.state(database, user_id, workspace_id)
         state.revision += 1
         await planning.invalidate_future(database, user_id, workspace_id, state)
+    from navox.vox.service import invalidate_active_context
+
+    await invalidate_active_context(database, user_id, workspace_id)
     return {"erased": True, "reviews_erased": len(rows), "derived_tasks_erased": len(task_ids)}
 
 

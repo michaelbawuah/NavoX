@@ -254,7 +254,34 @@ describe("Vox local processed microphone capture", () => {
     expect(fake.emit()[0]).toBeCloseTo(0.2);
     expect(options.onVoiceActivity).toHaveBeenLastCalledWith(true);
     expect(silent(fake.emit())).toBe(true);
+    expect(options.onVoiceActivity).toHaveBeenLastCalledWith(true);
+    for (let index = 0; index < 14; index += 1)
+      expect(silent(fake.emit())).toBe(true);
     expect(options.onVoiceActivity).toHaveBeenLastCalledWith(false);
+    capture.stop();
+  });
+
+  it("keeps one speech window through short gaps and stops after sustained quiet", async () => {
+    const fake = browser();
+    const options = captureOptions();
+    const capture = await fake.factory.create(options);
+    capture.setEnabled(true);
+    fake.emit(0.1);
+    fake.emit(0.2);
+    for (let index = 0; index < 6; index += 1) fake.emit();
+    expect(vi.mocked(options.onVoiceActivity).mock.calls).toEqual([
+      [false],
+      [true],
+    ]);
+    fake.emit(0.3);
+    fake.emit(0.2);
+    for (let index = 0; index < 16; index += 1) fake.emit();
+    expect(vi.mocked(options.onVoiceActivity).mock.calls).toEqual([
+      [false],
+      [true],
+      [false],
+    ]);
+    expect(fake.raw.stop).not.toHaveBeenCalled();
     capture.stop();
   });
 

@@ -623,6 +623,9 @@ async def erase_feed_data(
     )
     if feed is None:
         return
+    from navox.vox.service import invalidate_active_context
+
+    await invalidate_active_context(database, user_id, workspace_id)
     from navox.student_recovery.service import invalidate_recovery_previews
 
     await invalidate_recovery_previews(database, user_id, workspace_id)

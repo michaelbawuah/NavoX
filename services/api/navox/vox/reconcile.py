@@ -184,8 +184,16 @@ async def reconcile_one(
     cleaner: MediaCleaner,
 ) -> bool:
     """Sweep ownership expiry, then perform at most one bounded external cleanup."""
+    from navox.vox.commands import sweep_expired_wake_commands
+    from navox.vox.context_store import sweep_expired_checkpoints
     from navox.vox.media import sweep_connections
 
+    # Independently retire short-lived private question payloads, even when
+    # no provider cleanup is due or a voice worker has crashed.
+    async with factory() as database:
+        await sweep_expired_wake_commands(database)
+    async with factory() as database:
+        await sweep_expired_checkpoints(database)
     async with factory() as database:
         await sweep_connections(database, limit=100)
     async with factory() as database:

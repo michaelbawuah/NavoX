@@ -1215,3 +1215,216 @@ describe("Vox reconnect and terminal resource fences", () => {
     expect(current.transport.connect).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("Vox same-room recovery", () => {
+  it("does not carry a queued wake question or listening claim into an ended or replacement call", async () => {
+    const env = rig();
+    await env.controller.start();
+    env.requests[0].onEvent({ type: "wake-input", status: "queued" });
+    expect(env.controller.current().wakeInputStatus).toBe("queued");
+    await env.controller.hangUp();
+    expect(env.controller.current()).toMatchObject({
+      wakeInputStatus: null,
+      wakeStatus: "off",
+    });
+    await env.controller.start();
+    expect(env.controller.current()).toMatchObject({
+      wakeInputStatus: null,
+      wakeStatus: "off",
+    });
+    await env.controller.hangUp();
+  });
+
+  it("retains the call and connection while the SDK recovers, and waits for fresh owner verification", async () => {
+    const env = rig();
+    await env.controller.start();
+    const request = env.requests[0];
+    const before = env.controller.current();
+    request.onEvent({ type: "reconnecting" });
+    expect(env.controller.current()).toMatchObject({
+      phase: "reconnecting",
+      callId: before.callId,
+    });
+    expect(request.mayTransmitAudio()).toBe(false);
+    expect(request.mayPlayAudio()).toBe(false);
+    expect(request.mayRenewReservation?.()).toBe(true);
+    expect(env.connections[0].close).not.toHaveBeenCalled();
+    env.controller.suspendForSessionCheck();
+    request.onEvent({ type: "reconnected" });
+    expect(env.controller.current().phase).toBe("reconnecting");
+    await env.controller.bindOwner(owner);
+    expect(env.controller.current()).toMatchObject({
+      phase: "active",
+      callId: before.callId,
+      startedAt: before.startedAt,
+    });
+    expect(request.mayTransmitAudio()).toBe(true);
+    expect(env.transport.connect).toHaveBeenCalledTimes(1);
+    await env.controller.hangUp();
+  });
+
+  it("restores standby after SDK recovery without sending audio or creating another conversation", async () => {
+    const env = rig();
+    await env.controller.start();
+    env.advance(VOX_STANDBY_AFTER_MS);
+    const request = env.requests[0];
+    request.onEvent({ type: "reconnecting" });
+    request.onEvent({ type: "reconnected" });
+    expect(env.controller.current().phase).toBe("standby");
+    expect(request.mayTransmitAudio()).toBe(false);
+    expect(request.mayListenForWake()).toBe(true);
+    expect(env.transport.connect).toHaveBeenCalledTimes(1);
+    await env.controller.hangUp();
+  });
+
+  it("cannot reconnect or restore media after hang-up or an owner change during recovery", async () => {
+    const env = rig();
+    await env.controller.start();
+    const request = env.requests[0];
+    request.onEvent({ type: "reconnecting" });
+    await env.controller.bindOwner(anotherOwner);
+    request.onEvent({ type: "reconnected" });
+    expect(env.controller.current()).toMatchObject({
+      phase: "ended",
+      owner: anotherOwner,
+    });
+    expect(request.mayTransmitAudio()).toBe(false);
+    expect(env.transport.connect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("terminal loss after SDK reconnect starts", () => {
+  it.each([false, true])(
+    "creates a replacement with the same call and standby=%s after cleanup",
+    async (standby) => {
+      const env = rig();
+      await env.controller.start();
+      if (standby) env.advance(VOX_STANDBY_AFTER_MS);
+      const before = env.controller.current();
+      const old = env.requests[0];
+      const closing = deferred<void>();
+      env.connections[0].close.mockReturnValue(closing.promise);
+      old.onEvent({ type: "reconnecting" });
+      old.onEvent({ type: "disconnected" });
+      expect(old.mayTransmitAudio()).toBe(false);
+      expect(old.mayPlayAudio()).toBe(false);
+      expect(env.transport.connect).toHaveBeenCalledTimes(1);
+      closing.resolve();
+      await vi.waitFor(() => expect(env.requests).toHaveLength(2));
+      await vi.waitFor(() =>
+        expect(env.controller.current().phase).toBe(
+          standby ? "standby" : "active",
+        ),
+      );
+      expect(env.controller.current()).toMatchObject({
+        callId: before.callId,
+        startedAt: before.startedAt,
+      });
+      expect(env.connections[0].close).toHaveBeenCalledTimes(1);
+      old.onEvent({ type: "ended" });
+      expect(env.controller.current().phase).toBe(
+        standby ? "standby" : "active",
+      );
+      await env.controller.hangUp();
+    },
+  );
+
+  it("waits for fresh account verification after terminal loss during SDK recovery", async () => {
+    const env = rig();
+    await env.controller.start();
+    const old = env.requests[0];
+    old.onEvent({ type: "reconnecting" });
+    env.controller.suspendForSessionCheck();
+    old.onEvent({ type: "disconnected" });
+    old.onEvent({ type: "reconnected" });
+    expect(env.transport.connect).toHaveBeenCalledTimes(1);
+    expect(old.mayTransmitAudio()).toBe(false);
+    await env.controller.bindOwner(owner);
+    expect(env.requests).toHaveLength(2);
+    expect(env.requests[1].callId).toBe(old.callId);
+    await env.controller.hangUp();
+  });
+
+  it("hang-up during terminal recovery never creates a replacement", async () => {
+    const env = rig();
+    await env.controller.start();
+    const closing = deferred<void>();
+    env.connections[0].close.mockReturnValue(closing.promise);
+    const old = env.requests[0];
+    old.onEvent({ type: "reconnecting" });
+    old.onEvent({ type: "disconnected" });
+    const ended = env.controller.hangUp();
+    closing.resolve();
+    await ended;
+    expect(env.transport.connect).toHaveBeenCalledTimes(1);
+    expect(env.controller.current().phase).toBe("ended");
+  });
+});
+
+describe("bounded terminal recovery", () => {
+  it("ends repeated worker failures, releases audio, and requires a fresh call", async () => {
+    const env = rig();
+    await env.controller.start();
+    const firstCallId = env.controller.current().callId;
+    for (let index = 0; index < 3; index += 1) {
+      env.requests[index].onEvent({ type: "disconnected" });
+      await vi.waitFor(() => {
+        expect(env.requests).toHaveLength(index + 2);
+        expect(env.controller.current().phase).toBe("active");
+      });
+    }
+    env.requests[3].onEvent({ type: "disconnected" });
+    await vi.waitFor(() =>
+      expect(env.controller.current()).toMatchObject({
+        phase: "ended",
+        endReason: "connection-failed",
+      }),
+    );
+    expect(env.transport.connect).toHaveBeenCalledTimes(4);
+    for (const request of env.requests) {
+      expect(request.mayTransmitAudio()).toBe(false);
+      expect(request.mayPlayAudio()).toBe(false);
+    }
+    for (const joined of env.connections) {
+      expect(joined.close).toHaveBeenCalledTimes(1);
+    }
+    await env.controller.start();
+    expect(env.controller.current().callId).not.toBe(firstCallId);
+    await env.controller.reconnect();
+    expect(env.transport.connect).toHaveBeenCalledTimes(6);
+    await env.controller.dispose();
+  });
+
+  it("allows later network recovery after the failure window has elapsed", async () => {
+    const env = rig();
+    await env.controller.start();
+    const firstCallId = env.controller.current().callId;
+    for (let index = 0; index < 5; index += 1) {
+      await env.controller.reconnect();
+      expect(env.controller.current().callId).toBe(firstCallId);
+      env.advance(120_001);
+      env.controller.resume();
+    }
+    expect(env.controller.current().phase).toBe("active");
+    expect(env.transport.connect).toHaveBeenCalledTimes(6);
+    await env.controller.dispose();
+  });
+});
+
+it("keeps web lookup results only in the current owned call", async () => {
+  const test = rig();
+  await test.controller.start();
+  const old = test.requests[0];
+  old.onEvent({ type: "web-lookup", result: { status: "searching" } });
+  expect(test.controller.current().webLookup?.status).toBe("searching");
+  await test.controller.hangUp();
+  expect(test.controller.current().webLookup).toBeNull();
+  old.onEvent({ type: "web-lookup", result: { status: "searching" } });
+  expect(test.controller.current().webLookup).toBeNull();
+  await test.controller.start();
+  expect(test.controller.current().webLookup).toBeNull();
+  await test.controller.bindOwner(anotherOwner);
+  old.onEvent({ type: "web-lookup", result: { status: "searching" } });
+  expect(test.controller.current().webLookup).toBeNull();
+  await test.controller.dispose();
+});

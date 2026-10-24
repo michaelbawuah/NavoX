@@ -1,4 +1,4 @@
-/** Owned, content-free native reservations. These never grant media or AI access. */
+/** Owned native reservations and explicit local wake text; neither grants media or AI access. */
 import type { VoxConnection, VoxOwner, VoxTransport } from "./vox-call";
 
 export const VOX_RESERVATION_TIMEOUT_MS = 10_000;
@@ -42,6 +42,9 @@ export class VoxReservationError extends Error {
   constructor(
     readonly code:
       | "unavailable"
+      | "temporary"
+      | "cleanup-pending"
+      | "allowance-exhausted"
       | "scope-changed"
       | "invalid-response"
       | "cancelled",
@@ -175,9 +178,13 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
         signal.removeEventListener("abort", abort);
         resolve(value);
       },
-      () => {
+      (error: unknown) => {
         signal.removeEventListener("abort", abort);
-        reject(new VoxReservationError("unavailable"));
+        reject(
+          error instanceof VoxReservationError
+            ? error
+            : new VoxReservationError("unavailable"),
+        );
       },
     );
     if (signal.aborted) abort();
@@ -256,12 +263,25 @@ export class VoxReservationClient {
     capturedGeneration: number,
     operation:
       | { action: "join"; requestId: string }
-      | { action: "renew" | "close"; connectionId: string },
+      | { action: "renew" | "close" | "wake-config"; connectionId: string }
+      | {
+          action: "wake";
+          connectionId: string;
+          requestId: string;
+          text: string;
+        },
     signal?: AbortSignal,
   ): Promise<unknown> {
     const checked = scope(owner);
     const id = uuid(callId);
     const gen = generation(capturedGeneration);
+    if (
+      operation.action === "wake" &&
+      (typeof operation.text !== "string" ||
+        !operation.text.trim() ||
+        operation.text.length > 4000)
+    )
+      throw new VoxReservationError("unavailable");
     const path =
       operation.action === "join"
         ? `/${id}/media`
@@ -272,9 +292,16 @@ export class VoxReservationClient {
       "POST",
       operation.action === "join"
         ? { generation: gen, request_id: uuid(operation.requestId) }
-        : { generation: gen },
+        : operation.action === "wake"
+          ? {
+              generation: gen,
+              request_id: uuid(operation.requestId),
+              text: operation.text.trim(),
+            }
+          : { generation: gen },
       operation.action === "close" ? 204 : 200,
       signal,
+      operation.action === "wake-config",
     );
   }
 
@@ -323,6 +350,7 @@ export class VoxReservationClient {
     payload: unknown,
     expectedStatus: number,
     signal?: AbortSignal,
+    missingAsNull = false,
   ): Promise<unknown> {
     const timeout = new AbortController();
     const timer = setTimeout(() => timeout.abort(), VOX_RESERVATION_TIMEOUT_MS);
@@ -354,16 +382,39 @@ export class VoxReservationClient {
             ...(method === "POST" ? { body: JSON.stringify(payload) } : {}),
             signal: combined,
           },
-        ).then((received) => {
-          // An abort-ignoring fetch must not leave a late response body open.
-          if (combined.aborted) void received.body?.cancel().catch(() => {});
-          return received;
-        }),
+        )
+          .then((received) => {
+            // An abort-ignoring fetch must not leave a late response body open.
+            if (combined.aborted) void received.body?.cancel().catch(() => {});
+            return received;
+          })
+          .catch(() => {
+            throw new VoxReservationError("temporary");
+          }),
         combined,
       );
+      if (response.status === 404 && missingAsNull) {
+        void response.body?.cancel().catch(() => {});
+        return null;
+      }
+      // Only media admission uses this pre-allocation response. Retrying any
+      // ambiguous join failure could duplicate a room or its provider work.
+      if (
+        response.status === 425 &&
+        method === "POST" &&
+        path.endsWith("/media")
+      )
+        throw new VoxReservationError("cleanup-pending");
       if (response.status === 401 || response.status === 409)
         throw new VoxReservationError("scope-changed");
-      if (response.status !== expectedStatus)
+      const admissionDenial =
+        response.status === 429 && method === "POST" && path.endsWith("/media");
+      if (
+        (response.status === 429 && !admissionDenial) ||
+        response.status >= 500
+      )
+        throw new VoxReservationError("temporary");
+      if (response.status !== expectedStatus && !admissionDenial)
         throw new VoxReservationError("unavailable");
       if (expectedStatus === 204) return null;
       if (
@@ -398,14 +449,33 @@ export class VoxReservationClient {
         bytes.set(chunk, offset);
         offset += chunk.length;
       }
-      return JSON.parse(
+      const body: unknown = JSON.parse(
         new TextDecoder("utf-8", { fatal: true }).decode(bytes),
       );
+      if (admissionDenial) {
+        const detail =
+          body && typeof body === "object" && "detail" in body
+            ? body.detail
+            : null;
+        if (
+          detail &&
+          typeof detail === "object" &&
+          "code" in detail &&
+          detail.code === "vox_allowance_exhausted_before_media"
+        )
+          throw new VoxReservationError("allowance-exhausted");
+        throw new VoxReservationError("temporary");
+      }
+      return body;
     } catch (error) {
       if (reader) void reader.cancel().catch(() => {});
       else if (response) void response.body?.cancel().catch(() => {});
+      if (combined.aborted && !signal?.aborted && path.endsWith("/renew"))
+        throw new VoxReservationError("temporary");
       if (error instanceof VoxReservationError) throw error;
-      throw new VoxReservationError("unavailable");
+      throw new VoxReservationError(
+        !response && !signal?.aborted ? "temporary" : "unavailable",
+      );
     } finally {
       clearTimeout(timer);
     }
@@ -582,7 +652,13 @@ export class VoxReservationClient {
           this.installLease(intent, renewed, started);
           return renewed;
         } catch (error) {
-          if (!signal.aborted) intent.failed = true;
+          if (
+            !signal.aborted &&
+            !(
+              error instanceof VoxReservationError && error.code === "temporary"
+            )
+          )
+            intent.failed = true;
           throw error;
         }
       })();
@@ -758,10 +834,17 @@ export function wrapVoxReservations(
           renewal = null;
           if (!mayRenew()) return reconcile();
           reconcile();
-        } catch {
+        } catch (error) {
           if (!live || renewal !== current) return;
           renewal = null;
-          ended();
+          if (
+            error instanceof VoxReservationError &&
+            error.code === "temporary" &&
+            remaining() > 0
+          ) {
+            clearTimer();
+            timer = setTimeout(reconcile, Math.min(2_000, remaining()));
+          } else ended();
         }
       };
       const reconcile = () => {

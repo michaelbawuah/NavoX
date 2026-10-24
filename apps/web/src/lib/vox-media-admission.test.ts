@@ -11,7 +11,7 @@ const callId = "33333333-3333-4333-8333-333333333333";
 const connectionId = "44444444-4444-4444-8444-444444444444";
 const requestId = "55555555-5555-4555-8555-555555555555";
 const now = Date.parse("2026-10-22T12:00:00Z");
-function setup(qualified = true) {
+function setup(qualified = true, clock = () => now) {
   const reservations = new VoxReservationClient();
   const authority = vi
     .spyOn(reservations, "mediaAuthority")
@@ -27,6 +27,7 @@ function setup(qualified = true) {
   };
   const grant = {
     ...binding,
+    token_expires_at: new Date(now + 120_000).toISOString(),
     server_url: "wss://project.livekit.cloud",
     token: "e30.e30.c2ln",
   };
@@ -45,7 +46,7 @@ function setup(qualified = true) {
   const admission = createVoxMediaAdmission({
     reservations,
     qualified,
-    now: () => now,
+    now: clock,
     requestId: () => requestId,
   });
   return { authority, binding, grant, media, abort, request, admission };
@@ -90,6 +91,8 @@ describe("native Vox media admission", () => {
     { server_url: "https://project.livekit.cloud" },
     { server_url: "wss://project.livekit.cloud?secret=x" },
     { token: "raw-secret" },
+    { token_expires_at: new Date(now).toISOString() },
+    { token_expires_at: new Date(now + 121_000).toISOString() },
     { unexpected: true },
   ])("rejects malformed or mismatched admission %j", async (change) => {
     const env = setup();
@@ -110,6 +113,72 @@ describe("native Vox media admission", () => {
     env.media.mockResolvedValue({ ...env.binding, ...change });
     await expect(lease.renew(new AbortController().signal)).rejects.toThrow();
   });
+  it("extends only the same live media epoch within the current reservation while keeping the original JWT expiry", async () => {
+    let clock = now;
+    const env = setup(true, () => clock);
+    const lease = await env.admission.join(env.request);
+    clock += 30_000;
+    env.authority.mockReturnValue({
+      generation: 7,
+      expiresAt: clock + 120_000,
+    });
+    env.media.mockResolvedValue({
+      ...env.binding,
+      expires_at: new Date(clock + 120_000).toISOString(),
+    });
+    await expect(lease.renew(new AbortController().signal)).resolves.toEqual({
+      connectionId,
+      generation: 7,
+      expiresAt: clock + 120_000,
+    });
+    expect(lease.tokenExpiresAt).toBe(now + 120_000);
+    env.media.mockResolvedValue({
+      ...env.binding,
+      expires_at: new Date(clock + 119_000).toISOString(),
+    });
+    await expect(lease.renew(new AbortController().signal)).rejects.toThrow();
+    clock += 120_000;
+    await expect(lease.renew(new AbortController().signal)).rejects.toThrow();
+    expect(env.media).toHaveBeenCalledTimes(3);
+  });
+
+  it("submits a full local wake question through the same owned media epoch and checks the queue acknowledgement", async () => {
+    const env = setup();
+    const lease = await env.admission.join(env.request);
+    env.media.mockResolvedValue({
+      request_id: requestId,
+      status: "accepted",
+      delivery: "queued",
+    });
+    const signal = new AbortController().signal;
+    await lease.submitWakeText?.("What were we discussing?", signal);
+    expect(env.media).toHaveBeenLastCalledWith(
+      owner,
+      callId,
+      7,
+      {
+        action: "wake",
+        connectionId,
+        requestId,
+        text: "What were we discussing?",
+      },
+      signal,
+    );
+    env.media.mockResolvedValue({
+      request_id: connectionId,
+      status: "accepted",
+      delivery: "queued",
+    });
+    await expect(
+      lease.submitWakeText?.("Another question", signal),
+    ).rejects.toThrow();
+    const calls = env.media.mock.calls.length;
+    await expect(
+      lease.submitWakeText?.("x".repeat(4001), signal),
+    ).rejects.toThrow();
+    expect(env.media).toHaveBeenCalledTimes(calls);
+  });
+
   it("closes an epoch once after caller abort independently of reservation removal", async () => {
     const env = setup();
     const lease = await env.admission.join(env.request);
@@ -133,5 +202,218 @@ describe("native Vox media admission", () => {
     await expect(close).rejects.toThrow();
     expect(lease.close()).toBe(close);
     expect(env.media).toHaveBeenCalledTimes(2);
+  });
+  function configResponse() {
+    return {
+      client_call_id: callId,
+      connection_id: connectionId,
+      generation: 7,
+      expires_at: new Date(now + 120_000).toISOString(),
+      engine: "porcupine",
+      label: "Hey NavoX",
+      access_key: "fixture-only-browser-key",
+      keyword_public_path: "/wake/hey-navox-v1.ppn",
+      model_public_path: "/wake/porcupine-en-v4.pv",
+    };
+  }
+
+  it("reads licensed configuration only in standby through the captured media epoch", async () => {
+    const env = setup();
+    const lease = await env.admission.join(env.request);
+    const signal = new AbortController().signal;
+    expect(env.media).toHaveBeenCalledTimes(1);
+    await expect(lease.loadWakeConfig?.(signal)).rejects.toThrow();
+    expect(env.media).toHaveBeenCalledTimes(1);
+    env.request.mayListenForWake = () => true;
+    env.media.mockResolvedValue(configResponse());
+    await expect(lease.loadWakeConfig?.(signal)).resolves.toEqual({
+      accessKey: "fixture-only-browser-key",
+      keywordPublicPath: "/wake/hey-navox-v1.ppn",
+      modelPublicPath: "/wake/porcupine-en-v4.pv",
+      label: "Hey NavoX",
+    });
+    expect(env.media).toHaveBeenLastCalledWith(
+      owner,
+      callId,
+      7,
+      { action: "wake-config", connectionId },
+      signal,
+    );
+    env.media.mockResolvedValue(null);
+    await expect(lease.loadWakeConfig?.(signal)).resolves.toBeNull();
+  });
+
+  it.each([
+    ["call", { client_call_id: requestId }],
+    ["connection", { connection_id: requestId }],
+    ["generation", { generation: 8 }],
+    ["engine", { engine: "remote-asr" }],
+    ["label", { label: "another word" }],
+    ["expiry", { expires_at: new Date(now).toISOString() }],
+    [
+      "extended deadline",
+      { expires_at: new Date(now + 121_000).toISOString() },
+    ],
+    [
+      "external model",
+      { model_public_path: "https://other.example/engine.pv" },
+    ],
+    ["traversal", { keyword_public_path: "/wake/../model.ppn" }],
+    ["query", { keyword_public_path: "/wake/model.ppn?token=x" }],
+    ["empty key", { access_key: "" }],
+    ["unexpected field", { other: true }],
+  ])(
+    "rejects mismatched or malformed wake configuration: %s",
+    async (_label, change) => {
+      const env = setup();
+      const lease = await env.admission.join(env.request);
+      env.request.mayListenForWake = () => true;
+      env.media.mockResolvedValue({
+        ...configResponse(),
+        ...(change as Record<string, unknown>),
+      });
+      await expect(
+        lease.loadWakeConfig?.(new AbortController().signal),
+      ).rejects.toThrow("unavailable");
+    },
+  );
+
+  it.each(["generation", "abort", "resume", "close"] as const)(
+    "drops a private configuration response after %s",
+    async (reason) => {
+      const env = setup();
+      const lease = await env.admission.join(env.request);
+      env.request.mayListenForWake = () => true;
+      let resolve!: (value: unknown) => void;
+      env.media.mockReturnValueOnce(
+        new Promise((yes) => {
+          resolve = yes;
+        }),
+      );
+      const loading = lease.loadWakeConfig?.(new AbortController().signal);
+      const rejected = expect(loading).rejects.toThrow("unavailable");
+      if (reason === "generation")
+        env.authority.mockReturnValue({
+          generation: 8,
+          expiresAt: now + 120_000,
+        });
+      if (reason === "abort") env.abort.abort();
+      if (reason === "resume") env.request.mayListenForWake = () => false;
+      if (reason === "close") {
+        env.media.mockResolvedValue(null);
+        await lease.close();
+      }
+      resolve(configResponse());
+      await rejected;
+    },
+  );
+});
+
+describe("replacement room admission", () => {
+  it("waits for confirmed old-room cleanup and reuses one request ID", async () => {
+    vi.useFakeTimers();
+    try {
+      const env = setup();
+      const { VoxReservationError } = await import("./vox-reservations");
+      env.media.mockRejectedValueOnce(
+        new VoxReservationError("cleanup-pending"),
+      );
+      const pending = env.admission.join(env.request);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(env.media).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      const lease = await pending;
+      expect(lease.callId).toBe(callId);
+      expect(env.media).toHaveBeenCalledTimes(2);
+      expect(env.media.mock.calls[1]).toEqual(env.media.mock.calls[0]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels cleanup waiting immediately on hang-up", async () => {
+    vi.useFakeTimers();
+    try {
+      const env = setup();
+      const { VoxReservationError } = await import("./vox-reservations");
+      env.media.mockRejectedValue(new VoxReservationError("cleanup-pending"));
+      const pending = env.admission.join(env.request);
+      const rejected = expect(pending).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(0);
+      env.abort.abort();
+      await rejected;
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(env.media).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds cleanup waiting and never retries an ambiguous network or authorization error", async () => {
+    vi.useFakeTimers();
+    try {
+      const { VoxReservationError } = await import("./vox-reservations");
+      for (const code of [
+        "temporary",
+        "scope-changed",
+        "invalid-response",
+      ] as const) {
+        const env = setup();
+        env.media.mockRejectedValue(new VoxReservationError(code));
+        await expect(env.admission.join(env.request)).rejects.toThrow();
+        expect(env.media).toHaveBeenCalledTimes(1);
+      }
+      const env = setup();
+      env.media.mockRejectedValue(new VoxReservationError("cleanup-pending"));
+      const pending = env.admission.join(env.request);
+      const rejected = expect(pending).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(20_000);
+      await rejected;
+      expect(env.media).toHaveBeenCalledTimes(20);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("checks owner generation again before each cleanup retry", async () => {
+    vi.useFakeTimers();
+    try {
+      const env = setup();
+      const { VoxReservationError } = await import("./vox-reservations");
+      env.media.mockRejectedValue(new VoxReservationError("cleanup-pending"));
+      const pending = env.admission.join(env.request);
+      const rejected = expect(pending).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(0);
+      env.authority.mockReturnValue({
+        generation: 8,
+        expiresAt: now + 120_000,
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await rejected;
+      expect(env.media).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("recognizes cleanup-pending only on the media join endpoint", async () => {
+    const reservations = new VoxReservationClient({
+      fetch: vi.fn(async () => new Response(null, { status: 425 })),
+    });
+    await expect(
+      reservations.mediaRequest(owner, callId, 7, {
+        action: "join",
+        requestId,
+      }),
+    ).rejects.toMatchObject({ code: "cleanup-pending" });
+    await expect(
+      reservations.mediaRequest(owner, callId, 7, {
+        action: "renew",
+        connectionId,
+      }),
+    ).rejects.toMatchObject({ code: "unavailable" });
   });
 });

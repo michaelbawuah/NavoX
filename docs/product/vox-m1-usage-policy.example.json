@@ -1,0 +1,47 @@
+{
+  "revision": 0,
+  "policy": {
+    "daily_voice_minutes": 60,
+    "monthly_voice_minutes": 600,
+    "daily_tokens": 300000,
+    "monthly_tokens": 3000000,
+    "notice_fraction": "0.8",
+    "model_pricing": [
+      {
+        "provider": "openai",
+        "model": "gpt-realtime-2.1",
+        "version": "openai-2026-10-23",
+        "input_text": "4",
+        "cached_text": "0.40",
+        "output_text": "24",
+        "input_audio": "32",
+        "cached_audio": "0.40",
+        "output_audio": "64"
+      },
+      {
+        "provider": "openai",
+        "model": "gpt-transcribe",
+        "version": "openai-2026-10-23",
+        "audio_usd_per_minute": "0.0045"
+      },
+      {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "version": "openai-2026-10-23",
+        "input_text": "0.20",
+        "cached_text": "0.02",
+        "output_text": "1.20",
+        "max_input_tokens": 272000
+      },
+      {
+        "provider": "openai",
+        "model": "gpt-4o-mini-tts-2025-12-15",
+        "version": "openai-2026-10-23",
+        "input_text": "0.60",
+        "output_audio": "12"
+      }
+    ],
+    "transport_usd_per_minute": null,
+    "transport_pricing_version": null
+  }
+}

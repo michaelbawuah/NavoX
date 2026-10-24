@@ -376,7 +376,9 @@ async def test_http_admission_replays_exact_epoch_renews_binding_and_close_survi
     endpoint = path + "/" + binding["connection_id"]
     renewed = await env.client.post(endpoint + "/renew", json={"generation": row["generation"]})
     assert renewed.status_code == 200
-    assert renewed.json() == {k: v for k, v in binding.items() if k not in {"token", "server_url"}}
+    assert renewed.json() == {
+        k: v for k, v in binding.items() if k not in {"token", "server_url", "token_expires_at"}
+    }
     wrong = await env.client.post(endpoint + "/renew", json={"generation": row["generation"] + 1})
     assert wrong.status_code == 404
     env.app.dependency_overrides.pop(media_provider)

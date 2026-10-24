@@ -19,6 +19,7 @@ from test_vox_migration import database as base_database  # noqa: F401 - shared 
 from navox.db.base import Base
 from navox.db.models import User, UserSession, Workspace
 from navox.db.vox import VoxCall, VoxState
+from navox.db.vox_commands import VoxWakeCommand
 from navox.db.vox_media import VoxMediaCleanup, VoxMediaConnection
 
 NOW = datetime(2026, 10, 22, 12, tzinfo=UTC)
@@ -361,6 +362,10 @@ async def test_postgres_upgrade_and_guarded_downgrade_preserve_old_data(ai_datab
     if engine.dialect.name != "postgresql":
         pytest.skip("Requires PostgreSQL transactional DDL and the downgrade guard")
     async with engine.begin() as connection:
+        # The fixture starts at current metadata. Remove later dependent tables
+        # before reconstructing 0048; explicit drops retain PostgreSQL FK checks.
+        # Voice credits reference usage streams, not media, and remain intact.
+        await connection.run_sync(lambda sync: VoxWakeCommand.__table__.drop(sync))
         await connection.run_sync(
             lambda sync: Base.metadata.drop_all(
                 sync,

@@ -1,0 +1,117 @@
+# Isolated qualification stack; never shares production volumes or credentials.
+name: navox-vox-test
+
+x-api: &api
+  build:
+    context: ./services/api
+  image: navox-vox-test-api
+  env_file: ${NAVOX_VOX_ENV_FILE:?Set the private test environment file}
+  volumes:
+    - type: bind
+      source: ${NAVOX_VOX_CONFIG_FILE:?Set the private inference config file}
+      target: /run/navox/vox-inference.json
+      read_only: true
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    temporal:
+      condition: service_started
+  restart: unless-stopped
+  stop_grace_period: 150s
+
+services:
+  postgres:
+    image: postgres:17.5-alpine
+    environment:
+      POSTGRES_DB: temporal
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: ${TEMPORAL_DATABASE_PASSWORD:?Set an isolated database password}
+      NAVOX_DATABASE_PASSWORD: ${NAVOX_DATABASE_PASSWORD:?Set an isolated database password}
+    volumes:
+      - vox-test-data:/var/lib/postgresql/data
+      - ./docker/postgres/init-production.sh:/docker-entrypoint-initdb.d/10-create-navox.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U navox -d navox"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  temporal:
+    image: temporalio/auto-setup:1.28.0
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: ${TEMPORAL_DATABASE_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ./services/api
+    image: navox-vox-test-api
+    env_file: ${NAVOX_VOX_ENV_FILE}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["uv", "run", "--no-sync", "alembic", "upgrade", "head"]
+
+  api:
+    <<: *api
+    ports: ["127.0.0.1:18000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready', timeout=5)"]
+      interval: 10s
+      timeout: 8s
+      retries: 20
+      start_period: 45s
+
+  vox-worker:
+    <<: *api
+    command: ["uv", "run", "--no-sync", "python", "-m", "navox.vox.worker_livekit", "start"]
+
+  vox-cleanup:
+    <<: *api
+    command: ["uv", "run", "--no-sync", "python", "-m", "navox.vox.worker_reconcile"]
+
+  assistant-migrate:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NAVOX_PUBLIC_ORIGIN}/api/v1
+        NEXT_PUBLIC_NAVOX_STUDENT_VOX_ENABLED: "true"
+        NEXT_PUBLIC_NAVOX_STUDENT_VOX_MEDIA_ENABLED: "true"
+        NEXT_PUBLIC_NAVOX_STUDENT_VOX_CAPTURE_QUALIFIED: "true"
+    image: navox-vox-test-web
+    environment:
+      NAVOX_ASSISTANT_DATABASE_URL: postgres://navox:${NAVOX_DATABASE_PASSWORD}@postgres:5432/navox
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["npm", "run", "migrate", "--workspace=@navox/assistant-runtime"]
+
+  web:
+    image: navox-vox-test-web
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NAVOX_PUBLIC_ORIGIN}/api/v1
+      NAVOX_API_BASE_URL: http://api:8000/api/v1
+      NAVOX_ASSISTANT_DATABASE_URL: postgres://navox:${NAVOX_DATABASE_PASSWORD}@postgres:5432/navox
+      NAVOX_ASSISTANT_ORIGIN: ${NAVOX_PUBLIC_ORIGIN}
+      NAVOX_ASSISTANT_TEMPORAL_TARGET: temporal:7233
+      NAVOX_STUDENT_AGENT_ENABLED: "false"
+      NAVOX_STUDENT_AGENT_MODEL_ENABLED: "false"
+    depends_on:
+      api:
+        condition: service_healthy
+      assistant-migrate:
+        condition: service_completed_successfully
+    ports: ["127.0.0.1:13000:3000"]
+    restart: unless-stopped
+
+volumes:
+  vox-test-data:
