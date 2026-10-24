@@ -213,3 +213,24 @@ replacement response (169 frames) both reported zero source starvations. The
 browser received audio and completed hang-up/close with HTTP 204 and no page
 errors. One network packet was lost and 857 samples were concealed; physical
 Safari/device/network audio quality remains a separate listening acceptance item.
+
+
+### Public web lookup addition (requested after voice retest)
+
+The user confirmed that the scratchy output was gone. This confirms that specific
+listening issue; it does not pass every M1 physical-phone acceptance item.
+
+- [x] Shared read-only public search tool wired to realtime and fallback paths.
+- [x] Require completed live lookup and valid source citations.
+- [x] Fail without guessing on unavailable/uncited responses.
+- [x] Show clickable sources only from the admitted agent/current owned call.
+- [x] Clear results at hang-up/account change; no transcript retention change.
+- [x] Reserve and log search request/token usage; combined cost explicitly unknown.
+- [x] 75 focused backend and 189 focused frontend tests; scoped lint/type checks.
+- [ ] Live deployment and spoken El Clasico lookup.
+- [ ] Physical-phone lookup/listening test (user).
+- [ ] Search-inclusive cost reconciliation.
+
+UI addition: a bounded, scrollable source panel inside the existing call controls,
+with source-link tap areas at least 44 px high. No mascot or audio-playout changes.
+Persistent memory remains a separate, unfinished milestone.

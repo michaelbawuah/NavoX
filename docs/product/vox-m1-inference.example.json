@@ -40,5 +40,7 @@
   "max_context_characters": 400000,
   "tts_stream_format": "sse",
   "end_of_turn_silence_ms": 1200,
-  "llm_reasoning_effort": "none"
+  "llm_reasoning_effort": "none",
+  "web_search": null,
+  "web_search_reasoning_effort": "low"
 }

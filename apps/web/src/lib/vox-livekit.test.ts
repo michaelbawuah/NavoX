@@ -1341,3 +1341,32 @@ describe("bounded Vox provider grants", () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 });
+
+it("accepts web results only from the admitted agent and current owned lease", async () => {
+  const env = environment();
+  env.request.mayRenewReservation = vi.fn(() => true);
+  const connection = await env.transport.connect(env.request);
+  const data = new TextEncoder().encode(
+    JSON.stringify({ status: "searching" }),
+  );
+  const receive = env.room.events?.dataReceived;
+  if (!receive) throw new Error("Expected a room data handler");
+  receive(data, "someone-else", "navox.vox.web.v1");
+  receive(data, agent, "wrong-topic");
+  expect(env.request.onEvent).not.toHaveBeenCalledWith(
+    expect.objectContaining({ type: "web-lookup" }),
+  );
+  receive(data, agent, "navox.vox.web.v1");
+  expect(env.request.onEvent).toHaveBeenCalledWith({
+    type: "web-lookup",
+    result: { status: "searching" },
+  });
+  vi.mocked(env.request.onEvent).mockClear();
+  env.request.mayRenewReservation = () => false;
+  receive(data, agent, "navox.vox.web.v1");
+  expect(env.request.onEvent).not.toHaveBeenCalled();
+  await connection.close();
+  vi.mocked(env.request.onEvent).mockClear();
+  receive(data, agent, "navox.vox.web.v1");
+  expect(env.request.onEvent).not.toHaveBeenCalled();
+});

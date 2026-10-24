@@ -35,6 +35,7 @@ from navox.vox.inference_worker import ConfiguredVoiceWorker
 from navox.vox.provider import cloud_config
 from navox.vox.schedule_tools import ScheduleTools
 from navox.vox.session_context import CallContextKey, VoxCallContext
+from navox.vox.web_tools import WEB_TOPIC, PublicWebTools, VoxReadTools
 from navox.vox.worker import (
     DatabaseAuthority,
     PolicyVoiceGateway,
@@ -320,7 +321,20 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
 
             usage = WorkerUsageHooks(check)
             output.usage = usage
-            tools = ScheduleTools(check)
+
+            async def publish_web(result: dict[str, object]) -> None:
+                await inference_check()
+                await ctx.room.local_participant.publish_data(
+                    json.dumps(result, ensure_ascii=False).encode(),
+                    reliable=True,
+                    destination_identities=[assignment.client_identity],
+                    topic=WEB_TOPIC,
+                )
+
+            tools = VoxReadTools(
+                ScheduleTools(check),
+                PublicWebTools(check, inference, settings, usage, publish_web),
+            )
             realtime = OpenAIRealtimeAdapter(inference, settings, inference_check, usage, tools)
             pipeline = OpenAICompatiblePipeline(inference, settings, inference_check, usage, tools)
             worker = ConfiguredVoiceWorker(
@@ -553,6 +567,7 @@ async def job_entrypoint(ctx: agents.JobContext) -> None:
 
 def build_server(settings: Settings) -> agents.AgentServer:
     config = cloud_config(settings)
+    inference = load_inference_config(settings)
     server = agents.AgentServer(
         ws_url=config.server_url,
         api_key=config.api_key,
@@ -567,7 +582,7 @@ def build_server(settings: Settings) -> agents.AgentServer:
         permissions=agents.WorkerPermissions(
             can_publish=True,
             can_subscribe=True,
-            can_publish_data=False,
+            can_publish_data=inference is not None and inference.web_search is not None,
             can_update_metadata=False,
             can_publish_sources=[rtc.TrackSource.SOURCE_MICROPHONE],  # type: ignore[list-item]
         ),

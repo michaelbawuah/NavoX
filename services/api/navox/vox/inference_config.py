@@ -82,6 +82,8 @@ class VoxInferenceConfig(BaseModel):
     llm_reasoning_effort: (
         Literal["none", "minimal", "low", "medium", "high", "xhigh", "max"] | None
     ) = "none"
+    web_search: ProviderRoute | None = None
+    web_search_reasoning_effort: Literal["none", "low", "medium"] = "low"
     tts_stream_format: Literal["audio", "sse"] = "audio"
     end_of_turn_silence_ms: int = Field(default=1200, strict=True, ge=400, le=2000)
     turn_timeout_seconds: float = Field(default=45, ge=5, le=90, allow_inf_nan=False)
@@ -97,7 +99,10 @@ class VoxInferenceConfig(BaseModel):
             if endpoint_origin(origin) != origin or urlsplit(origin).path:
                 raise ValueError("Allowlist entries must be exact origins")
             origins.add(origin)
-        for route in (self.realtime, self.stt, self.llm, self.tts):
+        routes: tuple[ProviderRoute, ...] = (self.realtime, self.stt, self.llm, self.tts)
+        if self.web_search is not None:
+            routes += (self.web_search,)
+        for route in routes:
             if endpoint_origin(route.base_url) not in origins:
                 raise ValueError("Inference endpoint is not operator-allowlisted")
             if route.base_url.endswith("/") or not urlsplit(route.base_url).path.startswith("/"):

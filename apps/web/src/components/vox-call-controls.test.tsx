@@ -980,3 +980,35 @@ describe("Vox call interface with real provider and controller", () => {
     expect(test.transport.connect).toHaveBeenCalledTimes(2);
   });
 });
+
+it("shows clickable inline web citations and removes them at hang-up", async () => {
+  const test = rig();
+  await test.mount("Today", "floating", true);
+  await clickHome();
+  await act(async () =>
+    test.requests[0].onEvent({
+      type: "web-lookup",
+      result: {
+        status: "complete",
+        text: "Fixture [source]",
+        checkedAt: "2026-10-24T00:00:00Z",
+        citations: [
+          {
+            start: 8,
+            end: 16,
+            title: "Official fixtures",
+            url: "https://example.org/fixtures",
+          },
+        ],
+      },
+    }),
+  );
+  const source = host.querySelector<HTMLAnchorElement>(
+    '[aria-label="Web lookup sources"] a',
+  );
+  expect(source?.href).toBe("https://example.org/fixtures");
+  expect(source?.textContent).toBe("Official fixtures");
+  expect(source?.rel).toBe("noopener noreferrer");
+  await click("Hang up");
+  expect(host.querySelector('[aria-label="Web lookup sources"]')).toBeNull();
+});

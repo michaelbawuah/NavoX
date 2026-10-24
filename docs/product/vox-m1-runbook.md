@@ -244,3 +244,29 @@ and offers a fresh call, preventing a persistent provider fault from producing
 an endless reconnect loop. Ordinary same-room SDK recovery does not consume
 this allowance. A new call resets it; old recoveries expire from the window.
 This changes failure handling, not layout or the normal successful call flow.
+
+
+### Public web lookup in Vox
+
+Optional `web_search` uses the same ProviderRoute shape as `llm`; null disables
+it. To enable, configure a Responses-compatible route supporting the hosted
+`web_search` tool (the test stack uses the existing OpenAI credential reference
+and gpt-5.6-luna). The endpoint must be operator-allowlisted.
+`web_search_reasoning_effort` defaults to low. Restart the worker after toggling
+the route so its LiveKit data permission matches the feature; browser clients
+retain no data-publishing permission. Deploy compatible API/worker images before
+adding these configuration fields. No new client-side key is needed.
+
+Both spoken paths receive the same read-only search tool. Requests send the public
+question, server time and student timezone, not the call history or student
+records. A completed search and valid citations are required before a result is
+accepted. The call displays clickable inline source links; failure asks the
+voice model to acknowledge that it could not verify the answer. Public results
+are ephemeral and disappear on hang-up or account change. Existing off-record
+retention remains unchanged.
+
+Search requests use the normal quota reservation and token ledger. Their provider
+label is suffixed `-web-search` so combined model and search-tool fees remain
+explicitly unknown rather than silently pricing only model tokens. Do not treat
+the current estimate as a complete search-inclusive bill. Pricing/reconciliation
+is still required before cost acceptance can pass.

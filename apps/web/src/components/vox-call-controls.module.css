@@ -442,3 +442,22 @@
     animation: none;
   }
 }
+
+.webResult {
+  max-height: 12rem;
+  overflow-y: auto;
+  padding: 0.75rem 1rem;
+  border: 1px solid currentColor;
+  border-radius: 1rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.webResult a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

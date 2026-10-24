@@ -1410,3 +1410,21 @@ describe("bounded terminal recovery", () => {
     await env.controller.dispose();
   });
 });
+
+it("keeps web lookup results only in the current owned call", async () => {
+  const test = rig();
+  await test.controller.start();
+  const old = test.requests[0];
+  old.onEvent({ type: "web-lookup", result: { status: "searching" } });
+  expect(test.controller.current().webLookup?.status).toBe("searching");
+  await test.controller.hangUp();
+  expect(test.controller.current().webLookup).toBeNull();
+  old.onEvent({ type: "web-lookup", result: { status: "searching" } });
+  expect(test.controller.current().webLookup).toBeNull();
+  await test.controller.start();
+  expect(test.controller.current().webLookup).toBeNull();
+  await test.controller.bindOwner(anotherOwner);
+  old.onEvent({ type: "web-lookup", result: { status: "searching" } });
+  expect(test.controller.current().webLookup).toBeNull();
+  await test.controller.dispose();
+});

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import {
   type KeyboardEvent,
+  type ReactNode,
   useId,
   useLayoutEffect,
   useRef,
@@ -119,6 +120,51 @@ function phaseDetail(state: VoxCallState) {
     default:
       return "Your microphone and speaker have separate controls.";
   }
+}
+
+function WebLookup({ state }: { state: VoxCallState }) {
+  const result = state.ownerVerified ? state.webLookup : null;
+  if (!result || state.phase === "ended") return null;
+  if (result.status !== "complete")
+    return (
+      <p
+        role="status"
+        className={styles.hint}
+        data-vox-web-status={result.status}
+      >
+        {result.status === "searching"
+          ? "Checking the web…"
+          : "The online lookup could not be verified."}
+      </p>
+    );
+  const characters = Array.from(result.text);
+  const content: ReactNode[] = [];
+  let offset = 0;
+  for (const [index, source] of result.citations.entries()) {
+    content.push(characters.slice(offset, source.start).join(""));
+    content.push(
+      <a
+        key={index}
+        href={source.url}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        {source.title}
+      </a>,
+    );
+    offset = source.end;
+  }
+  content.push(characters.slice(offset).join(""));
+  return (
+    <section
+      className={styles.webResult}
+      aria-label="Web lookup sources"
+      data-vox-web-status="complete"
+    >
+      <p className={styles.eyebrow}>From the web</p>
+      <p>{content}</p>
+    </section>
+  );
 }
 
 function CallDialog({
@@ -248,6 +294,7 @@ function CallDialog({
           {phaseDetail(state)}
         </p>
       </div>
+      <WebLookup state={state} />
       {usageNotice && (
         <p role="status" data-vox-usage="true" className={styles.hint}>
           {usageNotice}

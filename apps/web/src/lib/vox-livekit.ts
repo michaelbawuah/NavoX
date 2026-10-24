@@ -10,6 +10,7 @@ import type {
 import { VoxStandbyWake, type VoxWakeFactory } from "./vox-local-wake";
 import type { PorcupineWakeConfig } from "./vox-porcupine-wake";
 import { VoxReservationError } from "./vox-reservations";
+import { parseVoxWebLookup } from "./vox-web-results";
 
 export interface VoxMediaAdmission {
   available: boolean;
@@ -67,6 +68,7 @@ export interface VoxRemoteAudio {
 }
 
 export interface VoxRoomEvents {
+  dataReceived?(data: Uint8Array, identity: string, topic?: string): void;
   participantJoined(identity: string): void;
   participantLeft(identity: string): void;
   trackPublished(identity: string): void;
@@ -156,6 +158,13 @@ async function loadLiveKit(): Promise<VoxLiveKitSDK> {
           await room.localParticipant.unpublishTrack(track, true);
         },
         listen(events) {
+          const dataReceived = (
+            data: Uint8Array,
+            participant?: { identity: string },
+            _kind?: unknown,
+            topic?: string,
+          ) => events.dataReceived?.(data, participant?.identity ?? "", topic);
+          room.on(sdk.RoomEvent.DataReceived, dataReceived);
           const joined = (participant: { identity: string }) =>
             events.participantJoined(participant.identity);
           const left = (participant: { identity: string }) =>
@@ -188,6 +197,7 @@ async function loadLiveKit(): Promise<VoxLiveKitSDK> {
             events.playbackChanged,
           );
           return () => {
+            room.off(sdk.RoomEvent.DataReceived, dataReceived);
             room.off(sdk.RoomEvent.ActiveSpeakersChanged, speakers);
             room.off(sdk.RoomEvent.ParticipantConnected, joined);
             room.off(sdk.RoomEvent.ParticipantDisconnected, left);
@@ -686,6 +696,18 @@ export function createLiveKitVoxTransport(options: {
         if (!fresh() || !visible()) throw unavailable();
         room = sdk.room();
         unlisten = room.listen({
+          dataReceived(data, id, topic) {
+            if (
+              !fresh() ||
+              !joined ||
+              id !== lease?.agentIdentity ||
+              topic !== "navox.vox.web.v1" ||
+              !request.mayRenewReservation?.()
+            )
+              return;
+            const result = parseVoxWebLookup(data);
+            if (result) request.onEvent({ type: "web-lookup", result });
+          },
           participantJoined(id) {
             if (id !== lease?.agentIdentity || !fresh()) return;
             room?.subscribeAgent(id);

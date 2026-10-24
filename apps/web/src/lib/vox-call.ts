@@ -1,3 +1,5 @@
+import type { VoxWebLookup } from "./vox-web-results";
+
 /**
  * Transport-independent Vox lifecycle groundwork. This module opens no microphone,
  * calls no provider and retains no audio or conversation text. A future app-level
@@ -38,6 +40,7 @@ export interface VoxCallState {
   /** Browser playback needs another user gesture; microphone authority is separate. */
   speakerBlocked: boolean;
   wakeStatus?: "off" | "starting" | "listening" | "unavailable";
+  webLookup?: VoxWebLookup | null;
   wakeInputStatus?: "queued" | "failed" | null;
   captionsEnabled: boolean;
   minimized: boolean;
@@ -57,6 +60,7 @@ export type VoxTransportEvent =
       type: "wake-status";
       status: "off" | "starting" | "listening" | "unavailable";
     }
+  | { type: "web-lookup"; result: VoxWebLookup }
   | { type: "wake-input"; status: "queued" | "failed" }
   | { type: "ended" };
 
@@ -358,6 +362,7 @@ export class VoxCallController {
       speakerBlocked: false,
       wakeStatus: "off",
       wakeInputStatus: null,
+      webLookup: null,
     };
     this.resumeStandby = false;
     this.deferredJoin = false;
@@ -475,6 +480,12 @@ export class VoxCallController {
         if (!this.joined()) return;
         if (event.type === "wake-status") {
           this.state.wakeStatus = event.status;
+          this.publish();
+          return;
+        }
+        if (event.type === "web-lookup") {
+          if (!this.state.ownerVerified) return;
+          this.state.webLookup = event.result;
           this.publish();
           return;
         }
@@ -723,6 +734,7 @@ export class VoxCallController {
       this.state.speakerBlocked = false;
       this.state.wakeStatus = "off";
       this.state.wakeInputStatus = null;
+      this.state.webLookup = null;
       this.state.endReason = reason;
     }
     if (rebind) {
