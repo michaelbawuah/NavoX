@@ -7,15 +7,18 @@ raw audio or automatic sensitive-fact learning is enabled by this module.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import delete, select
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from navox.connectors.sync_state import database_now
 from navox.core.settings import Settings
 from navox.db.communications import AssistantSession
 from navox.db.conversation_memory import MemoryConversation, MemoryFact, MemoryPrivacy, MemoryThread
@@ -27,6 +30,20 @@ from navox.memory.service import MemoryError, lock_owner
 DOMAIN = "navox-student-memory-v1"
 MAX_CONVERSATION_TURNS = 1000
 MAX_CONVERSATION_BYTES = 2_000_000
+HISTORY_PAGE_LIFETIME = timedelta(minutes=15)
+HISTORY_CURSOR_ID = UUID("008aa01c-cbb2-4732-998c-515f0e683903")
+
+
+class _HistoryCursor(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    version: Literal[1]
+    generation: int = Field(strict=True, ge=0)
+    query_digest: str = Field(pattern=r"^[a-f0-9]{64}$")
+    page_size: int = Field(strict=True, ge=1, le=100)
+    after_created_at: datetime
+    after_id: UUID
+    expires_at: datetime
 
 
 def utc(value: datetime) -> datetime:
@@ -425,6 +442,142 @@ async def list_history(
             result.append(value)
     await database.commit()
     return result
+
+
+def _history_cursor(
+    settings: Settings,
+    user_id: UUID,
+    workspace_id: UUID,
+    token: str,
+    *,
+    generation: int,
+    query_digest: str,
+    page_size: int,
+    now: datetime,
+) -> _HistoryCursor:
+    try:
+        if not token or len(token) > 4096:
+            raise ValueError
+        value = _HistoryCursor.model_validate(
+            decrypt(settings, user_id, workspace_id, HISTORY_CURSOR_ID, "history-page", token)
+        )
+        if (
+            value.generation != generation
+            or value.query_digest != query_digest
+            or value.page_size != page_size
+            or value.after_created_at.tzinfo is None
+            or value.expires_at.tzinfo is None
+            or utc(value.expires_at) <= now
+            or utc(value.expires_at) > now + HISTORY_PAGE_LIFETIME
+        ):
+            raise ValueError
+        return value
+    except (MemoryError, ValidationError, ValueError, TypeError):
+        # The same response covers foreign, stale, expired and modified tokens.
+        # No decrypted query, cursor metadata or retained text reaches errors.
+        raise MemoryError(409, "This history page changed. Start the search again.") from None
+
+
+async def history_page(
+    database: AsyncSession,
+    settings: Settings,
+    user_id: UUID,
+    workspace_id: UUID,
+    *,
+    query: str = "",
+    cursor: str | None = None,
+    page_size: int = 25,
+) -> dict[str, Any]:
+    """Traverse every retained conversation with bounded encrypted-text work.
+
+    Ordering uses immutable creation time and ID: continuing an older call cannot
+    move it across a page boundary. At most page_size transcripts are decrypted;
+    one extra metadata row establishes whether another explicit request is useful.
+    Search can return an empty page with a continuation, never a false claim that
+    the rest of the owner's retained history has also been searched.
+    """
+    if type(page_size) is not int or not 1 <= page_size <= 100:
+        raise MemoryError(422, "Choose between one and 100 conversations per page.")
+    if not isinstance(query, str) or len(query) > 200:
+        raise MemoryError(422, "Use a history search of up to 200 characters.")
+    query = query.strip().casefold()
+    query_digest = hashlib.sha256(query.encode()).hexdigest()
+    await lock_owner(database, user_id)
+    await expire_owner_history(database, user_id, workspace_id)
+    privacy = await privacy_row(database, user_id, workspace_id)
+    generation = privacy.generation if privacy is not None else 0
+    now = utc(await database_now(database))
+    after = (
+        _history_cursor(
+            settings,
+            user_id,
+            workspace_id,
+            cursor,
+            generation=generation,
+            query_digest=query_digest,
+            page_size=page_size,
+            now=now,
+        )
+        if cursor is not None
+        else None
+    )
+    statement = select(MemoryConversation).where(
+        *owner_scope(MemoryConversation, user_id, workspace_id),
+        MemoryConversation.erased_at.is_(None),
+    )
+    if after is not None:
+        statement = statement.where(
+            or_(
+                MemoryConversation.created_at < utc(after.after_created_at),
+                and_(
+                    MemoryConversation.created_at == utc(after.after_created_at),
+                    MemoryConversation.id > after.after_id,
+                ),
+            )
+        )
+    rows = list(
+        await database.scalars(
+            statement.order_by(MemoryConversation.created_at.desc(), MemoryConversation.id).limit(
+                page_size + 1
+            )
+        )
+    )
+    more = len(rows) > page_size
+    scanned = rows[:page_size]
+    items = []
+    for row in scanned:
+        value = history_view(row, settings, detail=bool(query))
+        if not query or query in json.dumps(value, default=str, ensure_ascii=False).casefold():
+            value.pop("turns", None)
+            value.pop("summary", None)
+            items.append(value)
+    next_cursor = None
+    if more:
+        last = scanned[-1]
+        continuation = _HistoryCursor(
+            version=1,
+            generation=generation,
+            query_digest=query_digest,
+            page_size=page_size,
+            after_created_at=utc(last.created_at),
+            after_id=last.id,
+            expires_at=after.expires_at if after is not None else now + HISTORY_PAGE_LIFETIME,
+        )
+        next_cursor = encrypt(
+            settings,
+            user_id,
+            workspace_id,
+            HISTORY_CURSOR_ID,
+            "history-page",
+            continuation.model_dump(mode="json"),
+        )
+    await database.commit()
+    return {
+        "items": items,
+        "next_cursor": next_cursor,
+        "search_complete": not more,
+        "scanned": len(scanned),
+    }
 
 
 async def get_history(

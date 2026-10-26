@@ -81,6 +81,19 @@ class HistoryResponse(StrictModel):
     message_count: int
 
 
+class HistoryPage(StrictModel):
+    items: list[HistoryResponse] = Field(max_length=100)
+    next_cursor: str | None = Field(max_length=4096)
+    search_complete: bool
+    scanned: int = Field(ge=0, le=100)
+
+
+class HistoryPageInput(StrictModel):
+    query: str = Field(default="", max_length=200)
+    cursor: str | None = Field(default=None, max_length=4096)
+    page_size: int = Field(default=25, strict=True, ge=1, le=100)
+
+
 class HistoryTurn(StrictModel):
     role: Literal["user", "assistant"]
     content: str

@@ -29,6 +29,8 @@ from navox.memory.history_schemas import (
     FactResponse,
     FactUpdate,
     HistoryDetail,
+    HistoryPage,
+    HistoryPageInput,
     HistoryResponse,
     PrivacyResponse,
     PrivacyUpdate,
@@ -155,6 +157,28 @@ async def list_history(
 ) -> list[dict[str, Any]]:
     try:
         return await history.list_history(database, settings, *scope(current_account), query)
+    except MemoryError as value:
+        raise error(value) from None
+
+
+@router.post("/history/page", response_model=HistoryPage)
+async def search_history_page(
+    payload: HistoryPageInput,
+    current_account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+) -> dict[str, Any]:
+    # The browser uses a body so private search text and continuation tokens do
+    # not become URL/access-log/referrer material. The legacy GET list stays intact.
+    try:
+        return await history.history_page(
+            database,
+            settings,
+            *scope(current_account),
+            query=payload.query,
+            cursor=payload.cursor,
+            page_size=payload.page_size,
+        )
     except MemoryError as value:
         raise error(value) from None
 
