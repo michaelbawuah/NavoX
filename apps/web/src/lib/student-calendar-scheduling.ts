@@ -60,6 +60,7 @@ export interface CalendarEventPreviewInput extends CalendarCommand {
   end_at: string;
   timezone: string;
   availability: AvailabilityPreviewInput;
+  allow_study_displacement?: boolean;
 }
 export type CalendarEventStatus =
   | "pending"
@@ -87,6 +88,19 @@ export interface CalendarEventView {
   changes_applied: boolean | null;
   can_undo: boolean;
   message: string;
+  study_changes_applied?: boolean;
+  study_moves?: CalendarStudyMove[];
+  study_details_redacted?: boolean;
+}
+export interface CalendarStudyMove {
+  block_id: string;
+  task_id: string;
+  title: string;
+  minutes: number;
+  before_start_at: string;
+  before_end_at: string;
+  after_start_at: string;
+  after_end_at: string;
 }
 export interface CalendarEventsView {
   generation: number;
@@ -279,6 +293,15 @@ export function readCalendarSchedulingView(
   };
 }
 export function readCalendarEventView(value: unknown): CalendarEventView {
+  const studyKeys = [
+    "study_changes_applied",
+    "study_moves",
+    "study_details_redacted",
+  ];
+  const hasStudy =
+    !!value &&
+    typeof value === "object" &&
+    studyKeys.some((key) => Object.hasOwn(value, key));
   const v = obj(value, [
     "generation",
     "calendar_revision",
@@ -296,6 +319,7 @@ export function readCalendarEventView(value: unknown): CalendarEventView {
     "changes_applied",
     "can_undo",
     "message",
+    ...(hasStudy ? studyKeys : []),
   ]);
   if (
     ![
@@ -325,6 +349,68 @@ export function readCalendarEventView(value: unknown): CalendarEventView {
     Date.parse(end_at) - Date.parse(start_at) > 480 * 60_000
   )
     return invalid();
+  let study: Pick<
+    CalendarEventView,
+    "study_changes_applied" | "study_moves" | "study_details_redacted"
+  > = {};
+  if (hasStudy) {
+    if (
+      typeof v.study_changes_applied !== "boolean" ||
+      typeof v.study_details_redacted !== "boolean" ||
+      (v.status === "pending" &&
+        (v.study_changes_applied || v.study_details_redacted)) ||
+      (!["pending", "failed"].includes(String(v.status)) &&
+        !v.study_changes_applied)
+    )
+      return invalid();
+    const moves = array(
+      v.study_moves,
+      (value) => {
+        const move = obj(value, [
+          "block_id",
+          "task_id",
+          "title",
+          "minutes",
+          "before_start_at",
+          "before_end_at",
+          "after_start_at",
+          "after_end_at",
+        ]);
+        const minutes = num(move.minutes),
+          before_start_at = instant(move.before_start_at),
+          before_end_at = instant(move.before_end_at),
+          after_start_at = instant(move.after_start_at),
+          after_end_at = instant(move.after_end_at);
+        if (
+          minutes < 1 ||
+          minutes > 90 ||
+          Date.parse(before_end_at) - Date.parse(before_start_at) !==
+            minutes * 60000 ||
+          Date.parse(after_end_at) - Date.parse(after_start_at) !==
+            minutes * 60000
+        )
+          return invalid();
+        return {
+          block_id: id(move.block_id),
+          task_id: id(move.task_id),
+          title: text(move.title, 200, 1),
+          minutes,
+          before_start_at,
+          before_end_at,
+          after_start_at,
+          after_end_at,
+        };
+      },
+      24,
+      (move) => move.block_id,
+    );
+    if (!moves.length && !v.study_details_redacted) return invalid();
+    study = {
+      study_changes_applied: v.study_changes_applied,
+      study_details_redacted: v.study_details_redacted,
+      study_moves: moves,
+    };
+  }
   return {
     generation: num(v.generation),
     calendar_revision: num(v.calendar_revision),
@@ -342,6 +428,7 @@ export function readCalendarEventView(value: unknown): CalendarEventView {
     changes_applied: v.changes_applied as boolean | null,
     can_undo: v.can_undo,
     message: text(v.message, 1000),
+    ...study,
   };
 }
 function eventCommand(input: CalendarEventCommand): CalendarEventCommand {
@@ -504,7 +591,15 @@ export function createStudentCalendarSchedulingApi(
         "end_at",
         "timezone",
         "availability",
+        ...("allow_study_displacement" in input
+          ? ["allow_study_displacement"]
+          : []),
       ]);
+      if (
+        "allow_study_displacement" in input &&
+        typeof input.allow_study_displacement !== "boolean"
+      )
+        return invalid();
       const checked = {
         ...readCalendarCommand({
           generation: input.generation,
@@ -519,6 +614,9 @@ export function createStudentCalendarSchedulingApi(
         end_at: instant(input.end_at),
         timezone: timezone(input.timezone),
         availability: readAvailabilityPreviewInput(input.availability),
+        ...("allow_study_displacement" in input
+          ? { allow_study_displacement: input.allow_study_displacement }
+          : {}),
       };
       if (Date.parse(checked.end_at) <= Date.parse(checked.start_at))
         return invalid();

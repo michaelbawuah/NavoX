@@ -9,7 +9,10 @@ import {
 import { notifyCalendarAccessChanged } from "../lib/student-calendar-privacy";
 import { AppleCalendarConnection } from "./apple-calendar-connection";
 import styles from "./student-calendar.module.css";
-import { StudentCalendarSchedulingConsent } from "./student-calendar-scheduling";
+import {
+  StudentCalendarScheduling,
+  StudentCalendarSchedulingConsent,
+} from "./student-calendar-scheduling";
 import { useCalendarWorkspace } from "./use-calendar-workspace";
 
 export const calendarConsent =
@@ -31,6 +34,12 @@ export function StudentCalendarConnections(props: CalendarConnectionsProps) {
       <StudentCalendarSchedulingConsent
         key={`scheduling:${props.accountId}`}
         accountId={props.accountId}
+      />
+      <StudentCalendarScheduling
+        key={`calendar-activity:${props.accountId}`}
+        accountId={props.accountId}
+        options={[]}
+        availability={null}
       />
     </>
   );

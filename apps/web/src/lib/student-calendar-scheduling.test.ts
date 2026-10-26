@@ -39,6 +39,18 @@ function event(): CalendarEventView {
     message: "Review this event",
   };
 }
+function studyMove(index = 1) {
+  return {
+    block_id: `70000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    task_id: `80000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    title: `Synthetic study block ${index}`,
+    minutes: 30,
+    before_start_at: "2026-10-22T12:50:00Z",
+    before_end_at: "2026-10-22T13:20:00Z",
+    after_start_at: "2026-10-22T14:00:00Z",
+    after_end_at: "2026-10-22T14:30:00Z",
+  };
+}
 function view() {
   return {
     generation: 2,
@@ -88,6 +100,48 @@ function authorization() {
 }
 
 describe("separate reviewed calendar scheduling boundary", () => {
+  it("reads complete bounded displacement receipts and truthful redaction", () => {
+    expect(readCalendarEventView(event())).not.toHaveProperty("study_moves");
+    const full = {
+      ...event(),
+      study_changes_applied: false,
+      study_details_redacted: false,
+      study_moves: Array.from({ length: 24 }, (_, index) =>
+        studyMove(index + 1),
+      ),
+    };
+    expect(readCalendarEventView(full).study_moves).toHaveLength(24);
+    for (const changes of [
+      { study_moves: [...full.study_moves, studyMove(25)] },
+      { study_moves: [studyMove(), studyMove()] },
+      { study_moves: [{ ...studyMove(), minutes: 20 }] },
+      { study_moves: [{ ...studyMove(), minutes: 91 }] },
+      { study_changes_applied: true },
+      { study_details_redacted: true },
+    ])
+      expect(() => readCalendarEventView({ ...full, ...changes })).toThrow();
+    expect(() =>
+      readCalendarEventView({ ...event(), study_moves: [studyMove()] }),
+    ).toThrow();
+    expect(
+      readCalendarEventView({
+        ...event(),
+        status: "failed",
+        study_changes_applied: true,
+        study_details_redacted: true,
+        study_moves: [],
+      }).study_changes_applied,
+    ).toBe(true);
+    expect(
+      readCalendarEventView({
+        ...event(),
+        status: "failed",
+        study_changes_applied: false,
+        study_details_redacted: true,
+        study_moves: [],
+      }).study_moves,
+    ).toEqual([]);
+  });
   it("does not read or change anything at construction", () => {
     const fetch = vi.fn();
     createStudentCalendarSchedulingApi(account, { fetch });
@@ -415,5 +469,40 @@ describe("separate reviewed calendar scheduling boundary", () => {
     const api = createStudentCalendarSchedulingApi(account, { fetch });
     await expect(api.previewEvent(input, signal())).rejects.toThrow();
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it("sends explicit displacement opt-in only when provided", async () => {
+    const input = {
+      ...command,
+      grant_id: grant,
+      calendar_id: "primary",
+      title: "Study with Sam",
+      location: "Library",
+      start_at: event().start_at,
+      end_at: event().end_at,
+      timezone: "UTC",
+      availability: {
+        start_at: "2026-10-22T12:00:00Z",
+        end_at: "2026-10-22T18:00:00Z",
+        duration_minutes: 30,
+        preferences_revision: 2,
+        expected_timezone: "UTC",
+        routine_confirmed: true,
+        travel_assumption: "zero" as const,
+        include_short_slots: false,
+      },
+    };
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => json(event()));
+    const api = createStudentCalendarSchedulingApi(account, { fetch });
+    await api.previewEvent(input, signal());
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).not.toHaveProperty(
+      "allow_study_displacement",
+    );
+    await api.previewEvent(
+      { ...input, allow_study_displacement: true },
+      signal(),
+    );
+    expect(
+      JSON.parse(String(fetch.mock.calls[1][1]?.body)).allow_study_displacement,
+    ).toBe(true);
   });
 });

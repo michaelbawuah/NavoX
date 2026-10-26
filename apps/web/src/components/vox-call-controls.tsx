@@ -16,6 +16,7 @@ import {
   useVoxConversation,
   type VoxConversationModel,
 } from "../lib/vox-conversation";
+import { VoxCalendarReview } from "./vox-calendar-review";
 import styles from "./vox-call-controls.module.css";
 import { useVoxCall } from "./vox-call-provider";
 import { VoxClassReview } from "./vox-class-review";
@@ -395,6 +396,17 @@ function CallDialog({
         </p>
       </div>
       <WebLookup state={state} />
+      {state.ownerVerified && state.owner && !ended && state.calendarReview && (
+        <VoxCalendarReview
+          key={`${state.callId}:${state.owner.workspaceId}:${state.owner.userId}:${state.calendarReview.event_id}:${state.calendarReview.status}`}
+          proposal={state.calendarReview}
+          onReview={() => {
+            controller.dismissCalendarReview();
+            controller.setMinimized(true);
+          }}
+          onClose={() => controller.dismissCalendarReview()}
+        />
+      )}
       {state.ownerVerified &&
         state.owner &&
         !ended &&

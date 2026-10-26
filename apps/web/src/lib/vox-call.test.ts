@@ -1488,3 +1488,40 @@ it("fences memory save reviews across suspension, hang-up and owner changes", as
   expect(test.controller.current().memorySaveReview).toBeNull();
   await test.controller.dispose();
 });
+
+it("fences calendar review metadata across session checks, dismissal and transport replacement", async () => {
+  const test = rig();
+  await test.controller.start();
+  const old = test.requests[0];
+  const result = {
+    kind: "calendar-event" as const,
+    event_id: "11111111-1111-4111-8111-111111111111",
+    status: "pending" as const,
+    voice_approval_available: false,
+    destination: "/connections#calendar" as const,
+  };
+  old.onEvent({ type: "calendar-review", result });
+  expect(test.controller.current().calendarReview).toEqual(result);
+  test.controller.dismissCalendarReview();
+  expect(test.controller.current().calendarReview).toBeNull();
+  old.onEvent({ type: "calendar-review", result });
+  test.controller.suspendForSessionCheck();
+  expect(test.controller.current().calendarReview).toBeNull();
+  old.onEvent({ type: "calendar-review", result });
+  expect(test.controller.current().calendarReview).toBeNull();
+  await test.controller.bindOwner(owner);
+  await test.controller.reconnect();
+  old.onEvent({ type: "calendar-review", result });
+  expect(test.controller.current().calendarReview).toBeNull();
+  const current = test.requests.at(-1);
+  current?.onEvent({ type: "calendar-review", result });
+  expect(test.controller.current().calendarReview).toEqual(result);
+  await test.controller.hangUp();
+  expect(test.controller.current().calendarReview).toBeNull();
+  current?.onEvent({ type: "calendar-review", result });
+  expect(test.controller.current().calendarReview).toBeNull();
+  await test.controller.bindOwner(anotherOwner);
+  current?.onEvent({ type: "calendar-review", result });
+  expect(test.controller.current().calendarReview).toBeNull();
+  await test.controller.dispose();
+});

@@ -1251,3 +1251,32 @@ it("shows clickable inline web citations and removes them at hang-up", async () 
   await click("Hang up");
   expect(host.querySelector('[aria-label="Web lookup sources"]')).toBeNull();
 });
+
+it("renders current calendar review metadata and clears it on dismissal and hang-up", async () => {
+  const test = rig();
+  await test.mount();
+  await click("Talk with NavoX");
+  const result = {
+    kind: "calendar-event" as const,
+    event_id: "11111111-1111-4111-8111-111111111111",
+    status: "uncertain" as const,
+    voice_approval_available: false,
+    destination: "/connections#calendar" as const,
+  };
+  await act(async () =>
+    test.requests[0].onEvent({ type: "calendar-review", result }),
+  );
+  expect(
+    host
+      .querySelector('[aria-label="Vox calendar review"] a')
+      ?.getAttribute("href"),
+  ).toBe("/connections#calendar");
+  expect(host.textContent).toContain("event result has not been confirmed");
+  await click("Dismiss calendar review");
+  expect(host.querySelector('[aria-label="Vox calendar review"]')).toBeNull();
+  await act(async () =>
+    test.requests[0].onEvent({ type: "calendar-review", result }),
+  );
+  await click("Hang up");
+  expect(host.querySelector('[aria-label="Vox calendar review"]')).toBeNull();
+});

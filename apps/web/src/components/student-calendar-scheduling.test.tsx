@@ -86,6 +86,18 @@ function event(): CalendarEventView {
     message: "Review",
   };
 }
+function studyMove(index = 1) {
+  return {
+    block_id: `70000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    task_id: `80000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    title: `Synthetic study block ${index}`,
+    minutes: 30,
+    before_start_at: "2026-10-22T12:50:00Z",
+    before_end_at: "2026-10-22T13:20:00Z",
+    after_start_at: "2026-10-22T14:00:00Z",
+    after_end_at: "2026-10-22T14:30:00Z",
+  };
+}
 function client(): StudentCalendarSchedulingApi {
   return {
     account: vi.fn(async () => accountId),
@@ -229,12 +241,12 @@ async function check(label: string) {
     await settle();
   });
 }
-async function mount(api: StudentCalendarSchedulingApi) {
+async function mount(api: StudentCalendarSchedulingApi, choices = options) {
   await act(async () => {
     root.render(
       <StudentCalendarScheduling
         accountId={accountId}
-        options={options}
+        options={choices}
         availability={availability}
         api={api}
       />,
@@ -242,8 +254,8 @@ async function mount(api: StudentCalendarSchedulingApi) {
     await settle();
   });
 }
-async function prepare(api: StudentCalendarSchedulingApi) {
-  await mount(api);
+async function prepare(api: StudentCalendarSchedulingApi, choices = options) {
+  await mount(api, choices);
   await click("Check scheduling and recent actions");
   await set("Google account", grant);
   await set("Add to calendar", "primary");
@@ -272,6 +284,88 @@ afterEach(async () => {
 });
 
 describe("reviewed calendar scheduling screen", () => {
+  it("explicitly opts in only for a selected certified study-move option", async () => {
+    const api = client();
+    const displaced = options.map((option) => ({
+      ...option,
+      displaced_study_block_ids: [studyMove().block_id],
+    }));
+    await prepare(api, displaced);
+    expect(host.textContent).toContain("review moving 1 study block");
+    expect(api.previewEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ allow_study_displacement: true }),
+      expect.any(AbortSignal),
+    );
+    expect(api.approveEvent).not.toHaveBeenCalled();
+  });
+  it("shows every exact before-and-after move before displacement approval", async () => {
+    const api = client();
+    vi.mocked(api.previewEvent).mockResolvedValue({
+      ...event(),
+      study_changes_applied: false,
+      study_details_redacted: false,
+      study_moves: Array.from({ length: 24 }, (_, index) =>
+        studyMove(index + 1),
+      ),
+    });
+    await prepare(api);
+    const review = host.querySelector(
+      '[aria-label="Exact study plan changes"]',
+    );
+    expect(review?.querySelectorAll("li")).toHaveLength(24);
+    expect(review?.textContent).toContain("Synthetic study block 24");
+    expect(review?.textContent).toContain("Before:");
+    expect(review?.textContent).toContain("After:");
+    expect(review?.textContent).toContain(
+      "Study moves may remain if the calendar request fails",
+    );
+    expect(review?.textContent).toContain(
+      "Calendar Undo only removes the event",
+    );
+    expect(button("Approve and add event").disabled).toBe(true);
+    expect(api.approveEvent).not.toHaveBeenCalled();
+  });
+  it("keeps existing receipts reviewable on Connections without a new-event opening", async () => {
+    const api = client();
+    const saved: CalendarEventView = {
+      ...event(),
+      status: "failed",
+      study_changes_applied: true,
+      study_details_redacted: true,
+      study_moves: [],
+    };
+    vi.mocked(api.events).mockResolvedValue({
+      generation: 2,
+      calendar_revision: 5,
+      next_cursor: null,
+      events: [saved],
+    });
+    await act(async () =>
+      root.render(
+        <StudentCalendarScheduling
+          accountId={accountId}
+          options={[]}
+          availability={null}
+          api={api}
+        />,
+      ),
+    );
+    expect(host.querySelector("#calendar")).not.toBeNull();
+    await click("Check scheduling and recent actions");
+    const recent = [...host.querySelectorAll("button")].find((button) =>
+      button.textContent?.includes(saved.title),
+    );
+    if (!recent) throw Error("Missing saved calendar receipt");
+    await act(async () => recent.click());
+    expect(host.textContent).toContain("Some study details were forgotten");
+    expect(host.textContent).toContain(
+      "This receipt records applied study moves",
+    );
+    expect(host.textContent).toContain("Calendar Undo only removes the event");
+    expect(api.previewEvent).not.toHaveBeenCalled();
+    expect(api.approveEvent).not.toHaveBeenCalled();
+    expect(host.querySelector("form")).toBeNull();
+  });
   it("performs no calendar or provider reads before the student requests them", async () => {
     const api = client();
     await mount(api);

@@ -1635,3 +1635,40 @@ it("accepts a memory save review only under the current agent, topic and live le
   receive(data, agent, "navox.vox.memory-save-review.v1");
   expect(env.request.onEvent).not.toHaveBeenCalled();
 });
+
+it("accepts calendar metadata only from the current admitted agent and owned live lease", async () => {
+  const env = environment();
+  env.request.mayRenewReservation = () => true;
+  const connection = await env.transport.connect(env.request);
+  const result = {
+    kind: "calendar-event",
+    event_id: "11111111-1111-4111-8111-111111111111",
+    status: "pending",
+    voice_approval_available: false,
+    destination: "/connections#calendar",
+  };
+  const data = new TextEncoder().encode(JSON.stringify(result));
+  const receive = env.room.events?.dataReceived;
+  if (!receive) throw Error("Expected data handler");
+  vi.mocked(env.request.onEvent).mockClear();
+  receive(data, "other-agent", "navox.vox.calendar-review.v1");
+  receive(data, agent, "wrong-topic");
+  receive(
+    new TextEncoder().encode(JSON.stringify({ ...result, title: "private" })),
+    agent,
+    "navox.vox.calendar-review.v1",
+  );
+  expect(env.request.onEvent).not.toHaveBeenCalled();
+  receive(data, agent, "navox.vox.calendar-review.v1");
+  expect(env.request.onEvent).toHaveBeenCalledWith({
+    type: "calendar-review",
+    result,
+  });
+  vi.mocked(env.request.onEvent).mockClear();
+  env.request.mayRenewReservation = () => false;
+  receive(data, agent, "navox.vox.calendar-review.v1");
+  expect(env.request.onEvent).not.toHaveBeenCalled();
+  await connection.close();
+  receive(data, agent, "navox.vox.calendar-review.v1");
+  expect(env.request.onEvent).not.toHaveBeenCalled();
+});

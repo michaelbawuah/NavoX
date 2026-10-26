@@ -1,6 +1,10 @@
 import type { WakeWordAdapter } from "@navox/assistant-runtime/voice";
 import type { LocalAudioTrack, RemoteTrack } from "livekit-client";
 import { VoxActivityTracker } from "./vox-activity";
+import {
+  parseVoxCalendarReview,
+  VOX_CALENDAR_REVIEW_TOPIC,
+} from "./vox-calendar-review";
 import type {
   VoxConnection,
   VoxOwner,
@@ -762,6 +766,9 @@ export function createLiveKitVoxTransport(options: {
             } else if (topic === "navox.vox.plan-review.v1") {
               const result = parseVoxPlanReview(data);
               if (result) request.onEvent({ type: "plan-review", result });
+            } else if (topic === VOX_CALENDAR_REVIEW_TOPIC) {
+              const result = parseVoxCalendarReview(data);
+              if (result) request.onEvent({ type: "calendar-review", result });
             }
           },
           participantJoined(id) {

@@ -54,6 +54,12 @@ function eventTime(
   });
   return `${format.format(new Date(event.start_at))} – ${format.format(new Date(event.end_at))}`;
 }
+function studyMoveCount(option: AvailabilityOption) {
+  return "displaced_study_block_ids" in option &&
+    Array.isArray(option.displaced_study_block_ids)
+    ? option.displaced_study_block_ids.length
+    : 0;
+}
 interface ConsentProps {
   accountId: string;
   api?: StudentCalendarSchedulingApi;
@@ -500,6 +506,9 @@ export function StudentCalendarScheduling({
             end_at: selected.end_at,
             timezone: availability.expected_timezone,
             availability,
+            ...(studyMoveCount(selected) > 0
+              ? { allow_study_displacement: true }
+              : {}),
           },
           signal,
         ),
@@ -581,7 +590,11 @@ export function StudentCalendarScheduling({
   const connected =
     view?.grants.filter((grant) => grant.status === "connected") ?? [];
   return (
-    <section className={styles.panel} aria-labelledby={`${id}-heading`}>
+    <section
+      id="calendar"
+      className={styles.panel}
+      aria-labelledby={`${id}-heading`}
+    >
       <div className={styles.heading}>
         <div>
           <p className={styles.eyebrow}>Make a time official</p>
@@ -597,8 +610,8 @@ export function StudentCalendarScheduling({
       </p>
       {!availability && (
         <p className={styles.hint}>
-          Find confirmed openings above before reviewing a new event. Recent
-          actions can still be checked here.
+          <Link href="/planner">Find confirmed openings in Planner</Link> before
+          reviewing a new event. Recent actions can still be checked here.
         </p>
       )}
       {view && connected.length === 0 && (
@@ -703,6 +716,8 @@ export function StudentCalendarScheduling({
                         ...option,
                         timezone: availability.expected_timezone,
                       })}
+                      {studyMoveCount(option) > 0 &&
+                        ` · review moving ${studyMoveCount(option)} study ${studyMoveCount(option) === 1 ? "block" : "blocks"}`}
                     </option>
                   ))}
                 </select>
@@ -763,6 +778,50 @@ export function StudentCalendarScheduling({
               </div>
             )}
           </dl>
+          {event.study_moves && (
+            <section aria-label="Exact study plan changes">
+              <h4>Study plan changes</h4>
+              <p>
+                {event.study_changes_applied
+                  ? "This receipt records applied study moves."
+                  : "These study moves are proposed, not applied."}
+              </p>
+              {event.study_details_redacted && (
+                <p className={styles.warning}>
+                  Some study details were forgotten and are no longer available
+                  in this receipt. Check current blocks in{" "}
+                  <Link href="/planner">Planner</Link>.
+                </p>
+              )}
+              <ol className={styles.list}>
+                {event.study_moves.map((move) => (
+                  <li key={move.block_id}>
+                    <strong>{move.title}</strong> · {move.minutes} minutes
+                    <p>
+                      Before:{" "}
+                      {eventTime({
+                        start_at: move.before_start_at,
+                        end_at: move.before_end_at,
+                        timezone: event.timezone,
+                      })}
+                    </p>
+                    <p>
+                      After:{" "}
+                      {eventTime({
+                        start_at: move.after_start_at,
+                        end_at: move.after_end_at,
+                        timezone: event.timezone,
+                      })}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+              <p className={styles.warning}>
+                Study moves may remain if the calendar request fails. Calendar
+                Undo only removes the event.
+              </p>
+            </section>
+          )}
           {(event.message.startsWith("This request predates your reset;") ||
             (event.status === "created" && !event.can_undo)) && (
             <p className={styles.hint}>{event.message}</p>
@@ -797,6 +856,8 @@ export function StudentCalendarScheduling({
                 />
                 <span>
                   I reviewed this title, time, timezone, location and calendar.
+                  {event.study_moves &&
+                    " I also reviewed every exact before-and-after study move and understand those changes may remain if the event fails."}
                   Add this exact event.
                 </span>
               </label>

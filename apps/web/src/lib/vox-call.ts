@@ -1,3 +1,4 @@
+import type { VoxCalendarReview } from "./vox-calendar-review";
 import type { VoxMemoryReview } from "./vox-memory-review";
 import type { VoxMemorySaveReview } from "./vox-memory-save-review";
 import type { VoxPlanReview } from "./vox-plan-review";
@@ -49,6 +50,7 @@ export interface VoxCallState {
   planReview?: VoxPlanReview | null;
   memoryReview?: VoxMemoryReview | null;
   memorySaveReview?: VoxMemorySaveReview | null;
+  calendarReview?: VoxCalendarReview | null;
   wakeInputStatus?: "queued" | "failed" | null;
   captionsEnabled: boolean;
   minimized: boolean;
@@ -72,6 +74,7 @@ export type VoxTransportEvent =
   | { type: "plan-review"; result: VoxPlanReview }
   | { type: "memory-review"; result: VoxMemoryReview }
   | { type: "memory-save-review"; result: VoxMemorySaveReview }
+  | { type: "calendar-review"; result: VoxCalendarReview }
   | { type: "wake-input"; status: "queued" | "failed" }
   | { type: "ended" };
 
@@ -228,6 +231,10 @@ export class VoxCallController {
 
   dismissMemorySaveReview(): void {
     this.state.memorySaveReview = null;
+    this.publish();
+  }
+  dismissCalendarReview(): void {
+    this.state.calendarReview = null;
     this.publish();
   }
 
@@ -392,6 +399,7 @@ export class VoxCallController {
       planReview: null,
       memoryReview: null,
       memorySaveReview: null,
+      calendarReview: null,
     };
     this.resumeStandby = false;
     this.deferredJoin = false;
@@ -521,6 +529,12 @@ export class VoxCallController {
         if (event.type === "memory-save-review") {
           if (!this.state.ownerVerified) return;
           this.state.memorySaveReview = event.result;
+          this.publish();
+          return;
+        }
+        if (event.type === "calendar-review") {
+          if (!this.state.ownerVerified) return;
+          this.state.calendarReview = event.result;
           this.publish();
           return;
         }
@@ -701,6 +715,7 @@ export class VoxCallController {
     this.state.ownerVerified = false;
     this.state.memoryReview = null;
     this.state.memorySaveReview = null;
+    this.state.calendarReview = null;
     // Playback/capture is stopped; a suppressed quiet callback must not leave
     // an old speaking/thinking label preventing standby after verification.
     this.state.activity = "quiet";
@@ -792,6 +807,7 @@ export class VoxCallController {
       this.state.webLookup = null;
       this.state.memoryReview = null;
       this.state.memorySaveReview = null;
+      this.state.calendarReview = null;
       this.state.endReason = reason;
     }
     if (rebind) {
@@ -848,6 +864,7 @@ export class VoxCallController {
     this.state.ownerVerified = false;
     this.state.memoryReview = null;
     this.state.memorySaveReview = null;
+    this.state.calendarReview = null;
     await this.hangUp("disposed");
     this.listeners.clear();
     this.reservationObservers.clear();
