@@ -378,7 +378,9 @@ class OpenAICompatiblePipeline:
                     self.config.llm,
                     "/chat/completions",
                     payload=body,
-                    input_bound=len(json.dumps(messages, ensure_ascii=False).encode()) + 2048,
+                    # Tool schemas are prompt input too; the whole serialized
+                    # request must fit inside the native prepaid reservation.
+                    input_bound=len(json.dumps(body, ensure_ascii=False).encode()) + 2048,
                 )
                 try:
                     message = result["choices"][0]["message"]

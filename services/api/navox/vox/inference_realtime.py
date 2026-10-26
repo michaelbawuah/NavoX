@@ -106,6 +106,7 @@ class OpenAIRealtimeAdapter:
         self._resampler: av.AudioResampler | None = None
         self._input_bytes = 0
         self._context_ceiling = 0
+        self._static_ceiling = 0
         self._stream: UUID | None = None
         self._transcription_stream: UUID | None = None
         self._question = ""
@@ -151,9 +152,46 @@ class OpenAIRealtimeAdapter:
         await self.check()
         return event
 
-    async def _connect(self, history: tuple[MemoryTurn, ...]) -> None:
+    def _session_configuration(self) -> dict[str, Any]:
+        return {
+            "type": "realtime",
+            "model": self.config.realtime.model,
+            "instructions": INSTRUCTIONS,
+            "output_modalities": ["audio"],
+            "max_output_tokens": self.config.max_output_tokens,
+            "truncation": "disabled",
+            "tools": [
+                {key: value for key, value in tool.items() if key != "strict"}
+                for tool in self.tools.definitions()
+            ]
+            if self.tools
+            else [],
+            "tool_choice": "auto" if self.tools else "none",
+            "audio": {
+                "input": {
+                    "format": {"type": "audio/pcm", "rate": 24000},
+                    "turn_detection": None,
+                    "transcription": {"model": self.config.stt.model},
+                },
+                "output": {
+                    "format": {"type": "audio/pcm", "rate": 24000},
+                    "voice": self.config.realtime.voice,
+                },
+            },
+        }
+
+    async def _connect(
+        self,
+        history: tuple[MemoryTurn, ...],
+        *,
+        admit: Callable[[int], Awaitable[None]] | None = None,
+    ) -> None:
         if self.socket is not None:
             return
+        session = self._session_configuration()
+        static_ceiling = len(json.dumps(session, ensure_ascii=False).encode()) + 2048
+        if static_ceiling + 3000 + self.config.max_output_tokens > MAX_CONTEXT_TOKENS:
+            raise ProviderRejected("The realtime tool configuration exceeds its input bound")
         route = self.config.realtime
         parsed = urlsplit(route.base_url)
         url = urlunsplit(
@@ -166,6 +204,21 @@ class OpenAIRealtimeAdapter:
             )
         )
         key = route_credential(route, self.settings)
+        messages = history_messages(history)
+        if self.memory_context is not None:
+            async with asyncio.timeout(10):
+                recalled = memory_message(await self.memory_context(""))
+            if recalled is not None:
+                messages.insert(0, {"role": "user", "content": recalled})
+        context_ceiling = static_ceiling + sum(
+            len(message["content"].encode()) + 64 for message in messages
+        )
+        ceiling = context_ceiling + 3000 + self.config.max_output_tokens
+        if ceiling > MAX_CONTEXT_TOKENS:
+            raise ProviderRejected("The call context requires compaction")
+        if admit is not None:
+            await admit(ceiling)
+        self._static_ceiling, self._context_ceiling = static_ceiling, context_ceiling
         await self.check()
         try:
             self.socket = await self.connector(
@@ -180,55 +233,14 @@ class OpenAIRealtimeAdapter:
         self.opened_at = self.clock()
         try:
             async with asyncio.timeout(10):
-                await self._send(
-                    {
-                        "type": "session.update",
-                        "session": {
-                            "type": "realtime",
-                            "model": route.model,
-                            "instructions": INSTRUCTIONS,
-                            "output_modalities": ["audio"],
-                            "max_output_tokens": self.config.max_output_tokens,
-                            "truncation": "disabled",
-                            # Realtime rejects Chat/Responses' strict tool field.
-                            # The server still validates arguments before execution.
-                            "tools": [
-                                {key: value for key, value in tool.items() if key != "strict"}
-                                for tool in self.tools.definitions()
-                            ]
-                            if self.tools
-                            else [],
-                            "tool_choice": "auto" if self.tools else "none",
-                            "audio": {
-                                "input": {
-                                    "format": {"type": "audio/pcm", "rate": 24000},
-                                    "turn_detection": None,
-                                    "transcription": {"model": self.config.stt.model},
-                                },
-                                "output": {
-                                    "format": {"type": "audio/pcm", "rate": 24000},
-                                    "voice": route.voice,
-                                },
-                            },
-                        },
-                    }
-                )
+                await self._send({"type": "session.update", "session": session})
                 for _ in range(20):
                     if (await self._event())["type"] == "session.updated":
                         break
                 else:
                     raise ProviderRejected("The realtime session was not acknowledged")
-                self._context_ceiling = len(INSTRUCTIONS.encode()) + 2048
-                messages = history_messages(history)
-                if self.memory_context is not None:
-                    recalled = memory_message(await self.memory_context(""))
-                    if recalled is not None:
-                        messages.insert(0, {"role": "user", "content": recalled})
                 for message in messages:
                     role, value = message["role"], message["content"]
-                    self._context_ceiling += len(value.encode()) + 64
-                    if self._context_ceiling > MAX_CONTEXT_TOKENS:
-                        raise ProviderRejected("The call context requires compaction")
                     await self._send(
                         {
                             "type": "conversation.item.create",
@@ -274,6 +286,7 @@ class OpenAIRealtimeAdapter:
             connector=self.connector,
             clock=self.clock,
             memory_context=self.memory_context,
+            host_hooks=self.host_hooks,
         )
         old = None
         try:
@@ -291,6 +304,7 @@ class OpenAIRealtimeAdapter:
                 replacement.socket = None
                 self.opened_at = replacement.opened_at
                 self._context_ceiling = replacement._context_ceiling
+                self._static_ceiling = replacement._static_ceiling
                 logging.getLogger(__name__).info("Vox provider session renewed")
                 return True
         finally:
@@ -307,21 +321,39 @@ class OpenAIRealtimeAdapter:
         async with self._lock:
             if self._stream is not None:
                 return
-            await self._connect(history)
-            ceiling = self._context_ceiling + 3000 + self.config.max_output_tokens
-            if ceiling > MAX_CONTEXT_TOKENS:
-                raise ProviderRejected("The call context requires compaction")
-            self._stream = uuid4()
-            self._transcription_stream = uuid4()
-            await self.usage.begin(
-                self._stream, self.config.realtime.provider, self.config.realtime.model, ceiling
-            )
-            await self.usage.begin(
-                self._transcription_stream,
-                self.config.stt.provider,
-                self.config.stt.model,
-                3000 + self.config.max_output_tokens,
-            )
+            admitted = False
+
+            async def admit(ceiling: int) -> None:
+                nonlocal admitted
+                if ceiling > MAX_CONTEXT_TOKENS:
+                    raise ProviderRejected("The call context requires compaction")
+                stream = uuid4()
+                await self.usage.begin(
+                    stream, self.config.realtime.provider, self.config.realtime.model, ceiling
+                )
+                self._stream = stream
+                transcription = uuid4()
+                await self.usage.begin(
+                    transcription,
+                    self.config.stt.provider,
+                    self.config.stt.model,
+                    3000 + self.config.max_output_tokens,
+                )
+                self._transcription_stream = transcription
+                admitted = True
+
+            try:
+                await self._connect(history, admit=admit)
+                if not admitted:
+                    await admit(self._context_ceiling + 3000 + self.config.max_output_tokens)
+            except BaseException:
+                # No input frame or response request exists for this turn yet.
+                # Settle only streams that native admission actually created.
+                for stream in (self._stream, self._transcription_stream):
+                    if stream is not None:
+                        await self.usage.finish(stream, {}, True)
+                self._stream = self._transcription_stream = None
+                raise
             self._input_bytes = 0
             self._question = ""
             self._question_item = None
