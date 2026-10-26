@@ -41,6 +41,7 @@ from navox.vox.inference_config import (
 from navox.vox.inference_http import OpenAICompatiblePipeline, UsageHooks
 from navox.vox.inference_realtime import OpenAIRealtimeAdapter
 from navox.vox.inference_worker import ConfiguredVoiceWorker
+from navox.vox.memory_learning_tools import MemoryLearningTools
 from navox.vox.memory_save_tools import MEMORY_SAVE_REVIEW_TOPIC, MemorySaveTools
 from navox.vox.memory_tools import MEMORY_REVIEW_TOPIC, MemoryTools
 from navox.vox.planning_tools import REVIEW_TOPIC, PlanningTools
@@ -501,6 +502,7 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                 MemorySaveTools(
                     check, settings, call_id=context_key.call_id, publish=publish_memory_save
                 ),
+                MemoryLearningTools(check, settings, call_id=context_key.call_id),
                 CalendarTools(
                     check,
                     settings,
