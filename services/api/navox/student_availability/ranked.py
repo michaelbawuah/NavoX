@@ -87,8 +87,6 @@ async def ranked_suggestions(
         or not snapshot.checked_at <= request.now < snapshot.expires_at
     ):
         raise schedule.StudentError(409, "The meeting choices no longer match this account")
-    if not allow_study_displacement:
-        return suggest(request)
     await schedule.owner(database, user_id, workspace_id, lock=True)
     now = await database_now(database)
     if not snapshot.checked_at <= now < snapshot.expires_at:
@@ -103,6 +101,8 @@ async def ranked_suggestions(
             raise schedule.StudentError(409, "This availability check expired. Check again")
         return result
 
+    if not allow_study_displacement:
+        return await publish(suggest(request))
     candidates = study_candidates(request)
     if not candidates or any(row.state != "complete" for row in snapshot.source_summary):
         return await publish(suggest(request))
@@ -113,7 +113,13 @@ async def ranked_suggestions(
     # confirmed-only selector independent of scheduling/storage integrations.
     from navox.student_calendars import displacement
 
-    context = await displacement.load_context(database, user_id, workspace_id, snapshot)
+    context = await displacement.load_context(
+        database,
+        user_id,
+        workspace_id,
+        snapshot,
+        planning_enabled=allow_study_displacement,
+    )
     now = await database_now(database)
     if (
         not snapshot.checked_at <= now < snapshot.expires_at

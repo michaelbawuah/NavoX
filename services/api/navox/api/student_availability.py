@@ -128,8 +128,8 @@ async def suggestions(
             now = await database_now(boundary_database)
             if now < snapshot.checked_at or now >= snapshot.expires_at:
                 raise schedule.StudentError(409, "This availability check expired. Check again")
-            # BusyInterval intentionally carries no exam/deadline meaning or
-            # professor hours. Do not invent those optional ranking inputs.
+            # The ranked helper adds current owned task deadlines. Calendar
+            # busy data does not imply exam meaning or another person's hours.
             selection = await ranked_suggestions(
                 boundary_database,
                 user_id,

@@ -115,6 +115,7 @@ async def test_one_owned_context_certifies_exact_study_moves_without_applying_th
         assert result.changes_applied is False
         await database.commit()
     assert len(loads) == 1 and contexts and all(context is loads[0] for context in contexts)
+    assert loads[0].planning_enabled is True
     assert len(contexts) <= MAX_CERTIFIED_CANDIDATES
     assert await blocks(env) == before
     async with env.factory() as database:
@@ -452,8 +453,30 @@ async def test_disabled_planning_preserves_confirmed_only_calendar_selection(
 
 
 @pytest.mark.asyncio
+async def test_disabled_planning_keeps_ordinary_confirmed_calendar_choices(event_env, monkeypatch):
+    env = event_env
+    env.settings.student_planning_enabled = False
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("Ordinary calendar choices need no study allocator")
+
+    monkeypatch.setattr(displacement, "load_context", forbidden)
+    response = await env.client.post(
+        ROOT, headers=env.headers, json=choices(env).model_dump(mode="json")
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()["selection"]
+    assert result["suggestions"] and not result["changes_applied"]
+    assert all(not row["displaced_study_block_ids"] for row in result["suggestions"])
+    assert not env.writes.inserts
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["active", "completed", "archived"])
-async def test_owned_active_deadlines_prevent_meetings_immediately_before_them(event_env, status):
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_owned_active_deadlines_prevent_meetings_immediately_before_them(
+    event_env, status, enabled
+):
     env = event_env
     async with env.factory() as database:
         task = await planning.save_task(
@@ -492,7 +515,7 @@ async def test_owned_active_deadlines_prevent_meetings_immediately_before_them(e
             env.workspace_id,
             checked,
             request,
-            allow_study_displacement=True,
+            allow_study_displacement=enabled,
         )
         assert len(result.suggestions) == (0 if status == "active" else 1)
         assert "Private submitted report" not in result.model_dump_json()
@@ -533,3 +556,40 @@ async def test_too_many_real_deadlines_are_not_silently_omitted(event_env):
                 ),
                 allow_study_displacement=True,
             )
+
+
+@pytest.mark.asyncio
+async def test_owned_deadline_semantics_are_rechecked_before_publication(event_env, monkeypatch):
+    env = event_env
+    async with env.factory() as database:
+        task = await planning.save_task(
+            database,
+            env.user_id,
+            env.workspace_id,
+            TaskCreate(
+                request_id=uuid4(),
+                title="Private changed deadline",
+                due_at=env.start_at.replace(hour=22),
+            ),
+        )
+        await database.commit()
+    original = ranked._deadlines
+    calls = 0
+
+    async def changed(database, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            row = await database.get(StudentTask, task.id)
+            row.due_at += timedelta(minutes=30)
+            await database.flush()
+        return await original(database, *args, **kwargs)
+
+    monkeypatch.setattr(ranked, "_deadlines", changed)
+    response = await env.client.post(
+        ROOT, headers=env.headers, json=choices(env).model_dump(mode="json")
+    )
+    assert calls == 2
+    assert response.status_code == 409 and "deadlines changed" in response.text
+    assert "Private changed deadline" not in response.text
+    assert not env.writes.inserts
