@@ -9,9 +9,11 @@ import httpx
 import pytest
 from icalendar import Calendar
 
+from navox.providers.apple_availability import DAV, _properties, _Unavailable, _xml
 from navox.student.service import StudentError
 from navox.student_calendars import apple_provider as apple
 from navox.student_calendars.provider import (
+    CalendarCreateReceipt,
     CalendarWriteChanged,
     CalendarWriteRejected,
     CalendarWriteUncertain,
@@ -101,6 +103,7 @@ class Wire:
         self.delete_status = None
         self.change_before_delete = False
         self.discovery_redirect = None
+        self.discovery_change = None
 
     async def check(self):
         self.calls += 1
@@ -129,6 +132,8 @@ class Wire:
             else:
                 assert str(request.url) == HOME and request.headers["depth"] == "1"
                 content = self.targets
+            if self.discovery_change:
+                content = self.discovery_change(request, content)
             return httpx.Response(207, content=content)
         assert str(request.url) == RESOURCE
         if request.method == "PUT":
@@ -238,7 +243,9 @@ async def test_disabled_provider_never_writes_but_owned_target_reads_remain_avai
 async def test_create_is_one_conditional_put_exact_private_readback_and_conditional_undo():
     wire = Wire()
     result = await insert(wire)
-    assert result == {**reviewed(), "status": "confirmed", "etag": '"v1"'}
+    assert result == CalendarCreateReceipt(
+        {**reviewed(), "status": "confirmed", "etag": '"v1"'}, '"v1"'
+    )
     assert wire.count("PUT") == wire.count("GET") == 1
     parsed = Calendar.from_ical(wire.stored)
     assert len(parsed.subcomponents) == 1
@@ -264,7 +271,8 @@ async def test_unicode_folding_and_each_utc_dst_fold_roundtrip_without_time_gues
         event["start"]["dateTime"] = start.isoformat()
         event["end"]["dateTime"] = (start + timedelta(minutes=30)).isoformat()
         result = await insert(wire, event)
-        assert {key: result[key] for key in event} == event
+        assert {key: result.event[key] for key in event} == event
+        assert result.creation_etag == '"v1"'
         assert b"\r\n " in wire.stored
         assert Calendar.from_ical(wire.stored).subcomponents[0].decoded("DTSTART") == start
 
@@ -318,6 +326,74 @@ async def test_partial_duplicate_or_unsafe_discovery_never_produces_a_write(chan
     assert wire.count("PUT") == 0
 
 
+@pytest.mark.parametrize(
+    "extra",
+    [
+        "<d:prop><d:owner><d:href>/other/</d:href></d:owner></d:prop>",
+        "<d:status>HTTP/1.1 200 OK</d:status>",
+        "<d:status>HTTP/1.1 403 Forbidden</d:status>",
+    ],
+)
+def test_propstat_requires_exactly_one_property_container_and_success_status(extra):
+    row = xml_response(TARGET, "<d:owner><d:href>/owner/</d:href></d:owner>")
+    content = multi(row.replace("</d:propstat>", extra + "</d:propstat>"))
+    with pytest.raises(_Unavailable):
+        _properties(_xml(content).find(DAV + "response"))
+
+
+def test_disjoint_successful_propstats_preserve_properties_but_duplicate_owner_is_ambiguous():
+    row = xml_response(TARGET, "<d:owner><d:href>/owner/</d:href></d:owner>")
+    second = (
+        "<d:propstat><d:prop><d:displayname>Personal</d:displayname></d:prop>"
+        "<d:status>HTTP/1.1 200 OK</d:status></d:propstat>"
+    )
+    content = multi(row.replace("</d:response>", second + "</d:response>"))
+    props = _properties(_xml(content).find(DAV + "response"))
+    assert set(props) == {DAV + "owner", DAV + "displayname"}
+    duplicate = second.replace(
+        "<d:displayname>Personal</d:displayname>",
+        "<d:owner><d:href>/other/</d:href></d:owner>",
+    )
+    content = multi(row.replace("</d:response>", duplicate + "</d:response>"))
+    with pytest.raises(_Unavailable):
+        _properties(_xml(content).find(DAV + "response"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", [apple.DISCOVERY_URL, PRINCIPAL, HOME])
+@pytest.mark.parametrize("duplicate", ["prop", "status", "failed-status"])
+async def test_ambiguous_principal_home_or_target_propstat_never_reaches_put(stage, duplicate):
+    wire = Wire()
+
+    def change(request, raw):
+        if str(request.url) != stage:
+            return raw
+        extra = {
+            "prop": b"<d:prop><d:owner><d:href>/other/</d:href></d:owner></d:prop>",
+            "status": b"<d:status>HTTP/1.1 200 OK</d:status>",
+            "failed-status": b"<d:status>HTTP/1.1 403 Forbidden</d:status>",
+        }[duplicate]
+        return raw.replace(b"</d:propstat>", extra + b"</d:propstat>", 1)
+
+    wire.discovery_change = change
+    with pytest.raises(GoogleCalendarWriteError):
+        await insert(wire)
+    assert wire.count("PUT") == wire.count("DELETE") == 0
+    assert wire.count("PROPFIND") == [apple.DISCOVERY_URL, PRINCIPAL, HOME].index(stage) + 1
+
+
+@pytest.mark.asyncio
+async def test_separate_complete_target_propstats_remain_writable():
+    wire = Wire()
+    wire.targets = wire.targets.replace(
+        b"<d:displayname>",
+        b"</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>"
+        b"<d:propstat><d:prop><d:displayname>",
+    )
+    assert (await insert(wire)).creation_etag == '"v1"'
+    assert wire.count("PUT") == 1
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "url",
@@ -326,6 +402,10 @@ async def test_partial_duplicate_or_unsafe_discovery_never_produces_a_write(chan
         "http://p42-caldav.icloud.com/personal/",
         "https://p42-caldav.icloud.com:444/personal/",
         "https://p42-caldav.icloud.com/%2e%2e/",
+        TARGET.replace("personal", "per%73onal"),
+        TARGET.replace("personal", "per%ZZonal"),
+        TARGET.replace("personal", "per%252fonal"),
+        TARGET.replace("personal", "per%255conal"),
     ],
 )
 async def test_untrusted_selected_calendar_never_receives_credentials(url):
@@ -335,6 +415,35 @@ async def test_untrusted_selected_calendar_never_receives_credentials(url):
             apple_id=ACCOUNT, app_password=PASSWORD, calendar_id=url, check=wire.check
         )
     assert wire.requests == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", [apple.DISCOVERY_URL, PRINCIPAL, HOME])
+@pytest.mark.parametrize("alias", ["%31", "%ZZ", "%252f", "%255c"])
+async def test_noncanonical_discovery_hrefs_never_produce_a_write(stage, alias):
+    wire = Wire()
+
+    def change(request, raw):
+        if str(request.url) != stage:
+            return raw
+        original = {apple.DISCOVERY_URL: PRINCIPAL, PRINCIPAL: HOME, HOME: TARGET}[stage]
+        # Principal/home use a numeric owner prefix; target uses a calendar name.
+        aliased = original.replace("123/", alias + "23/", 1)
+        return raw.replace(original.encode(), aliased.encode())
+
+    wire.discovery_change = change
+    with pytest.raises(GoogleCalendarWriteError):
+        await insert(wire)
+    assert wire.count("PUT") == wire.count("DELETE") == 0
+    assert wire.count("PROPFIND") == [apple.DISCOVERY_URL, PRINCIPAL, HOME].index(stage) + 1
+
+
+def test_trusted_uri_accepts_one_canonical_utf8_spelling_and_rejects_aliases():
+    canonical = HOME + "caf%C3%A9/"
+    assert apple._trusted(HOME, canonical) == canonical
+    for value in (HOME + "café/", HOME + "caf%c3%a9/", HOME + "personal%2f"):
+        with pytest.raises(GoogleCalendarWriteError):
+            apple._trusted(HOME, value)
 
 
 @pytest.mark.asyncio
@@ -468,11 +577,31 @@ async def test_normalized_storage_requires_get_proof_and_never_trusts_inconsiste
             value, "stored", value.stored.replace(b"\r\n", b"\n")
         )
         if allowed:
-            assert (await insert(wire))["etag"] == '"v1"'
+            result = await insert(wire)
+            assert result.event["etag"] == '"v1"' and result.creation_etag is None
         else:
             with pytest.raises(CalendarWriteUncertain):
                 await insert(wire)
         assert wire.count("PUT") == wire.count("GET") == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("put_etag", [None, 'W/"normalized"'])
+async def test_later_matching_get_version_is_observed_without_promoting_creation_proof(put_etag):
+    wire = Wire()
+    wire.put_etag = put_etag
+
+    def later_edit(value):
+        value.stored = value.stored.replace(
+            b"END:VEVENT", b"SEQUENCE:2\r\nLAST-MODIFIED:20301103T050001Z\r\nEND:VEVENT"
+        )
+        value.etag = '"v2"'
+
+    wire.after_get = later_edit
+    receipt = await insert(wire)
+    assert receipt.event == {**reviewed(), "status": "confirmed", "etag": '"v2"'}
+    assert receipt.creation_etag is None
+    assert wire.count("PUT") == wire.count("GET") == 1 and wire.count("DELETE") == 0
 
 
 @pytest.mark.asyncio

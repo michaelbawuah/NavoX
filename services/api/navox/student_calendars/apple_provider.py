@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -29,6 +29,7 @@ from navox.providers.apple_availability import (
     _xml,
 )
 from navox.student_calendars.provider import (
+    CalendarCreateReceipt,
     CalendarTarget,
     CalendarWriteChanged,
     CalendarWriteRejected,
@@ -73,12 +74,17 @@ def _text(value: object, limit: int, *, empty: bool = False) -> str:
 def _trusted(base: str, value: str) -> str:
     try:
         result = _url(base, value)
-        path = unquote(urlsplit(result).path, errors="strict")
+        raw_path = urlsplit(result).path
+        path = unquote(raw_path, errors="strict")
         if (
             "\\" in path
+            or "%" in path
             or any(part in {".", ".."} for part in path.split("/"))
             or any(ord(char) <= 32 or ord(char) == 127 for char in path)
-            or re.search(r"%(?:2f|5c|2e)", urlsplit(result).path, re.IGNORECASE)
+            # Use one URI spelling before ownership, deduplication or home
+            # containment checks. This also rejects malformed escapes, escaped
+            # unreserved characters, encoded separators and nested escapes.
+            or raw_path != quote(path, safe="/:@!$&'()*+,;=-._~")
         ):
             raise _Unavailable
         return result
@@ -591,7 +597,7 @@ class AppleCalendarWriteProvider:
         calendar_id: str,
         event: dict[str, Any],
         check: Check,
-    ) -> dict[str, Any]:
+    ) -> CalendarCreateReceipt:
         if not self.enabled:
             raise CalendarWriteRejected("Apple calendar writes are not enabled")
         reviewed = _input(event)
@@ -626,19 +632,21 @@ class AppleCalendarWriteProvider:
                     raise ValueError
                 normalized, stored = observed
                 put_etag = response.headers.get("etag")
+                creation_etag = None
                 if put_etag is not None and put_etag.startswith("W/"):
                     _etag(put_etag[2:])
-                if (
-                    put_etag is not None
-                    and not put_etag.startswith("W/")
-                    and (_etag(put_etag) != normalized["etag"] or stored != content)
-                ):
-                    raise ValueError
+                elif put_etag is not None:
+                    creation_etag = _etag(put_etag)
+                    if creation_etag != normalized["etag"] or stored != content:
+                        raise ValueError
                 if {
                     key: value for key, value in normalized.items() if key not in {"status", "etag"}
                 } != reviewed:
                     raise ValueError
-                return normalized
+                # GET proves only the observed representation. Its version may
+                # reflect a later edit, even when supported semantics match.
+                # Only the independent strong PUT tag proves creation version.
+                return CalendarCreateReceipt(normalized, creation_etag)
             except (ValueError, GoogleCalendarWriteError):
                 raise CalendarWriteUncertain("Apple creation could not be confirmed") from None
 

@@ -9,13 +9,16 @@ The source uses the existing server-vault Apple Account and app-specific passwor
 explicitly in memory. It does not manufacture a bearer token or request another
 credential. Only the fixed iCloud CalDAV hosts accepted by the busy reader can
 receive Basic authentication. Discovery redirects are bounded; object reads and
-mutations never follow redirects.
+mutations never follow redirects. Noncanonical URI path spellings, malformed
+percent escapes and nested encoded separators fail before comparison or I/O.
 
 Fresh authenticated discovery yields a principal, calendar home and bounded
 calendar inventory. A writable target must be a VEVENT collection beneath that
 home, name the exact current principal as `DAV:owner`, and grant read, bind,
 unbind and write-content privileges. The standard write/all aggregations are
 recognized. Missing, failed, duplicate or ambiguous properties fail closed.
+Each propstat must have exactly one property container and one successful status;
+disjoint properties in separate successful propstats remain supported.
 An owned calendar may still have other readers; ownership does not prove sole
 access to its data.
 
@@ -27,10 +30,13 @@ content are rejected. Creating uses exactly one `PUT` with `If-None-Match: *`.
 No timeout or conflict is retried.
 
 Creation is returned only after an exact resource GET proves the reviewed
-semantics and a strong ETag. A strong PUT ETag additionally requires identical
-stored bytes and version. When the server normalizes storage and omits a strong
-PUT ETag, the GET representation/version supplies the pin. Undo reads the exact
-marked resource again and uses only `DELETE` with the pinned strong `If-Match`.
+semantics and a strong observed ETag. Its receipt separately carries the original
+creation ETag only when PUT independently supplied a strong tag, and requires
+identical stored bytes and version in that case. A missing or weak PUT tag leaves
+that creation proof absent even when GET observes matching content: GET may have
+read a later version. Such an observation cannot enable Undo or pin that later
+version as the original. Undo reads the exact marked resource again and uses only
+`DELETE` with the independently pinned strong `If-Match`.
 A stale version is changed, never an unconditional deletion. The native service
 must still verify the post-delete outcome.
 

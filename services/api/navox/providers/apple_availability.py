@@ -101,14 +101,15 @@ def _properties(response: ET.Element) -> dict[str, ET.Element]:
     if response.find(DAV + "status") is not None:
         raise _Unavailable
     for propstat in response.findall(DAV + "propstat"):
-        status = propstat.findtext(DAV + "status", "")
+        statuses = propstat.findall(DAV + "status")
+        properties = propstat.findall(DAV + "prop")
+        if len(statuses) != 1 or len(properties) != 1 or len(statuses[0]):
+            raise _Unavailable
+        status = statuses[0].text or ""
         if not re.fullmatch(r"HTTP/1\.[01] 200(?: .*)?", status):
             # A failed property may hide a calendar or unsupported event type.
             raise _Unavailable
-        prop = propstat.find(DAV + "prop")
-        if prop is None:
-            raise _Unavailable
-        for item in prop:
+        for item in properties[0]:
             if item.tag in result:
                 raise _Unavailable
             result[item.tag] = item
