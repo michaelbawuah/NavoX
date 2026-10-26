@@ -190,3 +190,14 @@ async def test_revoked_authority_stops_the_read():
     with pytest.raises(Revoked):
         await collect(handler, check=check)
     assert seen == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("show", [[], {}, 1, None])
+async def test_malformed_show_state_is_partial_instead_of_crashing(show):
+    handler, _ = routes(
+        {"value": [{"id": "cal-a"}]}, {"cal-a": {"value": [event(0, 60, show=show)]}}
+    )
+    snapshot = await collect(handler)
+    assert snapshot.state == "partial"
+    assert intervals(snapshot) == {(0, 60)}

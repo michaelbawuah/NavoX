@@ -210,7 +210,7 @@ class MicrosoftAvailabilityProvider:
                             show = event.get("showAs")
                             if show == "free":
                                 continue
-                            if show not in BLOCKING:
+                            if not isinstance(show, str) or show not in BLOCKING:
                                 complete = False
                             try:
                                 start = _graph_time(event.get("start"))

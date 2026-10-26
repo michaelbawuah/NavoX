@@ -312,7 +312,9 @@ async def view(
     )
     try:
         CredentialVault(settings)
+        encrypted_credentials_ready = True
     except CredentialVaultError:
+        encrypted_credentials_ready = False
         configured = False
     return CalendarView(
         generation=current.generation,
@@ -324,7 +326,7 @@ async def view(
             CalendarProvider(
                 id="outlook",
                 availability="available"
-                if configured
+                if encrypted_credentials_ready
                 and settings.microsoft_oauth_client_id.strip()
                 and settings.microsoft_oauth_client_secret
                 and settings.microsoft_oauth_client_secret.get_secret_value().strip()

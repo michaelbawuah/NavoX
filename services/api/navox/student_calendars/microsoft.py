@@ -272,6 +272,7 @@ async def finish(
         )
         database.add(connection)
     old_credential = connection.credential_reference
+    connection.external_email = identity.email.casefold()
     connection.credential_reference = credential.id
     connection.granted_scopes = sorted(tokens.scopes.intersection(SCOPES))
     connection.last_checked_at = current.now
