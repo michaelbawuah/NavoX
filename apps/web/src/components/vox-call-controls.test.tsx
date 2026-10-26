@@ -186,6 +186,51 @@ async function clickHome() {
 }
 
 describe("Home entry shares the app-scoped Vox call", () => {
+  it("distinguishes temporary call text from saved history without claiming a privacy status", async () => {
+    const test = rig();
+    await test.mount();
+    await click("Talk with NavoX");
+    expect(dialog().textContent).toContain(
+      "Text in this panel clears when the call ends. Saved history follows your Memory & privacy settings.",
+    );
+    expect(dialog().textContent).not.toContain("Off the record.");
+    expect(dialog().textContent).not.toContain(
+      "This conversation clears when you hang up",
+    );
+    const privacy = dialog().querySelector<HTMLAnchorElement>(
+      'a[href="/settings#memory-privacy"]',
+    );
+    expect(privacy?.textContent?.trim()).toBe("Memory & privacy");
+    // The policy isn't loaded by this view, so it cannot advertise a current status.
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.some(([url]) => String(url).includes("/memory/privacy")),
+    ).toBe(false);
+  });
+
+  it("opens the memory settings destination while preserving the app-owned call", async () => {
+    const test = rig();
+    await test.mount();
+    await click("Talk with NavoX");
+    const callId = latest?.state.callId;
+    const privacy = dialog().querySelector<HTMLAnchorElement>(
+      'a[href="/settings#memory-privacy"]',
+    );
+    if (!privacy) throw new Error("Missing Memory & privacy link");
+    // Keep jsdom from attempting a document navigation; the Link's click handler
+    // still minimizes the call before the simulated client-route transition.
+    privacy.addEventListener("click", (event) => event.preventDefault());
+    await act(async () => privacy.click());
+    expect(latest?.state.minimized).toBe(true);
+    await test.mount("Settings");
+    expect(latest?.state.callId).toBe(callId);
+    expect(latest?.state.phase).toBe("active");
+    expect(test.transport.connect).toHaveBeenCalledTimes(1);
+    expect(test.connections[0].close).not.toHaveBeenCalled();
+    expect(test.transport.endCall).not.toHaveBeenCalled();
+  });
+
   it("explains a budget denial once and permits a later manual attempt without reload", async () => {
     const test = rig();
     test.transport.connect.mockRejectedValueOnce(

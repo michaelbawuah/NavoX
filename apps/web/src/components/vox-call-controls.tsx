@@ -332,10 +332,11 @@ function CallDialog({
                 </button>
               </fieldset>
               <p className={styles.captionNote}>
-                Off the record. This conversation clears when you hang up.
+                Text in this panel clears when the call ends. Saved history
+                follows your Memory &amp; privacy settings.
               </p>
-              <Link href="/settings" onClick={onMinimize}>
-                Voice and saved preferences
+              <Link href="/settings#memory-privacy" onClick={onMinimize}>
+                Memory &amp; privacy
               </Link>
             </div>
           </details>
