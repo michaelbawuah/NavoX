@@ -53,6 +53,12 @@ async def history_env(ai_database):
         )
         assert response.status_code == 201
         account = response.json()
+        client.headers.update(
+            {
+                "Origin": settings.web_origin,
+                "X-NavoX-Account": f"{account['workspace']['id']}:{account['id']}",
+            }
+        )
         yield SimpleNamespace(
             client=client,
             factory=ai_database,
@@ -330,6 +336,10 @@ async def test_history_and_fact_ids_cannot_cross_accounts(history_env):
         },
     )
     assert response.status_code == 201
+    other_account = response.json()
+    env.client.headers["X-NavoX-Account"] = (
+        f"{other_account['workspace']['id']}:{other_account['id']}"
+    )
     assert (await env.client.get(f"/api/v1/memory/history/{row['id']}")).status_code == 404
     assert (await env.client.delete(f"/api/v1/memory/history/{row['id']}")).status_code == 404
     assert (

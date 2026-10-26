@@ -558,7 +558,7 @@ async def _check_claims(
             first_day = (first - timedelta(hours=4)).astimezone(zone).date()
             last_day = (last + timedelta(hours=4)).astimezone(zone).date()
             first, last = _uncertain_day_span(first_day, zone, days=(last_day - first_day).days + 1)
-        if first < draft.end_at and last > draft.start_at:
+        if first < draft.end_at + MEETING_BUFFER and last > draft.start_at - MEETING_BUFFER:
             if row.status in {"created", "changed"}:
                 raise schedule.StudentError(
                     409,

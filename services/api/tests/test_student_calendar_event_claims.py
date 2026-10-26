@@ -75,8 +75,8 @@ async def test_adjacent_nonoverlapping_event_is_allowed_despite_the_retained_cla
     await created(env)
     lagged_busy(env, monkeypatch)
     env.start_at, env.end_at = (
-        env.end_at + timedelta(minutes=10),
-        env.end_at + timedelta(minutes=40),
+        env.end_at + timedelta(minutes=20),
+        env.end_at + timedelta(minutes=50),
     )
     second = await act(env, await preview(env), "approve")
     assert second.status_code == 200 and second.json()["status"] == "created", second.text
@@ -173,8 +173,8 @@ async def test_claim_scan_bound_fails_closed_without_unbounded_decryption_or_pro
     env = event_env
     await created(env)
     env.start_at, env.end_at = (
-        env.end_at + timedelta(minutes=10),
-        env.end_at + timedelta(minutes=40),
+        env.end_at + timedelta(minutes=20),
+        env.end_at + timedelta(minutes=50),
     )
     await created(env)
     monkeypatch.setattr(scheduling, "MAX_EVENT_CLAIMS", 1)
