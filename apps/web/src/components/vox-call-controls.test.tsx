@@ -286,6 +286,44 @@ describe("Home entry shares the app-scoped Vox call", () => {
     ).toBeNull();
     expect(dialog().textContent).toContain("Privacy status unavailable");
   });
+  it("briefly retries a not-yet-reserved privacy read while the call is connecting", async () => {
+    vi.useFakeTimers();
+    const test = rig(),
+      joined = deferred<ReturnType<typeof test.join>>();
+    test.transport.connect.mockImplementationOnce(async (request) => {
+      test.requests.push(request);
+      return joined.promise;
+    });
+    let privacyReads = 0;
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (!String(url).endsWith("/privacy") || ++privacyReads === 1)
+        return Response.json({}, { status: 404 });
+      return Response.json({
+        user_id: account.id,
+        workspace_id: account.workspace.id,
+        client_call_id: String(url).split("/calls/")[1]?.split("/")[0],
+        generation: 0,
+        privacy_generation: 1,
+        mode: "off-record",
+        retention_days: null,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      });
+    });
+    await test.mount();
+    await click("Talk with NavoX");
+    expect(latest?.state.phase).toBe("connecting");
+    expect(
+      dialog().querySelector('[data-vox-privacy="off-record"]'),
+    ).toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1001);
+    });
+    expect(latest?.state.phase).toBe("connecting");
+    expect(
+      dialog().querySelector('[data-vox-privacy="off-record"]'),
+    ).not.toBeNull();
+    await act(async () => joined.resolve(test.join(test.requests[0])));
+  });
 
   it("distinguishes temporary call text from saved history without claiming a privacy status", async () => {
     const test = rig();

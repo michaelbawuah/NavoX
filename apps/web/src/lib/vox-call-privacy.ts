@@ -137,6 +137,7 @@ export function useVoxCallPrivacy(state: VoxCallState | undefined) {
     let live = true;
     let retry: ReturnType<typeof setTimeout> | undefined;
     let active: AbortController | undefined;
+    let earlyRetries = 0;
     async function load() {
       if (!live) return;
       const controller = new AbortController();
@@ -167,6 +168,14 @@ export function useVoxCallPrivacy(state: VoxCallState | undefined) {
             headers: { "X-NavoX-Account": `${workspaceId}:${userId}` },
           },
         );
+        if (
+          response.status === 404 &&
+          key.endsWith(":connecting") &&
+          earlyRetries < 3
+        ) {
+          ++earlyRetries;
+          delay = 1000;
+        }
         const value = readVoxCallPrivacy(await boundedJson(response), {
           workspaceId,
           userId,
