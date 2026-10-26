@@ -5,6 +5,7 @@ import {
   readMemoryConversation,
   readMemoryFacts,
   readMemoryHistory,
+  readMemoryHistoryPage,
   readMemoryPrivacy,
 } from "./conversation-memory";
 
@@ -25,6 +26,35 @@ const history = {
 };
 afterEach(() => vi.unstubAllGlobals());
 describe("private memory contracts", () => {
+  it("keeps an empty search page traversable and rejects inconsistent paging proof", () => {
+    const page = {
+      items: [],
+      next_cursor: "opaque-proof",
+      search_complete: false,
+      scanned: 25,
+    };
+    expect(readMemoryHistoryPage(page)).toEqual(page);
+    expect(
+      readMemoryHistoryPage({
+        items: [history],
+        next_cursor: null,
+        search_complete: true,
+        scanned: 1,
+      }).items,
+    ).toHaveLength(1);
+    for (const changes of [
+      { search_complete: true },
+      { next_cursor: "" },
+      { next_cursor: "x".repeat(8193) },
+      { scanned: 0 },
+      { scanned: 101 },
+      { scanned: -1 },
+    ])
+      expect(() => readMemoryHistoryPage({ ...page, ...changes })).toThrow();
+    expect(() =>
+      readMemoryHistoryPage({ ...page, items: [history], scanned: 0 }),
+    ).toThrow();
+  });
   it("requires the disclosed history choice and a safe generation", () => {
     expect(readMemoryPrivacy(privacy)).toEqual(privacy);
     expect(() =>

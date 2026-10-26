@@ -73,7 +73,13 @@ beforeEach(() => {
         });
       if (url.includes("/privacy")) return Response.json(privacy);
       if (url.endsWith("/facts")) return Response.json([fact]);
-      if (url.includes("/history?")) return Response.json([call]);
+      if (url.endsWith("/history/page"))
+        return Response.json({
+          items: [call],
+          next_cursor: null,
+          search_complete: true,
+          scanned: 1,
+        });
       return Response.json({
         ...call,
         turns: [
@@ -195,6 +201,93 @@ it("requires exact review before forgetting a conversation and uses its source i
     "X-NavoX-Account": "school:student",
   });
 });
+it("finds older matches through empty pages using private POST bodies", async () => {
+  await mount();
+  const search = "private morning subject";
+  const original = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    if (String(url).endsWith("/history/page")) {
+      const body = JSON.parse(String(options?.body));
+      expect(String(url)).not.toContain(search);
+      expect(options?.method).toBe("POST");
+      expect(body.query).toBe(search);
+      if (!body.cursor)
+        return Response.json({
+          items: [],
+          next_cursor: "older-proof",
+          search_complete: false,
+          scanned: 25,
+        });
+      expect(body.cursor).toBe("older-proof");
+      return Response.json({
+        items: [
+          { ...call, id: "older-101", title: "Older private conversation" },
+        ],
+        next_cursor: null,
+        search_complete: true,
+        scanned: 25,
+      });
+    }
+    if (!original) throw Error("Missing fixture");
+    return original(url, options);
+  });
+  // Open the controls before submitting the bounded private search.
+  vi.mocked(fetch).mockImplementationOnce(async () =>
+    Response.json({
+      items: [],
+      next_cursor: null,
+      search_complete: true,
+      scanned: 0,
+    }),
+  );
+  await click("View and search history");
+  await type(
+    host.querySelector('input[type="search"]') as HTMLInputElement,
+    search,
+  );
+  await click("Search history");
+  expect(host.textContent).toContain("pages checked so far");
+  expect(host.textContent).toContain("Checked 25 saved conversations");
+  await click("Search older conversations");
+  expect(host.textContent).toContain("Older private conversation");
+  expect(host.textContent).toContain("Checked 50 saved conversations");
+  expect(host.textContent).not.toContain("pages checked so far");
+  expect(window.location.href).not.toContain("private");
+});
+
+it("fences an older page when the owner is being rechecked", async () => {
+  await mount();
+  vi.mocked(fetch).mockImplementationOnce(async () =>
+    Response.json({
+      items: [call],
+      next_cursor: "older-proof",
+      search_complete: false,
+      scanned: 25,
+    }),
+  );
+  await click("View and search history");
+  let resolve: (response: Response) => void = () => {};
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  await act(async () => button("Load older conversations").click());
+  await act(async () => session.callbacks?.checking());
+  await act(async () =>
+    resolve(
+      Response.json({
+        items: [{ ...call, id: "older", title: "Late private page" }],
+        next_cursor: null,
+        search_complete: true,
+        scanned: 1,
+      }),
+    ),
+  );
+  expect(host.textContent).not.toContain("Late private page");
+  expect(host.textContent).not.toContain("Morning plan");
+});
 it("blocks delete-all until the exact phrase is entered", async () => {
   await mount();
   await click("Delete all memory");
@@ -297,8 +390,11 @@ it("opens an owner-bound Vox search without deleting or putting its subject in t
   expect(
     vi
       .mocked(fetch)
-      .mock.calls.some(([url]) =>
-        String(url).endsWith("/history?query=morning"),
+      .mock.calls.some(
+        ([url, options]) =>
+          String(url).endsWith("/history/page") &&
+          options?.method === "POST" &&
+          JSON.parse(String(options.body)).query === "morning",
       ),
   ).toBe(true);
   expect(

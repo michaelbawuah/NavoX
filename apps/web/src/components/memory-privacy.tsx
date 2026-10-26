@@ -21,7 +21,7 @@ import {
   memorySourceLabel,
   readMemoryConversation,
   readMemoryFacts,
-  readMemoryHistory,
+  readMemoryHistoryPage,
   readMemoryPrivacy,
   conversationMemoryRequest as request,
 } from "../lib/conversation-memory";
@@ -59,6 +59,10 @@ export function MemoryPrivacyPanel({
     null,
   );
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
+  const [historyQuery, setHistoryQuery] = useState("");
+  const [historyScanned, setHistoryScanned] = useState(0);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
   const [conversationLoading, setConversationLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [retention, setRetention] = useState("");
@@ -89,6 +93,10 @@ export function MemoryPrivacyPanel({
     setPrivacy(null);
     setFacts([]);
     setHistory(null);
+    setHistoryCursor(null);
+    setHistoryQuery("");
+    setHistoryScanned(0);
+    setHistoryLoadingMore(false);
     setConversation(null);
     setConversationLoading(false);
     setQuery("");
@@ -221,34 +229,64 @@ export function MemoryPrivacyPanel({
     return () =>
       window.removeEventListener("navox:memory-forget-ready", review);
   }, [accountKey, ready, privacy?.generation, busy, mustReload, loading]);
-  async function searchHistory(event?: FormEvent, searchQuery = query) {
+  async function searchHistory(
+    event?: FormEvent,
+    searchQuery = query,
+    cursor: string | null = null,
+  ) {
     event?.preventDefault();
-    if (!ready || busy || mustReload) return;
+    if (!ready || busy || mustReload || historyLoadingMore) return;
     const current = ++historyEpoch.current,
       ownerEpoch = epoch.current;
     setError("");
     setConversation(null);
-    setHistory(null);
+    if (cursor === null) {
+      setHistory(null);
+      setHistoryCursor(null);
+      setHistoryScanned(0);
+    }
+    setHistoryLoadingMore(cursor !== null);
     setHistoryOpen(true);
     try {
-      const rows = await request(
+      const page = await request(
         accountKey,
-        `/history?query=${encodeURIComponent(searchQuery.trim())}`,
-        readMemoryHistory,
+        "/history/page",
+        readMemoryHistoryPage,
+        "POST",
+        { query: searchQuery.trim(), cursor, page_size: 25 },
       );
       if (
         mounted.current &&
         current === historyEpoch.current &&
         ownerEpoch === epoch.current
-      )
-        setHistory(rows);
+      ) {
+        setHistory((previous) => {
+          const older = cursor === null ? [] : (previous ?? []);
+          const seen = new Set(older.map((row) => row.id));
+          return [...older, ...page.items.filter((row) => !seen.has(row.id))];
+        });
+        setHistoryCursor(page.next_cursor);
+        setHistoryQuery(searchQuery.trim());
+        setHistoryScanned(
+          (previous) => (cursor === null ? 0 : previous) + page.scanned,
+        );
+      }
     } catch {
       if (
         mounted.current &&
         current === historyEpoch.current &&
         ownerEpoch === epoch.current
       )
-        setError("Conversation history couldn’t load. Try again.");
+        setError(
+          "Conversation history couldn’t load. Search again to check the latest history.",
+        );
+    } finally {
+      if (
+        mounted.current &&
+        current === historyEpoch.current &&
+        ownerEpoch === epoch.current
+      )
+        setHistoryLoadingMore(false);
     }
   }
   async function openConversation(row: MemoryHistory) {
@@ -309,6 +347,10 @@ export function MemoryPrivacyPanel({
         setForget(null);
         setConversation(null);
         setHistory(null);
+        setHistoryCursor(null);
+        setHistoryQuery("");
+        setHistoryScanned(0);
+        setHistoryLoadingMore(false);
         setHistoryOpen(false);
         setFormOpen(false);
         setEditing(null);
@@ -663,7 +705,9 @@ export function MemoryPrivacyPanel({
             {historyOpen && (
               <div className={styles.history}>
                 <p className={styles.muted}>
-                  Search checks your 100 most recent conversations.
+                  {historyScanned
+                    ? `Checked ${historyScanned} saved conversations${historyCursor ? "; older conversations are available." : "."}`
+                    : "History is checked in private pages, including older conversations."}
                 </p>
                 <form
                   className={styles.search}
@@ -690,7 +734,11 @@ export function MemoryPrivacyPanel({
                       : "Loading conversations…"}
                   </p>
                 ) : !history.length ? (
-                  <p>No conversations found.</p>
+                  <p>
+                    {historyCursor
+                      ? "No matching conversations in the pages checked so far. Search older conversations to keep checking."
+                      : "No conversations found."}
+                  </p>
                 ) : (
                   <ul className={styles.historyList}>
                     {history.map((row) => (
@@ -721,6 +769,21 @@ export function MemoryPrivacyPanel({
                       </li>
                     ))}
                   </ul>
+                )}
+                {historyCursor && (
+                  <button
+                    type="button"
+                    disabled={controlsDisabled || historyLoadingMore}
+                    onClick={() =>
+                      void searchHistory(undefined, historyQuery, historyCursor)
+                    }
+                  >
+                    {historyLoadingMore
+                      ? "Checking older conversations…"
+                      : historyQuery
+                        ? "Search older conversations"
+                        : "Load older conversations"}
+                  </button>
                 )}
                 {conversationLoading && (
                   <p role="status">Opening the conversation…</p>

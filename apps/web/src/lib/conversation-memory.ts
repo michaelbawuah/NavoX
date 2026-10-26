@@ -98,6 +98,35 @@ export function readMemoryHistory(value: unknown): MemoryHistory[] {
   if (!Array.isArray(value) || value.length > 100) invalid();
   return value.map(readHistoryRow);
 }
+export type MemoryHistoryPage = {
+  items: MemoryHistory[];
+  next_cursor: string | null;
+  search_complete: boolean;
+  scanned: number;
+};
+export function readMemoryHistoryPage(value: unknown): MemoryHistoryPage {
+  const row = object(value);
+  const items = readMemoryHistory(row.items);
+  if (
+    !(
+      row.next_cursor === null ||
+      (text(row.next_cursor, 8192) && row.next_cursor.length > 0)
+    ) ||
+    typeof row.search_complete !== "boolean" ||
+    row.search_complete !== (row.next_cursor === null) ||
+    !integer(row.scanned) ||
+    Number(row.scanned) > 100 ||
+    items.length > Number(row.scanned) ||
+    (row.scanned === 0 && row.next_cursor !== null)
+  )
+    invalid();
+  return {
+    items,
+    next_cursor: row.next_cursor,
+    search_complete: row.search_complete,
+    scanned: row.scanned,
+  } as MemoryHistoryPage;
+}
 export function readMemoryConversation(value: unknown): MemoryConversation {
   const row = object(value);
   readHistoryRow(row);
