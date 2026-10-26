@@ -558,10 +558,14 @@ async def _fresh_internal(
     workspace_id: UUID,
     draft: CalendarEventPreview,
     fresh: AvailabilitySnapshot,
+    *,
+    settings: Settings,
 ) -> None:
     if current.now >= fresh.expires_at:
         raise schedule.StudentError(409, "The availability check expired. Review the time again")
-    internal = await availability._internal(database, user_id, workspace_id, draft.availability)
+    internal = await availability._internal(
+        database, user_id, workspace_id, draft.availability, settings=settings
+    )
     if internal.digest != fresh.revision.student_revision:
         raise schedule.StudentError(
             409, "Your schedule or routine changed. Check availability again"
@@ -674,7 +678,9 @@ async def preview(
     async with factory() as database:
         current = await service.boundary(database, user_id, workspace_id, session_hash)
         service.check_command(current, draft)
-        await _fresh_internal(database, current, user_id, workspace_id, draft, fresh)
+        await _fresh_internal(
+            database, current, user_id, workspace_id, draft, fresh, settings=settings
+        )
         if (
             await _authority(database, user_id, workspace_id, session_hash, draft.grant_id)
             != authority
@@ -951,7 +957,9 @@ async def approve(
         await _check(factory, authority, session_hash)
         async with factory() as database:
             current = await service.boundary(database, user_id, workspace_id, session_hash)
-            await _fresh_internal(database, current, user_id, workspace_id, draft, fresh)
+            await _fresh_internal(
+                database, current, user_id, workspace_id, draft, fresh, settings=settings
+            )
             await database.commit()
 
     provider = provider or GoogleCalendarWriteProvider()
@@ -979,7 +987,9 @@ async def approve(
             != authority
         ):
             raise schedule.StudentError(409, "Calendar permissions changed. Review again")
-        await _fresh_internal(database, current, user_id, workspace_id, draft, fresh)
+        await _fresh_internal(
+            database, current, user_id, workspace_id, draft, fresh, settings=settings
+        )
         await _check_claims(database, user_id, workspace_id, draft, settings, excluding=row.id)
         study = payload.get("study_displacement")
         review = None
@@ -1016,7 +1026,7 @@ async def approve(
                 database, user_id, workspace_id, planning
             )
             internal = await availability._internal(
-                database, user_id, workspace_id, draft.availability
+                database, user_id, workspace_id, draft.availability, settings=settings
             )
             fresh = fresh.model_copy(
                 update={
@@ -1029,7 +1039,9 @@ async def approve(
                 }
             )
             latest = await service.boundary(database, user_id, workspace_id, session_hash)
-            await _fresh_internal(database, latest, user_id, workspace_id, draft, fresh)
+            await _fresh_internal(
+                database, latest, user_id, workspace_id, draft, fresh, settings=settings
+            )
         body = _body(row, draft, description=payload.get("provenance", ""))
         schedule.audit(database, user_id, workspace_id, "student.calendar.event.submitted", row.id)
         await database.commit()
