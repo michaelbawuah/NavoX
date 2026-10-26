@@ -2,10 +2,10 @@
 .pickerBody {
   display: grid;
   gap: 1rem;
-  color: #e5edf5;
+  color: var(--text, #f2f4f7);
   border: 1px solid #2b3949;
   border-radius: 1rem;
-  background: #111923;
+  background: var(--surface, #14171c);
   padding: 1.25rem;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -42,7 +42,7 @@
 .muted,
 .meta,
 .panel small {
-  color: #a7b6c8;
+  color: var(--text-muted, #a3acb8);
   font-size: 0.85rem;
 }
 .kicker {
@@ -98,8 +98,8 @@
   width: 100%;
   min-width: 0;
   border: 1px solid #3b4a5d;
-  background: #0c121b;
-  color: #edf5fc;
+  background: var(--bg, #0b0d10);
+  color: var(--text, #f2f4f7);
   border-radius: 0.6rem;
   padding: 0.7rem;
   font: inherit;
@@ -155,7 +155,7 @@
   gap: 0.3rem;
 }
 .choice span span {
-  color: #b6c3d2;
+  color: var(--text-muted, #a3acb8);
   font-size: 0.85rem;
   white-space: pre-wrap;
 }
