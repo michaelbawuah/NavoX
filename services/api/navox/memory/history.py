@@ -8,7 +8,6 @@ raw audio or automatic sensitive-fact learning is enabled by this module.
 from __future__ import annotations
 
 import json
-import re
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID, uuid4
@@ -22,17 +21,12 @@ from navox.db.communications import AssistantSession
 from navox.db.conversation_memory import MemoryConversation, MemoryFact, MemoryPrivacy, MemoryThread
 from navox.db.memory import OwnerMemory
 from navox.memory.history_schemas import FactCreate, FactUpdate, PrivacyResponse, PrivacyUpdate
+from navox.memory.sensitivity import SENSITIVE
 from navox.memory.service import MemoryError, lock_owner
 
 DOMAIN = "navox-student-memory-v1"
 MAX_CONVERSATION_TURNS = 1000
 MAX_CONVERSATION_BYTES = 2_000_000
-SENSITIVE = re.compile(
-    r"\b(health|hospital|diagnos\w*|medication|therapy|therapist|depress\w*|anxiety|mental|"
-    r"trauma\w*|suicid\w*|self.harm|family|parents?|mother|father|abuse|pregnan\w*|"
-    r"disabil\w*|cancer|injur\w*|religio\w*|sexual\w*)\b",
-    re.IGNORECASE,
-)
 
 
 def utc(value: datetime) -> datetime:
@@ -575,28 +569,25 @@ async def edit_fact(
     label, content = payload.label or old["label"], payload.content or old["content"]
     sensitive = require_sensitive_agreement(label, content, payload.sensitive_agreement)
     await bump_and_invalidate(database, user_id, workspace_id)
-    # Corrected fact invalidates every summary/thread derived from its old source.
-    # Retaining an old source would immediately contradict the student's correction.
+    # Preserve the historical transcript and sibling saved facts. A missing
+    # derived summary marks this source as obsolete for future recall; every
+    # completed archived turn otherwise has a summary. Keep the explicit
+    # correction authoritative without rewriting what was originally said.
     if row.source_conversation_id is not None:
         source = await database.get(MemoryConversation, row.source_conversation_id)
         if source is not None:
-            source.encrypted_transcript = source.encrypted_summary = None
-            source.message_count, source.erased_at = 0, datetime.now(UTC)
-        await database.execute(
-            delete(MemoryFact).where(
-                *owner_scope(MemoryFact, user_id, workspace_id),
-                MemoryFact.source_conversation_id == row.source_conversation_id,
-                MemoryFact.id != row.id,
-            )
-        )
-        await database.execute(
-            delete(MemoryThread).where(
-                *owner_scope(MemoryThread, user_id, workspace_id),
-                MemoryThread.source_conversation_id == row.source_conversation_id,
-            )
-        )
+            source.encrypted_summary = None
     row.encrypted_content = encrypt(
-        settings, user_id, workspace_id, row.id, "fact", {"label": label, "content": content}
+        settings,
+        user_id,
+        workspace_id,
+        row.id,
+        "fact",
+        {
+            "label": label,
+            "content": content,
+            "supersedes_source": row.source_conversation_id is not None,
+        },
     )
     row.sensitive, row.updated_at = sensitive, datetime.now(UTC)
     await database.commit()

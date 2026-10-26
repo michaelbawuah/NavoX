@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from navox.ai.context import ContextDenied, reject_credentials
+from navox.memory.sensitivity import SENSITIVE
 
 MemoryKind = Literal["reply_length", "tone", "signoff", "study_hours", "project_fact"]
 MAX_MEMORIES = 30
@@ -32,6 +33,8 @@ def safe_text(value: str) -> str:
 def validate_content(kind: MemoryKind, content: str) -> str:
     """Typed preferences remain text that the owner can explicitly choose to use."""
     safe_text(content)
+    if kind == "project_fact" and SENSITIVE.search(content):
+        raise ValueError("Use Memory facts to review sensitive details before saving.")
     if kind == "reply_length" and content not in {"short", "balanced", "detailed"}:
         raise ValueError("Reply length must be short, balanced, or detailed")
     if kind == "tone" and content not in {"friendly", "professional", "direct"}:
@@ -58,6 +61,8 @@ class MemoryCreate(BaseModel):
     @model_validator(mode="after")
     def content_matches_kind(self) -> Self:
         validate_content(self.kind, self.content)
+        if self.kind == "project_fact" and self.label and SENSITIVE.search(self.label):
+            raise ValueError("Use Memory facts to review sensitive details before saving.")
         return self
 
 

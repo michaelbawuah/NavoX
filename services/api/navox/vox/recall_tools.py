@@ -119,9 +119,34 @@ async def read_owner_memory(
         for term in re.findall(r"[\w'-]+", query.casefold())
         if len(term) > 2 and term not in STOP_WORDS
     }
+    source_ids = {
+        fact.source_conversation_id for fact in facts[:100] if fact.source_conversation_id
+    }
+    suppressed_sources = (
+        set(
+            await database.scalars(
+                select(MemoryConversation.id).where(
+                    *history.owner_scope(MemoryConversation, user_id, workspace_id),
+                    MemoryConversation.id.in_(source_ids),
+                    MemoryConversation.encrypted_transcript.is_not(None),
+                    MemoryConversation.encrypted_summary.is_(None),
+                )
+            )
+        )
+        if source_ids
+        else set()
+    )
     visible = []
     sensitive_withheld = False
     for row in facts[:100]:
+        payload = history.decrypt(
+            settings, user_id, workspace_id, row.id, "fact", row.encrypted_content
+        )
+        if (
+            row.source_conversation_id in suppressed_sources
+            and payload.get("supersedes_source") is not True
+        ):
+            continue
         if row.sensitive:
             sensitive_withheld = True
             continue
@@ -146,6 +171,7 @@ async def read_owner_memory(
                 .where(
                     *history.owner_scope(MemoryConversation, user_id, workspace_id),
                     MemoryConversation.erased_at.is_(None),
+                    MemoryConversation.encrypted_summary.is_not(None),
                     (
                         MemoryConversation.expires_at.is_(None)
                         | (MemoryConversation.expires_at > datetime.now(UTC))
@@ -187,6 +213,7 @@ async def read_owner_memory(
                 MemoryThread.status == "open",
                 *history.owner_scope(MemoryConversation, user_id, workspace_id),
                 MemoryConversation.erased_at.is_(None),
+                MemoryConversation.encrypted_summary.is_not(None),
                 (
                     MemoryConversation.expires_at.is_(None)
                     | (MemoryConversation.expires_at > datetime.now(UTC))

@@ -18,6 +18,7 @@ from navox.memory.schemas import (
     MemoryUpdate,
     validate_content,
 )
+from navox.memory.sensitivity import SENSITIVE
 
 
 class MemoryError(ValueError):
@@ -102,6 +103,14 @@ async def update_memory(
     memory = await owned_memory(
         database, user_id=user_id, workspace_id=workspace_id, memory_id=memory_id
     )
+    if (
+        memory.kind == "project_fact"
+        and (payload.label is not None or payload.content is not None)
+        and SENSITIVE.search(
+            (payload.label or memory.label) + " " + (payload.content or memory.content)
+        )
+    ):
+        raise MemoryError(422, "Use Memory facts to review sensitive details before saving.")
     if payload.content is not None:
         try:
             memory.content = validate_content(cast(MemoryKind, memory.kind), payload.content)
