@@ -4,6 +4,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccountSessionCallbacks } from "../lib/account-session";
+import { selectAvailabilityOptions } from "../lib/student-availability-options";
+import type { StudentAvailabilitySuggestionsApi } from "../lib/student-availability-suggestions-api";
 import type {
   AvailabilityPreviewInput,
   AvailabilitySnapshot,
@@ -204,10 +206,56 @@ async function select(label: string, value: string) {
     await settle();
   });
 }
-async function mountAvailability(client: StudentCalendarApi) {
+async function mountAvailability(
+  client: StudentCalendarApi,
+  suppliedSuggestions?: StudentAvailabilitySuggestionsApi,
+) {
+  const suggestionsApi =
+    suppliedSuggestions ??
+    ({
+      suggest: vi.fn(async (input, signal) => {
+        const { purpose: _purpose, ...request } = input;
+        const current = await client.preview(request, signal);
+        const options = selectAvailabilityOptions(
+          current.result,
+          input.duration_minutes,
+          Date.now(),
+        );
+        return {
+          changes_applied: false as const,
+          snapshot: current,
+          selection: {
+            status:
+              current.result.status === "needs_routine"
+                ? ("needs_routine" as const)
+                : current.result.status === "partial"
+                  ? ("partial_information" as const)
+                  : options.length
+                    ? ("ok" as const)
+                    : ("no_time" as const),
+            timezone: current.result.timezone,
+            duration_minutes: input.duration_minutes,
+            suggestions: options.map((item) => ({
+              start_at: item.start_at,
+              end_at: item.end_at,
+              minutes: item.duration_minutes,
+              reasons: [],
+              displaced_study_block_ids: [] as [],
+            })),
+            alternatives_available: 0,
+            changes_applied: false as const,
+          },
+        };
+      }),
+    } satisfies StudentAvailabilitySuggestionsApi);
   await act(async () => {
     root.render(
-      <StudentAvailability accountId={accountId} timezone="UTC" api={client} />,
+      <StudentAvailability
+        accountId={accountId}
+        timezone="UTC"
+        api={client}
+        suggestionsApi={suggestionsApi}
+      />,
     );
     await settle();
   });
@@ -241,6 +289,52 @@ afterEach(async () => {
 });
 
 describe("private calendar connection and availability screens", () => {
+  it("shows server ranked options and sends purpose without creating an event", async () => {
+    const client = api();
+    const suggest = vi.fn<StudentAvailabilitySuggestionsApi["suggest"]>(
+      async (input) => ({
+        changes_applied: false as const,
+        snapshot: snapshot(input),
+        selection: {
+          status: "ok",
+          timezone: "UTC",
+          duration_minutes: input.duration_minutes,
+          suggestions: [
+            {
+              start_at: "2026-10-22T09:10:00Z",
+              end_at: "2026-10-22T09:40:00Z",
+              minutes: 30,
+              reasons: ["soonest"],
+              displaced_study_block_ids: [],
+            },
+          ],
+          alternatives_available: 0,
+          changes_applied: false,
+        },
+      }),
+    );
+    await mountAvailability(client, { suggest });
+    await chooseAssumptions();
+    await select("What are you making time for?", "coffee");
+    await click("Find openings");
+    expect(suggest).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: "coffee", duration_minutes: 30 }),
+      expect.any(AbortSignal),
+    );
+    expect(client.preview).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("Earliest suitable option");
+    expect(host.textContent).toContain("9:10");
+    expect(host.textContent).toContain(
+      "No event, invitation, email or study-plan change was made",
+    );
+    await select("What are you making time for?", "lunch");
+    expect(host.textContent).not.toContain("Earliest suitable option");
+    const duration = [...host.querySelectorAll("label")]
+      .find((label) => label.textContent?.includes("Meeting duration"))
+      ?.querySelector("select");
+    expect(duration?.value).toBe("60");
+  });
+
   it("loads only saved routine metadata on mount and requires both explicit assumptions before provider reads", async () => {
     const client = api();
     await mountAvailability(client);
