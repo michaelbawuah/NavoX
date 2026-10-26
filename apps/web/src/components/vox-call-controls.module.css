@@ -273,6 +273,28 @@
 .callStatus {
   text-align: center;
 }
+.privacyStatus {
+  margin: 10px 0 0;
+  color: var(--nx-accent, #49cbb6);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.privacyStatus[data-vox-privacy="unknown"] {
+  color: var(--nx-text-muted, #a9b7b4);
+}
+.floating > .privacyStatus {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: max-content;
+  max-width: min(250px, calc(100vw - 40px));
+  padding: 6px 10px;
+  border: 1px solid var(--nx-border, #3b504d);
+  border-radius: 10px;
+  background: var(--nx-surface, #172321);
+  overflow-wrap: anywhere;
+  text-align: right;
+}
 .status {
   margin: 0;
   font-size: 21px;
@@ -557,6 +579,7 @@
     width: 64px;
   }
   .floating > .hint,
+  .floating > .privacyStatus,
   .firstTip {
     right: 50%;
     transform: translateX(50%);

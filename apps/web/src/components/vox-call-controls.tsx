@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import type { VoxCallController, VoxCallState } from "../lib/vox-call";
+import { useVoxCallPrivacy, voxPrivacyLabel } from "../lib/vox-call-privacy";
 import {
   useVoxConversation,
   type VoxConversationModel,
@@ -204,6 +205,7 @@ function CallDialog({
   onDone,
   onStart,
   usageNotice,
+  privacy,
 }: {
   conversation: VoxConversationModel;
   controller: VoxCallController;
@@ -213,6 +215,7 @@ function CallDialog({
   onDone: () => void;
   onStart: () => void;
   usageNotice?: string;
+  privacy: ReturnType<typeof useVoxCallPrivacy>;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const returnTarget = useRef<HTMLElement | null>(null);
@@ -366,6 +369,15 @@ function CallDialog({
         >
           {phaseLabel(state)}
         </p>
+        {!ended && (
+          <p
+            className={styles.privacyStatus}
+            data-vox-privacy={privacy.value?.mode ?? "unknown"}
+            role="status"
+          >
+            {privacy.value ? voxPrivacyLabel(privacy.value) : privacy.label}
+          </p>
+        )}
         {state.startedAt !== null && (
           <time
             role="timer"
@@ -678,6 +690,7 @@ export function VoxCallControls({
 }) {
   const call = useVoxCall();
   const conversation = useVoxConversation(call?.state);
+  const privacy = useVoxCallPrivacy(call?.state);
   const launcher = useRef<HTMLButtonElement>(null);
   const [dismissedCallId, setDismissedCallId] = useState<string | null>(null);
   const [startError, setStartError] = useState(false);
@@ -817,6 +830,15 @@ export function VoxCallControls({
           </span>
         )}
       </button>
+      {ongoing && state.minimized && (
+        <p
+          className={styles.privacyStatus}
+          data-vox-privacy={privacy.value?.mode ?? "unknown"}
+          role="status"
+        >
+          {privacy.value ? voxPrivacyLabel(privacy.value) : privacy.label}
+        </p>
+      )}
       {cleanupIncomplete && !open ? (
         <p className={styles.hint}>
           Call cleanup could not be confirmed. Reload before starting another
@@ -861,6 +883,7 @@ export function VoxCallControls({
           onDone={done}
           onStart={() => void start()}
           usageNotice={call.usageNotice?.message}
+          privacy={privacy}
         />
       )}
     </section>

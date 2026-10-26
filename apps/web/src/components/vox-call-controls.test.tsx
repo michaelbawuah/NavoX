@@ -186,6 +186,74 @@ async function clickHome() {
 }
 
 describe("Home entry shares the app-scoped Vox call", () => {
+  it("shows verified off-record status in the expanded and minimized call", async () => {
+    const test = rig();
+    vi.mocked(fetch).mockImplementation(async (url, options) => {
+      expect(options?.headers).toEqual({
+        "X-NavoX-Account": `${account.workspace.id}:${account.id}`,
+      });
+      const callId = String(url).split("/calls/")[1]?.split("/")[0];
+      return Response.json({
+        user_id: account.id,
+        workspace_id: account.workspace.id,
+        client_call_id: callId,
+        generation: 0,
+        privacy_generation: 2,
+        mode: "off-record",
+        retention_days: null,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      });
+    });
+    await test.mount();
+    expect(fetch).not.toHaveBeenCalled();
+    await click("Talk with NavoX");
+    expect(
+      dialog().querySelector('[data-vox-privacy="off-record"]')?.textContent,
+    ).toBe("Off the record");
+    await click("Minimize call");
+    expect(
+      host.querySelector('[data-vox-privacy="off-record"]')?.textContent,
+    ).toBe("Off the record");
+    const check = deferred<AccountAccess>();
+    test.restoreAccess.mockImplementationOnce(() => check.promise);
+    await act(async () =>
+      document.dispatchEvent(new Event("visibilitychange")),
+    );
+    expect(host.querySelector('[data-vox-privacy="off-record"]')).toBeNull();
+    await act(async () => check.resolve(proof));
+  });
+
+  it("does not apply a late privacy response after hang-up", async () => {
+    const test = rig();
+    const responses: ReturnType<typeof deferred<Response>>[] = [];
+    vi.mocked(fetch).mockImplementation(() => {
+      const response = deferred<Response>();
+      responses.push(response);
+      return response.promise;
+    });
+    await test.mount();
+    await click("Talk with NavoX");
+    const callId = latest?.state.callId;
+    await click("Hang up");
+    await act(async () => {
+      for (const response of responses)
+        response.resolve(
+          Response.json({
+            user_id: account.id,
+            workspace_id: account.workspace.id,
+            client_call_id: callId,
+            generation: 0,
+            privacy_generation: 0,
+            mode: "off-record",
+            retention_days: null,
+            expires_at: new Date(Date.now() + 60000).toISOString(),
+          }),
+        );
+    });
+    expect(host.querySelector('[data-vox-privacy="off-record"]')).toBeNull();
+    expect(latest?.state.phase).toBe("ended");
+  });
+
   it("distinguishes temporary call text from saved history without claiming a privacy status", async () => {
     const test = rig();
     await test.mount();

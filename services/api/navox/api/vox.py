@@ -20,6 +20,7 @@ from navox.api.auth import (
     hash_session_token,
 )
 from navox.vox import admission, media, readiness, service
+from navox.vox.call_privacy import CallPrivacy, read_call_privacy
 from navox.vox.media import ConnectionIntent
 from navox.vox.media_schemas import MediaBinding, MediaGrant, MediaStart
 from navox.vox.provider import LiveKitCloudProvider, MediaUnavailable, cloud_config
@@ -190,6 +191,26 @@ async def start(
     payload = await bounded_json(request, VoxStart)
     return await result(
         service.start(database, account.user.id, account.workspace.id, session_token_hash, payload)
+    )
+
+
+@router.get(
+    "/{client_call_id}/privacy", response_model=CallPrivacy, dependencies=[Depends(enabled)]
+)
+async def call_privacy(
+    client_call_id: UUID,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    session_token_hash: SessionHashDependency,
+) -> CallPrivacy:
+    return await result(
+        read_call_privacy(
+            database,
+            account.user.id,
+            account.workspace.id,
+            session_token_hash,
+            client_call_id,
+        )
     )
 
 
