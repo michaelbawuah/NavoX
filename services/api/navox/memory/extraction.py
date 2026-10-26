@@ -294,3 +294,149 @@ async def mark_responded_followups(
             thread.encrypted_content = history.encrypt(
                 settings, user_id, workspace_id, thread.id, "thread", value
             )
+
+
+async def _offered_followups(
+    database: AsyncSession,
+    settings: Settings,
+    user_id: UUID,
+    workspace_id: UUID,
+    *,
+    context_key: str,
+    generation: int,
+    thread_ids: frozenset[UUID],
+    now: datetime,
+) -> list[tuple[MemoryThread, dict[str, Any]]]:
+    """Retain the owner's lock through the caller's receipt transaction."""
+    from navox.memory import history
+    from navox.memory.service import lock_owner
+
+    await lock_owner(database, user_id)
+    privacy = await history.privacy_row(database, user_id, workspace_id)
+    if (
+        not thread_ids
+        or len(thread_ids) > MAX_AUTOMATIC_ROWS
+        or privacy is None
+        or not privacy.history_enabled
+        or privacy.off_the_record
+        or privacy.disclosure_version != 1
+        or privacy.generation != generation
+    ):
+        return []
+    rows = list(
+        await database.scalars(
+            select(MemoryThread)
+            .join(MemoryConversation, MemoryConversation.id == MemoryThread.source_conversation_id)
+            .where(
+                *history.owner_scope(MemoryThread, user_id, workspace_id),
+                MemoryThread.id.in_(thread_ids),
+                MemoryThread.status == "offered",
+                *history.owner_scope(MemoryConversation, user_id, workspace_id),
+                MemoryConversation.erased_at.is_(None),
+                MemoryConversation.encrypted_summary.is_not(None),
+                (MemoryConversation.expires_at.is_(None) | (MemoryConversation.expires_at > now)),
+            )
+        )
+    )
+    result = []
+    for row in rows:
+        value = history.decrypt(
+            settings, user_id, workspace_id, row.id, "thread", row.encrypted_content
+        )
+        if (
+            isinstance(value, dict)
+            and value.get("extraction_method") == METHOD
+            and value.get("offered_context") == context_key
+            and value.get("offered_generation") == generation
+        ):
+            result.append((row, value))
+    return result
+
+
+async def mark_followup_exposure(
+    database: AsyncSession,
+    settings: Settings,
+    user_id: UUID,
+    workspace_id: UUID,
+    *,
+    context_key: str,
+    generation: int,
+    thread_ids: frozenset[UUID],
+    now: datetime | None = None,
+) -> frozenset[UUID]:
+    """Record possible exposure BEFORE output; commit before publishing audio.
+
+    A receipt does not prove that the student heard the follow-up. It prevents a
+    crash or uncertain partial output from offering it in a different context.
+    The caller owns commit/rollback; this never starts a nested transaction.
+    """
+    from navox.memory import history
+
+    moment = now or datetime.now(UTC)
+    rows = await _offered_followups(
+        database,
+        settings,
+        user_id,
+        workspace_id,
+        context_key=context_key,
+        generation=generation,
+        thread_ids=thread_ids,
+        now=moment,
+    )
+    for row, value in rows:
+        if "exposure_started_at" not in value:
+            value["exposure_started_at"] = moment.astimezone(UTC).isoformat()
+            row.updated_at = moment
+            row.encrypted_content = history.encrypt(
+                settings, user_id, workspace_id, row.id, "thread", value
+            )
+    return frozenset(row.id for row, _ in rows)
+
+
+async def release_unexposed_followups(
+    database: AsyncSession,
+    settings: Settings,
+    user_id: UUID,
+    workspace_id: UUID,
+    *,
+    context_key: str,
+    generation: int,
+    thread_ids: frozenset[UUID],
+    now: datetime | None = None,
+) -> frozenset[UUID]:
+    """Release a known-unsounded offer, never a legacy/uncertain output attempt.
+
+    Only new delivery-version offers can establish the absence of exposure.
+    A missing receipt on an older offer is not evidence that it was unheard.
+    Call only after the context can no longer publish its old response.
+    """
+    from navox.memory import history
+
+    moment = now or datetime.now(UTC)
+    rows = await _offered_followups(
+        database,
+        settings,
+        user_id,
+        workspace_id,
+        context_key=context_key,
+        generation=generation,
+        thread_ids=thread_ids,
+        now=moment,
+    )
+    released = set()
+    for row, value in rows:
+        if (
+            type(value.get("delivery_version")) is not int
+            or value["delivery_version"] != 1
+            or "exposure_started_at" in value
+            or "responded_at" in value
+        ):
+            continue
+        for key in ("delivery_version", "offered_context", "offered_generation", "offered_at"):
+            value.pop(key, None)
+        row.status, row.updated_at = "open", moment
+        row.encrypted_content = history.encrypt(
+            settings, user_id, workspace_id, row.id, "thread", value
+        )
+        released.add(row.id)
+    return frozenset(released)

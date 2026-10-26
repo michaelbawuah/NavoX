@@ -1,9 +1,11 @@
 """Bounded owner-authorized memory reads shared by both configured speech paths."""
 
+from __future__ import annotations
+
 import json
 import re
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -16,6 +18,9 @@ from navox.memory import history
 from navox.memory.extraction import eligible_followup
 from navox.memory.service import MemoryError, lock_owner
 from navox.vox.worker import DatabaseAuthority, WorkerAccessLost
+
+if TYPE_CHECKING:
+    from navox.vox.recall_delivery import RecallDeliveryCoordinator
 
 TOOL_NAME = "get_student_memory"
 STOP_WORDS = frozenset(
@@ -33,10 +38,16 @@ class RecallArguments(BaseModel):
 
 class MemoryReadTools:
     def __init__(
-        self, check: DatabaseAuthority, settings: Settings, *, context_key: str | None = None
+        self,
+        check: DatabaseAuthority,
+        settings: Settings,
+        *,
+        context_key: str | None = None,
+        delivery: RecallDeliveryCoordinator | None = None,
     ):
         self.check, self.settings = check, settings
         self.context_key = context_key
+        self.delivery = delivery
 
     def definitions(self) -> list[dict[str, Any]]:
         return [
@@ -101,7 +112,11 @@ class MemoryReadTools:
                         authority.workspace_id,
                         query,
                         context_key=self.context_key,
+                        allow_protected=self.delivery is None or self.delivery.notice_available,
+                        claim_receipts=self.delivery is not None,
                     )
+                    if self.delivery is not None:
+                        result = self.delivery.observe(result, generation=privacy.generation)
                     await database.commit()
         except MemoryError:
             result = {
@@ -122,6 +137,8 @@ async def read_owner_memory(
     *,
     context_key: str | None = None,
     now: datetime | None = None,
+    allow_protected: bool = True,
+    claim_receipts: bool = False,
 ) -> dict[str, Any]:
     moment = now or datetime.now(UTC)
     privacy = await history.privacy_row(database, user_id, workspace_id)
@@ -207,7 +224,7 @@ async def read_owner_memory(
                 .limit(101)
             )
         )
-        if terms
+        if terms and allow_protected
         else []
     )
     matches = []
@@ -232,24 +249,30 @@ async def read_owner_memory(
                     "student_excerpts": excerpts[-2:],
                 }
             )
-    threads = list(
-        await database.scalars(
-            select(MemoryThread)
-            .join(MemoryConversation, MemoryConversation.id == MemoryThread.source_conversation_id)
-            .where(
-                *history.owner_scope(MemoryThread, user_id, workspace_id),
-                MemoryThread.status.in_(("open", "offered", "responded")),
-                *history.owner_scope(MemoryConversation, user_id, workspace_id),
-                MemoryConversation.erased_at.is_(None),
-                MemoryConversation.encrypted_summary.is_not(None),
-                (
-                    MemoryConversation.expires_at.is_(None)
-                    | (MemoryConversation.expires_at > datetime.now(UTC))
-                ),
+    threads = (
+        list(
+            await database.scalars(
+                select(MemoryThread)
+                .join(
+                    MemoryConversation, MemoryConversation.id == MemoryThread.source_conversation_id
+                )
+                .where(
+                    *history.owner_scope(MemoryThread, user_id, workspace_id),
+                    MemoryThread.status.in_(("open", "offered", "responded")),
+                    *history.owner_scope(MemoryConversation, user_id, workspace_id),
+                    MemoryConversation.erased_at.is_(None),
+                    MemoryConversation.encrypted_summary.is_not(None),
+                    (
+                        MemoryConversation.expires_at.is_(None)
+                        | (MemoryConversation.expires_at > datetime.now(UTC))
+                    ),
+                )
+                .order_by(MemoryThread.updated_at.desc())
+                .limit(101)
             )
-            .order_by(MemoryThread.updated_at.desc())
-            .limit(101)
         )
+        if allow_protected
+        else []
     )
     visible_threads = []
     thread_values = [
@@ -262,11 +285,12 @@ async def read_owner_memory(
         for thread in threads[:100]
     ]
     already_responded = any(
-        thread.status == "responded"
+        (thread.status == "responded" or "exposure_started_at" in value)
         and value.get("offered_context") == context_key
         and value.get("offered_generation") == privacy.generation
         for thread, value in thread_values
     )
+    claim_ids = []
     for thread, value in thread_values:
         if already_responded or thread.status == "responded":
             continue
@@ -276,6 +300,8 @@ async def read_owner_memory(
             value["offered_context"] = context_key
             value["offered_generation"] = privacy.generation
             value["offered_at"] = moment.isoformat()
+            if claim_receipts:
+                value["delivery_version"] = 1
             thread.status, thread.updated_at = "offered", moment
             thread.encrypted_content = history.encrypt(
                 settings, user_id, workspace_id, thread.id, "thread", value
@@ -291,6 +317,8 @@ async def read_owner_memory(
                     "updated_at": history.utc(thread.updated_at).isoformat(),
                 }
             )
+            if claim_receipts:
+                claim_ids.append(str(thread.id))
             break  # At most one optional follow-up in this call/chat context.
     return {
         "status": "ok",
@@ -298,6 +326,7 @@ async def read_owner_memory(
         "threads": visible_threads,
         "past_context": matches[:3],
         "spoken_privacy_warning_required": bool(matches or visible_threads),
+        **({"_followup_claim_ids": claim_ids} if claim_receipts else {}),
         "sensitive_details_withheld": sensitive_withheld,
         "truncated": len(facts) > 100
         or len(visible) > 20
