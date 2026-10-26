@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccountSessionCallbacks } from "../lib/account-session";
 import { productFeatures } from "../lib/product-features";
 import type { AvailabilityPreviewInput } from "../lib/student-calendar-api";
+import { notifyCalendarAccessChanged } from "../lib/student-calendar-privacy";
 import type {
   CalendarEventView,
   StudentCalendarSchedulingApi,
@@ -160,6 +161,7 @@ function client(): StudentCalendarSchedulingApi {
       changes_applied: false,
     })),
     previewEvent: vi.fn(async () => event()),
+    event: vi.fn(async () => event()),
     events: vi.fn(async () => ({
       generation: 2,
       calendar_revision: 5,
@@ -284,6 +286,69 @@ afterEach(async () => {
 });
 
 describe("reviewed calendar scheduling screen", () => {
+  it("refreshes the exact older receipt and hides forgotten study details while checking", async () => {
+    const api = client();
+    vi.mocked(api.previewEvent).mockResolvedValue({
+      ...event(),
+      study_changes_applied: false,
+      study_details_redacted: false,
+      study_moves: [studyMove()],
+    });
+    await prepare(api);
+    expect(host.textContent).toContain("Synthetic study block 1");
+    let resolve!: (value: CalendarEventView) => void;
+    vi.mocked(api.event).mockReturnValue(
+      new Promise((yes) => {
+        resolve = yes;
+      }),
+    );
+    await click("Check scheduling and recent actions");
+    expect(api.event).toHaveBeenCalledWith(action, expect.any(AbortSignal));
+    expect(host.textContent).not.toContain("Synthetic study block 1");
+    await act(async () => {
+      resolve({
+        ...event(),
+        status: "failed",
+        revision: 2,
+        study_changes_applied: false,
+        study_details_redacted: true,
+        study_moves: [],
+      });
+      await settle();
+    });
+    expect(host.textContent).toContain("Some study details were forgotten");
+    expect(host.textContent).not.toContain("Synthetic study block 1");
+    expect(host.textContent).not.toContain("Approve and add event");
+    expect(api.reconcileEvent).not.toHaveBeenCalled();
+    expect(api.approveEvent).not.toHaveBeenCalled();
+  });
+  it("keeps private receipt details hidden after a failed refresh and recovers by exact ID", async () => {
+    const api = client();
+    await prepare(api);
+    vi.mocked(api.event).mockRejectedValueOnce(new Error("Interrupted"));
+    await click("Check scheduling and recent actions");
+    expect(host.querySelector("article")).toBeNull();
+    expect(host.textContent).not.toContain("Approve and add event");
+    await click("Check scheduling and recent actions");
+    expect(api.event).toHaveBeenNthCalledWith(
+      2,
+      action,
+      expect.any(AbortSignal),
+    );
+    expect(host.textContent).toContain("Ready for your review");
+    expect(button("Approve and add event").disabled).toBe(true);
+    expect(api.approveEvent).not.toHaveBeenCalled();
+  });
+  it("does not recover an invalidated pending review after calendar access changes", async () => {
+    const api = client();
+    await prepare(api);
+    await act(async () => notifyCalendarAccessChanged());
+    expect(host.textContent).not.toContain("Ready for your review");
+    await click("Check scheduling and recent actions");
+    expect(api.event).not.toHaveBeenCalled();
+    expect(host.textContent).not.toContain("Approve and add event");
+    expect(api.approveEvent).not.toHaveBeenCalled();
+  });
   it("explicitly opts in only for a selected certified study-move option", async () => {
     const api = client();
     const displaced = options.map((option) => ({

@@ -165,6 +165,53 @@ describe("separate reviewed calendar scheduling boundary", () => {
       }),
     );
   });
+  it("reads a maximum UTF-8 study-move page within the bounded response cap", async () => {
+    const events = Array.from({ length: 20 }, (_, index) => ({
+      ...event(),
+      id: `90000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      calendar_label: "界".repeat(1024),
+      title: "界".repeat(200),
+      location: "界".repeat(500),
+      message: "界".repeat(1000),
+      study_changes_applied: false,
+      study_details_redacted: false,
+      study_moves: Array.from({ length: 24 }, (_, index) => ({
+        ...studyMove(index + 1),
+        title: "界".repeat(200),
+      })),
+    }));
+    const page = {
+      generation: 2,
+      calendar_revision: 5,
+      events,
+      next_cursor: null,
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify(page)).byteLength;
+    expect(bytes).toBeGreaterThan(256 * 1024);
+    expect(bytes).toBeLessThan(1024 * 1024);
+    const api = createStudentCalendarSchedulingApi(account, {
+      fetch: vi.fn(async () => json(page)),
+    });
+    expect((await api.events(signal())).events).toHaveLength(20);
+  });
+  it("reads only the requested account-checked receipt without provider commands", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => json(event()));
+    const api = createStudentCalendarSchedulingApi(account, {
+      fetch,
+      baseUrl: "https://api.example.test/api/v1",
+    });
+    expect(await api.event(action, signal())).toEqual(event());
+    expect(fetch).toHaveBeenCalledWith(
+      `https://api.example.test/api/v1/student/calendars/events/${action}`,
+      expect.objectContaining({
+        method: "GET",
+        headers: { "X-NavoX-Account": account },
+        cache: "no-store",
+      }),
+    );
+    fetch.mockResolvedValue(json({ ...event(), id: request }));
+    await expect(api.event(action, signal())).rejects.toThrow();
+  });
   it("accepts exact Google write-purpose authorization, never just read-busy scopes", async () => {
     const answer = authorization();
     const fetch = vi.fn<typeof globalThis.fetch>(async () => json(answer));

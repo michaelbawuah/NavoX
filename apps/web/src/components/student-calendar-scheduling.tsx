@@ -293,6 +293,7 @@ export function StudentCalendarScheduling({
   const [title, setTitle] = useState("");
   const [location, setLocation] = useState("");
   const [event, setEvent] = useState<CalendarEventView | null>(null);
+  const selectedReceiptId = useRef<string | null>(null);
   const [recent, setRecent] = useState<CalendarEventView[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -309,6 +310,7 @@ export function StudentCalendarScheduling({
     setTitle("");
     setLocation("");
     setEvent(null);
+    selectedReceiptId.current = null;
     setRecent([]);
     setCursor(null);
     setConfirmed(false);
@@ -329,6 +331,7 @@ export function StudentCalendarScheduling({
     () =>
       observeCalendarAccessChanges(() => {
         access.cancel();
+        selectedReceiptId.current = null;
         setView(null);
         setTargets(null);
         setEvent((old) => (old?.status === "pending" ? null : old));
@@ -367,11 +370,14 @@ export function StudentCalendarScheduling({
     setChoice("");
     setConfirmed(false);
     setUndoConfirmed(false);
+    if (event?.status === "pending" && !mustCheck)
+      selectedReceiptId.current = null;
     setEvent((old) => (old?.status === "pending" && !mustCheck ? null : old));
-  }, [searchKey, access.cancel, mustCheck]);
+  }, [searchKey, access.cancel, mustCheck, event]);
   const draftChanged = () => {
     access.cancel();
     setEvent(null);
+    selectedReceiptId.current = null;
     setConfirmed(false);
     setUndoConfirmed(false);
     setMustCheck(false);
@@ -379,6 +385,7 @@ export function StudentCalendarScheduling({
     access.setError("");
   };
   const acceptEvent = (current: CalendarEventView) => {
+    selectedReceiptId.current = current.id;
     setEvent(current);
     setConfirmed(false);
     setUndoConfirmed(false);
@@ -402,27 +409,40 @@ export function StudentCalendarScheduling({
     );
   };
   const check = () => {
+    const selectedId = selectedReceiptId.current;
     setConfirmed(false);
     setUndoConfirmed(false);
+    // A page refresh must not retain old private details when a selected receipt
+    // is older than page one or its study sources have since been forgotten.
+    setEvent(null);
+    setRecent([]);
+    setView(null);
+    setTargets(null);
     void access.run(
       async (signal) => {
         const [scheduling, events] = await Promise.all([
           api.scheduling(signal),
           api.events(signal),
         ]);
+        const selected = selectedId
+          ? (events.events.find((receipt) => receipt.id === selectedId) ??
+            (await api.event(selectedId, signal)))
+          : null;
         if (
           scheduling.generation !== events.generation ||
-          scheduling.revision !== events.calendar_revision
+          scheduling.revision !== events.calendar_revision ||
+          (selected &&
+            (selected.generation !== events.generation ||
+              selected.calendar_revision !== events.calendar_revision))
         )
           throw new Error("Calendar access changed. Check it again.");
-        return { scheduling, events };
+        return { scheduling, events, selected };
       },
-      ({ scheduling, events }) => {
+      ({ scheduling, events, selected }) => {
         setView(scheduling);
         setRecent(events.events);
         setCursor(events.next_cursor);
-        const recovered = events.events.find((row) => row.id === event?.id);
-        if (recovered) acceptEvent(recovered);
+        if (selected) acceptEvent(selected);
         setTargets(null);
         setGrantId("");
         setCalendarId("");
@@ -451,7 +471,9 @@ export function StudentCalendarScheduling({
         setView((old) =>
           old ? { ...old, revision: next.calendar_revision } : old,
         );
-        const recovered = next.events.find((row) => row.id === event?.id);
+        const recovered = next.events.find(
+          (row) => row.id === selectedReceiptId.current,
+        );
         if (recovered) acceptEvent(recovered);
       },
     );

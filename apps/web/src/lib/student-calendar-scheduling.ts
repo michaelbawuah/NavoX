@@ -136,6 +136,7 @@ export interface StudentCalendarSchedulingApi extends StudentCalendarApi {
     signal: AbortSignal,
   ): Promise<CalendarEventView>;
   events(signal: AbortSignal, cursor?: string): Promise<CalendarEventsView>;
+  event(eventId: string, signal: AbortSignal): Promise<CalendarEventView>;
   approveEvent(
     eventId: string,
     input: CalendarEventApproval,
@@ -686,8 +687,23 @@ export function createStudentCalendarSchedulingApi(
         },
         signal,
         undefined,
-        256 * 1024,
+        // Twenty receipts may each contain24 full study moves and UTF-8 titles.
+        1024 * 1024,
       ),
+    event: (eventId, signal) => {
+      const expectedId = id(eventId);
+      return send(
+        `/student/calendars/events/${expectedId}`,
+        (value) => {
+          const receipt = readCalendarEventView(value);
+          if (receipt.id !== expectedId) return invalid();
+          return receipt;
+        },
+        signal,
+        undefined,
+        65536,
+      );
+    },
     approveEvent: (eventId, input, signal) => {
       const selected = id(eventId),
         checked = approval(input);
