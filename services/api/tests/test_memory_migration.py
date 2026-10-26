@@ -4,6 +4,7 @@ import importlib.util
 import io
 from pathlib import Path
 
+import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import CheckConstraint, UniqueConstraint
@@ -47,3 +48,33 @@ def test_memory_migration_is_additive_and_matches_frozen_owner_constraints():
     assert "ADD COLUMN memory_generation INTEGER" in sql
     assert "ADD COLUMN off_the_record BOOLEAN DEFAULT false NOT NULL" in sql
     assert "INSERT INTO" not in sql and "DROP TABLE" not in sql
+
+
+@pytest.mark.parametrize(
+    "occupied",
+    (
+        "memory_privacy",
+        "memory_conversations",
+        "memory_facts",
+        "memory_threads",
+        "vox_call_checkpoints",
+    ),
+)
+def test_memory_downgrade_refuses_any_saved_memory_or_checkpoint(monkeypatch, occupied):
+    module = migration()
+    removed = []
+
+    class Bind:
+        def execute(self, statement):
+            class Result:
+                def first(self):
+                    return (1,) if occupied in str(statement) else None
+
+            return Result()
+
+    monkeypatch.setattr(module.op, "get_bind", lambda: Bind())
+    monkeypatch.setattr(module.op, "drop_column", lambda *args: removed.append(args))
+    monkeypatch.setattr(module.op, "drop_table", lambda *args: removed.append(args))
+    with pytest.raises(RuntimeError, match="preserve"):
+        module.downgrade()
+    assert removed == []

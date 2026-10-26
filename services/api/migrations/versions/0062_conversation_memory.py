@@ -117,6 +117,15 @@ def upgrade():
 
 
 def downgrade():
+    for table in (
+        "memory_privacy",
+        "memory_conversations",
+        "memory_facts",
+        "memory_threads",
+        "vox_call_checkpoints",
+    ):
+        if op.get_bind().execute(sa.text(f"SELECT 1 FROM {table} LIMIT 1")).first():
+            raise RuntimeError("Memory or active-call data exists; preserve it before downgrading")
     op.drop_column("vox_call_checkpoints", "off_the_record")
     op.drop_column("vox_call_checkpoints", "memory_generation")
     for table in ("memory_threads", "memory_facts", "memory_conversations", "memory_privacy"):

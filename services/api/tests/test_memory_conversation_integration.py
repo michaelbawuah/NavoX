@@ -25,6 +25,12 @@ async def prepare(env):
         connector_secret_encryption_key=SecretStr(Fernet.generate_key().decode()),
     )
     env.app.dependency_overrides[get_settings] = lambda: settings
+    env.client.headers.update(
+        {
+            "Origin": settings.web_origin,
+            "X-NavoX-Account": f"{env.workspace_id}:{env.user_id}",
+        }
+    )
     response = await env.client.put(
         "/api/v1/memory/privacy",
         json={

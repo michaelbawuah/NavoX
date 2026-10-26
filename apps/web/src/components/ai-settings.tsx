@@ -83,8 +83,8 @@ export function AISettings() {
     <section className={styles.controlCard}>
       <h2>AI preferences</h2>
       <p>
-        NavoX chooses an eligible model for each task. Your workspace privacy
-        rules always apply.
+        NavoX chooses an eligible model for each task. Your privacy choices
+        always apply.
       </p>
       {settings && (
         <div className={styles.approvalForm}>

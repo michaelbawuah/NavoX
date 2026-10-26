@@ -9,6 +9,9 @@ on:
       - 'feat/student-own-work-verified-base'
       - 'feat/student-day-review-foundation'
       - 'feat/student-whiteboard-tutor'
+      - 'feat/vox-m1-live-call-*'
+      - 'feat/vox-m2-shell-today-*'
+      - 'feat/m3-m5-integration-*'
 
 permissions:
   contents: read
