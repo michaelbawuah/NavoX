@@ -336,6 +336,98 @@ it("lets a new search replace a pending older page without mixing results", asyn
   expect(host.textContent).not.toContain("Old search late page");
   expect(host.textContent).toContain("Checked 1 saved conversation");
 });
+it("clears an older-page spinner when opening a conversation supersedes it", async () => {
+  await mount();
+  vi.mocked(fetch).mockImplementationOnce(async () =>
+    Response.json({
+      items: [call],
+      next_cursor: "older-proof",
+      search_complete: false,
+      scanned: 25,
+    }),
+  );
+  await click("View and search history");
+  let resolve: (response: Response) => void = () => {};
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  await click("Load older conversations");
+  expect(button("Checking older conversations…").disabled).toBe(true);
+  const row = [...host.querySelectorAll("button")].find(
+    (node) => node.querySelector("strong")?.textContent === call.title,
+  );
+  if (!row) throw Error("Missing saved conversation");
+  await act(async () => row.click());
+  expect(host.textContent).toContain("Plan my morning");
+  expect(button("Load older conversations").disabled).toBe(false);
+  await act(async () =>
+    resolve(
+      Response.json({
+        items: [{ ...call, id: "late-old", title: "Late old page" }],
+        next_cursor: null,
+        search_complete: true,
+        scanned: 25,
+      }),
+    ),
+  );
+  expect(host.textContent).not.toContain("Late old page");
+  expect(button("Load older conversations").disabled).toBe(false);
+  await click("Load older conversations");
+  expect(host.textContent).not.toContain("Checking older conversations…");
+});
+it("clears a conversation spinner when a new search supersedes its pending read", async () => {
+  await mount();
+  await click("View and search history");
+  let resolve: (response: Response) => void = () => {};
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  const row = [...host.querySelectorAll("button")].find(
+    (node) => node.querySelector("strong")?.textContent === call.title,
+  );
+  if (!row) throw Error("Missing saved conversation");
+  await act(async () => row.click());
+  expect(host.textContent).toContain("Opening the conversation…");
+  await type(
+    host.querySelector('input[type="search"]') as HTMLInputElement,
+    "fresh search",
+  );
+  vi.mocked(fetch).mockImplementationOnce(async () =>
+    Response.json({
+      items: [{ ...call, id: "fresh", title: "Fresh search result" }],
+      next_cursor: null,
+      search_complete: true,
+      scanned: 1,
+    }),
+  );
+  await click("Search history");
+  expect(host.textContent).toContain("Fresh search result");
+  expect(host.textContent).not.toContain("Opening the conversation…");
+  await act(async () =>
+    resolve(
+      Response.json({
+        ...call,
+        summary: null,
+        turns: [
+          {
+            role: "user",
+            content: "Late conversation content",
+            created_at: call.created_at,
+          },
+        ],
+      }),
+    ),
+  );
+  expect(host.textContent).not.toContain("Late conversation content");
+  expect(host.textContent).not.toContain("Opening the conversation…");
+  expect(host.textContent).toContain("Fresh search result");
+});
 it("blocks delete-all until the exact phrase is entered", async () => {
   await mount();
   await click("Delete all memory");

@@ -246,6 +246,7 @@ export function MemoryPrivacyPanel({
       ownerEpoch = epoch.current;
     setError("");
     setConversation(null);
+    setConversationLoading(false);
     if (cursor === null) {
       setHistory(null);
       setHistoryCursor(null);
@@ -299,6 +300,7 @@ export function MemoryPrivacyPanel({
     const current = ++historyEpoch.current,
       ownerEpoch = epoch.current;
     setError("");
+    setHistoryLoadingMore(false);
     setConversation(null);
     setConversationLoading(true);
     try {
