@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import async_engine_from_config as real_async_engine_from_config
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -102,6 +103,8 @@ async def test_actual_alembic_0053_0054_upgrade_downgrade_and_history_refusal(mo
     monkeypatch.setattr("sqlalchemy.ext.asyncio.async_engine_from_config", scoped_engine)
     cfg = Config(str(Path(__file__).parents[1] / "alembic.ini"))
     cfg.set_main_option("script_location", str(Path(__file__).parents[1] / "migrations"))
+    expected_head = ScriptDirectory.from_config(cfg).get_current_head()
+    assert expected_head is not None
 
     async def migrate(function, revision):
         await asyncio.to_thread(function, cfg, revision)
@@ -118,7 +121,7 @@ async def test_actual_alembic_0053_0054_upgrade_downgrade_and_history_refusal(mo
             head = (
                 await connection.execute(text("SELECT version_num FROM alembic_version"))
             ).scalar_one()
-            assert head == "0056_vox_call_checkpoints"
+            assert head == expected_head
             tables = await connection.run_sync(
                 lambda c: set(inspect(c).get_table_names(schema=schema))
             )
