@@ -2,10 +2,10 @@
 .pickerBody {
   display: grid;
   gap: 1rem;
-  color: var(--text, #f2f4f7);
-  border: 1px solid #2b3949;
+  color: var(--nx-text);
+  border: 1px solid var(--nx-border);
   border-radius: 1rem;
-  background: var(--surface, #14171c);
+  background: var(--nx-surface);
   padding: 1.25rem;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -42,11 +42,11 @@
 .muted,
 .meta,
 .panel small {
-  color: var(--text-muted, #a3acb8);
+  color: var(--nx-muted);
   font-size: 0.85rem;
 }
 .kicker {
-  color: #74dfc4;
+  color: var(--nx-accent-text);
   font-size: 0.8rem;
   padding-bottom: 0.35rem;
 }
@@ -61,12 +61,12 @@
 .list li {
   display: grid;
   gap: 0.9rem;
-  border: 1px solid #2c3847;
+  border: 1px solid var(--nx-border);
   border-radius: 0.75rem;
   padding: 1rem;
 }
 .list li[data-enabled="false"] {
-  background: #151b24;
+  background: var(--nx-raised);
 }
 .list h3 {
   margin: 0.35rem 0;
@@ -84,7 +84,7 @@
   gap: 1rem;
 }
 .form {
-  border-top: 1px solid #2c3847;
+  border-top: 1px solid var(--nx-border);
   padding-top: 1.25rem;
 }
 .form label {
@@ -97,20 +97,20 @@
 .form select {
   width: 100%;
   min-width: 0;
-  border: 1px solid #3b4a5d;
-  background: var(--bg, #0b0d10);
-  color: var(--text, #f2f4f7);
+  border: 1px solid var(--nx-border);
+  background: var(--nx-bg);
+  color: var(--nx-text);
   border-radius: 0.6rem;
   padding: 0.7rem;
   font: inherit;
 }
 .panel button,
 .picker button {
-  border: 1px solid #3c5762;
+  border: 1px solid var(--nx-border);
   border-radius: 0.55rem;
   padding: 0.55rem 0.8rem;
-  background: #172c2c;
-  color: #b3f3df;
+  background: var(--nx-raised);
+  color: var(--nx-text);
   font: inherit;
   font-size: 0.85rem;
   cursor: pointer;
@@ -122,11 +122,11 @@
 }
 .panel :focus-visible,
 .picker :focus-visible {
-  outline: 2px solid #75e0c6;
+  outline: 2px solid var(--nx-accent);
   outline-offset: 3px;
 }
 .picker a {
-  color: #8de7d2;
+  color: var(--nx-accent-text);
   font-size: 0.85rem;
 }
 .picker {
@@ -148,21 +148,21 @@
   height: 1rem;
   flex: 0 0 auto;
   margin-top: 0.2rem;
-  accent-color: #75dfc6;
+  accent-color: var(--nx-accent);
 }
 .choice > span {
   display: grid;
   gap: 0.3rem;
 }
 .choice span span {
-  color: var(--text-muted, #a3acb8);
+  color: var(--nx-muted);
   font-size: 0.85rem;
   white-space: pre-wrap;
 }
 .error {
   padding: 0.8rem;
-  background: #301c25;
-  color: #ffbbc8;
+  background: var(--nx-raised);
+  color: var(--nx-danger);
   border-radius: 0.6rem;
 }
 .notice,
@@ -170,7 +170,7 @@
 .confirm {
   padding: 0.9rem;
   border-radius: 0.6rem;
-  background: #17262b;
+  background: var(--nx-raised);
 }
 .confirm {
   display: flex;
@@ -186,5 +186,16 @@
   }
   .panel {
     padding: 1rem;
+  }
+}
+
+.panel button,
+.picker button {
+  min-height: 40px;
+}
+@media (max-width: 767px) {
+  .panel button,
+  .picker button {
+    min-height: 44px;
   }
 }

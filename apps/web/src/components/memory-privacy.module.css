@@ -2,7 +2,7 @@
   display: grid;
   gap: 24px;
   min-width: 0;
-  color: var(--text, #f2f4f7);
+  color: var(--nx-text);
 }
 .panel h2,
 .panel h3,
@@ -34,43 +34,43 @@
   flex: 1 1 250px;
 }
 .privateBadge {
-  color: var(--text-muted, #a3acb8);
+  color: var(--nx-muted);
   font-size: 13px;
 }
 .group {
   display: grid;
   gap: 16px;
   padding: 24px;
-  background: var(--surface, #14171c);
-  border: 1px solid var(--border, #262b33);
+  background: var(--nx-surface);
+  border: 1px solid var(--nx-border);
   border-radius: 14px;
   min-width: 0;
 }
 .panel .muted,
 .panel small {
-  color: var(--text-muted, #a3acb8);
+  color: var(--nx-muted);
   font-size: 13px;
 }
 .panel button {
   min-height: 40px;
   padding: 8px 12px;
-  border: 1px solid var(--border, #262b33);
+  border: 1px solid var(--nx-border);
   border-radius: 8px;
-  background: var(--surface-raised, #1b1f26);
-  color: var(--text, #f2f4f7);
+  background: var(--nx-raised);
+  color: var(--nx-text);
   font: inherit;
   font-size: 14px;
   cursor: pointer;
 }
 .panel button:hover {
-  border-color: var(--accent, #4fd1b5);
+  border-color: var(--nx-accent);
 }
 .panel button:disabled {
   opacity: 0.5;
   cursor: default;
 }
 .panel :focus-visible {
-  outline: 2px solid var(--accent, #4fd1b5);
+  outline: 2px solid var(--nx-accent);
   outline-offset: 3px;
 }
 .panel label {
@@ -85,10 +85,10 @@
   width: 100%;
   min-width: 0;
   padding: 10px 12px;
-  border: 1px solid var(--border, #262b33);
+  border: 1px solid var(--nx-border);
   border-radius: 8px;
-  background: var(--bg, #0b0d10);
-  color: var(--text, #f2f4f7);
+  background: var(--nx-bg);
+  color: var(--nx-text);
   font: inherit;
 }
 .panel textarea {
@@ -107,7 +107,7 @@
   gap: 16px;
   align-items: flex-start;
   padding-bottom: 16px;
-  border-bottom: 1px solid var(--border, #262b33);
+  border-bottom: 1px solid var(--nx-border);
 }
 .facts > li > div:first-child {
   flex: 1 1 230px;
@@ -131,7 +131,7 @@
   gap: 16px;
 }
 .factForm {
-  border-top: 1px solid var(--border, #262b33);
+  border-top: 1px solid var(--nx-border);
   padding-top: 20px;
 }
 .panel .check {
@@ -145,7 +145,7 @@
   width: 18px;
   height: 18px;
   flex-shrink: 0;
-  accent-color: var(--accent, #4fd1b5);
+  accent-color: var(--nx-accent);
   margin-top: 2px;
 }
 .panel .switch {
@@ -153,9 +153,9 @@
   border-radius: 24px;
 }
 .switch[aria-checked="true"] {
-  background: var(--accent, #4fd1b5);
+  background: var(--nx-accent);
   color: #0b0d10;
-  border-color: var(--accent, #4fd1b5);
+  border-color: var(--nx-accent);
   font-weight: 600;
 }
 .retention {
@@ -165,7 +165,7 @@
   justify-self: start;
 }
 .panel details {
-  border-top: 1px solid var(--border, #262b33);
+  border-top: 1px solid var(--nx-border);
   padding-top: 16px;
 }
 .panel summary {
@@ -205,12 +205,12 @@
   overflow-wrap: anywhere;
 }
 .panel .deleteLink {
-  color: var(--danger, #f07178);
+  color: var(--nx-danger);
 }
 .conversation {
   display: grid;
   gap: 16px;
-  border: 1px solid var(--border, #262b33);
+  border: 1px solid var(--nx-border);
   border-radius: 12px;
   padding: 16px;
 }
@@ -229,13 +229,13 @@
 }
 .summary {
   padding: 12px;
-  background: var(--surface-raised, #1b1f26);
+  background: var(--nx-raised);
   border-radius: 8px;
   display: grid;
   gap: 8px;
 }
 .sensitiveNote {
-  color: var(--text-muted, #a3acb8);
+  color: var(--nx-muted);
   padding: 0 8px;
 }
 .dangerZone,
@@ -243,28 +243,28 @@
   display: grid;
   gap: 16px;
   padding: 24px;
-  border: 1px solid var(--danger, #f07178);
+  border: 1px solid var(--nx-danger);
   border-radius: 14px;
-  background: var(--surface, #14171c);
+  background: var(--nx-surface);
 }
 .panel .danger {
-  color: var(--danger, #f07178);
-  border-color: var(--danger, #f07178);
+  color: var(--nx-danger);
+  border-color: var(--nx-danger);
   justify-self: start;
 }
 .error,
 .notice {
   display: grid;
   gap: 12px;
-  border: 1px solid var(--border, #262b33);
+  border: 1px solid var(--nx-border);
   border-radius: 12px;
   padding: 16px;
 }
 .error {
-  color: var(--danger, #f07178);
+  color: var(--nx-danger);
 }
 .notice {
-  color: var(--text, #f2f4f7);
+  color: var(--nx-text);
 }
 .srOnly {
   position: absolute;
