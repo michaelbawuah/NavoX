@@ -136,7 +136,10 @@ class MicrosoftCalendarWriteProvider:
         token = _text(access_token, 32000)
         if not token.isascii():
             raise CalendarWriteRejected("Microsoft calendar authorization is unavailable")
-        parts = urlsplit(_text(url, 8192))
+        try:
+            parts = urlsplit(_text(url, 8192))
+        except ValueError:
+            raise CalendarWriteRejected("The Microsoft calendar endpoint is unavailable") from None
         if (
             method not in {"GET", "POST"}
             or parts.scheme != "https"
@@ -246,12 +249,22 @@ class MicrosoftCalendarWriteProvider:
             following = data.get("@odata.nextLink")
             if following is None:
                 return tuple(result)
-            parts = urlsplit(_text(following, 8192))
-            if (parts.scheme, parts.netloc, parts.path) != (
-                "https",
-                "graph.microsoft.com",
-                "/v1.0/me/calendars",
-            ) or following in seen:
+            try:
+                parts = urlsplit(_text(following, 8192))
+            except ValueError:
+                raise GoogleCalendarWriteError(
+                    "Microsoft calendar inventory is incomplete"
+                ) from None
+            if (
+                (parts.scheme, parts.netloc, parts.path)
+                != (
+                    "https",
+                    "graph.microsoft.com",
+                    "/v1.0/me/calendars",
+                )
+                or parts.fragment
+                or following in seen
+            ):
                 raise GoogleCalendarWriteError("Microsoft calendar inventory is incomplete")
             seen.add(following)
             url, params = following, None

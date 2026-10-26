@@ -372,16 +372,22 @@ async def test_inventory_skips_shared_and_read_only_and_requires_verified_owner(
 
 
 @pytest.mark.asyncio
-async def test_foreign_inventory_link_is_not_followed():
+@pytest.mark.parametrize(
+    "following",
+    [
+        "https://evil.example/steal",
+        "https://[invalid-ipv6/v1.0/me/calendars",
+        ms.CALENDARS + "?$skiptoken=next#unapproved-fragment",
+    ],
+)
+async def test_foreign_or_malformed_inventory_link_is_not_followed(following):
     calls = []
 
     def handler(request):
         calls.append(request)
         if request.url.path == "/v1.0/me":
             return httpx.Response(200, json={"mail": "student@example.test"})
-        return httpx.Response(
-            200, json={"value": [], "@odata.nextLink": "https://evil.example/steal"}
-        )
+        return httpx.Response(200, json={"value": [], "@odata.nextLink": following})
 
     with pytest.raises(GoogleCalendarWriteError):
         await client(handler).owned_calendars(access_token="synthetic-token", check=allowed)
