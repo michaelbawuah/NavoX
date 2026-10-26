@@ -62,10 +62,13 @@ class CalendarApprovalCoordinator(HostTurnHooks):
         self._armed_until: float | None = None
         self._ambiguous = False
         self._followup: str | None = None
+        self._invalid_until: float | None = None
 
     @property
     def needs_input(self) -> bool:
-        return self._pending is not None
+        return self._pending is not None or (
+            self._invalid_until is not None and self.clock() < self._invalid_until
+        )
 
     def prepare(self, action: PendingCalendarAction) -> bool:
         self.invalidate("new_proposal")
@@ -100,9 +103,19 @@ class CalendarApprovalCoordinator(HostTurnHooks):
 
     async def input(self, question: str) -> HostReply | None:
         action = self._pending
-        if action is None:
-            return None
         decision = normalized_reply(question)
+        if action is None:
+            if (
+                self._invalid_until is not None
+                and self.clock() < self._invalid_until
+                and decision in AFFIRMATIVE | AMBIGUOUS | NEGATIVE
+            ):
+                return HostReply(
+                    "That calendar review is no longer active. "
+                    "Please review it again; no new action is confirmed."
+                )
+            self._invalid_until = None
+            return None
         if decision in NEGATIVE:
             self.invalidate("declined")
             return HostReply("Cancelled this voice approval. No new calendar action was submitted.")
@@ -134,6 +147,13 @@ class CalendarApprovalCoordinator(HostTurnHooks):
             )
 
     def invalidate(self, reason: str) -> None:
+        had_review = self._pending is not None or self._invalid_until is not None
+        self._invalid_until = (
+            self.clock() + APPROVAL_SECONDS
+            if had_review
+            and reason in {"interrupted", "source_changed_during_readback", "expired_or_unplayed"}
+            else None
+        )
         self._pending = None
         self._queued = False
         self._armed_until = None

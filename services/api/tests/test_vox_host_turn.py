@@ -73,7 +73,7 @@ async def test_unplayed_interrupted_expired_and_changed_sources_cannot_approve()
     host.prepare(action(calls))
     await host.played(READBACK)
     host.invalidate("interrupted")
-    assert await host.input("yes") is None
+    assert "no longer active" in (await host.input("yes")).answer
     host.prepare(action(calls))
     await host.played(READBACK)
     now[0] = 90
@@ -90,6 +90,24 @@ async def test_unplayed_interrupted_expired_and_changed_sources_cannot_approve()
     changed[0] = True
     assert "changed" in (await host.input("yes")).answer
     assert "apply" not in calls
+
+
+@pytest.mark.asyncio
+async def test_source_change_during_readback_keeps_next_yes_in_host_failure_path():
+    calls = []
+
+    async def changed():
+        raise schedule.StudentError(409, "changed synthetic source")
+
+    host = CalendarApprovalCoordinator()
+    host.prepare(action(calls, validate=changed))
+    await host.after_tool()
+    await host.played(READBACK)
+    assert host.needs_input
+    assert "no longer active" in (await host.input("yes")).answer
+    assert "apply" not in calls
+    assert await host.input("Instead, find tomorrow's lunch options") is None
+    assert not host.needs_input
 
 
 @pytest.mark.asyncio
