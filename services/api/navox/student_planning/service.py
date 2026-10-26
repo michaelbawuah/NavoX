@@ -24,6 +24,7 @@ from navox.db.student_planning import (
 )
 from navox.student import service as schedule
 from navox.student.occurrences import project
+from navox.student_calendars import claims as calendar_claims
 from navox.student_planning import calendar_busy
 from navox.student_planning.planner import build_plan
 from navox.student_planning.schemas import (
@@ -166,6 +167,7 @@ async def remember(
             StudentPlanningCommand.user_id == user_id,
             StudentPlanningCommand.workspace_id == workspace_id,
             StudentPlanningCommand.created_at < now - timedelta(days=7),
+            StudentPlanningCommand.action != "calendar.displacement",
         )
         .execution_options(synchronize_session=False)
     )
@@ -403,6 +405,7 @@ async def save_task(
     expected_preview: str | None = None,
 ) -> TaskView:
     await schedule.owner(database, user_id, workspace_id, lock=True)
+    await calendar_claims.require_mutable(database, user_id, workspace_id)
     action = "task.update" if task_id else "task.create"
     body = {"task_id": str(task_id), "payload": payload.model_dump(mode="json")}
     if expected_preview is not None:
@@ -544,6 +547,9 @@ async def remove_task(
     row = await get_task(database, user_id, workspace_id, task_id)
     if row.revision != revision:
         raise schedule.StudentError(409, "This task changed. Refresh before forgetting it")
+    from navox.student_calendars.displacement import redact
+
+    await redact(database, user_id, workspace_id, task_ids={task_id})
     # Remove all derived copies, including old preview/outcome snapshots containing titles.
     from navox.vox.service import invalidate_active_context
 
@@ -599,6 +605,7 @@ async def save_preferences(
     database: AsyncSession, user_id: UUID, workspace_id: UUID, payload: PreferencesUpdate
 ) -> PreferencesView:
     user = await schedule.owner(database, user_id, workspace_id, lock=True)
+    await calendar_claims.require_mutable(database, user_id, workspace_id)
     body = payload.model_dump(mode="json")
     previous = await command(
         database, user_id, workspace_id, payload.request_id, "preferences", body
@@ -647,9 +654,13 @@ async def stable_source_hash(
     task_rows = await tasks(database, user_id, workspace_id)
     eligible = await eligible_tasks(database, user_id, workspace_id, task_rows)
     access = await calendar_busy.inventory(database, user_id, workspace_id)
+    native_claims = calendar_claims.fingerprint(
+        await calendar_claims.snapshot(database, user_id, workspace_id)
+    )
     return digest(
         {
             **({"calendar_access": access} if access else {}),
+            **({"calendar_claims": native_claims} if native_claims else {}),
             "version": 1,
             "timezone": user.timezone,
             "preferences": scheduling_preferences(planning.preferences),
@@ -699,6 +710,10 @@ async def invalidate_future(
     if planning.window_end is None and planning.accepted_source_hash is None:
         return
     planning.needs_review = True
+    # Explicit erasure may invalidate this plan while an approved calendar
+    # operation is unknown. Preserve its other approved destinations.
+    if await calendar_claims.pending_displacement(database, user_id, workspace_id):
+        return
     now = await database_now(database)
     future = list(
         await database.scalars(
@@ -1114,6 +1129,7 @@ async def accept(
     now: datetime | None = None,
 ) -> PlanView:
     await schedule.owner(database, user_id, workspace_id, lock=True)
+    await calendar_claims.require_mutable(database, user_id, workspace_id)
     body = payload.model_dump(mode="json")
     previous = await command(database, user_id, workspace_id, payload.request_id, "accept", body)
     if previous:
@@ -1176,6 +1192,8 @@ async def outcome(
     expected_preview: str | None = None,
 ) -> OutcomeView:
     await schedule.owner(database, user_id, workspace_id, lock=True)
+    if not preview_only:
+        await calendar_claims.require_mutable(database, user_id, workspace_id)
     body = {"block_id": str(block_id), "payload": payload.model_dump(mode="json")}
     previous = (
         None
@@ -1359,6 +1377,7 @@ async def undo_outcome(
     now: datetime | None = None,
 ) -> PlanView:
     await schedule.owner(database, user_id, workspace_id, lock=True)
+    await calendar_claims.require_mutable(database, user_id, workspace_id)
     body = payload.model_dump(mode="json")
     previous = await command(database, user_id, workspace_id, payload.request_id, "undo", body)
     if previous:
@@ -1497,6 +1516,9 @@ async def forget_source_tasks(
     )
     if not identifiers:
         return
+    from navox.student_calendars.displacement import redact
+
+    await redact(database, user_id, workspace_id, task_ids=set(identifiers))
     await database.execute(
         delete(StudentStudyBlock).where(
             StudentStudyBlock.user_id == user_id,
@@ -1543,6 +1565,7 @@ async def invalidate_snapshots(database: AsyncSession, user_id: UUID, workspace_
         .where(
             StudentPlanningCommand.user_id == user_id,
             StudentPlanningCommand.workspace_id == workspace_id,
+            StudentPlanningCommand.action != "calendar.displacement",
         )
         .values(result={"invalidated": True}, undo_snapshot=None)
         .execution_options(synchronize_session=False)
@@ -1551,8 +1574,10 @@ async def invalidate_snapshots(database: AsyncSession, user_id: UUID, workspace_
 
 async def forget_planning_data(database: AsyncSession, user_id: UUID, workspace_id: UUID) -> None:
     """Explicit student-data reset hook; caller holds User lock and commits atomically."""
+    from navox.student_calendars.displacement import redact
     from navox.student_recovery.service import invalidate_recovery_previews
 
+    await redact(database, user_id, workspace_id)
     await invalidate_recovery_previews(database, user_id, workspace_id)
     from navox.db.noa import NoaSettings
 

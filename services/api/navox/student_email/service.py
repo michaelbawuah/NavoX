@@ -935,6 +935,9 @@ async def forget_email_data(
         )
     )
     if task_ids:
+        from navox.student_calendars.displacement import redact
+
+        await redact(database, user_id, workspace_id, task_ids=set(task_ids))
         await planning.invalidate_snapshots(database, user_id, workspace_id)
         await database.execute(
             delete(StudentStudyBlock).where(

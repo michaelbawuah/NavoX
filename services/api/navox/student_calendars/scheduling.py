@@ -27,7 +27,7 @@ from navox.student import service as schedule
 from navox.student_availability import service as availability
 from navox.student_availability.engine import MEETING_BUFFER, _uncertain_day_span
 from navox.student_availability.schemas import AvailabilitySnapshot
-from navox.student_calendars import service
+from navox.student_calendars import displacement, service
 from navox.student_calendars.provider import (
     CalendarWriteChanged,
     CalendarWriteRejected,
@@ -46,6 +46,7 @@ from navox.student_calendars.schemas import (
     CalendarEventView,
     CalendarGrantView,
     CalendarSchedulingView,
+    CalendarStudyMove,
     CalendarTargetsRequest,
     CalendarTargetsView,
     CalendarTargetView,
@@ -352,6 +353,41 @@ def _view(
     row: StudentCalendarEvent, payload: dict[str, Any], current: service.Boundary
 ) -> CalendarEventView:
     draft = CalendarEventPreview.model_validate(payload["draft"])
+    study = payload.get("study_displacement")
+    study_fields: dict[str, Any] = {}
+    study_message = ""
+    if study is not None:
+        if (
+            not isinstance(study, dict)
+            or study.get("v") != 1
+            or type(study.get("applied")) is not bool
+        ):
+            raise schedule.StudentError(503, "This private study review could not be opened")
+        moves = [displacement.StudyMove.model_validate(value) for value in study["review"]["moves"]]
+        study_fields = {
+            "study_changes_applied": study["applied"],
+            "study_details_redacted": study.get("redacted") is True,
+            "study_moves": [
+                CalendarStudyMove(
+                    block_id=move.before.id,
+                    task_id=move.before.task_id,
+                    title=move.before.title,
+                    minutes=move.before.minutes,
+                    before_start_at=move.before.start_at,
+                    before_end_at=move.before.end_at,
+                    after_start_at=move.after.start_at,
+                    after_end_at=move.after.end_at,
+                )
+                for move in moves
+            ],
+        }
+        if study["applied"]:
+            study_message = (
+                " The reviewed study moves were saved and were not rolled back. "
+                "Undo removes the calendar event only; saved study moves remain."
+            )
+        if study.get("redacted") is True:
+            study_message += " Forgotten study-change details are no longer retained or displayed."
     return CalendarEventView(
         generation=current.generation,
         calendar_revision=current.revision,
@@ -388,8 +424,15 @@ def _view(
             "Google confirmed the event, but its original creation version was not confirmed. "
             "Review it in Google Calendar to make changes."
             if row.status == "created" and payload.get("creation_etag") != payload.get("etag")
+            else (
+                "This study review was explicitly forgotten and cannot be approved. "
+                "Nothing was submitted."
+            )
+            if study is not None and study.get("redacted") is True and not study["applied"]
             else MESSAGES[row.status]
-        ),
+        )
+        + study_message,
+        **study_fields,
     )
 
 
@@ -490,12 +533,16 @@ async def _free(
     )
     if (
         draft.start_at - MEETING_BUFFER < snapshot.checked_at
-        or snapshot.result.status != "complete"
-        or not any(
-            opening.start_at <= draft.start_at - MEETING_BUFFER
-            and opening.end_at >= draft.end_at + MEETING_BUFFER
-            and not opening.displaced_study_block_ids
-            for opening in snapshot.result.confirmed_openings
+        or (snapshot.result.status != "complete" and not draft.allow_study_displacement)
+        or not (
+            displacement.fits(snapshot, draft)
+            if draft.allow_study_displacement
+            else any(
+                opening.start_at <= draft.start_at - MEETING_BUFFER
+                and opening.end_at >= draft.end_at + MEETING_BUFFER
+                and not opening.displaced_study_block_ids
+                for opening in snapshot.result.confirmed_openings
+            )
         )
     ):
         raise schedule.StudentError(
@@ -689,7 +736,22 @@ async def preview(
             "connection_id": str(authority.connection_id),
             "etag": None,
             "creation_etag": None,
+            "provenance": "Added by NavoX",
         }
+        if draft.allow_study_displacement:
+            review = await displacement.prepare(
+                database, user_id, workspace_id, draft, fresh, current.now
+            )
+            if review is not None:
+                payload["study_displacement"] = {
+                    "v": 1,
+                    "review": review.model_dump(mode="json"),
+                    "applied": False,
+                    "applied_revision": None,
+                }
+                await displacement.index_review(
+                    database, user_id, workspace_id, row.id, review, current.now
+                )
         row.digest = _digest({"id": str(row.id), "generation": row.generation, "payload": payload})
         row.encrypted_payload = _seal(row, payload, settings)
         database.add(row)
@@ -755,7 +817,9 @@ async def _recover_authority(
     )
 
 
-def _body(row: StudentCalendarEvent, draft: CalendarEventPreview) -> dict[str, Any]:
+def _body(
+    row: StudentCalendarEvent, draft: CalendarEventPreview, *, description: str = ""
+) -> dict[str, Any]:
     body: dict[str, Any] = {
         "id": row.id.hex,
         "summary": draft.title,
@@ -768,10 +832,18 @@ def _body(row: StudentCalendarEvent, draft: CalendarEventPreview) -> dict[str, A
     }
     if draft.location:
         body["location"] = draft.location
+    if description:
+        body["description"] = description
     return body
 
 
-def _matches(row: StudentCalendarEvent, draft: CalendarEventPreview, event: dict[str, Any]) -> bool:
+def _matches(
+    row: StudentCalendarEvent,
+    draft: CalendarEventPreview,
+    event: dict[str, Any],
+    *,
+    description: str = "",
+) -> bool:
     try:
         allowed = {
             "kind",
@@ -813,7 +885,7 @@ def _matches(row: StudentCalendarEvent, draft: CalendarEventPreview, event: dict
             and datetime.fromisoformat(end.replace("Z", "+00:00")) == draft.end_at
             and event["start"].get("timeZone") == draft.timezone
             and event["end"].get("timeZone") == draft.timezone
-            and event.get("description", "") == ""
+            and event.get("description", "") == description
             and event.get("eventType", "default") == "default"
             and event.get("reminders", {}).get("useDefault") is False
             and not event.get("reminders", {}).get("overrides")
@@ -857,6 +929,8 @@ async def approve(
         service.check_command(current, command)
         if row.status != "pending":
             raise schedule.StudentError(409, "This event was already submitted. Check its status")
+        if payload.get("study_displacement", {}).get("redacted") is True:
+            raise schedule.StudentError(409, "This study review was forgotten. Prepare a new event")
         if utc(row.expires_at) <= current.now or row.auth_session_id != current.session.id:
             raise schedule.StudentError(
                 409, "This approval expired or sign-in changed. Review a new event"
@@ -907,6 +981,15 @@ async def approve(
             raise schedule.StudentError(409, "Calendar permissions changed. Review again")
         await _fresh_internal(database, current, user_id, workspace_id, draft, fresh)
         await _check_claims(database, user_id, workspace_id, draft, settings, excluding=row.id)
+        study = payload.get("study_displacement")
+        review = None
+        if study is not None:
+            if study.get("redacted") is True or study.get("applied") is not False:
+                raise schedule.StudentError(409, "The study review is no longer available")
+            review = displacement.StudyReview.model_validate(study["review"])
+            await displacement.validate(
+                database, user_id, workspace_id, draft, fresh, review, current.now
+            )
         # Any own-app side effect admitted since another request's fresh read
         # invalidates that request, even after this event becomes confirmed.
         # Recapture our own authority at the new native revision so our bounded
@@ -919,7 +1002,35 @@ async def approve(
         )
         row.status, row.started_at = "executing", current.now
         row.revision += 1
-        body = _body(row, draft)
+        if review is not None:
+            planning = await displacement.apply(
+                database, user_id, workspace_id, review, row.id, current.now
+            )
+            assert study is not None
+            study["applied"], study["applied_revision"] = True, planning.revision
+            row.encrypted_payload = _seal(row, payload, settings)
+            await database.flush()
+            from navox.student_planning import service as planning_service
+
+            planning.accepted_source_hash = await planning_service.stable_source_hash(
+                database, user_id, workspace_id, planning
+            )
+            internal = await availability._internal(
+                database, user_id, workspace_id, draft.availability
+            )
+            fresh = fresh.model_copy(
+                update={
+                    "revision": fresh.revision.model_copy(
+                        update={
+                            "student_revision": internal.digest,
+                            "planning_revision": planning.revision,
+                        }
+                    )
+                }
+            )
+            latest = await service.boundary(database, user_id, workspace_id, session_hash)
+            await _fresh_internal(database, latest, user_id, workspace_id, draft, fresh)
+        body = _body(row, draft, description=payload.get("provenance", ""))
         schedule.audit(database, user_id, workspace_id, "student.calendar.event.submitted", row.id)
         await database.commit()
     # Once this receipt is durable no code path returns the action to pending.
@@ -928,7 +1039,7 @@ async def approve(
         inserted = await provider.insert(
             access_token=token, calendar_id=draft.calendar_id, event=body, check=check
         )
-        if not _matches(row, draft, inserted):
+        if not _matches(row, draft, inserted, description=payload.get("provenance", "")):
             return await _finish(
                 factory,
                 settings,
@@ -1136,7 +1247,7 @@ async def _observe(
             None,
             expected_revision=observed_revision,
         )
-    matches = _matches(row, draft, event)
+    matches = _matches(row, draft, event, description=payload.get("provenance", ""))
     original_etag = payload.get("etag")
     if original_etag is not None and event.get("etag") != original_etag:
         matches = False
@@ -1249,7 +1360,10 @@ async def undo(
             None,
             expected_revision=command.event_revision,
         )
-    if not _matches(row, draft, event) or event.get("etag") != payload["etag"]:
+    if (
+        not _matches(row, draft, event, description=payload.get("provenance", ""))
+        or event.get("etag") != payload["etag"]
+    ):
         return await _finish(
             factory,
             settings,

@@ -34,6 +34,7 @@ from navox.providers.microsoft_availability import (
 from navox.providers.microsoft_mail import MicrosoftMailError, MicrosoftMailGateway
 from navox.student import service as schedule
 from navox.student_calendars import apple
+from navox.student_calendars import claims as calendar_claims
 from navox.student_calendars import service as calendars
 from navox.student_calendars.schemas import CONSENT_VERSION, MICROSOFT_AVAILABILITY_SCOPES
 
@@ -241,10 +242,11 @@ async def collect(
     travel_minutes: int,
 ) -> CalendarBusy:
     original = await inventory(database, user_id, workspace_id)
+    claims = await calendar_claims.snapshot(database, user_id, workspace_id)
     if not original:
         return CalendarBusy(
-            (),
-            "unconnected",
+            tuple(sorted({row.interval(travel_minutes) for row in claims})),
+            calendar_claims.fingerprint(claims) or "unconnected",
             False,
             (
                 "No calendar is connected. This preview uses your saved classes, "
@@ -254,7 +256,7 @@ async def collect(
     if len(original) > 8:
         raise schedule.StudentError(409, "Narrow calendar connections before planning")
     settings = get_settings()
-    intervals: list[tuple[datetime, datetime]] = []
+    intervals = [row.interval(travel_minutes) for row in claims]
 
     async def check() -> None:
         user = await schedule.owner(database, user_id, workspace_id)
@@ -264,6 +266,8 @@ async def collect(
             )
         if await inventory(database, user_id, workspace_id) != original:
             raise schedule.StudentError(409, "Calendar access changed. Review a new plan")
+        if await calendar_claims.snapshot(database, user_id, workspace_id) != claims:
+            raise schedule.StudentError(409, "Calendar activity changed. Review a new plan")
 
     await check()
     first = (start_at - timedelta(minutes=travel_minutes)).replace(microsecond=0)

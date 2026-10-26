@@ -11,6 +11,7 @@ from navox.connectors.sync_state import utc
 from navox.db.student_planning import StudentStudyBlock
 from navox.student import service as schedule
 from navox.student.schemas import Input
+from navox.student_calendars import claims as calendar_claims
 from navox.student_planning import service
 
 
@@ -33,6 +34,8 @@ async def complete(
     expected_preview: str | None = None,
 ) -> dict[str, Any]:
     await schedule.owner(database, user_id, workspace_id, lock=True)
+    if expected_preview is not None:
+        await calendar_claims.require_mutable(database, user_id, workspace_id)
     body = {"task_id": str(task_id), **payload.model_dump(mode="json")}
     if expected_preview:
         previous = await service.command(

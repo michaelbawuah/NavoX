@@ -116,6 +116,9 @@ class CalendarEventPreview(CalendarCommand):
     end_at: datetime
     timezone: str = Field(min_length=1, max_length=64)
     availability: AvailabilityPreview
+    allow_study_displacement: bool = Field(
+        default=False, strict=True, exclude_if=lambda value: not value
+    )
 
     _instants = field_validator("start_at", "end_at")(instant)
     _zone = field_validator("timezone")(valid_zone)
@@ -153,6 +156,17 @@ CalendarEventStatus = Literal[
 ]
 
 
+class CalendarStudyMove(Input):
+    block_id: UUID
+    task_id: UUID
+    title: str
+    minutes: int
+    before_start_at: datetime
+    before_end_at: datetime
+    after_start_at: datetime
+    after_end_at: datetime
+
+
 class CalendarEventView(Input):
     generation: int
     calendar_revision: int
@@ -170,3 +184,10 @@ class CalendarEventView(Input):
     changes_applied: bool | None
     can_undo: bool
     message: str
+    study_changes_applied: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    study_moves: list[CalendarStudyMove] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    study_details_redacted: bool | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
