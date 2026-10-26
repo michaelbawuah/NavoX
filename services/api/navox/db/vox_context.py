@@ -3,7 +3,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from navox.db.base import Base
@@ -31,6 +31,8 @@ class VoxCallCheckpoint(Base):
     )
     generation: Mapped[int] = mapped_column(Integer)
     revision: Mapped[int] = mapped_column(Integer)
+    memory_generation: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    off_the_record: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     encrypted_context: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

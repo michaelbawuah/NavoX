@@ -298,6 +298,10 @@ async def converse(
         request=request,
     )
     await context.build(task, {})
+    from navox.memory.history import append_completed_turn, recording_generation
+
+    async with runtime.store.factory() as database:
+        memory_generation = await recording_generation(database, user_id, workspace_id)
     # Public ordinary access is bound by server code to this verified native
     # session/task. Generic feature runtimes never receive this entitlement.
     runtime = GatewayRuntime(
@@ -325,6 +329,18 @@ async def converse(
             output_reference=context.reference(result.task_id, "answer", answer.answer),
         )
         sequence = turn.sequence
+        await append_completed_turn(
+            database,
+            settings,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            source_id=request.session_id,
+            source_kind="chat",
+            expected_generation=memory_generation,
+            sequence=sequence,
+            question=request.utterance,
+            answer=answer.answer,
+        )
         await database.commit()
     return ConversationResponse(
         answer=answer.answer,
