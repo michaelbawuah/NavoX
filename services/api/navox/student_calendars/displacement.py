@@ -177,6 +177,13 @@ def _base_slots(
     first, last = _window(snapshot, now)
     busy = [(row.start_at, row.end_at) for row in snapshot.result.busy]
     busy.append((draft.start_at - MEETING_BUFFER, draft.end_at + MEETING_BUFFER))
+    # A block can begin after snapshot.checked_at but before this certificate.
+    # Its remaining work/rest must become hard busy for replacement destinations,
+    # even though the earlier availability engine classified it as movable.
+    rest = timedelta(minutes=snapshot.input.preferences.break_minutes)
+    busy.extend(
+        (row.start_at - rest, row.end_at + rest) for row in context.blocks if row.start_at <= now
+    )
     slots, warnings = available_slots(
         snapshot.input.preferences,
         snapshot.input.timezone,

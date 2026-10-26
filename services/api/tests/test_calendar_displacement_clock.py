@@ -171,3 +171,57 @@ def test_pure_certification_does_not_override_disabled_study_planning():
         displacement.certify(
             context, snapshot, now + timedelta(minutes=30), now + timedelta(hours=1), now
         )
+
+
+@pytest.mark.parametrize("finished", [False, True])
+def test_replacement_destination_keeps_crossed_start_and_post_study_rest_busy(finished):
+    now, snapshot, context = clock_case()
+    original = context.blocks[0]
+    if finished:
+        original = original.model_copy(
+            update={
+                "start_at": now - timedelta(hours=1) + timedelta(seconds=10),
+                "end_at": now + timedelta(seconds=10),
+            }
+        )
+        context.blocks[0] = original
+    second_task_id = uuid4()
+    second_task = context.tasks[original.task_id].model_copy(update={"id": second_task_id})
+    context.tasks[second_task_id] = second_task
+    second = original.model_copy(
+        update={
+            "id": uuid4(),
+            "task_id": second_task_id,
+            "start_at": now.replace(hour=12),
+            "end_at": now.replace(hour=13),
+        }
+    )
+    context.blocks.append(second)
+    base = snapshot.input.study_blocks[0]
+    request = snapshot.input.model_copy(
+        update={
+            "study_blocks": (
+                base.model_copy(update={"start_at": original.start_at, "end_at": original.end_at}),
+                base.model_copy(
+                    update={
+                        "id": str(second.id),
+                        "start_at": second.start_at,
+                        "end_at": second.end_at,
+                    }
+                ),
+            )
+        }
+    )
+    snapshot = snapshot.model_copy(
+        update={"input": request, "result": compute_availability(request)}
+    )
+    review = displacement.certify(
+        context,
+        snapshot,
+        now.replace(hour=12),
+        now.replace(hour=12, minute=30),
+        now + timedelta(seconds=20),
+    )
+    assert review is not None and len(review.moves) == 1
+    assert review.moves[0].before.id == second.id
+    assert review.moves[0].after.start_at >= original.end_at + timedelta(minutes=15)
