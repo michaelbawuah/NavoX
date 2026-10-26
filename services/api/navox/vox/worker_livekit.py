@@ -786,7 +786,9 @@ def build_server(settings: Settings) -> agents.AgentServer:
         permissions=agents.WorkerPermissions(
             can_publish=True,
             can_subscribe=True,
-            can_publish_data=inference is not None and inference.web_search is not None,
+            # Native review/result topics are independent of optional web search.
+            # Publishers retain exact call proof and client-identity targeting.
+            can_publish_data=inference is not None,
             can_update_metadata=False,
             can_publish_sources=[rtc.TrackSource.SOURCE_MICROPHONE],  # type: ignore[list-item]
         ),
