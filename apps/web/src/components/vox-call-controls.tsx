@@ -21,6 +21,7 @@ import { useVoxCall } from "./vox-call-provider";
 import { VoxClassReview } from "./vox-class-review";
 import { VoxConversation } from "./vox-conversation";
 import { VoxMemoryReview } from "./vox-memory-review";
+import { VoxMemorySaveReview } from "./vox-memory-save-review";
 import { VoxPlanReview } from "./vox-plan-review";
 import { VoxRoutineReview } from "./vox-routine-review";
 import { VoxTaskReview } from "./vox-task-review";
@@ -394,6 +395,21 @@ function CallDialog({
         </p>
       </div>
       <WebLookup state={state} />
+      {state.ownerVerified &&
+        state.owner &&
+        !ended &&
+        state.memorySaveReview && (
+          <VoxMemorySaveReview
+            key={`${state.callId}:${state.owner.workspaceId}:${state.owner.userId}:${state.memorySaveReview.review.id}`}
+            proposal={state.memorySaveReview}
+            accountKey={`${state.owner.workspaceId}:${state.owner.userId}`}
+            onReview={() => {
+              controller.dismissMemorySaveReview();
+              controller.setMinimized(true);
+            }}
+            onClose={() => controller.dismissMemorySaveReview()}
+          />
+        )}
       {state.ownerVerified && state.owner && !ended && state.memoryReview && (
         <VoxMemoryReview
           key={`${state.callId}:${state.owner.workspaceId}:${state.owner.userId}:${state.memoryReview.query}`}

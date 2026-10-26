@@ -12,6 +12,10 @@ import {
   parseVoxMemoryReview,
   VOX_MEMORY_REVIEW_TOPIC,
 } from "./vox-memory-review";
+import {
+  parseVoxMemorySaveReview,
+  VOX_MEMORY_SAVE_REVIEW_TOPIC,
+} from "./vox-memory-save-review";
 import { parseVoxPlanReview } from "./vox-plan-review";
 import type { PorcupineWakeConfig } from "./vox-porcupine-wake";
 import { VoxReservationError } from "./vox-reservations";
@@ -751,6 +755,10 @@ export function createLiveKitVoxTransport(options: {
             } else if (topic === VOX_MEMORY_REVIEW_TOPIC) {
               const result = parseVoxMemoryReview(data);
               if (result) request.onEvent({ type: "memory-review", result });
+            } else if (topic === VOX_MEMORY_SAVE_REVIEW_TOPIC) {
+              const result = parseVoxMemorySaveReview(data);
+              if (result)
+                request.onEvent({ type: "memory-save-review", result });
             } else if (topic === "navox.vox.plan-review.v1") {
               const result = parseVoxPlanReview(data);
               if (result) request.onEvent({ type: "plan-review", result });

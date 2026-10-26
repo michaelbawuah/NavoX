@@ -2,6 +2,7 @@
 
 import type { LocalAudioTrack } from "livekit-client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { memorySaveReviewFixture } from "../test-fixtures/memory-save-review";
 import {
   VOX_STANDBY_AFTER_MS,
   VoxCallController,
@@ -1601,5 +1602,36 @@ it("accepts memory review metadata only from the exact current agent and lease",
   expect(env.request.onEvent).not.toHaveBeenCalled();
   await connection.close();
   receive(data, agent, "navox.vox.memory-review.v1");
+  expect(env.request.onEvent).not.toHaveBeenCalled();
+});
+
+it("accepts a memory save review only under the current agent, topic and live lease", async () => {
+  const env = environment();
+  env.request.mayRenewReservation = () => true;
+  const connection = await env.transport.connect(env.request);
+  const result = memorySaveReviewFixture();
+  const data = new TextEncoder().encode(JSON.stringify(result));
+  const receive = env.room.events?.dataReceived;
+  if (!receive) throw Error("Expected data handler");
+  vi.mocked(env.request.onEvent).mockClear();
+  receive(data, "other-agent", "navox.vox.memory-save-review.v1");
+  receive(data, agent, "wrong-topic");
+  receive(
+    new TextEncoder().encode(JSON.stringify({ ...result, applied: true })),
+    agent,
+    "navox.vox.memory-save-review.v1",
+  );
+  expect(env.request.onEvent).not.toHaveBeenCalled();
+  receive(data, agent, "navox.vox.memory-save-review.v1");
+  expect(env.request.onEvent).toHaveBeenCalledWith({
+    type: "memory-save-review",
+    result,
+  });
+  vi.mocked(env.request.onEvent).mockClear();
+  env.request.mayRenewReservation = () => false;
+  receive(data, agent, "navox.vox.memory-save-review.v1");
+  expect(env.request.onEvent).not.toHaveBeenCalled();
+  await connection.close();
+  receive(data, agent, "navox.vox.memory-save-review.v1");
   expect(env.request.onEvent).not.toHaveBeenCalled();
 });

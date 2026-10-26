@@ -30,7 +30,9 @@ import {
   memoryForgetDraftKey,
   validMemoryForgetQuery,
 } from "../lib/vox-memory-review";
+import { memorySaveDraftKey } from "../lib/vox-memory-save-review";
 import styles from "./memory-privacy.module.css";
+import { MemorySaveReviewPanel } from "./memory-save-review";
 import { PersonalMemoryPanel } from "./personal-memory";
 
 function localDate(value: string, timezone?: string) {
@@ -116,6 +118,7 @@ export function MemoryPrivacyPanel({
   const discardPendingReview = useCallback(() => {
     try {
       window.sessionStorage.removeItem(memoryForgetDraftKey(accountKey));
+      window.sessionStorage.removeItem(memorySaveDraftKey(accountKey));
     } catch {
       /* No private browser draft is available. */
     }
@@ -456,6 +459,20 @@ export function MemoryPrivacyPanel({
         <p role="status">Opening your private memory…</p>
       ) : privacy ? (
         <>
+          <MemorySaveReviewPanel
+            accountKey={accountKey}
+            disabled={controlsDisabled || privacy.off_the_record}
+            onSaved={() => {
+              setNotice("Memory saved. You can correct or forget it here.");
+              void load();
+            }}
+            onUncertain={() => {
+              setMustReload(true);
+              setError(
+                "The save result could not be checked. Reload your memory before making another change.",
+              );
+            }}
+          />
           <div className={styles.group}>
             <div className={styles.heading}>
               <div>

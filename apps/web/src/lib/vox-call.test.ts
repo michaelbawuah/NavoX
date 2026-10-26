@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { memorySaveReviewFixture } from "../test-fixtures/memory-save-review";
 import {
   VOX_END_CALL_TIMEOUT_MS,
   VOX_STANDBY_AFTER_MS,
@@ -1460,5 +1461,30 @@ it("fences memory reviews on session checks, terminal cleanup and stale transpor
   expect(test.controller.current().memoryReview).toBeNull();
   old.onEvent({ type: "memory-review", result });
   expect(test.controller.current().memoryReview).toBeNull();
+  await test.controller.dispose();
+});
+
+it("fences memory save reviews across suspension, hang-up and owner changes", async () => {
+  const test = rig();
+  await test.controller.start();
+  const old = test.requests[0],
+    result = memorySaveReviewFixture();
+  old.onEvent({ type: "memory-save-review", result });
+  expect(test.controller.current().memorySaveReview).toEqual(result);
+  test.controller.suspendForSessionCheck();
+  expect(test.controller.current().memorySaveReview).toBeNull();
+  old.onEvent({ type: "memory-save-review", result });
+  expect(test.controller.current().memorySaveReview).toBeNull();
+  await test.controller.bindOwner(owner);
+  old.onEvent({ type: "memory-save-review", result });
+  test.controller.dismissMemorySaveReview();
+  expect(test.controller.current().memorySaveReview).toBeNull();
+  old.onEvent({ type: "memory-save-review", result });
+  await test.controller.hangUp();
+  old.onEvent({ type: "memory-save-review", result });
+  expect(test.controller.current().memorySaveReview).toBeNull();
+  await test.controller.bindOwner(anotherOwner);
+  old.onEvent({ type: "memory-save-review", result });
+  expect(test.controller.current().memorySaveReview).toBeNull();
   await test.controller.dispose();
 });
