@@ -33,8 +33,10 @@ from navox.vox.inference_config import load_inference_config
 from navox.vox.inference_http import OpenAICompatiblePipeline, UsageHooks
 from navox.vox.inference_realtime import OpenAIRealtimeAdapter
 from navox.vox.inference_worker import ConfiguredVoiceWorker
+from navox.vox.memory_tools import MEMORY_REVIEW_TOPIC, MemoryTools
 from navox.vox.planning_tools import REVIEW_TOPIC, PlanningTools
 from navox.vox.provider import cloud_config
+from navox.vox.recall_tools import MemoryReadTools
 from navox.vox.schedule_tools import ScheduleTools
 from navox.vox.session_context import CallContextKey, VoxCallContext
 from navox.vox.web_tools import WEB_TOPIC, PublicWebTools, VoxReadTools
@@ -388,14 +390,41 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                     topic=REVIEW_TOPIC,
                 )
 
+            memory_tools = MemoryReadTools(check, settings)
+
+            async def publish_memory(result: dict[str, object]) -> None:
+                await inference_check()
+                await ctx.room.local_participant.publish_data(
+                    json.dumps(result, ensure_ascii=False).encode(),
+                    reliable=True,
+                    destination_identities=[assignment.client_identity],
+                    topic=MEMORY_REVIEW_TOPIC,
+                )
+
             tools = VoxReadTools(
                 PlanningTools(check, settings, publish_plan),
                 CaptureTools(check, settings, publish_plan),
                 ScheduleTools(check),
                 PublicWebTools(check, inference, settings, usage, publish_web),
+                memory_tools,
+                MemoryTools(check, settings, publish_memory),
             )
-            realtime = OpenAIRealtimeAdapter(inference, settings, inference_check, usage, tools)
-            pipeline = OpenAICompatiblePipeline(inference, settings, inference_check, usage, tools)
+            realtime = OpenAIRealtimeAdapter(
+                inference,
+                settings,
+                inference_check,
+                usage,
+                tools,
+                memory_context=memory_tools.context,
+            )
+            pipeline = OpenAICompatiblePipeline(
+                inference,
+                settings,
+                inference_check,
+                usage,
+                tools,
+                memory_context=memory_tools.context,
+            )
             worker = ConfiguredVoiceWorker(
                 assignment, check, output, inference, context, realtime, pipeline, usage=usage
             )

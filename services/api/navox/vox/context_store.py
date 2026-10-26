@@ -122,6 +122,10 @@ class DatabaseContextStore:
         self._settings = settings
         self._private_snapshots: dict[CallContextKey, ContextSnapshot] = {}
 
+    def release(self, key: CallContextKey) -> None:
+        """Erase off-record worker RAM immediately on hang-up or worker close."""
+        self._private_snapshots.pop(key, None)
+
     async def _row(self, database: AsyncSession, key: CallContextKey) -> VoxCallCheckpoint:
         call = await database.get(VoxCall, key.call_id, populate_existing=True)
         session = await database.get(UserSession, call.auth_session_id) if call else None

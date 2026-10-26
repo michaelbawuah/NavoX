@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unicodedata
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 from urllib.parse import urlencode
@@ -23,6 +24,7 @@ from navox.student import service as schedule
 from navox.vox.worker import DatabaseAuthority, WorkerAccessLost
 
 FORGET_TOOL = "prepare_memory_forget"
+MEMORY_REVIEW_TOPIC = "navox.vox.memory-review.v1"
 MAX_CANDIDATES = 100
 MAX_MATCHES = 4
 
@@ -109,8 +111,14 @@ async def candidates(
 
 
 class MemoryTools:
-    def __init__(self, check: DatabaseAuthority, settings: Settings) -> None:
+    def __init__(
+        self,
+        check: DatabaseAuthority,
+        settings: Settings,
+        publish: Callable[[dict[str, object]], Awaitable[None]] | None = None,
+    ) -> None:
         self.check, self.settings = check, settings
+        self.publish = publish
 
     def definitions(self) -> list[dict[str, Any]]:
         return [
@@ -205,7 +213,7 @@ class MemoryTools:
         )
         if not complete:
             message += " This search covers only the 100 most recently updated saved items."
-        return {
+        result: dict[str, Any] = {
             "status": "review_required",
             "applied": False,
             "query": query.query,
@@ -217,3 +225,8 @@ class MemoryTools:
             "searched_items": len(rows),
             "message": message,
         }
+        if self.publish is not None:
+            await self.publish(result)
+            if await self.check() != authority:
+                raise WorkerAccessLost("The voice tool's owner changed")
+        return result

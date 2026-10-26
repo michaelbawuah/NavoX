@@ -34,6 +34,7 @@ from navox.vox.inference_http import (
     bounded_text,
     usage_counts,
 )
+from navox.vox.recall_tools import memory_message
 from navox.vox.session_context import history_messages
 from navox.vox.worker import MemoryTurn
 
@@ -91,9 +92,11 @@ class OpenAIRealtimeAdapter:
         *,
         connector: Callable[[str, dict[str, str]], Awaitable[Socket]] = open_socket,
         clock: Callable[[], float] = time.monotonic,
+        memory_context: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
     ):
         self.config, self.settings, self.check, self.usage = config, settings, check, usage
         self.tools, self.connector, self.clock = tools, connector, clock
+        self.memory_context = memory_context
         self.socket: Socket | None = None
         self.opened_at = 0.0
         self._lock = asyncio.Lock()
@@ -213,7 +216,12 @@ class OpenAIRealtimeAdapter:
                 else:
                     raise ProviderRejected("The realtime session was not acknowledged")
                 self._context_ceiling = len(INSTRUCTIONS.encode()) + 2048
-                for message in history_messages(history):
+                messages = history_messages(history)
+                if self.memory_context is not None:
+                    recalled = memory_message(await self.memory_context(""))
+                    if recalled is not None:
+                        messages.insert(0, {"role": "user", "content": recalled})
+                for message in messages:
                     role, value = message["role"], message["content"]
                     self._context_ceiling += len(value.encode()) + 64
                     if self._context_ceiling > MAX_CONTEXT_TOKENS:
@@ -262,6 +270,7 @@ class OpenAIRealtimeAdapter:
             self.tools,
             connector=self.connector,
             clock=self.clock,
+            memory_context=self.memory_context,
         )
         old = None
         try:

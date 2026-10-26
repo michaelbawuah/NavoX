@@ -96,6 +96,7 @@ class ContextStore(Protocol):
         self, key: CallContextKey, expected_revision: int, turns: tuple[MemoryTurn, ...]
     ) -> bool: ...
     async def delete(self, key: CallContextKey) -> None: ...
+    def release(self, key: CallContextKey) -> None: ...
 
 
 def validate_turns(turns: tuple[MemoryTurn, ...], maximum: int) -> None:
@@ -189,6 +190,7 @@ class VoxCallContext:
         self._closed = True
         self._epoch = None
         self._snapshot = ContextSnapshot()
+        self.store.release(self.key)
 
 
 class InMemoryContextStore:
@@ -211,3 +213,6 @@ class InMemoryContextStore:
 
     async def delete(self, key: CallContextKey) -> None:
         self._values.pop(key, None)
+
+    def release(self, key: CallContextKey) -> None:
+        """Test persistence outlives a worker; no separate private RAM cache."""
