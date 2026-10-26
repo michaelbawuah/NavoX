@@ -233,10 +233,13 @@ export function MemoryPrivacyPanel({
     setError("");
     setNotice("");
     const current = epoch.current;
-    const sessionChange = privacyChange
-      ? notifyAccountSessionChanging()
-      : undefined;
+    let sessionChange:
+      | ReturnType<typeof notifyAccountSessionChanging>
+      | undefined;
     try {
+      sessionChange = privacyChange
+        ? notifyAccountSessionChanging()
+        : undefined;
       await operation();
       if (!mounted.current) return;
       if (privacyChange || current === epoch.current) {
@@ -314,6 +317,7 @@ export function MemoryPrivacyPanel({
       editing
         ? "Saved fact corrected."
         : "Saved. You can edit or forget this at any time.",
+      !!editing,
     );
   }
   const controlsDisabled = busy || loading || mustReload || !privacy || !ready;
@@ -580,6 +584,9 @@ export function MemoryPrivacyPanel({
             </button>
             {historyOpen && (
               <div className={styles.history}>
+                <p className={styles.muted}>
+                  Search checks your 100 most recent conversations.
+                </p>
                 <form
                   className={styles.search}
                   onSubmit={(e) => void searchHistory(e)}

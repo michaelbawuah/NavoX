@@ -59,7 +59,7 @@ export function readMemoryPrivacy(value: unknown): MemoryPrivacy {
   return row as MemoryPrivacy;
 }
 export function readMemoryFacts(value: unknown): MemoryFact[] {
-  if (!Array.isArray(value) || value.length > 1000) invalid();
+  if (!Array.isArray(value) || value.length > 100) invalid();
   return value.map((value) => {
     const row = object(value);
     if (
@@ -104,7 +104,7 @@ export function readMemoryConversation(value: unknown): MemoryConversation {
   if (
     !(row.summary === null || text(row.summary)) ||
     !Array.isArray(row.turns) ||
-    row.turns.length > 1000
+    row.turns.length > 2000
   )
     invalid();
   for (const value of row.turns as unknown[]) {

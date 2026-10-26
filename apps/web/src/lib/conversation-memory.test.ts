@@ -55,6 +55,28 @@ describe("private memory contracts", () => {
       }),
     ).toThrow();
   });
+  it("accepts the complete backend limit of 2000 history messages", () => {
+    const turns = Array.from({ length: 2000 }, (_, index) => ({
+      role: index % 2 ? "assistant" : "user",
+      content: "A completed turn",
+      created_at: history.created_at,
+    }));
+    expect(
+      readMemoryConversation({
+        ...history,
+        message_count: 2000,
+        summary: null,
+        turns,
+      }).turns,
+    ).toHaveLength(2000);
+    expect(() =>
+      readMemoryConversation({
+        ...history,
+        summary: null,
+        turns: [...turns, turns[0]],
+      }),
+    ).toThrow();
+  });
   it("binds requests to the displayed account and bypasses caches", async () => {
     const fetch = vi.fn(async () => Response.json(privacy));
     vi.stubGlobal("fetch", fetch);
