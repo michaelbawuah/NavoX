@@ -142,6 +142,7 @@ async def suggestions(
                     duration_minutes=payload.duration_minutes,
                     count=2,
                 ),
+                allow_study_displacement=settings.student_planning_enabled,
             )
             await calendars.check_scope(boundary_database, original_scope, token_hash)
             final = await service._internal(

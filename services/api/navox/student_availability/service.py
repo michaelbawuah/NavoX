@@ -196,6 +196,19 @@ async def _internal(
     )
     native = await claims.snapshot(database, user_id, workspace_id, settings=settings)
     for claim in native:
+        if claim.unknown_travel or payload.travel_assumption == "unknown":
+            busy.append(
+                BusyInterval(
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    id=f"native-{claim.id.hex}",
+                    source_id=NATIVE_CALENDAR,
+                    kind="meeting",
+                    start_at=claim.start_at,
+                    end_at=claim.end_at,
+                )
+            )
+            continue
         first, last = claim.interval()
         # The retained interval already contains its own meeting buffer (or a
         # conservative unknown-travel day). Fixed avoids padding it twice;

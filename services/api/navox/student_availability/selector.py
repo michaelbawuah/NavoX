@@ -4,15 +4,17 @@ Pure and deterministic: no provider, database, model or write access. The input
 must be a fresh `AvailabilityResult` produced by `compute_availability` for the
 same owner and window. The caller must honor any shorter snapshot expiry or
 compute immediately before selection; this result's sixty-second age cap is not
-an authorization or source-expiry check. This module only positions a NEW meeting inside confirmed
-openings, reserving ten minutes before and after it.
+an authorization or source-expiry check. The public selector positions a NEW
+meeting inside confirmed openings. A separate server allocator can certify exact
+slots from study-only provisional windows; that internal ranking seam is never
+an HTTP input. Both reserve ten minutes before and after the meeting.
 
 Honesty rules:
 - Only confirmed openings with no uncertainty or displacement metadata are offered.
   Unknown coverage, unconfirmed routine and unknown travel are never free time.
 - Movable study work is not offered without a feasible replacement plan. This
-  conservative slice cannot recover unaffected portions of a large provisional
-  opening that contains a movable study block; it can return fewer choices.
+  public selector stays conservative. The server extension must independently
+  certify even an unaffected part of a broad study-only provisional window.
 - Ten-minute buffers also fit inside the confirmed opening and after `now`.
   Existing class/meeting padding may make this conservative around those edges.
 - Another person's sourced hours are a preference, never assumed agreement.
@@ -122,8 +124,16 @@ class SuggestionResult(FrozenInput):
 
 
 @dataclass(frozen=True)
+class TentativeCandidate:
+    """A bounded position to check, with no feasibility or authority implied."""
+
+    opening: Opening
+    start_at: datetime
+
+
+@dataclass(frozen=True)
 class CertifiedCandidate:
-    """Internal positioned slot; only the owned allocator may construct these.
+    """Internal positioned slot; only after the owned allocator has checked it.
 
     This is deliberately absent from SuggestionRequest and all HTTP inputs.
     It is not a reusable authorization or a substitute for exact event review.
@@ -266,7 +276,7 @@ def _score(
     )
 
 
-def study_candidates(request: SuggestionRequest) -> tuple[CertifiedCandidate, ...]:
+def study_candidates(request: SuggestionRequest) -> tuple[TentativeCandidate, ...]:
     """Bounded tentative slots, never suggestions until the server certifies them."""
     availability = request.availability
     minutes = duration_for(request.purpose, request.duration_minutes)
@@ -292,7 +302,7 @@ def study_candidates(request: SuggestionRequest) -> tuple[CertifiedCandidate, ..
         ):
             score = _score(request, opening, start, minutes, zone, busy_ends, busy_starts)
             if score is not None:
-                candidates.append((score[0], CertifiedCandidate(opening, start, ())))
+                candidates.append((score[0], TentativeCandidate(opening, start)))
                 if len(candidates) > MAX_CANDIDATES:
                     raise ValueError("Too many candidate times; narrow the requested window")
     candidates.sort(key=lambda pair: pair[0])

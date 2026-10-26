@@ -19,17 +19,19 @@ from navox.db.student_calendars import StudentCalendarEvent
 from navox.db.student_planning import StudentStudyBlock, StudentTask
 from navox.providers.google_availability import ProviderBusy
 from navox.student import service as schedule
-from navox.student_availability import service
+from navox.student_availability import ranked, service
 from navox.student_availability.ranked import ranked_suggestions
 from navox.student_availability.schemas import AvailabilityPreview, TimeInterval
 from navox.student_availability.selector import (
     MAX_CERTIFIED_CANDIDATES,
     SuggestionRequest,
+    study_candidates,
     suggest,
 )
 from navox.student_calendars import displacement
 from navox.student_calendars import service as calendars
 from navox.student_planning import service as planning
+from navox.student_planning.schemas import TaskCreate
 
 ROOT = "/api/v1/student/availability/suggestions"
 
@@ -97,7 +99,14 @@ async def test_one_owned_context_certifies_exact_study_moves_without_applying_th
             require_other_windows=True,
         )
         assert suggest(request).suggestions == ()
-        result = await ranked_suggestions(database, env.user_id, env.workspace_id, checked, request)
+        result = await ranked_suggestions(
+            database,
+            env.user_id,
+            env.workspace_id,
+            checked,
+            request,
+            allow_study_displacement=True,
+        )
         assert len(result.suggestions) == 1
         option = result.suggestions[0]
         assert (option.start_at, option.end_at) == (env.start_at, env.end_at)
@@ -253,6 +262,65 @@ async def test_owned_context_and_expiry_are_required_even_for_internal_callers(s
 
 
 @pytest.mark.asyncio
+async def test_expiry_after_owned_context_loading_prevents_publication(study_env, monkeypatch):
+    env = study_env
+    checked = await snapshot(env)
+
+    times = iter((checked.checked_at, checked.expires_at))
+
+    async def expired(_database):
+        return next(times)
+
+    monkeypatch.setattr(ranked, "database_now", expired)
+    async with env.factory() as database:
+        await calendars.boundary(database, env.user_id, env.workspace_id, env.token_hash)
+        with pytest.raises(schedule.StudentError, match="changed"):
+            await ranked_suggestions(
+                database,
+                env.user_id,
+                env.workspace_id,
+                checked,
+                SuggestionRequest(
+                    availability=checked.result,
+                    now=checked.checked_at,
+                    purpose="coffee",
+                    duration_minutes=30,
+                ),
+                allow_study_displacement=True,
+            )
+
+
+@pytest.mark.asyncio
+async def test_authority_errors_from_certification_are_not_converted_to_no_time(
+    study_env, monkeypatch
+):
+    env = study_env
+    checked = await snapshot(env)
+
+    def denied(*args, **kwargs):
+        raise schedule.StudentError(401, "Sign in again")
+
+    monkeypatch.setattr(displacement, "certify", denied)
+    async with env.factory() as database:
+        await calendars.boundary(database, env.user_id, env.workspace_id, env.token_hash)
+        with pytest.raises(schedule.StudentError) as failure:
+            await ranked_suggestions(
+                database,
+                env.user_id,
+                env.workspace_id,
+                checked,
+                SuggestionRequest(
+                    availability=checked.result,
+                    now=checked.checked_at,
+                    purpose="coffee",
+                    duration_minutes=30,
+                ),
+                allow_study_displacement=True,
+            )
+        assert failure.value.status_code == 401
+
+
+@pytest.mark.asyncio
 async def test_retained_native_event_claims_block_a_lagging_provider_answer(event_env):
     env = event_env
     view = await event_preview(env)
@@ -279,3 +347,189 @@ async def test_retained_native_event_claims_block_a_lagging_provider_answer(even
         or row.start_at - timedelta(minutes=10) >= native[0].end_at
         for row in selected.suggestions
     )
+
+
+@pytest.mark.asyncio
+async def test_native_claim_does_not_invent_zero_when_current_travel_is_unknown(event_env):
+    env = event_env
+    created = await act(env, await event_preview(env), "approve")
+    assert created.status_code == 200, created.text
+    env.writes.events.clear()
+    checked = await snapshot(env, travel="unknown")
+    native = [row for row in checked.input.busy if row.source_id == service.NATIVE_CALENDAR]
+    assert native and native[0].kind == "meeting"
+    assert native[0].travel_before_minutes is None and native[0].travel_after_minutes is None
+    assert any(row.code == "travel_unknown" for row in checked.result.warnings)
+    assert not study_candidates(
+        SuggestionRequest(
+            availability=checked.result,
+            now=checked.checked_at,
+            purpose="coffee",
+            duration_minutes=30,
+        )
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("membership_changed", [True, False])
+async def test_native_claim_membership_is_rechecked_across_provider_reads(
+    event_env, monkeypatch, membership_changed
+):
+    env = event_env
+    view = await event_preview(env)
+    created = await act(env, view, "approve")
+    assert created.status_code == 200, created.text
+    original = env.busy.collect
+
+    async def changed(**kwargs):
+        result = await original(**kwargs)
+        async with env.factory() as database:
+            row = await database.scalar(select(StudentCalendarEvent))
+            # Exact native observations can change claim membership without a
+            # new scheduling admission. Status-only churn keeps the interval.
+            row.status = "undone" if membership_changed else "changed"
+            row.revision += 1
+            await database.commit()
+        return result
+
+    monkeypatch.setattr(env.busy, "collect", changed)
+    if membership_changed:
+        with pytest.raises(schedule.StudentError, match="changed"):
+            await snapshot(env)
+    else:
+        checked = await snapshot(env)
+        assert any(row.source_id == service.NATIVE_CALENDAR for row in checked.input.busy)
+
+
+def test_study_feasibility_candidates_have_a_fixed_work_bound():
+    from test_student_availability_selector import at, availability
+
+    from navox.student_availability.schemas import AvailabilityWarning, Opening
+
+    base = availability()
+    windows = tuple(
+        Opening(
+            start_at=at(8) + timedelta(days=day),
+            end_at=at(22) + timedelta(days=day),
+            minutes=14 * 60,
+            reasons=("movable_study",),
+            displaced_study_block_ids=(f"study-{day}",),
+        )
+        for day in range(14)
+    )
+    result = base.model_copy(
+        update={
+            "status": "partial",
+            "confirmed_openings": (),
+            "provisional_openings": windows,
+            "warnings": (AvailabilityWarning(code="movable_study"),),
+        }
+    )
+    request = SuggestionRequest(
+        availability=result, now=at(7), purpose="coffee", duration_minutes=30
+    )
+    assert len(study_candidates(request)) == MAX_CERTIFIED_CANDIDATES
+
+
+@pytest.mark.asyncio
+async def test_disabled_planning_preserves_confirmed_only_calendar_selection(
+    study_env, monkeypatch
+):
+    env = study_env
+    env.settings.student_planning_enabled = False
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("The disabled planner cannot certify study moves")
+
+    monkeypatch.setattr(displacement, "load_context", forbidden)
+    response = await env.client.post(
+        ROOT,
+        headers=env.headers,
+        json={**choices(env, minutes=60).model_dump(mode="json"), "purpose": "lunch"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["selection"]["suggestions"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["active", "completed", "archived"])
+async def test_owned_active_deadlines_prevent_meetings_immediately_before_them(event_env, status):
+    env = event_env
+    async with env.factory() as database:
+        task = await planning.save_task(
+            database,
+            env.user_id,
+            env.workspace_id,
+            TaskCreate(
+                request_id=uuid4(),
+                title="Private submitted report",
+                due_at=env.start_at.replace(hour=22),
+            ),
+        )
+        row = await database.get(StudentTask, task.id)
+        row.status = status
+        await database.commit()
+    checked = await snapshot(env)
+    async with env.factory() as database:
+        await calendars.boundary(database, env.user_id, env.workspace_id, env.token_hash)
+        request = SuggestionRequest(
+            availability=checked.result,
+            now=checked.checked_at,
+            purpose="other",
+            duration_minutes=30,
+            other_windows=(
+                TimeInterval(
+                    start_at=env.start_at.replace(hour=21),
+                    end_at=env.start_at.replace(hour=21, minute=30),
+                ),
+            ),
+            require_other_windows=True,
+        )
+        assert len(suggest(request).suggestions) == 1
+        result = await ranked_suggestions(
+            database,
+            env.user_id,
+            env.workspace_id,
+            checked,
+            request,
+            allow_study_displacement=True,
+        )
+        assert len(result.suggestions) == (0 if status == "active" else 1)
+        assert "Private submitted report" not in result.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_too_many_real_deadlines_are_not_silently_omitted(event_env):
+    env = event_env
+    async with env.factory() as database:
+        database.add_all(
+            StudentTask(
+                user_id=env.user_id,
+                workspace_id=env.workspace_id,
+                title="Private bounded deadline",
+                estimated_minutes=30,
+                remaining_minutes=30,
+                status="active",
+                revision=1,
+                due_at=env.start_at.replace(hour=22) + timedelta(minutes=index),
+            )
+            for index in range(201)
+        )
+        await database.commit()
+    checked = await snapshot(env)
+    async with env.factory() as database:
+        await calendars.boundary(database, env.user_id, env.workspace_id, env.token_hash)
+        with pytest.raises(schedule.StudentError, match="Too many"):
+            await ranked_suggestions(
+                database,
+                env.user_id,
+                env.workspace_id,
+                checked,
+                SuggestionRequest(
+                    availability=checked.result,
+                    now=checked.checked_at,
+                    purpose="coffee",
+                    duration_minutes=30,
+                ),
+                allow_study_displacement=True,
+            )
