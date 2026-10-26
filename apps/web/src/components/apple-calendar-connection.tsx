@@ -186,8 +186,9 @@ function AppleCalendarConnectionWorkspace({
       <h2 id={`${id}-title`}>Apple / iCloud Calendar</h2>
       <p>
         Find openings around your iCloud calendars using an app-specific
-        password. Apple’s credential can allow broader access; NavoX uses it
-        only for the busy-time checks you approve here.
+        password. Apple’s credential can allow broader access. This connection
+        authorizes busy-time checks; adding events needs separate reviewed
+        scheduling consent below and your exact approval for each event.
       </p>
       <p className={styles.hint}>
         Create an app-specific password in your Apple Account security settings.

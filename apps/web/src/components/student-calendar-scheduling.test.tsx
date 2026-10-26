@@ -4,7 +4,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccountSessionCallbacks } from "../lib/account-session";
 import { productFeatures } from "../lib/product-features";
-import type { AvailabilityPreviewInput } from "../lib/student-calendar-api";
+import type {
+  AvailabilityPreviewInput,
+  CalendarProviderId,
+} from "../lib/student-calendar-api";
 import { notifyCalendarAccessChanged } from "../lib/student-calendar-privacy";
 import type {
   CalendarEventView,
@@ -144,6 +147,8 @@ function client(): StudentCalendarSchedulingApi {
       changes_applied: false,
     })),
     startScheduling: vi.fn(),
+    startOutlookScheduling: vi.fn(),
+    startAppleScheduling: vi.fn(),
     stopScheduling: vi.fn<StudentCalendarSchedulingApi["stopScheduling"]>(
       async () => ({
         generation: 2,
@@ -194,6 +199,53 @@ function client(): StudentCalendarSchedulingApi {
       can_undo: false,
     })),
   };
+}
+async function providerClient(provider: CalendarProviderId, available = true) {
+  const api = client(),
+    signal = new AbortController().signal;
+  const scheduling = await api.scheduling(signal),
+    calendars = await api.calendars(signal);
+  vi.mocked(api.scheduling).mockResolvedValue({
+    ...scheduling,
+    grants: scheduling.grants.map((grant) => ({ ...grant, provider })),
+    providers: ["google", "outlook", "icloud"].map((id) => ({
+      id: id as CalendarProviderId,
+      availability: id === provider && available ? "available" : "unavailable",
+      message:
+        id === provider && !available
+          ? "Exact provider write qualification is unavailable."
+          : "Independent calendar scheduling permission.",
+    })),
+  });
+  vi.mocked(api.calendars).mockResolvedValue({
+    ...calendars,
+    grants: calendars.grants.map((grant) => ({ ...grant, provider })),
+  });
+  vi.mocked(api.targets).mockResolvedValue({
+    generation: 2,
+    revision: 5,
+    grant_id: grant,
+    provider,
+    targets: [{ id: "primary", label: "My calendar", timezone: "UTC" }],
+    changes_applied: false,
+  });
+  vi.mocked(api.previewEvent).mockResolvedValue({ ...event(), provider });
+  vi.mocked(api.approveEvent).mockResolvedValue({
+    ...event(),
+    provider,
+    status: "created",
+    revision: 2,
+    changes_applied: true,
+    can_undo: true,
+  });
+  vi.mocked(api.undoEvent).mockResolvedValue({
+    ...event(),
+    provider,
+    status: "undone",
+    revision: 3,
+    changes_applied: false,
+  });
+  return api;
 }
 let host: HTMLDivElement, root: Root;
 async function settle() {
@@ -256,10 +308,14 @@ async function mount(api: StudentCalendarSchedulingApi, choices = options) {
     await settle();
   });
 }
-async function prepare(api: StudentCalendarSchedulingApi, choices = options) {
+async function prepare(
+  api: StudentCalendarSchedulingApi,
+  choices = options,
+  accountField = "Google account",
+) {
   await mount(api, choices);
   await click("Check scheduling and recent actions");
-  await set("Google account", grant);
+  await set(accountField, grant);
   await set("Add to calendar", "primary");
   await set("Checked time", options[0].start_at);
   await set("Event title", "Study with Sam");
@@ -286,6 +342,180 @@ afterEach(async () => {
 });
 
 describe("reviewed calendar scheduling screen", () => {
+  it("does not infer Microsoft write support from connected busy-time access", async () => {
+    const api = await providerClient("outlook", false);
+    await act(async () =>
+      root.render(
+        <StudentCalendarSchedulingConsent accountId={accountId} api={api} />,
+      ),
+    );
+    await click("Check scheduling access");
+    await set("Calendar service", "outlook");
+    expect(host.textContent).toContain(
+      "Exact provider write qualification is unavailable",
+    );
+    expect(host.textContent).toContain(
+      "Microsoft reviewed scheduling is unavailable here",
+    );
+    expect(
+      [...host.querySelectorAll("button")].some(
+        (node) => node.textContent?.trim() === "Connect reviewed scheduling",
+      ),
+    ).toBe(false);
+    expect(api.startOutlookScheduling).not.toHaveBeenCalled();
+  });
+  it("keeps receipt checks available while provider-specific new writes and Undo are unavailable", async () => {
+    const api = await providerClient("outlook", false);
+    vi.mocked(api.events).mockResolvedValue({
+      generation: 2,
+      calendar_revision: 5,
+      next_cursor: null,
+      events: [
+        {
+          ...event(),
+          provider: "outlook",
+          status: "created",
+          changes_applied: true,
+          can_undo: true,
+        },
+      ],
+    });
+    await mount(api);
+    await click("Check scheduling and recent actions");
+    await click("Study with Sam · Added");
+    expect(host.textContent).toContain("Added and verified");
+    expect(button("Check event status").disabled).toBe(false);
+    expect(
+      [...host.querySelectorAll("button")].some(
+        (node) => node.textContent?.trim() === "Undo this event",
+      ),
+    ).toBe(false);
+    expect(api.previewEvent).not.toHaveBeenCalled();
+    expect(api.undoEvent).not.toHaveBeenCalled();
+  });
+  it("requires fresh separate Apple consent and reuses only the current native credential", async () => {
+    const api = await providerClient("icloud");
+    const next = await api.scheduling(new AbortController().signal);
+    vi.mocked(api.startAppleScheduling).mockResolvedValue({
+      ...next,
+      revision: 6,
+    });
+    await act(async () =>
+      root.render(
+        <StudentCalendarSchedulingConsent accountId={accountId} api={api} />,
+      ),
+    );
+    await click("Check scheduling access");
+    await set("Calendar service", "icloud");
+    await set("Apple / iCloud account", connection);
+    expect(button("Connect reviewed scheduling").disabled).toBe(true);
+    expect(host.querySelector('input[type="password"]')).toBeNull();
+    expect(host.textContent).toContain(
+      "app-specific credential already connected",
+    );
+    await check("Let NavoX add and verify events");
+    expect(api.startAppleScheduling).not.toHaveBeenCalled();
+    await set("Calendar service", "google");
+    await set("Calendar service", "icloud");
+    await set("Apple / iCloud account", connection);
+    expect(button("Connect reviewed scheduling").disabled).toBe(true);
+    await check("Let NavoX add and verify events");
+    await click("Connect reviewed scheduling");
+    expect(api.startAppleScheduling).toHaveBeenCalledWith(
+      expect.objectContaining({
+        consent_version: "calendar-scheduling.v1",
+        connection_id: connection,
+        confirmed: true,
+        generation: 2,
+        revision: 5,
+      }),
+      expect.any(AbortSignal),
+    );
+    expect(host.textContent).toContain(
+      "Each event still needs its own exact approval",
+    );
+    expect(api.startScheduling).not.toHaveBeenCalled();
+    expect(api.startOutlookScheduling).not.toHaveBeenCalled();
+  });
+  it("discards a held Apple setup receipt when current owner proof changes", async () => {
+    const api = await providerClient("icloud");
+    const next = await api.scheduling(new AbortController().signal);
+    let resolve!: (value: typeof next) => void;
+    vi.mocked(api.startAppleScheduling).mockReturnValue(
+      new Promise((yes) => {
+        resolve = yes;
+      }),
+    );
+    await act(async () =>
+      root.render(
+        <StudentCalendarSchedulingConsent accountId={accountId} api={api} />,
+      ),
+    );
+    await click("Check scheduling access");
+    await set("Calendar service", "icloud");
+    await set("Apple / iCloud account", connection);
+    await check("Let NavoX add and verify events");
+    await click("Connect reviewed scheduling");
+    await act(async () => observers[0].checking());
+    await act(async () => {
+      resolve(next);
+      await settle();
+    });
+    expect(host.textContent).not.toContain("student@example.test");
+    expect(host.textContent).not.toContain(
+      "Each event still needs its own exact approval",
+    );
+    expect(host.querySelector('input[type="checkbox"]')).toBeNull();
+  });
+  it.each(["outlook", "icloud"] as const)(
+    "reviews and conditionally undoes exact %s receipts without a client provider override",
+    async (provider) => {
+      const api = await providerClient(provider);
+      await prepare(api, options, "Calendar account");
+      expect(host.textContent).toContain(
+        provider === "icloud" ? "Apple / iCloud" : "Microsoft",
+      );
+      expect(button("Approve and add event").disabled).toBe(true);
+      await check("I reviewed this title");
+      await click("Approve and add event");
+      expect(button("Undo this event").disabled).toBe(true);
+      expect(vi.mocked(api.approveEvent).mock.calls[0][1]).not.toHaveProperty(
+        "provider",
+      );
+      await check("Remove only this event");
+      await click("Undo this event");
+      expect(vi.mocked(api.undoEvent).mock.calls[0][1]).not.toHaveProperty(
+        "provider",
+      );
+      expect(host.textContent).toContain("Removal verified");
+    },
+  );
+  it("does not review a non-Google event mislabeled as legacy Google", async () => {
+    const api = await providerClient("icloud");
+    vi.mocked(api.previewEvent).mockResolvedValue(event());
+    await prepare(api, options, "Calendar account");
+    expect(host.textContent).toContain("calendar service changed");
+    expect(host.textContent).not.toContain("Approve and add event");
+    expect(api.approveEvent).not.toHaveBeenCalled();
+  });
+  it("does not expose targets mislabeled as another calendar service", async () => {
+    const api = await providerClient("icloud");
+    const targets = await api.targets(
+      grant,
+      { generation: 2, revision: 5, request_id: action },
+      new AbortController().signal,
+    );
+    vi.mocked(api.targets).mockResolvedValue({
+      ...targets,
+      provider: "outlook",
+    });
+    await mount(api);
+    await click("Check scheduling and recent actions");
+    await set("Calendar account", grant);
+    expect(host.textContent).toContain("calendar service changed");
+    expect(host.querySelector('option[value="primary"]')).toBeNull();
+    expect(api.previewEvent).not.toHaveBeenCalled();
+  });
   it("refreshes the exact older receipt and hides forgotten study details while checking", async () => {
     const api = client();
     vi.mocked(api.previewEvent).mockResolvedValue({
