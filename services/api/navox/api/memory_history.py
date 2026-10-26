@@ -1,6 +1,6 @@
 """Authenticated text-memory controls; reads cannot opt an account into retention."""
 
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -61,7 +61,7 @@ async def list_history(
     database: DatabaseSession,
     settings: SettingsDependency,
     query: str = Query(default="", max_length=200),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     try:
         return await history.list_history(database, settings, *scope(current_account), query)
     except MemoryError as value:
@@ -74,7 +74,7 @@ async def read_history(
     current_account: CurrentAccountDependency,
     database: DatabaseSession,
     settings: SettingsDependency,
-) -> dict:
+) -> dict[str, Any]:
     try:
         return await history.get_history(database, settings, *scope(current_account), identifier)
     except MemoryError as value:
@@ -97,7 +97,7 @@ async def list_facts(
     current_account: CurrentAccountDependency,
     database: DatabaseSession,
     settings: SettingsDependency,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     try:
         return await history.list_facts(database, settings, *scope(current_account))
     except MemoryError as value:
@@ -110,7 +110,7 @@ async def add_fact(
     current_account: CurrentAccountDependency,
     database: DatabaseSession,
     settings: SettingsDependency,
-) -> dict:
+) -> dict[str, Any]:
     try:
         return await history.create_fact(database, settings, *scope(current_account), payload)
     except MemoryError as value:
@@ -124,7 +124,7 @@ async def change_fact(
     current_account: CurrentAccountDependency,
     database: DatabaseSession,
     settings: SettingsDependency,
-) -> dict:
+) -> dict[str, Any]:
     try:
         return await history.edit_fact(
             database, settings, *scope(current_account), identifier, payload

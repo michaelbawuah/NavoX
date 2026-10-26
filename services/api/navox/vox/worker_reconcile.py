@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from navox.core.settings import get_settings
 from navox.db.session import get_database_engine, get_session_factory
+from navox.memory.history import sweep_expired_history
 from navox.vox.provider import LiveKitCloudProvider, cloud_config
 from navox.vox.reconcile import MediaCleaner, reconcile_one
 
@@ -20,7 +21,16 @@ async def run_cleanup(
     factory: async_sessionmaker[AsyncSession], cleaner: MediaCleaner, stop: asyncio.Event
 ) -> None:
     """Bounded one-at-a-time cleanup; database/provider failures never lose claims."""
+    next_retention_sweep = 0.0
+    loop = asyncio.get_running_loop()
     while not stop.is_set():
+        if loop.time() >= next_retention_sweep:
+            try:
+                await sweep_expired_history(factory)
+            except Exception:
+                # Retry independently of Cloud cleanup. Never log private data.
+                pass
+            next_retention_sweep = loop.time() + 60
         try:
             completed = await reconcile_one(factory, cleaner)
         except Exception:

@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from navox.core.settings import Settings
 from navox.db.communications import AssistantSession
@@ -122,12 +122,14 @@ async def privacy_row(
 def privacy_response(row: MemoryPrivacy | None) -> PrivacyResponse:
     if row is None:
         return PrivacyResponse()
-    return PrivacyResponse(
-        history_enabled=row.history_enabled,
-        retention_days=row.retention_days,
-        off_the_record=row.off_the_record,
-        generation=row.generation,
-        disclosure_version=row.disclosure_version,
+    return PrivacyResponse.model_validate(
+        {
+            "history_enabled": row.history_enabled,
+            "retention_days": row.retention_days,
+            "off_the_record": row.off_the_record,
+            "generation": row.generation,
+            "disclosure_version": row.disclosure_version,
+        }
     )
 
 
@@ -158,9 +160,14 @@ async def update_privacy(
                 422, "Choose a retention period and agree before saving conversation text."
             )
         cipher(settings)  # Fail closed before recording can become enabled.
+    # Turning recording off must never silently turn a 30/90-day transcript
+    # into permanent storage. Only an enabled, explicit retention change alters
+    # existing deadlines; off-record changes preserve them.
+    retained_days = payload.retention_days if payload.history_enabled else row.retention_days
+    retention_changed = payload.history_enabled and retained_days != row.retention_days
     changed = (row.history_enabled, row.retention_days, row.off_the_record) != (
         payload.history_enabled,
-        payload.retention_days,
+        retained_days,
         payload.off_the_record,
     )
     if changed:
@@ -169,12 +176,12 @@ async def update_privacy(
         await invalidate_active_context(database, user_id, workspace_id)
         row.generation += 1
     row.history_enabled = payload.history_enabled
-    row.retention_days = payload.retention_days
+    row.retention_days = retained_days
     row.off_the_record = payload.off_the_record
     if payload.history_enabled:
         row.disclosure_version = 1
     row.updated_at = datetime.now(UTC)
-    if changed:
+    if retention_changed:
         conversations = list(
             await database.scalars(
                 select(MemoryConversation).where(
@@ -185,8 +192,8 @@ async def update_privacy(
         )
         for conversation in conversations:
             conversation.expires_at = (
-                utc(conversation.created_at) + timedelta(days=payload.retention_days)
-                if payload.retention_days is not None
+                utc(conversation.created_at) + timedelta(days=retained_days)
+                if retained_days is not None
                 else None
             )
     await expire_owner_history(database, user_id, workspace_id)
@@ -222,6 +229,34 @@ async def expire_owner_history(
         )
     await database.flush()
     return len(rows)
+
+
+async def sweep_expired_history(
+    factory: async_sessionmaker[AsyncSession], *, limit: int = 100
+) -> int:
+    """Bounded timed erasure, including owners who never reopen their history."""
+    if type(limit) is not int or not 1 <= limit <= 1000:
+        raise ValueError("Choose between one and 1000 expired conversations")
+    async with factory() as database:
+        owners = list(
+            await database.execute(
+                select(MemoryConversation.user_id, MemoryConversation.workspace_id)
+                .where(
+                    MemoryConversation.erased_at.is_(None),
+                    MemoryConversation.expires_at.is_not(None),
+                    MemoryConversation.expires_at <= datetime.now(UTC),
+                )
+                .order_by(MemoryConversation.expires_at, MemoryConversation.id)
+                .limit(limit)
+            )
+        )
+    erased = 0
+    for user_id, workspace_id in dict.fromkeys((row[0], row[1]) for row in owners):
+        async with factory() as database:
+            await lock_owner(database, user_id)
+            erased += await expire_owner_history(database, user_id, workspace_id)
+            await database.commit()
+    return erased
 
 
 async def append_completed_turn(
@@ -277,7 +312,7 @@ async def append_completed_turn(
         )
         database.add(row)
         await database.flush()
-        transcript = {"title": question[:80], "turns": []}
+        transcript: dict[str, Any] = {"title": question[:80], "turns": []}
     else:
         if sequence <= row.last_sequence:
             return False
@@ -439,6 +474,7 @@ def fact_view(row: MemoryFact, settings: Settings) -> dict[str, Any]:
 async def list_facts(
     database: AsyncSession, settings: Settings, user_id: UUID, workspace_id: UUID
 ) -> list[dict[str, Any]]:
+    await lock_owner(database, user_id)
     rows = list(
         await database.scalars(
             select(MemoryFact)
@@ -447,7 +483,9 @@ async def list_facts(
             .limit(100)
         )
     )
-    return [fact_view(row, settings) for row in rows]
+    result = [fact_view(row, settings) for row in rows]
+    await database.commit()
+    return result
 
 
 def require_sensitive_agreement(label: str, content: str, agreement: bool) -> bool:
@@ -542,7 +580,15 @@ async def edit_fact(
     if row.source_conversation_id is not None:
         source = await database.get(MemoryConversation, row.source_conversation_id)
         if source is not None:
-            source.encrypted_summary = None
+            source.encrypted_transcript = source.encrypted_summary = None
+            source.message_count, source.erased_at = 0, datetime.now(UTC)
+        await database.execute(
+            delete(MemoryFact).where(
+                *owner_scope(MemoryFact, user_id, workspace_id),
+                MemoryFact.source_conversation_id == row.source_conversation_id,
+                MemoryFact.id != row.id,
+            )
+        )
         await database.execute(
             delete(MemoryThread).where(
                 *owner_scope(MemoryThread, user_id, workspace_id),
@@ -566,7 +612,15 @@ async def forget_fact(
     if row.source_conversation_id is not None:
         source = await database.get(MemoryConversation, row.source_conversation_id)
         if source is not None:
-            source.encrypted_summary = None
+            source.encrypted_transcript = source.encrypted_summary = None
+            source.message_count, source.erased_at = 0, datetime.now(UTC)
+        await database.execute(
+            delete(MemoryFact).where(
+                *owner_scope(MemoryFact, user_id, workspace_id),
+                MemoryFact.source_conversation_id == row.source_conversation_id,
+                MemoryFact.id != row.id,
+            )
+        )
         await database.execute(
             delete(MemoryThread).where(
                 *owner_scope(MemoryThread, user_id, workspace_id),
