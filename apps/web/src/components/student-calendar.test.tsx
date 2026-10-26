@@ -188,6 +188,12 @@ function button(text: string) {
   if (!found) throw new Error(`Missing button ${text}`);
   return found;
 }
+function googleConsentInput() {
+  const label = [...host.querySelectorAll("label")].find(
+    (element) => element.textContent === calendarConsent,
+  );
+  return label?.querySelector('input[type="checkbox"]') ?? null;
+}
 async function click(text: string) {
   await act(async () => {
     button(text).click();
@@ -524,7 +530,7 @@ describe("private calendar connection and availability screens", () => {
       await settle();
     });
     expect(host.textContent).not.toContain("calendar@example.test");
-    expect(host.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(googleConsentInput()).toBeNull();
   });
   it("rejects a snapshot that expires during the final account proof", async () => {
     const client = api();
@@ -599,7 +605,7 @@ describe("private calendar connection and availability screens", () => {
     await click("Check calendar access");
     await click("Stop availability access");
     expect(host.textContent).not.toContain("calendar@example.test");
-    expect(host.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(googleConsentInput()).toBeNull();
     expect(host.textContent).toContain("Refresh before continuing");
     expect(button("Check calendar access").disabled).toBe(false);
   });

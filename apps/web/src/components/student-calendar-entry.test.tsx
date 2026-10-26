@@ -46,8 +46,8 @@ describe("calendar purpose consent entry", () => {
       expect(html).toContain("Find time without sharing event details");
       expect(html).toContain("Outlook / Microsoft 365");
       expect(html).toContain("Apple / iCloud");
-      expect(html).toContain("Unavailable here");
       expect(html).toContain("Access not checked");
+      expect(html).toContain("app-specific password");
       expect(fetch).not.toHaveBeenCalled();
     } finally {
       fetch.mockRestore();
