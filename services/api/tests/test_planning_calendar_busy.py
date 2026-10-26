@@ -15,7 +15,14 @@ from navox.student_planning import calendar_busy
 @pytest.mark.parametrize("coverage", ["complete", "partial", "unavailable"])
 async def test_planner_calendar_adapter_requires_complete_coverage(monkeypatch, coverage):
     user_id, workspace_id, connection_id = uuid4(), uuid4(), uuid4()
-    original = [{"id": str(uuid4()), "status": "active", "connection_id": str(connection_id)}]
+    original = [
+        {
+            "id": str(uuid4()),
+            "status": "active",
+            "connection_id": str(connection_id),
+            "provider": "google",
+        }
+    ]
 
     async def inventory(*args):
         return original
