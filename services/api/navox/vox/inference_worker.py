@@ -269,7 +269,14 @@ class ConfiguredVoiceWorker:
             if self.host_hooks is not None:
                 notice = await self.host_hooks.before_output()
                 if notice:
-                    spoken = await self.pipeline.speak("", notice)
+                    try:
+                        spoken = await self.pipeline.speak("", notice)
+                    except ProviderUnavailable:
+                        # A required host notice is an output authority fence,
+                        # not a realtime transport failure eligible for fallback.
+                        raise ProviderRejected(
+                            "The required voice notice could not be played"
+                        ) from None
                     await current()
                     # A generic privacy notice is not private response exposure
                     # and cannot arm a consequential calendar approval.
