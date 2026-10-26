@@ -287,13 +287,20 @@ def evidence(quote: EvidenceQuote, turns: list[dict[str, Any]]) -> dict[str, Any
 
 def neutral_fragment(turn: dict[str, Any], quote: str, *, timezone: str, now: datetime) -> bool:
     text = turn["content"]
+    sentences = [part.strip() for part in re.split(r"(?<=[.!])\s+", text)]
     if (
         any(char in text for char in "\"'‘’“”`?\n\r\t")
         or _UNSAFE_FRAGMENT.search(text)
         or excluded_source((text,))
-        or quote.strip() not in [part.strip() for part in re.split(r"(?<=[.!])\s+", text)]
+        or quote.strip() not in sentences
     ):
         return False
+    # Positive certification of the whole parent prevents a model from selecting
+    # first-person words that the student is merely reporting or reading aloud.
+    for sentence in sentences:
+        parent = derive_literal_turn(sentence, timezone=timezone, now=now)
+        if not (parent.facts or parent.threads):
+            return False
     result = derive_literal_turn(quote, timezone=timezone, now=now)
     return bool(result.facts or result.threads)
 
@@ -428,6 +435,10 @@ async def apply_learning(
         )
     )
     new_facts = {row[0]: row[1] for row in new_fact_rows}
+    if transcript.get("recall_superseded"):
+        # This source has lost raw-recall authority. Do not retain or count
+        # private reviews that the live source guard must reject.
+        proposals = []
     # Summary is still exact-source selection, never invented prose or a fact.
     if (
         output.summary

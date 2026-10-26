@@ -140,12 +140,27 @@ async def test_semantic_selection_certifies_independent_neutral_sentences_only(h
         "I never said this. I prefer brief replies.",
         "I am discussing my family. I prefer brief replies.",
         "Do I prefer brief replies?",
+        "He told me the following. I prefer brief replies.",
+        "She wrote these words. I prefer brief replies.",
+        "I am reading a script. I prefer brief replies.",
+        "A friend is speaking. I prefer brief replies.",
     ],
 )
 def test_parent_source_qualifiers_cannot_be_erased_by_selected_span(text):
     assert not neutral_fragment(
         {"content": text}, "I prefer brief replies.", timezone="UTC", now=datetime.now(UTC)
     )
+
+
+@pytest.mark.asyncio
+async def test_reported_unknown_parent_is_private_review_not_automatic_fact(history_env):
+    env = history_env
+    _, _, identifier = await setup(env, "He told me the following. I prefer brief replies.")
+    result = await apply(env, identifier, output("I prefer brief replies."))
+    assert result == {"saved_count": 0, "review_count": 1} and await facts(env) == []
+    state = (await env.client.get("/api/v1/memory/learning")).json()
+    assert state["pending"][0]["content"] == "I prefer brief replies."
+    assert state["pending"][0]["sensitive"] is True
 
 
 @pytest.mark.asyncio
@@ -517,3 +532,81 @@ async def test_postgres_concurrent_private_confirmation_is_one_fact_and_one_gene
     first, second = await asyncio.gather(save(), save())
     assert first["id"] == second["id"] == suggestion and len(await facts(env)) == 1
     assert (await env.client.get("/api/v1/memory/privacy")).json()["generation"] == generation + 1
+
+
+@pytest.mark.asyncio
+async def test_same_source_semantic_correction_erases_old_and_unreachable_private_reviews(
+    history_env,
+):
+    env = history_env
+    generation = await enable(env)
+    env.settings.memory_semantic_learning_enabled = True
+    _, source_id = await archive(env, generation, question=MULTI)
+    await archive(env, generation, source_id=source_id, sequence=2, question=PRIVATE)
+    async with env.factory() as database:
+        old = await database.scalar(select(MemoryLearningJob))
+        old_id = old.id
+    first = await apply(env, old_id, output("I prefer brief replies.", PRIVATE))
+    assert first == {"saved_count": 1, "review_count": 1}
+    await archive(
+        env,
+        generation,
+        source_id=source_id,
+        sequence=3,
+        question="I prefer detailed replies. I code in Rust.",
+    )
+    new_quote = "My synthetic workshop uses a green prototype enclosure."
+    await archive(env, generation, source_id=source_id, sequence=4, question=new_quote)
+    async with env.factory() as database:
+        latest = await database.scalar(
+            select(MemoryLearningJob).where(MemoryLearningJob.sequence == 4)
+        )
+        latest_id = latest.id
+    result = await apply(env, latest_id, output("I prefer detailed replies.", new_quote))
+    assert result == {"saved_count": 1, "review_count": 0}
+    async with env.factory() as database:
+        old, latest = (
+            await database.get(MemoryLearningJob, old_id),
+            await database.get(MemoryLearningJob, latest_id),
+        )
+        assert old.encrypted_result is None and old.pending_count == 0
+        value = history.decrypt(
+            env.settings,
+            env.user_id,
+            env.workspace_id,
+            latest.id,
+            "learning-result",
+            latest.encrypted_result,
+        )
+        assert value["proposals"] == [] and new_quote not in str(value)
+    assert (await env.client.get("/api/v1/memory/learning")).json()["pending"] == []
+
+
+@pytest.mark.asyncio
+async def test_new_source_correction_erases_old_reviews_but_keeps_new_source_review_reachable(
+    history_env,
+):
+    env = history_env
+    generation = await enable(env)
+    env.settings.memory_semantic_learning_enabled = True
+    _, source_id = await archive(env, generation, question=MULTI)
+    await archive(env, generation, source_id=source_id, sequence=2, question=PRIVATE)
+    async with env.factory() as database:
+        old_id = (await database.scalar(select(MemoryLearningJob))).id
+    await apply(env, old_id, output("I prefer brief replies.", PRIVATE))
+    _, new_source_id = await archive(
+        env, generation, question="I prefer detailed replies. I code in Rust."
+    )
+    quote = "My synthetic workshop uses a green prototype enclosure."
+    await archive(env, generation, source_id=new_source_id, sequence=2, question=quote)
+    async with env.factory() as database:
+        new_id = (
+            await database.scalar(select(MemoryLearningJob).where(MemoryLearningJob.id != old_id))
+        ).id
+    result = await apply(env, new_id, output("I prefer detailed replies.", quote))
+    assert result == {"saved_count": 1, "review_count": 1}
+    async with env.factory() as database:
+        old = await database.get(MemoryLearningJob, old_id)
+        assert old.encrypted_result is None and old.pending_count == 0
+    pending = (await env.client.get("/api/v1/memory/learning")).json()["pending"]
+    assert len(pending) == 1 and pending[0]["content"] == quote

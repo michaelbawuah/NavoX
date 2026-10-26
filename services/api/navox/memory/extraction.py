@@ -165,6 +165,9 @@ async def learn_completed_turn(
                 old_source = await database.get(MemoryConversation, fact.source_conversation_id)
                 if old_source is not None:
                     old_source.encrypted_summary = None
+                    await history.clear_learning_proposals(
+                        database, source.user_id, source.workspace_id, source_id=old_source.id
+                    )
                     if old_source.id == source.id:
                         transcript["recall_superseded"] = True
         else:
