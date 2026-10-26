@@ -65,8 +65,8 @@ export function readMemoryFacts(value: unknown): MemoryFact[] {
     if (
       !text(row.id, 128) ||
       !row.id ||
-      !text(row.label, 160) ||
-      !text(row.content, 4000) ||
+      !text(row.label, 80) ||
+      !text(row.content, 500) ||
       !["user_saved", "vox", "chat"].includes(String(row.source_kind)) ||
       !(
         row.source_conversation_id === null ||

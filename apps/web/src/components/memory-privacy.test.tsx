@@ -228,7 +228,7 @@ it("fences further writes after an uncertain mutation until the saved state is l
   await mount();
   await click("Add something");
   await type(
-    host.querySelector('input[maxlength="160"]') as HTMLInputElement,
+    host.querySelector('input[maxlength="80"]') as HTMLInputElement,
     "My goal",
   );
   const textarea = host.querySelector("textarea");
