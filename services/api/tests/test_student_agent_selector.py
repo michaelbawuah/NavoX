@@ -808,7 +808,9 @@ async def test_current_owned_plan_preview_context_is_minimized_and_fresh(env):
         "call_id": uuid4(),
         "name": "plan.preview",
         "effect": "review",
-        "data": preview.model_dump(mode="json"),
+        # Match the tool bridge's minimized observation; replacement snapshots
+        # belong to the student's approval screen, not selector context.
+        "data": preview.model_dump(mode="json", exclude={"replaced_blocks"}),
     }
     runtime, adapter = await install_runtime(env)
     await select_next(
