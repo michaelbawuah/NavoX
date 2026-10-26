@@ -29,8 +29,8 @@ from navox.api.knowledge_graph import router as knowledge_graph_router
 from navox.api.knowledge_lifecycle import router as knowledge_lifecycle_router
 from navox.api.lms_feed import router as lms_feed_router
 from navox.api.mcp import router as mcp_router
-from navox.api.memory_history import router as memory_history_router
 from navox.api.memory import router as memory_router
+from navox.api.memory_history import router as memory_history_router
 from navox.api.middleware import RequestHardeningMiddleware
 from navox.api.news import router as news_router
 from navox.api.news_conversations import router as news_conversations_router

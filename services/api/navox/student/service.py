@@ -959,6 +959,7 @@ async def reset_data(
         erase_all_owned_feeds,
         lock_all_feeds_for_reset,
     )
+    from navox.memory.history import erase_all_memory
     from navox.outlook.cleanup import clear_private_data, lock_for_reset
     from navox.student_calendars.service import forget_calendar_data
     from navox.student_email.service import forget_email_data
@@ -966,7 +967,6 @@ async def reset_data(
     from navox.student_planning.service import forget_planning_data
     from navox.student_recovery.service import forget_recovery_data
     from navox.vox.service import forget_vox_data
-    from navox.memory.history import erase_all_memory
 
     # Mail and feed workers use connector→membership→User. Lock Outlook first:
     # the feed helper takes membership/User locks as well as its connectors.
