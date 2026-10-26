@@ -254,6 +254,39 @@ describe("Home entry shares the app-scoped Vox call", () => {
     expect(latest?.state.phase).toBe("ended");
   });
 
+  it("clears an expired privacy label when a refresh cannot be verified", async () => {
+    vi.useFakeTimers();
+    const test = rig();
+    let fail = false;
+    vi.mocked(fetch).mockImplementation(async (url) =>
+      fail
+        ? Response.json({}, { status: 503 })
+        : Response.json({
+            user_id: account.id,
+            workspace_id: account.workspace.id,
+            client_call_id: String(url).split("/calls/")[1]?.split("/")[0],
+            generation: 0,
+            privacy_generation: 1,
+            mode: "off-record",
+            retention_days: null,
+            expires_at: new Date(Date.now() + 1000).toISOString(),
+          }),
+    );
+    await test.mount();
+    await click("Talk with NavoX");
+    expect(
+      dialog().querySelector('[data-vox-privacy="off-record"]'),
+    ).not.toBeNull();
+    fail = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1001);
+    });
+    expect(
+      dialog().querySelector('[data-vox-privacy="off-record"]'),
+    ).toBeNull();
+    expect(dialog().textContent).toContain("Privacy status unavailable");
+  });
+
   it("distinguishes temporary call text from saved history without claiming a privacy status", async () => {
     const test = rig();
     await test.mount();

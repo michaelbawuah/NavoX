@@ -141,7 +141,15 @@ export function useVoxCallPrivacy(state: VoxCallState | undefined) {
       if (!live) return;
       const controller = new AbortController();
       active = controller;
-      setResult({ key, value: null, unavailable: false });
+      // Keep a still-valid label quiet during a background refresh. Scope or
+      // phase changes, expiry and any failed refresh clear it immediately.
+      setResult((previous) =>
+        previous?.key === key &&
+        previous.value &&
+        Date.parse(previous.value.expires_at) > Date.now()
+          ? previous
+          : { key, value: null, unavailable: false },
+      );
       const timeout = setTimeout(() => controller.abort(), 10000);
       let delay = 30000;
       try {
