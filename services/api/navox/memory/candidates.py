@@ -7,6 +7,7 @@ Unknown semantics are private by default; no model classification grants recall.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 from datetime import datetime, timedelta
@@ -14,7 +15,7 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
-from sqlalchemy import select
+from sqlalchemy import and_, literal, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.connectors.sync_state import database_now
@@ -122,7 +123,12 @@ async def origin_call(
             VoxCall.id == call_id,
             VoxCall.user_id == user_id,
             VoxCall.workspace_id == workspace_id,
-            VoxCall.generation == VoxState.generation,
+            or_(
+                and_(VoxCall.status == "reserved", VoxCall.generation == VoxState.generation),
+                and_(
+                    literal(not active), VoxCall.status == "ended", VoxCall.end_reason == "hang-up"
+                ),
+            ),
             User.agent_paused.is_(False),
             UserSession.user_id == user_id,
             UserSession.client_type == "web",
@@ -145,6 +151,7 @@ async def source_record(
     generation: int,
     *,
     now: datetime,
+    allow_private: bool = False,
 ) -> tuple[MemoryConversation, dict[str, Any]]:
     source = await database.scalar(
         select(MemoryConversation)
@@ -155,7 +162,7 @@ async def source_record(
             MemoryConversation.generation == generation,
             MemoryConversation.erased_at.is_(None),
             MemoryConversation.encrypted_transcript.is_not(None),
-            MemoryConversation.encrypted_summary.is_not(None),
+            true() if allow_private else MemoryConversation.encrypted_summary.is_not(None),
             (MemoryConversation.expires_at.is_(None) | (MemoryConversation.expires_at > now)),
         )
         .execution_options(populate_existing=True)
@@ -176,9 +183,69 @@ async def source_record(
             for turn in transcript["turns"]
         )
         or transcript.get("recall_superseded")
+        or (transcript.get("voice_recall_suppressed") and not allow_private)
     ):
         raise unavailable()
     return source, transcript
+
+
+async def confirmed_retry(
+    database: AsyncSession,
+    settings: Settings,
+    user_id: UUID,
+    workspace_id: UUID,
+    payload: CandidateConfirmation,
+    proof: CandidateProof,
+    *,
+    generation: int,
+    now: datetime,
+) -> dict[str, Any] | None:
+    """Read a matching post-save receipt without repeating privacy mutations."""
+    row = await database.get(MemoryFact, payload.review_id, populate_existing=True)
+    if row is None:
+        return None
+    if (row.user_id, row.workspace_id, row.source_conversation_id, row.sensitive) != (
+        user_id,
+        workspace_id,
+        proof.source_conversation_id,
+        proof.sensitive,
+    ):
+        raise unavailable()
+    value = history.decrypt(settings, user_id, workspace_id, row.id, "fact", row.encrypted_content)
+    receipt = value.get("review_receipt")
+    if (
+        not isinstance(receipt, dict)
+        or receipt.get("proof_sha256") != hashlib.sha256(payload.proposal.encode()).hexdigest()
+        or type(receipt.get("privacy_generation")) is not int
+        or receipt["privacy_generation"] != generation
+        or value.get("label") != proof.label
+        or value.get("content") != proof.quote
+        or value.get("extraction_method") != "reviewed_candidate_v1"
+        or value.get("private_by_default") is not proof.sensitive
+    ):
+        raise unavailable()
+    source, transcript = await source_record(
+        database,
+        settings,
+        user_id,
+        workspace_id,
+        proof.call_id,
+        proof.privacy_generation,
+        now=now,
+        allow_private=proof.sensitive,
+    )
+    turns = transcript["turns"]
+    if (
+        source.id != proof.source_conversation_id
+        or proof.turn_index >= len(turns)
+        or turns[proof.turn_index]["role"] != "user"
+        or turns[proof.turn_index]["content"].strip() != proof.quote
+        or bool(transcript.get("voice_recall_suppressed")) is not proof.sensitive
+    ):
+        raise unavailable()
+    if proof.sensitive and not payload.sensitive_agreement:
+        raise MemoryError(422, "Agree separately before saving this private or sensitive detail.")
+    return history.fact_view(row, settings)
 
 
 def source_sensitivity(
@@ -293,6 +360,11 @@ async def confirm_candidate(
     except (MemoryError, ValidationError, ValueError, TypeError):
         raise unavailable() from None
     generation = await privacy_generation(database, user_id, workspace_id)
+    retry = await confirmed_retry(
+        database, settings, user_id, workspace_id, payload, proof, generation=generation, now=now
+    )
+    if retry is not None:
+        return retry
     if generation != proof.privacy_generation:
         raise unavailable()
     call = await origin_call(database, user_id, workspace_id, proof.call_id, now=now, active=False)
@@ -315,13 +387,6 @@ async def confirm_candidate(
         raise unavailable()
     if proof.sensitive and not payload.sensitive_agreement:
         raise MemoryError(422, "Agree separately before saving this private or sensitive detail.")
-    existing = await database.get(MemoryFact, payload.review_id)
-    if existing is not None:
-        if (existing.user_id, existing.workspace_id) != (user_id, workspace_id):
-            raise unavailable()
-        # The review ID is the write ID. Retries return the current saved fact;
-        # they cannot reset a later edit or create a duplicate.
-        return history.fact_view(existing, settings)
     count = list(
         await database.scalars(
             select(MemoryFact.id)
@@ -331,6 +396,10 @@ async def confirm_candidate(
     )
     if len(count) >= 100:
         raise MemoryError(409, "Delete a saved fact before adding another.")
+    if proof.sensitive:
+        history.suppress_source_voice_recall(settings, source, transcript)
+        await history.bump_and_invalidate(database, user_id, workspace_id)
+        generation = await privacy_generation(database, user_id, workspace_id)
     row = MemoryFact(
         id=payload.review_id,
         user_id=user_id,
@@ -352,6 +421,10 @@ async def confirm_candidate(
                 "extraction_method": "reviewed_candidate_v1",
                 "source_turn": proof.turn_index,
                 "private_by_default": proof.sensitive,
+                "review_receipt": {
+                    "proof_sha256": hashlib.sha256(payload.proposal.encode()).hexdigest(),
+                    "privacy_generation": generation,
+                },
             },
         ),
     )

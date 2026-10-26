@@ -157,6 +157,29 @@ async def read_owner_memory(
             .limit(101)
         )
     )
+    # A private fact classifies its source conservatively, including neutral
+    # siblings and their summaries/threads. This content-free metadata survives
+    # transcript expiry, so retained siblings cannot re-enter voice afterward.
+    private_sources = set(
+        await database.scalars(
+            select(MemoryFact.source_conversation_id)
+            .where(
+                *history.owner_scope(MemoryFact, user_id, workspace_id),
+                MemoryFact.sensitive.is_(True),
+                MemoryFact.source_conversation_id.is_not(None),
+            )
+            .distinct()
+            .limit(101)
+        )
+    )
+    if len(private_sources) > 100:
+        return {
+            "status": "unavailable",
+            "facts": [],
+            "threads": [],
+            "past_context": [],
+            "message": "Private source scope exceeded its bound. Use Memory & privacy.",
+        }
     terms = {
         term
         for term in re.findall(r"[\w'-]+", query.casefold())
@@ -180,18 +203,18 @@ async def read_owner_memory(
         else set()
     )
     visible = []
-    sensitive_withheld = False
+    sensitive_withheld = bool(private_sources)
     for row in facts[:100]:
         payload = history.decrypt(
             settings, user_id, workspace_id, row.id, "fact", row.encrypted_content
         )
+        if row.sensitive or row.source_conversation_id in private_sources:
+            sensitive_withheld = True
+            continue
         if (
             row.source_conversation_id in suppressed_sources
             and payload.get("supersedes_source") is not True
         ):
-            continue
-        if row.sensitive:
-            sensitive_withheld = True
             continue
         value = history.fact_view(row, settings)
         # Keep current saved corrections even when the search uses an older
@@ -214,6 +237,7 @@ async def read_owner_memory(
                 .where(
                     *history.owner_scope(MemoryConversation, user_id, workspace_id),
                     MemoryConversation.erased_at.is_(None),
+                    MemoryConversation.id.not_in(private_sources),
                     MemoryConversation.encrypted_summary.is_not(None),
                     (
                         MemoryConversation.expires_at.is_(None)
@@ -230,7 +254,7 @@ async def read_owner_memory(
     matches = []
     for conversation in conversations[:100]:
         value = history.history_view(conversation, settings, detail=True, include_policy=True)
-        if value.get("_automatic_extraction_blocked"):
+        if value.get("_automatic_extraction_blocked") or value.get("_voice_recall_suppressed"):
             continue
         # Match and quote only student text, not a past model answer. A prior
         # generated answer is never promoted to a saved student fact.
@@ -261,6 +285,7 @@ async def read_owner_memory(
                     MemoryThread.status.in_(("open", "offered", "responded")),
                     *history.owner_scope(MemoryConversation, user_id, workspace_id),
                     MemoryConversation.erased_at.is_(None),
+                    MemoryConversation.id.not_in(private_sources),
                     MemoryConversation.encrypted_summary.is_not(None),
                     (
                         MemoryConversation.expires_at.is_(None)

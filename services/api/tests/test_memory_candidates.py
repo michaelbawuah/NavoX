@@ -19,8 +19,10 @@ from navox.db.vox import VoxCall, VoxState
 from navox.memory import candidates
 from navox.memory.candidates import CandidateArguments, prepare_candidate
 from navox.memory.service import MemoryError
+from navox.vox import service as vox_service
 from navox.vox.memory_save_tools import SAVE_MEMORY_TOOL, MemorySaveTools
 from navox.vox.recall_tools import read_owner_memory
+from navox.vox.schemas import VoxLease
 from navox.vox.worker import DatabaseAuthority, WorkerAccessLost, WorkerAuthority
 
 history_env = shared_history_fixture
@@ -287,8 +289,17 @@ async def test_manual_review_can_finish_after_hangup_but_not_after_forget(candid
     review = (await proposal(env))["review"]
     async with env.factory() as database:
         call = await database.get(VoxCall, env.call_id)
-        call.status, call.end_reason, call.ended_at = "ended", "hang-up", datetime.now(UTC)
-        await database.commit()
+        await vox_service.end(
+            database,
+            env.user_id,
+            env.workspace_id,
+            hash_session_token(env.client.cookies.get(env.settings.session_cookie_name)),
+            call.client_call_id,
+            VoxLease(generation=call.generation),
+        )
+    async with env.factory() as database:
+        state = await database.scalar(select(VoxState))
+        assert state.generation == 1  # Exercise the real native end generation advance.
     saved = await env.client.post(CONFIRM, json=body(review))
     assert saved.status_code == 201
     deleted = await env.client.delete(f"/api/v1/memory/facts/{review['id']}")

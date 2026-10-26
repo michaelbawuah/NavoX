@@ -182,9 +182,7 @@ async def update_privacy(
         payload.off_the_record,
     )
     if changed:
-        from navox.vox.service import invalidate_active_context
-
-        await invalidate_active_context(database, user_id, workspace_id)
+        await invalidate_private_contexts(database, user_id, workspace_id)
         row.generation += 1
     row.history_enabled = payload.history_enabled
     row.retention_days = retained_days
@@ -358,7 +356,7 @@ async def append_completed_turn(
     summary = "\n".join(turn["content"][:240] for turn in turns if turn["role"] == "user")[-4000:]
     row.encrypted_summary = (
         None
-        if transcript.get("recall_superseded")
+        if transcript.get("recall_superseded") or transcript.get("voice_recall_suppressed")
         else encrypt(settings, user_id, workspace_id, row.id, "summary", summary)
     )
     row.last_sequence, row.message_count, row.updated_at = sequence, len(turns), now
@@ -411,6 +409,7 @@ def history_view(
         result["_automatic_extraction_blocked"] = bool(
             transcript.get("automatic_extraction_blocked")
         )
+        result["_voice_recall_suppressed"] = bool(transcript.get("voice_recall_suppressed"))
     return result
 
 
@@ -591,14 +590,44 @@ async def get_history(
     return result
 
 
-async def bump_and_invalidate(database: AsyncSession, user_id: UUID, workspace_id: UUID) -> None:
+async def invalidate_private_contexts(
+    database: AsyncSession, user_id: UUID, workspace_id: UUID
+) -> None:
+    """Revoke provider RAM and implicit native chat history under the owner lock.
+
+    MemoryConversation is independent History and is not deleted here. Native
+    session deletion cascades to installed same-database Node cache rows; this
+    does not qualify erasure of a separately configured Node database.
+    """
     from navox.vox.service import invalidate_active_context
 
+    await invalidate_active_context(database, user_id, workspace_id)
+    await database.execute(
+        delete(AssistantSession).where(
+            *owner_scope(AssistantSession, user_id, workspace_id),
+            AssistantSession.status == "active",
+        )
+    )
+
+
+def suppress_source_voice_recall(
+    settings: Settings, source: MemoryConversation, transcript: dict[str, Any]
+) -> None:
+    """Preserve readable History while withdrawing this source from speech."""
+    transcript["voice_recall_suppressed"] = True
+    transcript["automatic_extraction_blocked"] = True
+    source.encrypted_transcript = encrypt(
+        settings, source.user_id, source.workspace_id, source.id, "transcript", transcript
+    )
+    source.encrypted_summary = None
+
+
+async def bump_and_invalidate(database: AsyncSession, user_id: UUID, workspace_id: UUID) -> None:
     row = await privacy_row(database, user_id, workspace_id, create=True)
     assert row is not None
     row.generation += 1
     row.updated_at = datetime.now(UTC)
-    await invalidate_active_context(database, user_id, workspace_id)
+    await invalidate_private_contexts(database, user_id, workspace_id)
 
 
 async def forget_conversation(
