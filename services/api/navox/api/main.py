@@ -5,6 +5,7 @@ from navox.api.actions import router as actions_router
 from navox.api.agent import router as agent_router
 from navox.api.ai import router as ai_router
 from navox.api.ai_operations import router as ai_operations_router
+from navox.api.apple_calendars import router as apple_calendars_router
 from navox.api.auth import router as auth_router
 from navox.api.board import router as board_router
 from navox.api.canvas import router as canvas_router
@@ -117,6 +118,7 @@ def create_app() -> FastAPI:
     app.include_router(student_alerts_router, prefix="/api/v1")
     app.include_router(student_availability_router, prefix="/api/v1")
     app.include_router(student_calendars_router, prefix="/api/v1")
+    app.include_router(apple_calendars_router, prefix="/api/v1")
     app.include_router(student_screenshot_router, prefix="/api/v1")
     app.include_router(student_planning_router, prefix="/api/v1")
     app.include_router(noa_router, prefix="/api/v1")

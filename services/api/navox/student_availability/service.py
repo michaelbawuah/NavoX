@@ -16,6 +16,7 @@ from navox.core.credential_vault import CredentialVaultError
 from navox.core.settings import Settings
 from navox.db.models import Connection
 from navox.db.student_planning import StudentPlanningState, StudentStudyBlock
+from navox.providers.apple_availability import AppleAvailabilitySnapshot
 from navox.providers.google_availability import (
     GoogleAvailabilityProvider,
     GoogleAvailabilitySnapshot,
@@ -40,7 +41,7 @@ from navox.student_availability.schemas import (
     SourceCoverage,
     StudyBlock,
 )
-from navox.student_calendars import microsoft
+from navox.student_calendars import apple, microsoft
 from navox.student_calendars import service as calendars
 from navox.student_planning import service as planning_service
 from navox.student_planning.schemas import Preferences
@@ -327,7 +328,9 @@ async def preview(
     provider = provider or GoogleAvailabilityProvider()
     microsoft_provider = microsoft_provider or MicrosoftAvailabilityProvider()
     source_start, source_end = _source_window(payload, internal.timezone)
-    external: dict[UUID, GoogleAvailabilitySnapshot | MicrosoftAvailabilitySnapshot] = {}
+    external: dict[
+        UUID, GoogleAvailabilitySnapshot | MicrosoftAvailabilitySnapshot | AppleAvailabilitySnapshot
+    ] = {}
 
     async def check() -> None:
         async with factory() as database:
@@ -349,6 +352,18 @@ async def preview(
                 ):
                     continue
                 try:
+                    if grant.provider == "icloud":
+                        async with factory() as apple_database:
+                            external[grant.id] = await apple.read(
+                                apple_database,
+                                scope,
+                                grant,
+                                settings,
+                                start_at=source_start,
+                                end_at=source_end,
+                                session_hash=session_hash,
+                            )
+                        continue
                     if grant.provider == "microsoft":
                         token = await microsoft.access(
                             factory, settings, scope, grant, session_hash

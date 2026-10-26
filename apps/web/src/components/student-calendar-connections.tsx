@@ -7,6 +7,7 @@ import {
   type StudentCalendarApi,
 } from "../lib/student-calendar-api";
 import { notifyCalendarAccessChanged } from "../lib/student-calendar-privacy";
+import { AppleCalendarConnection } from "./apple-calendar-connection";
 import styles from "./student-calendar.module.css";
 import { StudentCalendarSchedulingConsent } from "./student-calendar-scheduling";
 import { useCalendarWorkspace } from "./use-calendar-workspace";
@@ -23,6 +24,10 @@ export function StudentCalendarConnections(props: CalendarConnectionsProps) {
   return (
     <>
       <CalendarConnectionsWorkspace key={props.accountId} {...props} />
+      <AppleCalendarConnection
+        key={`apple:${props.accountId}`}
+        accountId={props.accountId}
+      />
       <StudentCalendarSchedulingConsent
         key={`scheduling:${props.accountId}`}
         accountId={props.accountId}
@@ -182,38 +187,47 @@ function CalendarConnectionsWorkspace({
         </li>
         <li className={styles.provider}>
           <strong>Apple / iCloud</strong>
-          <span className={styles.status}>Unavailable here</span>
+          <span className={styles.status}>
+            {!view
+              ? "Access not checked"
+              : view.providers.find((provider) => provider.id === "icloud")
+                    ?.availability === "available"
+                ? "Available to connect"
+                : "Setup unavailable here"}
+          </span>
         </li>
       </ul>
-      {view?.grants.map((grant) => (
-        <article className={styles.provider} key={grant.id}>
-          <div>
-            <strong>
-              {grant.account_label ??
-                `${grant.provider === "outlook" ? "Microsoft" : "Google"} calendar account`}
-            </strong>
-            <p className={styles.hint}>
-              {grant.status === "connected"
-                ? "Busy-time access is on"
-                : grant.status === "pending"
-                  ? "Calendar setup has not completed"
-                  : grant.status === "revoked"
-                    ? "Availability access is off"
-                    : "Calendar access is unavailable"}
-            </p>
-          </div>
-          {grant.status !== "revoked" && (
-            <button
-              type="button"
-              className={styles.secondary}
-              disabled={!privateState.ready || privateState.busy}
-              onClick={() => disconnect(grant.id)}
-            >
-              Stop availability access
-            </button>
-          )}
-        </article>
-      ))}
+      {view?.grants
+        .filter((grant) => grant.provider !== "icloud")
+        .map((grant) => (
+          <article className={styles.provider} key={grant.id}>
+            <div>
+              <strong>
+                {grant.account_label ??
+                  `${grant.provider === "outlook" ? "Microsoft" : "Google"} calendar account`}
+              </strong>
+              <p className={styles.hint}>
+                {grant.status === "connected"
+                  ? "Busy-time access is on"
+                  : grant.status === "pending"
+                    ? "Calendar setup has not completed"
+                    : grant.status === "revoked"
+                      ? "Availability access is off"
+                      : "Calendar access is unavailable"}
+              </p>
+            </div>
+            {grant.status !== "revoked" && (
+              <button
+                type="button"
+                className={styles.secondary}
+                disabled={!privateState.ready || privateState.busy}
+                onClick={() => disconnect(grant.id)}
+              >
+                Stop availability access
+              </button>
+            )}
+          </article>
+        ))}
       {google?.availability === "available" && (
         <>
           <label className={styles.check}>

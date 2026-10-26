@@ -61,6 +61,8 @@ function sourceLabel(sourceId: string, index: number) {
   if (sourceId === "student-timetable") return "Classes and fixed commitments";
   if (sourceId === "student-study-plan") return "Saved study plan";
   if (sourceId.startsWith("google-")) return "Google calendar access";
+  if (sourceId.startsWith("microsoft-")) return "Outlook calendar access";
+  if (sourceId.startsWith("icloud-")) return "Apple calendar access";
   return `Other required source ${index + 1}`;
 }
 
