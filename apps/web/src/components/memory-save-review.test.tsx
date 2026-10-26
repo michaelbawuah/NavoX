@@ -47,12 +47,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
-async function settings(accountKey = "school:student") {
+async function settings(accountKey = "school:student", disabled = false) {
   await act(async () =>
     root.render(
       <MemorySaveReviewPanel
         accountKey={accountKey}
-        disabled={false}
+        disabled={disabled}
         onSaved={onSaved}
         onUncertain={onUncertain}
       />,
@@ -222,4 +222,46 @@ it("does not claim a save when a valid-looking receipt belongs to another source
   expect(onUncertain).toHaveBeenCalledOnce();
   expect(button("Save this memory").disabled).toBe(true);
   expect(host.textContent).toContain("could not be confirmed");
+});
+it("queues a second review until an uncertain first save has been checked", async () => {
+  const first = memorySaveReviewFixture(),
+    second = memorySaveReviewFixture();
+  second.review.id = "10000000-0000-4000-8000-000000000002";
+  second.review.content = "Second synthetic private candidate.";
+  saveMemoryCandidateDraft(sessionStorage, "school:student", first.review);
+  await settings();
+  await agree();
+  let reject: (reason: Error) => void = () => {};
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+  );
+  await act(async () => button("Save this memory").click());
+  saveMemoryCandidateDraft(sessionStorage, "school:student", second.review);
+  await act(async () =>
+    window.dispatchEvent(new Event("navox:memory-save-review-ready")),
+  );
+  expect(host.textContent).toContain(first.review.content);
+  expect(host.textContent).not.toContain(second.review.content);
+  expect(sessionStorage.length).toBe(1);
+  await act(async () => reject(Error("lost first response")));
+  expect(onUncertain).toHaveBeenCalledOnce();
+  await click("Don’t save this");
+  expect(host.textContent).toContain("Check saved facts");
+  expect(host.textContent).not.toContain("was not saved");
+  await act(async () =>
+    window.dispatchEvent(new Event("navox:memory-save-review-ready")),
+  );
+  expect(host.textContent).not.toContain(second.review.content);
+  expect(sessionStorage.length).toBe(1);
+  // Parent keeps controls disabled until it reloads current saved facts.
+  await settings("school:student", true);
+  await settings("school:student", false);
+  expect(host.textContent).toContain(second.review.content);
+  expect(
+    (host.querySelector('input[type="checkbox"]') as HTMLInputElement).checked,
+  ).toBe(false);
+  expect(fetch).toHaveBeenCalledOnce();
 });

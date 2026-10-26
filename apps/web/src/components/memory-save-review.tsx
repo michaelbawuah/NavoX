@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import {
   conversationMemoryRequest,
   MemoryClientError,
@@ -29,9 +29,32 @@ export function MemorySaveReviewPanel({
   const [locked, setLocked] = useState(false);
   const [notice, setNotice] = useState("");
   const epoch = useRef(0);
+  const flow = useRef({ busy: false, uncertain: false, disabled });
+  const loadPending = useRef<() => void>(() => {});
   const id = useId();
+  useLayoutEffect(() => {
+    const wasDisabled = flow.current.disabled;
+    flow.current.disabled = disabled;
+    // The parent keeps controls disabled after an uncertain result until fresh
+    // saved facts have loaded. Only that fresh restoration releases the queue.
+    if (!disabled && wasDisabled && flow.current.uncertain) {
+      flow.current.uncertain = false;
+      setLocked(false);
+      setReview(null);
+      setNotice(
+        "Saved memory reloaded. Review a fresh proposal before saving.",
+      );
+    }
+    if (!disabled) loadPending.current();
+  }, [disabled]);
   useEffect(() => {
+    flow.current.busy = false;
+    flow.current.uncertain = false;
+    setBusy(false);
+    setLocked(false);
     const load = () => {
+      if (flow.current.busy || flow.current.uncertain || flow.current.disabled)
+        return;
       let candidate: MemorySaveCandidate | null = null;
       try {
         candidate = consumeMemoryCandidateDraft(
@@ -50,10 +73,12 @@ export function MemorySaveReviewPanel({
       setLocked(false);
       setNotice("");
     };
+    loadPending.current = load;
     load();
     window.addEventListener("navox:memory-save-review-ready", load);
     return () => {
       ++epoch.current;
+      loadPending.current = () => {};
       window.removeEventListener("navox:memory-save-review-ready", load);
     };
   }, [accountKey]);
@@ -80,6 +105,7 @@ export function MemorySaveReviewPanel({
     )
       return;
     const current = epoch.current;
+    flow.current.busy = true;
     setBusy(true);
     setNotice("");
     try {
@@ -115,6 +141,7 @@ export function MemorySaveReviewPanel({
       if (current !== epoch.current) return;
       setLocked(true);
       if (cause instanceof MemoryClientError && cause.uncertain) {
+        flow.current.uncertain = true;
         setNotice(
           "The save result could not be confirmed. Reload your memory before making another change.",
         );
@@ -124,7 +151,11 @@ export function MemorySaveReviewPanel({
           "This review could not be saved. It may have expired or changed. Ask Vox for a new review.",
         );
     } finally {
-      if (current === epoch.current) setBusy(false);
+      if (current === epoch.current) {
+        flow.current.busy = false;
+        setBusy(false);
+        loadPending.current();
+      }
     }
   }
   if (reviewOwner !== accountKey) return null;
@@ -179,7 +210,9 @@ export function MemorySaveReviewPanel({
           onClick={() => {
             ++epoch.current;
             setReview(null);
-            setNotice("This statement was not saved as a fact.");
+            setNotice(
+              "Review closed. Check saved facts below if you need to confirm a previous save.",
+            );
           }}
         >
           Don’t save this
