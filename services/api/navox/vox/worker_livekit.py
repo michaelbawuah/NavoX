@@ -27,15 +27,25 @@ from navox.ai.speech_adapters import MAX_SPEECH_AUDIO_BYTES
 from navox.core.settings import Settings, get_settings
 from navox.db.session import get_database_engine, get_session_factory
 from navox.vox.audio_input import AudioInputBuffer
+from navox.vox.calendar_approval import CalendarApprovalCoordinator
+from navox.vox.calendar_tools import CALENDAR_REVIEW_TOPIC, CalendarTools
 from navox.vox.capture_tools import CaptureTools
 from navox.vox.context_store import DatabaseContextStore
-from navox.vox.inference_config import load_inference_config
+from navox.vox.host_turn import CompositeHostTurnHooks
+from navox.vox.inference_config import (
+    InferenceConfigurationError,
+    VoxInferenceConfig,
+    load_inference_config,
+    route_credential,
+)
 from navox.vox.inference_http import OpenAICompatiblePipeline, UsageHooks
 from navox.vox.inference_realtime import OpenAIRealtimeAdapter
 from navox.vox.inference_worker import ConfiguredVoiceWorker
+from navox.vox.memory_save_tools import MEMORY_SAVE_REVIEW_TOPIC, MemorySaveTools
 from navox.vox.memory_tools import MEMORY_REVIEW_TOPIC, MemoryTools
 from navox.vox.planning_tools import REVIEW_TOPIC, PlanningTools
 from navox.vox.provider import cloud_config
+from navox.vox.recall_delivery import RecallDeliveryCoordinator
 from navox.vox.recall_tools import MemoryReadTools
 from navox.vox.schedule_tools import ScheduleTools
 from navox.vox.session_context import CallContextKey, VoxCallContext
@@ -52,6 +62,17 @@ from navox.vox.worker import (
 MAX_OUTPUT_SAMPLES = 48_000 * 60
 # Absorb short provider/DB scheduling stalls; interruption still clears immediately.
 OUTPUT_QUEUE_MS = 200
+
+
+def host_speech_available(config: VoxInferenceConfig, settings: Settings) -> bool:
+    """Use only the same operator-selected TTS route admitted for cascade speech."""
+    if config.mode != "cascade" and not config.fallback_enabled:
+        return False
+    try:
+        route_credential(config.tts, settings)
+    except InferenceConfigurationError:
+        return False
+    return True
 
 
 def log_worker_failure(stage: str, error: BaseException) -> None:
@@ -424,8 +445,17 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                     topic=REVIEW_TOPIC,
                 )
 
+            qualified_host_speech = host_speech_available(inference, settings)
+            memory_delivery = RecallDeliveryCoordinator(
+                check,
+                settings,
+                user_id=authority.user_id,
+                workspace_id=authority.workspace_id,
+                context_key=f"vox:{context_key.call_id}",
+                notice_available=qualified_host_speech,
+            )
             memory_tools = MemoryReadTools(
-                check, settings, context_key=f"vox:{context_key.call_id}"
+                check, settings, context_key=f"vox:{context_key.call_id}", delivery=memory_delivery
             )
 
             async def publish_memory(result: dict[str, object]) -> None:
@@ -437,6 +467,27 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                     topic=MEMORY_REVIEW_TOPIC,
                 )
 
+            async def publish_memory_save(result: dict[str, object]) -> None:
+                await inference_check()
+                await ctx.room.local_participant.publish_data(
+                    json.dumps(result, ensure_ascii=False).encode(),
+                    reliable=True,
+                    destination_identities=[assignment.client_identity],
+                    topic=MEMORY_SAVE_REVIEW_TOPIC,
+                )
+
+            async def publish_calendar(result: dict[str, object]) -> None:
+                await inference_check()
+                await ctx.room.local_participant.publish_data(
+                    json.dumps(result, ensure_ascii=False).encode(),
+                    reliable=True,
+                    destination_identities=[assignment.client_identity],
+                    topic=CALENDAR_REVIEW_TOPIC,
+                )
+
+            calendar_approval = CalendarApprovalCoordinator()
+            host_hooks = CompositeHostTurnHooks(calendar_approval, memory_delivery)
+
             tools = VoxReadTools(
                 PlanningTools(check, settings, publish_plan),
                 CaptureTools(check, settings, publish_plan),
@@ -444,6 +495,16 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                 PublicWebTools(check, inference, settings, usage, publish_web),
                 memory_tools,
                 MemoryTools(check, settings, publish_memory),
+                MemorySaveTools(
+                    check, settings, call_id=context_key.call_id, publish=publish_memory_save
+                ),
+                CalendarTools(
+                    check,
+                    settings,
+                    calendar_approval,
+                    publish_calendar,
+                    voice_available=qualified_host_speech,
+                ),
             )
             realtime = OpenAIRealtimeAdapter(
                 inference,
@@ -452,6 +513,7 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                 usage,
                 tools,
                 memory_context=memory_tools.context,
+                host_hooks=host_hooks,
             )
             pipeline = OpenAICompatiblePipeline(
                 inference,
@@ -460,9 +522,18 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                 usage,
                 tools,
                 memory_context=memory_tools.context,
+                host_hooks=host_hooks,
             )
             worker = ConfiguredVoiceWorker(
-                assignment, check, output, inference, context, realtime, pipeline, usage=usage
+                assignment,
+                check,
+                output,
+                inference,
+                context,
+                realtime,
+                pipeline,
+                usage=usage,
+                host_hooks=host_hooks,
             )
         stopped = asyncio.Event()
         streams: set[asyncio.Task[None]] = set()
