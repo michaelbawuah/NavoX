@@ -34,12 +34,14 @@ class NativeClaim:
     unknown_travel: bool
     timezone: str
 
-    def interval(self, travel_minutes: int = 0) -> tuple[datetime, datetime]:
+    def interval(
+        self, travel_minutes: int = 0, *, timezone: str | None = None
+    ) -> tuple[datetime, datetime]:
         first, last = self.start_at - MEETING_BUFFER, self.end_at + MEETING_BUFFER
         if self.unknown_travel:
-            zone = ZoneInfo(self.timezone)
-            left = first.astimezone(zone).date()
-            right = last.astimezone(zone).date()
+            zone = ZoneInfo(timezone or self.timezone)
+            left = (first - timedelta(hours=4)).astimezone(zone).date()
+            right = (last + timedelta(hours=4) - timedelta(microseconds=1)).astimezone(zone).date()
             return _uncertain_day_span(left, zone, days=(right - left).days + 1)
         padding = timedelta(minutes=travel_minutes)
         return first - padding, last + padding

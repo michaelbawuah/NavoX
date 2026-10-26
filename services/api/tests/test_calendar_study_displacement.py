@@ -704,3 +704,91 @@ async def test_opt_in_without_initial_moves_does_not_approve_later_displacement(
     assert (await saved_block(env, env.block_id))["start_at"] == move.start_at.isoformat().replace(
         "+00:00", "Z"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_zero_move_part_of_provisional_window_is_an_ordinary_event(study_env, enabled):
+    env = study_env
+    before = await saved_block(env, env.block_id)
+    env.settings.student_planning_enabled = enabled
+    view = await preview(
+        env,
+        start_at=env.start_at.replace(hour=9).isoformat(),
+        end_at=env.start_at.replace(hour=9, minute=30).isoformat(),
+    )
+    assert "study_moves" not in view
+    response = await act(env, view, "approve")
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "created"
+    assert "study_changes_applied" not in response.json()
+    assert (await saved_block(env, env.block_id)) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["preview", "approval"])
+async def test_planning_release_guard_never_admits_local_moves(study_env, stage):
+    env = study_env
+    before = await saved_block(env, env.block_id)
+    if stage == "approval":
+        view = await preview(env, allow_study_displacement=True)
+    env.settings.student_planning_enabled = False
+    if stage == "preview":
+        response = await env.client.post(
+            BASE + "/events/preview",
+            json=await draft_body(env, allow_study_displacement=True),
+            headers=env.headers,
+        )
+    else:
+        response = await act(env, view, "approve")
+    assert response.status_code == 404 and "Study changes are not enabled" in response.text
+    assert (await saved_block(env, env.block_id)) == before
+    assert env.writes.inserts == []
+
+
+@pytest.mark.asyncio
+async def test_ordinary_event_cannot_override_a_protected_adjacent_study_break(study_env):
+    env = study_env
+    body = await draft_body(
+        env,
+        start_at=env.start_at.replace(hour=13, minute=20).isoformat(),
+        end_at=env.start_at.replace(hour=13, minute=50).isoformat(),
+    )
+    body["availability"]["start_at"] = env.start_at.replace(hour=13, minute=5).isoformat()
+    body["availability"]["end_at"] = env.start_at.replace(hour=16).isoformat()
+    response = await env.client.post(BASE + "/events/preview", json=body, headers=env.headers)
+    assert response.status_code == 409 and "explicit review" in response.text
+    assert env.writes.inserts == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_saved_receipt_without_provenance_keeps_exact_undo(event_env):
+    env = event_env
+    response = await act(env, await preview(env), "approve")
+    assert response.status_code == 200, response.text
+    created = response.json()
+    async with env.factory() as database:
+        row = await database.get(StudentCalendarEvent, UUID(created["id"]))
+        payload = scheduling._open(row, env.settings)
+        payload.pop("provenance")
+        row.digest = scheduling._digest(
+            {
+                "id": str(row.id),
+                "generation": row.generation,
+                "payload": {
+                    **payload,
+                    "etag": None,
+                    "creation_etag": None,
+                },
+            }
+        )
+        row.encrypted_payload = scheduling._seal(row, payload, env.settings)
+        legacy = env.writes.events[row.id.hex]
+        legacy.pop("description")
+        legacy["extendedProperties"]["private"]["navoxDigest"] = row.digest
+        await database.commit()
+    legacy = await receipt(env, created["id"])
+    assert legacy["can_undo"] is True and "study_moves" not in legacy
+    undone = await act(env, legacy, "undo")
+    assert undone.status_code == 200, undone.text
+    assert undone.json()["status"] == "undone" and len(env.writes.deletes) == 1

@@ -17,6 +17,7 @@ from navox.student_availability.schemas import (
     StudyBlock,
 )
 from navox.student_calendars import displacement
+from navox.student_calendars.claims import NativeClaim
 from navox.student_planning.schemas import BlockView, Preferences, TaskView
 
 
@@ -107,7 +108,9 @@ def clock_case(*, complete=True):
         ),
     )
     state = StudentPlanningState(user_id=user_id, workspace_id=workspace_id, revision=1)
-    context = displacement.Context(state, [block], {task_id: task}, "b" * 64, {})
+    context = displacement.Context(
+        state, [block], {task_id: task}, "b" * 64, {}, planning_enabled=True
+    )
     return now, snapshot, context
 
 
@@ -132,6 +135,39 @@ def test_certificate_rejects_expiry_and_foreign_context():
 def test_movable_work_is_not_an_override_of_unknown_provider_coverage():
     now, snapshot, context = clock_case(complete=False)
     with pytest.raises(schedule.StudentError):
+        displacement.certify(
+            context, snapshot, now + timedelta(minutes=30), now + timedelta(hours=1), now
+        )
+
+
+def test_unknown_native_travel_includes_adjacent_days_and_exclusive_end():
+    early = NativeClaim(
+        uuid4(),
+        datetime(2030, 1, 2, 2, tzinfo=UTC),
+        datetime(2030, 1, 2, 3, tzinfo=UTC),
+        True,
+        "UTC",
+    )
+    assert early.interval() == (datetime(2030, 1, 1, tzinfo=UTC), datetime(2030, 1, 3, tzinfo=UTC))
+    boundary = NativeClaim(
+        uuid4(),
+        datetime(2030, 1, 2, 14, tzinfo=UTC),
+        datetime(2030, 1, 2, 19, 50, tzinfo=UTC),
+        True,
+        "UTC",
+    )
+    assert boundary.interval() == (
+        datetime(2030, 1, 2, tzinfo=UTC),
+        datetime(2030, 1, 3, tzinfo=UTC),
+    )
+    first, last = early.interval(timezone="America/New_York")
+    assert first.hour == last.hour == 5
+
+
+def test_pure_certification_does_not_override_disabled_study_planning():
+    now, snapshot, context = clock_case()
+    context.planning_enabled = False
+    with pytest.raises(schedule.StudentError, match="not enabled"):
         displacement.certify(
             context, snapshot, now + timedelta(minutes=30), now + timedelta(hours=1), now
         )

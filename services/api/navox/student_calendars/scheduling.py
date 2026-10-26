@@ -538,23 +538,36 @@ async def _free(
     snapshot = await availability.preview(
         factory, settings, user_id, workspace_id, session_hash, draft.availability
     )
-    if (
-        draft.start_at - MEETING_BUFFER < snapshot.checked_at
-        or (snapshot.result.status != "complete" and not draft.allow_study_displacement)
-        or not (
-            displacement.fits(snapshot, draft)
-            if draft.allow_study_displacement
-            else any(
-                opening.start_at <= draft.start_at - MEETING_BUFFER
-                and opening.end_at >= draft.end_at + MEETING_BUFFER
-                and not opening.displaced_study_block_ids
-                for opening in snapshot.result.confirmed_openings
-            )
-        )
+    if draft.start_at - MEETING_BUFFER < snapshot.checked_at or not displacement.fits(
+        snapshot, draft
     ):
         raise schedule.StudentError(
             409, "That time is no longer confirmed free. Check availability again"
         )
+    if draft.allow_study_displacement or not snapshot.input.study_blocks:
+        return snapshot
+    # A maximal provisional opening can contain study elsewhere. Independently
+    # certify a zero-move slice; a client option or ID list is never authority.
+    async with factory() as database:
+        current = await service.boundary(database, user_id, workspace_id, session_hash)
+        await _fresh_internal(
+            database, current, user_id, workspace_id, draft, snapshot, settings=settings
+        )
+        context = await displacement.load_context(
+            database,
+            user_id,
+            workspace_id,
+            snapshot,
+            planning_enabled=settings.student_planning_enabled,
+        )
+        if (
+            displacement.certify(context, snapshot, draft.start_at, draft.end_at, current.now)
+            is not None
+        ):
+            raise schedule.StudentError(
+                409, "That time requires an explicit review of affected study work"
+            )
+        await database.commit()
     return snapshot
 
 
@@ -614,7 +627,9 @@ async def _check_claims(
             # day span; a lagging provider cannot turn that uncertainty into zero.
             zone = ZoneInfo(draft.timezone)
             first_day = (first - timedelta(hours=4)).astimezone(zone).date()
-            last_day = (last + timedelta(hours=4)).astimezone(zone).date()
+            last_day = (
+                (last + timedelta(hours=4) - timedelta(microseconds=1)).astimezone(zone).date()
+            )
             first, last = _uncertain_day_span(first_day, zone, days=(last_day - first_day).days + 1)
         if first < draft.end_at + MEETING_BUFFER and last > draft.start_at - MEETING_BUFFER:
             if row.status in {"created", "changed"}:
@@ -753,7 +768,7 @@ async def preview(
         }
         if draft.allow_study_displacement:
             review = await displacement.prepare(
-                database, user_id, workspace_id, draft, fresh, current.now
+                database, user_id, workspace_id, draft, fresh, current.now, settings=settings
             )
             if review is not None:
                 payload["study_displacement"] = {
@@ -1011,12 +1026,19 @@ async def approve(
                     503, "This private study review could not be opened"
                 ) from None
             await displacement.validate(
-                database, user_id, workspace_id, draft, fresh, review, current.now
+                database,
+                user_id,
+                workspace_id,
+                draft,
+                fresh,
+                review,
+                current.now,
+                settings=settings,
             )
         elif draft.allow_study_displacement:
             if (
                 await displacement.prepare(
-                    database, user_id, workspace_id, draft, fresh, current.now
+                    database, user_id, workspace_id, draft, fresh, current.now, settings=settings
                 )
                 is not None
             ):
@@ -1037,7 +1059,7 @@ async def approve(
         row.revision += 1
         if review is not None:
             planning = await displacement.apply(
-                database, user_id, workspace_id, review, row.id, current.now
+                database, user_id, workspace_id, review, row.id, current.now, settings=settings
             )
             assert study is not None
             study["applied"], study["applied_revision"] = True, planning.revision

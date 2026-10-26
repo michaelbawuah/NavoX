@@ -66,6 +66,7 @@ class Context:
     source_hash: str
     wakes: dict[date, datetime | None]
     pending_displacement: bool = False
+    planning_enabled: bool = False
 
 
 class MeetingInterval(Protocol):
@@ -103,6 +104,8 @@ async def load_context(
     user_id: UUID,
     workspace_id: UUID,
     snapshot: AvailabilitySnapshot,
+    *,
+    planning_enabled: bool = False,
 ) -> Context:
     user = await schedule.owner(database, user_id, workspace_id, lock=True)
     state = await planning.state(database, user_id, workspace_id)
@@ -155,6 +158,7 @@ async def load_context(
         await planning.stable_source_hash(database, user_id, workspace_id, state),
         wakes,
         await claims.pending_displacement(database, user_id, workspace_id),
+        planning_enabled,
     )
 
 
@@ -320,13 +324,21 @@ async def prepare(
     draft: CalendarEventPreview,
     snapshot: AvailabilitySnapshot,
     now: datetime,
+    *,
+    settings: Settings,
 ) -> StudyReview | None:
     if not fits(snapshot, draft):
         raise schedule.StudentError(409, "That meeting does not fit confirmed calendar coverage")
     # A routine without a saved study plan has nothing to displace.
     if not snapshot.input.study_blocks:
         return None
-    context = await load_context(database, user_id, workspace_id, snapshot)
+    context = await load_context(
+        database,
+        user_id,
+        workspace_id,
+        snapshot,
+        planning_enabled=settings.student_planning_enabled,
+    )
     return certify(context, snapshot, draft.start_at, draft.end_at, now)
 
 
@@ -356,6 +368,8 @@ def certify(
     affected = _affected(context, snapshot, draft, now)
     if not affected:
         return None
+    if not context.planning_enabled:
+        raise schedule.StudentError(404, "Study changes are not enabled")
     if context.pending_displacement:
         raise schedule.StudentError(
             409, "A calendar request is still being checked before study can move"
@@ -447,8 +461,12 @@ async def validate(
     snapshot: AvailabilitySnapshot,
     review: StudyReview,
     now: datetime,
+    *,
+    settings: Settings,
 ) -> None:
-    context = await load_context(database, user_id, workspace_id, snapshot)
+    if not settings.student_planning_enabled:
+        raise schedule.StudentError(404, "Study changes are not enabled")
+    context = await load_context(database, user_id, workspace_id, snapshot, planning_enabled=True)
     await claims.require_mutable(database, user_id, workspace_id)
     if (
         not fits(snapshot, draft)
@@ -492,8 +510,12 @@ async def apply(
     review: StudyReview,
     event_id: UUID,
     now: datetime,
+    *,
+    settings: Settings,
 ) -> StudentPlanningState:
     """Caller validates, seals the executing event, flushes, then sets source hash."""
+    if not settings.student_planning_enabled:
+        raise schedule.StudentError(404, "Study changes are not enabled")
     state = await planning.state(database, user_id, workspace_id)
     if state.revision != review.planning_revision:
         raise schedule.StudentError(409, "The study plan changed before event admission")
