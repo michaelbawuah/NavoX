@@ -107,8 +107,9 @@ def _when(start: datetime, end: datetime, timezone: str) -> str:
 
 def readback(view: CalendarEventView, *, undo: bool = False) -> str:
     text = (
+        "I'll read your private calendar review aloud now. "
         f"{'Remove only' if undo else 'Add'} the event “{view.title}” "
-        f"{'from' if undo else 'to'} calendar “{view.calendar_label}”, "
+        f"{'from' if undo else 'to'} Google calendar “{view.calendar_label}”, "
         f"{_when(view.start_at, view.end_at, view.timezone)}. "
     )
     if view.location:
@@ -362,7 +363,11 @@ class CalendarTools:
         async with self.check.factory() as database:
             await calendars.check_scope(database, original, token)
             current = await availability._internal(
-                database, authority.user_id, authority.workspace_id, payload
+                database,
+                authority.user_id,
+                authority.workspace_id,
+                payload,
+                settings=self.settings,
             )
             now = await database_now(database)
             if (
@@ -446,11 +451,13 @@ class CalendarTools:
         if start.tzinfo is None or start.utcoffset() is None:
             raise ValueError
         window = await self._window(start, 1, query.duration_minutes)
+        if start + timedelta(minutes=query.duration_minutes) > window.end_at:
+            window = await self._window(start, 2, query.duration_minutes)
         if (
             start < window.start_at
             or start + timedelta(minutes=query.duration_minutes) > window.end_at
         ):
-            raise schedule.StudentError(422, "Choose one future local-day event")
+            raise schedule.StudentError(422, "Choose one future event within the reviewed window")
         targets, target = await self._target(query)
         draft = CalendarEventPreview.model_validate(
             {

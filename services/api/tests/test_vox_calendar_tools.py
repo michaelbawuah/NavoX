@@ -15,6 +15,7 @@ from navox.db.student import StudentFixedBlock
 from navox.db.student_calendars import StudentCalendarEvent
 from navox.db.vox import VoxCall
 from navox.student_calendars.provider import CalendarTarget
+from navox.student_planning import service as planning
 from navox.vox.calendar_approval import CalendarApprovalCoordinator
 from navox.vox.calendar_tools import PREPARE_TOOL, SUGGEST_TOOL, UNDO_TOOL, CalendarTools
 from navox.vox.worker import DatabaseAuthority, WorkerAccessLost, WorkerAssignment
@@ -81,7 +82,9 @@ async def test_voice_calendar_full_prepare_yes_verify_and_new_exact_undo_review(
     assert env.writes.inserts == []
     spoken = await play_review(env)
     assert "Review circuits" in spoken and "Study room" in spoken
+    assert spoken.index("private calendar review") < spoken.index("Review circuits")
     assert "Private personal calendar" in spoken and "UTC" in spoken
+    assert "Google calendar" in spoken
     assert env.start_at.strftime("%I:%M %p") in spoken
     added = await env.approval.input("of course")
     assert "confirmed this exact event was added" in added.answer
@@ -224,3 +227,20 @@ async def test_hangup_during_submitted_operation_stays_held_and_never_replays(ca
     with pytest.raises(WorkerAccessLost):
         await env.tools.execute(PREPARE_TOOL, arguments(env))
     assert len(env.writes.inserts) == 1
+
+
+@pytest.mark.asyncio
+async def test_overnight_awake_event_reads_both_exact_local_dates(calendar_voice_env):
+    env = calendar_voice_env
+    async with env.factory() as database:
+        state = await planning.state(database, env.user_id, env.workspace_id)
+        state.preferences = {**state.preferences, "wake_time": "20:00", "sleep_time": "08:00"}
+        state.preferences_revision += 1
+        await database.commit()
+    start = env.start_at.replace(hour=23, minute=30)
+    await prepare(env, start_at=start.isoformat(), duration_minutes=120)
+    spoken = await play_review(env)
+    end = start + timedelta(minutes=120)
+    assert start.strftime("%A, %B") in spoken and end.strftime("%A, %B") in spoken
+    assert "11:30 PM" in spoken and "01:30 AM" in spoken
+    assert env.writes.inserts == []
