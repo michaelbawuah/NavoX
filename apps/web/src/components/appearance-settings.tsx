@@ -21,6 +21,7 @@ export function AppearanceSettings({ accountKey }: { accountKey: string }) {
             onClick={() => choose(value)}
           >
             {value === "dark" ? "Dark" : "Light"}
+            {theme === value ? " · Selected" : ""}
           </button>
         ))}
       </fieldset>
