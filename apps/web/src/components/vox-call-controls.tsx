@@ -19,6 +19,7 @@ import styles from "./vox-call-controls.module.css";
 import { useVoxCall } from "./vox-call-provider";
 import { VoxClassReview } from "./vox-class-review";
 import { VoxConversation } from "./vox-conversation";
+import { VoxMemoryReview } from "./vox-memory-review";
 import { VoxPlanReview } from "./vox-plan-review";
 import { VoxRoutineReview } from "./vox-routine-review";
 import { VoxTaskReview } from "./vox-task-review";
@@ -380,6 +381,18 @@ function CallDialog({
         </p>
       </div>
       <WebLookup state={state} />
+      {state.ownerVerified && state.owner && !ended && state.memoryReview && (
+        <VoxMemoryReview
+          key={`${state.callId}:${state.owner.workspaceId}:${state.owner.userId}:${state.memoryReview.query}`}
+          proposal={state.memoryReview}
+          accountKey={`${state.owner.workspaceId}:${state.owner.userId}`}
+          onReview={() => {
+            controller.dismissMemoryReview();
+            controller.setMinimized(true);
+          }}
+          onClose={() => controller.dismissMemoryReview()}
+        />
+      )}
       {state.ownerVerified &&
         state.owner &&
         !ended &&

@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { saveMemoryForgetDraft } from "../lib/vox-memory-review";
 import { MemoryPrivacyPanel } from "./memory-privacy";
 
 const session = vi.hoisted(() => ({
@@ -52,6 +53,8 @@ const call = {
 };
 let host: HTMLDivElement, root: Root;
 beforeEach(() => {
+  sessionStorage.clear();
+  window.history.replaceState({}, "", "/settings");
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal(
     "fetch",
@@ -246,4 +249,45 @@ it("fences further writes after an uncertain mutation until the saved state is l
   expect(host.textContent).toContain("Reload your memory");
   await click("Retry");
   expect(button("Add something").disabled).toBe(false);
+});
+
+it("warns that correcting a source-linked fact also forgets its original source", async () => {
+  await mount();
+  const edit = [...host.querySelectorAll("button")].find((node) =>
+    node.textContent?.startsWith("Edit Study preference"),
+  );
+  if (!edit) throw new Error("Missing fact edit");
+  await act(async () => edit.click());
+  expect(host.textContent).toContain("also forgets its original conversation");
+  expect(button("Save correction and forget source").disabled).toBe(false);
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.some(([, options]) => options?.method === "PATCH"),
+  ).toBe(false);
+});
+
+it("opens an owner-bound Vox search without deleting or putting its subject in the URL", async () => {
+  saveMemoryForgetDraft(sessionStorage, "school:student", "morning");
+  await mount();
+  expect(host.textContent).toContain("Review matches for “morning”");
+  expect(
+    (host.querySelector('input[type="search"]') as HTMLInputElement).value,
+  ).toBe("morning");
+  expect(
+    host.querySelector('[data-memory-match="true"]')?.textContent,
+  ).toContain("Study preference");
+  expect(window.location.href).not.toContain("morning");
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.some(([url]) =>
+        String(url).endsWith("/history?query=morning"),
+      ),
+  ).toBe(true);
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.some(([, options]) => options?.method === "DELETE"),
+  ).toBe(false);
 });

@@ -1558,3 +1558,48 @@ it("accepts plan reviews only from the current agent, topic and owned lease", as
   receive(data, agent, "navox.vox.plan-review.v1");
   expect(env.request.onEvent).not.toHaveBeenCalled();
 });
+
+it("accepts memory review metadata only from the exact current agent and lease", async () => {
+  const env = environment();
+  env.request.mayRenewReservation = () => true;
+  const connection = await env.transport.connect(env.request);
+  const result = {
+    status: "review_required",
+    applied: false,
+    query: "morning routine",
+    destination: "/settings?section=memory&forget=morning+routine",
+    matches: [],
+    ambiguous: false,
+    has_more_matches: false,
+    search_complete: true,
+    searched_items: 0,
+    message: "Review first",
+  };
+  const data = new TextEncoder().encode(JSON.stringify(result));
+  const receive = env.room.events?.dataReceived;
+  if (!receive) throw new Error("Expected data handler");
+  vi.mocked(env.request.onEvent).mockClear();
+  receive(data, "other-agent", "navox.vox.memory-review.v1");
+  receive(data, agent, "wrong-topic");
+  receive(
+    new TextEncoder().encode(JSON.stringify({ ...result, applied: true })),
+    agent,
+    "navox.vox.memory-review.v1",
+  );
+  expect(env.request.onEvent).not.toHaveBeenCalled();
+  receive(data, agent, "navox.vox.memory-review.v1");
+  expect(env.request.onEvent).toHaveBeenCalledWith({
+    type: "memory-review",
+    result: {
+      ...result,
+      destination: "/settings?section=memory#memory-privacy",
+    },
+  });
+  vi.mocked(env.request.onEvent).mockClear();
+  env.request.mayRenewReservation = () => false;
+  receive(data, agent, "navox.vox.memory-review.v1");
+  expect(env.request.onEvent).not.toHaveBeenCalled();
+  await connection.close();
+  receive(data, agent, "navox.vox.memory-review.v1");
+  expect(env.request.onEvent).not.toHaveBeenCalled();
+});

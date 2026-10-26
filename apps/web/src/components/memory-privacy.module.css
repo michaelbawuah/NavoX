@@ -293,3 +293,9 @@
     flex-basis: 100%;
   }
 }
+
+.facts > li[data-memory-match="true"] {
+  outline: 1px solid var(--nx-accent-text);
+  outline-offset: 8px;
+  border-radius: 4px;
+}

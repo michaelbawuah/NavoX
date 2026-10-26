@@ -8,6 +8,10 @@ import type {
   VoxTransportRequest,
 } from "./vox-call";
 import { VoxStandbyWake, type VoxWakeFactory } from "./vox-local-wake";
+import {
+  parseVoxMemoryReview,
+  VOX_MEMORY_REVIEW_TOPIC,
+} from "./vox-memory-review";
 import { parseVoxPlanReview } from "./vox-plan-review";
 import type { PorcupineWakeConfig } from "./vox-porcupine-wake";
 import { VoxReservationError } from "./vox-reservations";
@@ -744,6 +748,9 @@ export function createLiveKitVoxTransport(options: {
             if (topic === "navox.vox.web.v1") {
               const result = parseVoxWebLookup(data);
               if (result) request.onEvent({ type: "web-lookup", result });
+            } else if (topic === VOX_MEMORY_REVIEW_TOPIC) {
+              const result = parseVoxMemoryReview(data);
+              if (result) request.onEvent({ type: "memory-review", result });
             } else if (topic === "navox.vox.plan-review.v1") {
               const result = parseVoxPlanReview(data);
               if (result) request.onEvent({ type: "plan-review", result });

@@ -25,6 +25,10 @@ import {
   readMemoryPrivacy,
   conversationMemoryRequest as request,
 } from "../lib/conversation-memory";
+import {
+  consumeMemoryForgetDraft,
+  validMemoryForgetQuery,
+} from "../lib/vox-memory-review";
 import styles from "./memory-privacy.module.css";
 import { PersonalMemoryPanel } from "./personal-memory";
 
@@ -159,7 +163,44 @@ export function MemoryPrivacyPanel({
   useEffect(() => {
     if (forget) document.getElementById(`${id}-forget`)?.focus();
   }, [forget, id]);
-  async function searchHistory(event?: FormEvent) {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: consume a one-use handoff only after fresh owner/privacy restoration.
+  useEffect(() => {
+    if (!ready || !privacy) return;
+    const review = () => {
+      let query: string | null = null;
+      try {
+        query = consumeMemoryForgetDraft(window.sessionStorage, accountKey);
+      } catch {
+        /* Settings still supports typed search. */
+      }
+      const url = new URL(window.location.href);
+      if (
+        !query &&
+        url.searchParams.get("section") === "memory" &&
+        validMemoryForgetQuery(url.searchParams.get("forget"))
+      )
+        query = url.searchParams.get("forget");
+      if (!query) return;
+      url.searchParams.delete("forget");
+      window.history.replaceState(
+        {},
+        "",
+        `${url.pathname}${url.search}#memory-privacy`,
+      );
+      setQuery(query);
+      setLegacyOpen(true);
+      setNotice(`Review matches for “${query}”. Nothing has been deleted.`);
+      void searchHistory(undefined, query);
+      document
+        .getElementById("memory-privacy")
+        ?.scrollIntoView?.({ block: "start" });
+    };
+    review();
+    window.addEventListener("navox:memory-forget-ready", review);
+    return () =>
+      window.removeEventListener("navox:memory-forget-ready", review);
+  }, [accountKey, ready, privacy?.generation]);
+  async function searchHistory(event?: FormEvent, searchQuery = query) {
     event?.preventDefault();
     if (!ready || busy || mustReload) return;
     const current = ++historyEpoch.current,
@@ -171,7 +212,7 @@ export function MemoryPrivacyPanel({
     try {
       const rows = await request(
         accountKey,
-        `/history?query=${encodeURIComponent(query.trim())}`,
+        `/history?query=${encodeURIComponent(searchQuery.trim())}`,
         readMemoryHistory,
       );
       if (
@@ -382,7 +423,15 @@ export function MemoryPrivacyPanel({
             )}
             <ul className={styles.facts}>
               {facts.map((fact) => (
-                <li key={fact.id}>
+                <li
+                  key={fact.id}
+                  data-memory-match={
+                    !!query.trim() &&
+                    `${fact.label} ${fact.content}`
+                      .toLocaleLowerCase()
+                      .includes(query.trim().toLocaleLowerCase())
+                  }
+                >
                   <div>
                     <strong>{fact.label}</strong>
                     <p className={styles.prewrap}>{fact.content}</p>
@@ -418,14 +467,21 @@ export function MemoryPrivacyPanel({
               ))}
             </ul>
             <p className={styles.muted}>
-              You can also say “forget what I said about…” in Vox when memory
-              tools are available.
+              Say “forget what I said about…” in Vox to find it, then review the
+              removal here.
             </p>
             {formOpen && (
               <form className={styles.factForm} onSubmit={saveFact}>
                 <h3>
                   {editing ? "Edit saved fact" : "Add something to remember"}
                 </h3>
+                {editing?.source_conversation_id && (
+                  <p className={styles.sensitiveNote}>
+                    Saving this correction also forgets its original
+                    conversation, summary and other facts learned from it. Your
+                    corrected fact stays.
+                  </p>
+                )}
                 <label>
                   Label
                   <input
@@ -466,7 +522,9 @@ export function MemoryPrivacyPanel({
                       controlsDisabled || !label.trim() || !content.trim()
                     }
                   >
-                    Save fact
+                    {editing?.source_conversation_id
+                      ? "Save correction and forget source"
+                      : "Save fact"}
                   </button>
                   <button
                     type="button"
@@ -700,7 +758,9 @@ export function MemoryPrivacyPanel({
               </h3>
               <p>
                 {"label" in forget
-                  ? "This deletes the saved fact. Its original conversation stays in history until you forget that conversation."
+                  ? forget.source_conversation_id
+                    ? "This deletes the fact, its source conversation and summary, and every other fact learned from that conversation. You can’t undo this."
+                    : "This deletes the saved fact. You can’t undo this."
                   : "This deletes the conversation, its summary and every fact learned from it. You can’t undo this."}
               </p>
               <div className={styles.actions}>
@@ -718,6 +778,7 @@ export function MemoryPrivacyPanel({
                           "DELETE",
                         ),
                       "Forgotten.",
+                      true,
                     )
                   }
                 >

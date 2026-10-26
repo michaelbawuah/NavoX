@@ -1428,3 +1428,37 @@ it("keeps web lookup results only in the current owned call", async () => {
   expect(test.controller.current().webLookup).toBeNull();
   await test.controller.dispose();
 });
+
+it("fences memory reviews on session checks, terminal cleanup and stale transports", async () => {
+  const test = rig();
+  await test.controller.start();
+  const old = test.requests[0];
+  const result = {
+    status: "review_required" as const,
+    applied: false as const,
+    query: "morning routine",
+    destination: "/settings?section=memory#memory-privacy",
+    matches: [],
+    ambiguous: false,
+    has_more_matches: false,
+    search_complete: true,
+    searched_items: 0,
+    message: "Review first",
+  };
+  old.onEvent({ type: "memory-review", result });
+  expect(test.controller.current().memoryReview).toEqual(result);
+  test.controller.suspendForSessionCheck();
+  expect(test.controller.current().memoryReview).toBeNull();
+  old.onEvent({ type: "memory-review", result });
+  expect(test.controller.current().memoryReview).toBeNull();
+  await test.controller.bindOwner(owner);
+  old.onEvent({ type: "memory-review", result });
+  test.controller.dismissMemoryReview();
+  expect(test.controller.current().memoryReview).toBeNull();
+  old.onEvent({ type: "memory-review", result });
+  await test.controller.hangUp();
+  expect(test.controller.current().memoryReview).toBeNull();
+  old.onEvent({ type: "memory-review", result });
+  expect(test.controller.current().memoryReview).toBeNull();
+  await test.controller.dispose();
+});
