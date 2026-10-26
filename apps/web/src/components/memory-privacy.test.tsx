@@ -251,7 +251,7 @@ it("fences further writes after an uncertain mutation until the saved state is l
   expect(button("Add something").disabled).toBe(false);
 });
 
-it("warns that correcting a source-linked fact also forgets its original source", async () => {
+it("explains that a corrected fact replaces current memory while preserving history", async () => {
   await mount();
   const edit = [...host.querySelectorAll("button")].find((node) =>
     node.textContent?.startsWith("Edit Study preference"),
@@ -259,7 +259,7 @@ it("warns that correcting a source-linked fact also forgets its original source"
   if (!edit) throw new Error("Missing fact edit");
   await act(async () => edit.click());
   expect(host.textContent).toContain("also forgets its original conversation");
-  expect(button("Save correction and forget source").disabled).toBe(false);
+  expect(button("Save correction").disabled).toBe(false);
   expect(
     vi
       .mocked(fetch)

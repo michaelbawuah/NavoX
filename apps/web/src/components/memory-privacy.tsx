@@ -523,7 +523,7 @@ export function MemoryPrivacyPanel({
                     }
                   >
                     {editing?.source_conversation_id
-                      ? "Save correction and forget source"
+                      ? "Save correction"
                       : "Save fact"}
                   </button>
                   <button
