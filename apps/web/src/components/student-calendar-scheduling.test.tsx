@@ -342,6 +342,33 @@ afterEach(async () => {
 });
 
 describe("reviewed calendar scheduling screen", () => {
+  it("distinguishes both offsets in an exact receipt across a repeated DST hour", async () => {
+    const api = client();
+    vi.mocked(api.events).mockResolvedValue({
+      generation: 2,
+      calendar_revision: 5,
+      next_cursor: null,
+      events: [
+        {
+          ...event(),
+          status: "created",
+          changes_applied: true,
+          provider: "outlook",
+          start_at: "2026-11-01T01:30:00-04:00",
+          end_at: "2026-11-01T01:15:00-05:00",
+          timezone: "America/New_York",
+        },
+      ],
+    });
+    await mount(api);
+    await click("Check scheduling and recent actions");
+    await click("Study with Sam · Added");
+    const receipt = host.querySelector("article");
+    expect(receipt?.textContent).toContain("1:30 AM EDT");
+    expect(receipt?.textContent).toContain("1:15 AM EST");
+    expect(receipt?.textContent).toContain("America/New_York");
+    expect(api.approveEvent).not.toHaveBeenCalled();
+  });
   it("does not infer Microsoft write support from connected busy-time access", async () => {
     const api = await providerClient("outlook", false);
     await act(async () =>
