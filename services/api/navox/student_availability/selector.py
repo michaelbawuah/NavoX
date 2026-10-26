@@ -19,6 +19,7 @@ Honesty rules:
 - Nothing here creates, holds or approves an event.
 """
 
+from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from typing import Literal, Self
 from zoneinfo import ZoneInfo
@@ -31,6 +32,7 @@ from navox.student_availability.schemas import (
     FrozenInput,
     Opening,
     TimeInterval,
+    identifier,
     instant,
 )
 
@@ -69,6 +71,7 @@ SPREAD = timedelta(minutes=90)
 MAX_CANDIDATES = 5_000
 MEETING_BUFFER = timedelta(minutes=10)
 MAX_AGE = timedelta(seconds=60)
+MAX_CERTIFIED_CANDIDATES = 64
 
 
 class Crunch(FrozenInput):
@@ -116,6 +119,19 @@ class SuggestionResult(FrozenInput):
     suggestions: tuple[Suggestion, ...]
     alternatives_available: int = Field(ge=0)
     changes_applied: Literal[False] = False
+
+
+@dataclass(frozen=True)
+class CertifiedCandidate:
+    """Internal positioned slot; only the owned allocator may construct these.
+
+    This is deliberately absent from SuggestionRequest and all HTTP inputs.
+    It is not a reusable authorization or a substitute for exact event review.
+    """
+
+    opening: Opening
+    start_at: datetime
+    displaced_study_block_ids: tuple[str, ...]
 
 
 def duration_for(purpose: Purpose, explicit: int | None) -> int | None:
@@ -185,8 +201,113 @@ def _ends(busy: tuple[TimeInterval, ...]) -> tuple[set[datetime], set[datetime]]
     return {item.end_at for item in busy}, {item.start_at for item in busy}
 
 
+def _score(
+    request: SuggestionRequest,
+    opening: Opening,
+    start: datetime,
+    minutes: int,
+    zone: ZoneInfo,
+    busy_ends: set[datetime],
+    busy_starts: set[datetime],
+    displaced: tuple[str, ...] = (),
+) -> tuple[tuple[float, datetime], Suggestion] | None:
+    length = timedelta(minutes=minutes)
+    end = start + length
+    if request.purpose == "lunch" and not _inside_daily(start, end, zone, LUNCH_WINDOW):
+        return None
+    if request.purpose == "coffee" and not _inside_daily(start, end, zone, COFFEE_WINDOW):
+        return None
+    theirs = _within(start, end, request.other_windows)
+    if request.require_other_windows and not theirs:
+        return None
+    gaps = [item.at - end for item in request.crunch if item.at >= end]
+    if any(gap < HARD_CRUNCH for gap in gaps) or any(
+        item.at > start and item.at < end for item in request.crunch
+    ):
+        return None
+    near_crunch = any(gap < SOFT_CRUNCH for gap in gaps)
+    after = start - MEETING_BUFFER == opening.start_at and opening.start_at in busy_ends
+    before = end + MEETING_BUFFER == opening.end_at and opening.end_at in busy_starts
+    penalty = 0.0
+    if request.other_windows and not theirs:
+        penalty += 100
+    if near_crunch:
+        penalty += 30
+    if request.purpose == "lunch":
+        middle = start.astimezone(zone) + length / 2
+        noon = middle.replace(hour=12, minute=30, second=0, microsecond=0)
+        penalty += abs((middle - noon).total_seconds()) / 600
+    penalty += (start - request.now).total_seconds() / 3600 * 0.5
+    if after:
+        penalty -= 1
+    if displaced:
+        # Prefer an otherwise similar ordinary opening to reshuffling work;
+        # exact fewer-block plans are less disruptive than larger ones.
+        penalty += 15 + 5 * (len(displaced) - 1)
+    reasons: list[SuggestionReason] = []
+    if theirs:
+        reasons.append("within_their_hours")
+    if after:
+        reasons.append("right_after_commitment")
+    elif before:
+        reasons.append("right_before_commitment")
+    if request.purpose == "lunch":
+        reasons.append("lunch_time")
+    if request.crunch and not near_crunch:
+        reasons.append("clear_of_deadlines")
+    if displaced:
+        reasons.append("moves_study_block")
+    return (penalty, start), Suggestion(
+        start_at=start,
+        end_at=end,
+        minutes=minutes,
+        reasons=tuple(reasons),
+        displaced_study_block_ids=displaced,
+    )
+
+
+def study_candidates(request: SuggestionRequest) -> tuple[CertifiedCandidate, ...]:
+    """Bounded tentative slots, never suggestions until the server certifies them."""
+    availability = request.availability
+    minutes = duration_for(request.purpose, request.duration_minutes)
+    if (
+        minutes is None
+        or availability.status == "needs_routine"
+        or any(warning.code != "movable_study" for warning in availability.warnings)
+    ):
+        return ()
+    zone = ZoneInfo(availability.timezone)
+    busy_ends, busy_starts = _ends(availability.busy)
+    candidates = []
+    for opening in availability.provisional_openings:
+        if (
+            set(opening.reasons) != {"movable_study"}
+            or not opening.displaced_study_block_ids
+            or opening.unchecked_source_ids
+            or opening.unknown_travel_record_ids
+        ):
+            continue
+        for start in _candidate_starts(
+            opening, timedelta(minutes=minutes), zone, request.now, request.other_windows
+        ):
+            score = _score(request, opening, start, minutes, zone, busy_ends, busy_starts)
+            if score is not None:
+                candidates.append((score[0], CertifiedCandidate(opening, start, ())))
+                if len(candidates) > MAX_CANDIDATES:
+                    raise ValueError("Too many candidate times; narrow the requested window")
+    candidates.sort(key=lambda pair: pair[0])
+    return tuple(item for _, item in candidates[:MAX_CERTIFIED_CANDIDATES])
+
+
 def suggest(request: SuggestionRequest) -> SuggestionResult:
-    """Return up to `count` ranked, non-overlapping options, best first."""
+    """Rank confirmed openings only; no raw study displacement is offerable."""
+    return _suggest_certified(request, ())
+
+
+def _suggest_certified(
+    request: SuggestionRequest, certified: tuple[CertifiedCandidate, ...]
+) -> SuggestionResult:
+    """Server-only extension after the exact owned replacement allocator ran."""
     availability = request.availability
     zone = ZoneInfo(availability.timezone)
     minutes = duration_for(request.purpose, request.duration_minutes)
@@ -213,62 +334,42 @@ def suggest(request: SuggestionRequest) -> SuggestionResult:
     scored: list[tuple[tuple[float, datetime], Suggestion]] = []
     for opening in openings:
         for start in _candidate_starts(opening, length, zone, request.now, request.other_windows):
-            end = start + length
-            if request.purpose == "lunch" and not _inside_daily(start, end, zone, LUNCH_WINDOW):
-                continue
-            if request.purpose == "coffee" and not _inside_daily(start, end, zone, COFFEE_WINDOW):
-                continue
-            theirs = _within(start, end, request.other_windows)
-            if request.require_other_windows and not theirs:
-                continue
-            gaps = [item.at - end for item in request.crunch if item.at >= end]
-            if any(gap < HARD_CRUNCH for gap in gaps) or any(
-                item.at > start and item.at < end for item in request.crunch
-            ):
-                continue
-            near_crunch = any(gap < SOFT_CRUNCH for gap in gaps)
-            # Busy intervals already include buffers and known travel, so an
-            # opening that starts where one ends follows a real commitment
-            # (not merely wake time), and likewise for the end edge.
-            after = start - MEETING_BUFFER == opening.start_at and opening.start_at in busy_ends
-            before = end + MEETING_BUFFER == opening.end_at and opening.end_at in busy_starts
+            candidate = _score(request, opening, start, minutes, zone, busy_ends, busy_starts)
+            if candidate is not None:
+                scored.append(candidate)
+            if len(scored) > MAX_CANDIDATES:
+                raise ValueError("Too many candidate times; narrow the requested window")
 
-            penalty = 0.0
-            if request.other_windows and not theirs:
-                penalty += 100
-            if near_crunch:
-                penalty += 30
-            if request.purpose == "lunch":
-                middle = start.astimezone(zone) + length / 2
-                noon = middle.replace(hour=12, minute=30, second=0, microsecond=0)
-                penalty += abs((middle - noon).total_seconds()) / 600
-            penalty += (start - request.now).total_seconds() / 3600 * 0.5
-            if after:
-                # Keeps the day compact; worth about two hours of "sooner".
-                penalty -= 1
-
-            reasons: list[SuggestionReason] = []
-            if theirs:
-                reasons.append("within_their_hours")
-            if after:
-                reasons.append("right_after_commitment")
-            elif before:
-                reasons.append("right_before_commitment")
-            if request.purpose == "lunch":
-                reasons.append("lunch_time")
-            if request.crunch and not near_crunch:
-                reasons.append("clear_of_deadlines")
-            scored.append(
-                (
-                    (penalty, start),
-                    Suggestion(
-                        start_at=start,
-                        end_at=end,
-                        minutes=minutes,
-                        reasons=tuple(reasons),
-                    ),
-                )
-            )
+    if (
+        len(certified) > MAX_CERTIFIED_CANDIDATES
+        or certified
+        and any(warning.code != "movable_study" for warning in availability.warnings)
+    ):
+        raise ValueError("Study replacements require complete known source coverage")
+    for item in certified:
+        opening, start, displaced = (
+            item.opening,
+            instant(item.start_at),
+            item.displaced_study_block_ids,
+        )
+        if (
+            opening not in availability.provisional_openings
+            or set(opening.reasons) != {"movable_study"}
+            or opening.unchecked_source_ids
+            or opening.unknown_travel_record_ids
+            or len(displaced) > 24
+            or len(set(displaced)) != len(displaced)
+            or start - MEETING_BUFFER < max(opening.start_at, request.now)
+            or start + length + MEETING_BUFFER > opening.end_at
+        ):
+            raise ValueError("The certified meeting does not match its owned opening")
+        for block_id in displaced:
+            identifier(block_id)
+        candidate = _score(
+            request, opening, start, minutes, zone, busy_ends, busy_starts, displaced
+        )
+        if candidate is not None:
+            scored.append(candidate)
             if len(scored) > MAX_CANDIDATES:
                 raise ValueError("Too many candidate times; narrow the requested window")
 

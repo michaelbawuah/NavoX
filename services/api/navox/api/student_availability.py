@@ -18,8 +18,9 @@ from navox.api.student_calendars import (
 from navox.connectors.sync_state import database_now
 from navox.student import service as schedule
 from navox.student_availability import service
+from navox.student_availability.ranked import ranked_suggestions
 from navox.student_availability.schemas import AvailabilityPreview, AvailabilitySnapshot
-from navox.student_availability.selector import SuggestionRequest, suggest
+from navox.student_availability.selector import SuggestionRequest
 from navox.student_availability.suggestion_schemas import (
     AvailabilitySuggestionsRequest,
     AvailabilitySuggestionsView,
@@ -110,7 +111,7 @@ async def suggestions(
             # service. The owner/session locks above serialize source changes
             # through publication; the source service remains the sole reader.
             current = await service._internal(
-                boundary_database, user_id, workspace_id, preview_payload
+                boundary_database, user_id, workspace_id, preview_payload, settings=settings
             )
             if (
                 current.digest != snapshot.revision.student_revision
@@ -129,15 +130,31 @@ async def suggestions(
                 raise schedule.StudentError(409, "This availability check expired. Check again")
             # BusyInterval intentionally carries no exam/deadline meaning or
             # professor hours. Do not invent those optional ranking inputs.
-            selection = suggest(
+            selection = await ranked_suggestions(
+                boundary_database,
+                user_id,
+                workspace_id,
+                snapshot,
                 SuggestionRequest(
                     availability=snapshot.result,
                     now=now,
                     purpose=payload.purpose,
                     duration_minutes=payload.duration_minutes,
                     count=2,
-                )
+                ),
             )
+            await calendars.check_scope(boundary_database, original_scope, token_hash)
+            final = await service._internal(
+                boundary_database, user_id, workspace_id, preview_payload, settings=settings
+            )
+            if (
+                final.digest != current.digest
+                or final.preferences_revision != current.preferences_revision
+                or final.planning_revision != current.planning_revision
+            ):
+                raise schedule.StudentError(
+                    409, "Your calendar, routine or study plan changed. Check again"
+                )
             if await database_now(boundary_database) >= snapshot.expires_at:
                 raise schedule.StudentError(409, "This availability check expired. Check again")
             result = AvailabilitySuggestionsView(snapshot=snapshot, selection=selection)
