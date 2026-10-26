@@ -15,6 +15,7 @@ from navox.core.settings import Settings
 from navox.db.models import UserSession
 from navox.db.vox import VoxCall
 from navox.db.vox_context import VoxCallCheckpoint
+from navox.memory import history as saved_history
 from navox.vox.session_context import CallContextKey, ContextSnapshot
 from navox.vox.worker import DatabaseAuthority, MemoryTurn, WorkerAccessLost
 
@@ -118,6 +119,8 @@ class DatabaseContextStore:
         self._configuration_id = configuration_id
         self.check = check
         self._cipher = checkpoint_cipher(settings)
+        self._settings = settings
+        self._private_snapshots: dict[CallContextKey, ContextSnapshot] = {}
 
     async def _row(self, database: AsyncSession, key: CallContextKey) -> VoxCallCheckpoint:
         call = await database.get(VoxCall, key.call_id, populate_existing=True)
@@ -136,6 +139,7 @@ class DatabaseContextStore:
             raise WorkerAccessLost("The call context has ended")
         row = await database.get(VoxCallCheckpoint, key.call_id, populate_existing=True)
         if row is None:
+            privacy = await saved_history.privacy_row(database, key.user_id, key.workspace_id)
             row = VoxCallCheckpoint(
                 call_id=key.call_id,
                 user_id=key.user_id,
@@ -143,6 +147,10 @@ class DatabaseContextStore:
                 auth_session_id=call.auth_session_id,
                 generation=key.generation,
                 revision=0,
+                memory_generation=await saved_history.recording_generation(
+                    database, key.user_id, key.workspace_id
+                ),
+                off_the_record=privacy.off_the_record if privacy is not None else False,
                 encrypted_context=encode_checkpoint(
                     self._cipher,
                     key,
@@ -182,6 +190,8 @@ class DatabaseContextStore:
                 intent.generation,
             )
             row = await self._row(database, key)
+            if row.off_the_record:
+                return self._private_snapshots.get(key, ContextSnapshot(row.revision))
             return decode_checkpoint(
                 self._cipher,
                 key,
@@ -209,7 +219,7 @@ class DatabaseContextStore:
             if row.revision != expected_revision:
                 return False
             # Reject corrupt/wrong-domain prior state instead of overwriting it.
-            decode_checkpoint(
+            prior = decode_checkpoint(
                 self._cipher,
                 key,
                 row.auth_session_id,
@@ -217,11 +227,26 @@ class DatabaseContextStore:
                 row.encrypted_context,
                 configuration_id=self._configuration_id,
             )
+            if row.off_the_record:
+                self._private_snapshots[key] = snapshot
+            elif turns and turns[-1].kind == "dialogue" and turns[:-1] == prior.turns:
+                await saved_history.append_completed_turn(
+                    database,
+                    self._settings,
+                    user_id=key.user_id,
+                    workspace_id=key.workspace_id,
+                    source_id=key.call_id,
+                    source_kind="vox",
+                    expected_generation=row.memory_generation,
+                    sequence=snapshot.revision,
+                    question=turns[-1].question,
+                    answer=turns[-1].answer,
+                )
             row.encrypted_context = encode_checkpoint(
                 self._cipher,
                 key,
                 row.auth_session_id,
-                snapshot,
+                ContextSnapshot(snapshot.revision) if row.off_the_record else snapshot,
                 configuration_id=self._configuration_id,
             )
             row.revision = snapshot.revision
@@ -240,6 +265,7 @@ class DatabaseContextStore:
             )
             row = await self._row(database, key)
             row.encrypted_context = None
+            self._private_snapshots.pop(key, None)
 
 
 async def purge_call_checkpoint(database: AsyncSession, call_id: UUID) -> None:
