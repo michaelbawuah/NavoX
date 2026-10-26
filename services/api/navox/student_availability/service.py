@@ -48,6 +48,7 @@ from navox.student_planning.schemas import Preferences
 
 TIMETABLE = "student-timetable"
 STUDY = "student-study-plan"
+NATIVE_CALENDAR = "student-calendar-actions"
 MAX_ACCOUNTS_PER_CHECK = 8
 SOURCE_PADDING = timedelta(minutes=250)
 
@@ -62,6 +63,7 @@ class InternalSnapshot:
     busy: tuple[BusyInterval, ...]
     studies: tuple[StudyBlock, ...]
     uncertainties: tuple[ProjectionUncertainty, ...]
+    native_claim_count: int = 0
 
 
 def _source_window(payload: AvailabilityPreview, timezone: str) -> tuple[datetime, datetime]:
@@ -86,7 +88,12 @@ async def _internal(
     user_id: UUID,
     workspace_id: UUID,
     payload: AvailabilityPreview,
+    *,
+    settings: Settings,
 ) -> InternalSnapshot:
+    # Local import prevents the scheduling -> availability -> planning cycle.
+    from navox.student_calendars import claims
+
     user = await schedule.owner(database, user_id, workspace_id)
     preferences = await planning_service.preferences(database, user_id, workspace_id)
     if (
@@ -187,6 +194,25 @@ async def _internal(
         )
         for item in fixed
     )
+    native = await claims.snapshot(database, user_id, workspace_id, settings=settings)
+    for claim in native:
+        first, last = claim.interval()
+        # The retained interval already contains its own meeting buffer (or a
+        # conservative unknown-travel day). Fixed avoids padding it twice;
+        # the positioned new meeting still reserves its separate ten minutes.
+        busy.append(
+            BusyInterval(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                id=f"native-{claim.id.hex}",
+                source_id=NATIVE_CALENDAR,
+                kind="fixed",
+                start_at=first,
+                end_at=last,
+                travel_before_minutes=0,
+                travel_after_minutes=0,
+            )
+        )
     uncertainties = [
         ProjectionUncertainty(
             user_id=user_id,
@@ -247,6 +273,9 @@ async def _internal(
             for block in blocks
         ],
     }
+    native_fingerprint = claims.fingerprint(native)
+    if native_fingerprint is not None:
+        body["calendar_claims"] = native_fingerprint
     digest = hashlib.sha256(
         json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -259,6 +288,7 @@ async def _internal(
         tuple(busy),
         studies,
         tuple(uncertainties),
+        len(native),
     )
 
 
@@ -320,7 +350,7 @@ async def preview(
 ) -> AvailabilitySnapshot:
     async with factory() as database:
         scope = await calendars.scope_snapshot(database, user_id, workspace_id, session_hash)
-        internal = await _internal(database, user_id, workspace_id, payload)
+        internal = await _internal(database, user_id, workspace_id, payload, settings=settings)
         started = await database_now(database)
         await database.commit()
     if len(scope.grants) > 198:
@@ -386,7 +416,7 @@ async def preview(
             raise
     async with factory() as database:
         await calendars.check_scope(database, scope, session_hash)
-        current = await _internal(database, user_id, workspace_id, payload)
+        current = await _internal(database, user_id, workspace_id, payload, settings=settings)
         if current.digest != internal.digest:
             raise schedule.StudentError(409, "Your schedule or study plan changed. Check again")
         now = await database_now(database)
@@ -397,6 +427,8 @@ async def preview(
         summaries = []
         busy = list(current.busy)
         required = [TIMETABLE, STUDY]
+        if current.native_claim_count:
+            required.append(NATIVE_CALENDAR)
         for source_id in required:
             coverage.append(
                 SourceCoverage(
@@ -412,7 +444,13 @@ async def preview(
                 )
             )
             summaries.append(
-                AvailabilitySourceSummary(source_id=source_id, state="complete", calendar_count=0)
+                AvailabilitySourceSummary(
+                    source_id=source_id,
+                    state="complete",
+                    calendar_count=current.native_claim_count
+                    if source_id == NATIVE_CALENDAR
+                    else 0,
+                )
             )
         grant_sources = [(f"{grant.provider}-{grant.id.hex}", grant) for grant in scope.grants]
         if not grant_sources:
