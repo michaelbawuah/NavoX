@@ -288,3 +288,47 @@ async def test_idle_authenticated_typed_answer_preserves_pending_review():
     await worker._task
     assert calls.count("apply") == 1 and not worker.failed
     await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_transport_failure_during_host_decision_cannot_retry_through_model_fallback():
+    class Decision(HostTurnHooks):
+        needs_input = True
+
+        def __init__(self):
+            self.effects = 0
+
+        async def input(self, question):
+            self.effects += 1
+            raise OSError("synthetic metadata failure after native decision")
+
+    class Fallback:
+        def __init__(self):
+            self.calls = 0
+
+        async def respond(self, *args, **kwargs):
+            self.calls += 1
+            raise AssertionError("A host decision must not be replayed through fallback")
+
+    socket, host = Socket(), Decision()
+
+    async def connector(url, headers):
+        return socket
+
+    realtime = OpenAIRealtimeAdapter(
+        VoxInferenceConfig(),
+        settings(),
+        Check(),
+        Hooks(),
+        connector=connector,
+        host_hooks=host,
+    )
+    fallback = Fallback()
+    worker = await worker_parts(realtime, fallback, Output(), host)
+    await realtime.begin_turn(())
+    for _ in range(10):
+        await realtime.append_audio(struct.pack("<h", 1000) * 320)
+    await worker._respond(b"pcm", 0)
+    assert host.effects == 1 and realtime.tool_started
+    assert fallback.calls == 0
+    await worker.close()

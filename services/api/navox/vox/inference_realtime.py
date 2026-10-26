@@ -404,6 +404,11 @@ class OpenAIRealtimeAdapter:
             else:
                 raise ProviderRejected("The current voice approval transcript is unavailable")
         if self._question:
+            if self.host_hooks.needs_input:
+                # A host decision can admit a native side effect during this
+                # await. Transport failure afterward must never replay the
+                # student's approval through automatic model fallback.
+                self.tool_started = True
             reply = await self.host_hooks.input(self._question)
             if reply is not None:
                 raise HostReplyRequired(self._question, reply.answer)
