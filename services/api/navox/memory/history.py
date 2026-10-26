@@ -322,13 +322,28 @@ async def append_completed_turn(
             {"role": "assistant", "content": answer, "created_at": now.isoformat()},
         ]
     )
+    from navox.memory.extraction import learn_completed_turn
+
+    await learn_completed_turn(
+        database,
+        settings,
+        source=row,
+        transcript=transcript,
+        question=question,
+        sequence=sequence,
+        now=now,
+    )
     row.encrypted_transcript = encrypt(
         settings, user_id, workspace_id, row.id, "transcript", transcript
     )
     # An extractive recap, explicitly derived from transcript, never a verified fact
     # or permission. No provider receives history merely because it was retained.
     summary = "\n".join(turn["content"][:240] for turn in turns if turn["role"] == "user")[-4000:]
-    row.encrypted_summary = encrypt(settings, user_id, workspace_id, row.id, "summary", summary)
+    row.encrypted_summary = (
+        None
+        if transcript.get("recall_superseded")
+        else encrypt(settings, user_id, workspace_id, row.id, "summary", summary)
+    )
     row.last_sequence, row.message_count, row.updated_at = sequence, len(turns), now
     await database.flush()
     return True
@@ -349,7 +364,11 @@ async def owned_conversation(
 
 
 def history_view(
-    row: MemoryConversation, settings: Settings, *, detail: bool = False
+    row: MemoryConversation,
+    settings: Settings,
+    *,
+    detail: bool = False,
+    include_policy: bool = False,
 ) -> dict[str, Any]:
     transcript = decrypt(
         settings, row.user_id, row.workspace_id, row.id, "transcript", row.encrypted_transcript
@@ -370,6 +389,10 @@ def history_view(
             )
             if row.encrypted_summary
             else None
+        )
+    if include_policy:
+        result["_automatic_extraction_blocked"] = bool(
+            transcript.get("automatic_extraction_blocked")
         )
     return result
 
@@ -566,6 +589,7 @@ async def edit_fact(
     await lock_owner(database, user_id)
     row = await owned_fact(database, user_id, workspace_id, identifier)
     old = fact_view(row, settings)
+    old_payload = decrypt(settings, user_id, workspace_id, row.id, "fact", row.encrypted_content)
     label, content = payload.label or old["label"], payload.content or old["content"]
     sensitive = require_sensitive_agreement(label, content, payload.sensitive_agreement)
     await bump_and_invalidate(database, user_id, workspace_id)
@@ -577,18 +601,18 @@ async def edit_fact(
         source = await database.get(MemoryConversation, row.source_conversation_id)
         if source is not None:
             source.encrypted_summary = None
-    row.encrypted_content = encrypt(
-        settings,
-        user_id,
-        workspace_id,
-        row.id,
-        "fact",
-        {
-            "label": label,
-            "content": content,
-            "supersedes_source": row.source_conversation_id is not None,
-        },
-    )
+    correction: dict[str, Any] = {
+        "label": label,
+        "content": content,
+        "supersedes_source": row.source_conversation_id is not None,
+    }
+    if old_payload.get("extraction_method") in {"literal_v1", "user_corrected"}:
+        correction.update(
+            extraction_method="user_corrected",
+            key=old_payload["key"],
+            source_turn=old_payload.get("source_turn"),
+        )
+    row.encrypted_content = encrypt(settings, user_id, workspace_id, row.id, "fact", correction)
     row.sensitive, row.updated_at = sensitive, datetime.now(UTC)
     await database.commit()
     return fact_view(row, settings)

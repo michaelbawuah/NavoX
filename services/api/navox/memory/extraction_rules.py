@@ -213,9 +213,14 @@ def derive_literal_turn(text: str, *, now: datetime, timezone: str) -> LiteralEx
         key, label = "programming_language", "Programming language"
     else:
         employment = re.fullmatch(r"I work at (.+)", body, re.I)
+        departure = re.fullmatch(r"I quit my job at (.+)", body, re.I)
         school = re.fullmatch(r"I study (.+?) at (.+)", body, re.I)
         if employment and _neutral_name(employment[1]):
             key, label = "employer", "Employer"
+        elif departure and _neutral_name(departure[1]):
+            # Storage must match this named employer against the current
+            # automatic employer before replacing it; never guess "that job".
+            key, label = "employer_departure", "Work update"
         elif school and all(_neutral_name(part) for part in school.groups()):
             key, label = "school", "School"
     if key:

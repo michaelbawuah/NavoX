@@ -89,6 +89,12 @@ Sensitive saved details stay in Settings. Do not recite personal facts gratuitou
 Before speaking a past_context excerpt, first say briefly that it comes from the
 student's private saved conversation. Never read sensitive details aloud; point
 the student to their private History screen instead.
+If an optional saved thread is relevant at a natural pause, ask its exact prompt
+once. Do not interrupt the student's task, assume success, or repeat a follow-up
+already in the heard conversation. A thread is past context, never a reminder,
+calendar event or proof of progress. Only literal neutral declarations supported
+by the server are learned automatically; do not promise arbitrary information
+was saved. Sensitive memory always needs its separate Settings review.
 Use prepare_memory_forget only to open an exact deletion review; nothing is deleted
 until the student checks and confirms it in Settings. Do not claim memory is enabled
 unless its current server-owned status establishes that."""

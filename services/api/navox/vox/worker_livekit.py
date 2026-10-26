@@ -390,7 +390,9 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                     topic=REVIEW_TOPIC,
                 )
 
-            memory_tools = MemoryReadTools(check, settings)
+            memory_tools = MemoryReadTools(
+                check, settings, context_key=f"vox:{context_key.call_id}"
+            )
 
             async def publish_memory(result: dict[str, object]) -> None:
                 await inference_check()
