@@ -548,7 +548,8 @@ class CalendarTools:
             draft,
             provider=self.provider,
         )
-        signature = _signature(await self._search(window))
+        reviewed_snapshot = await self._search(window)
+        signature = _signature(reviewed_snapshot)
 
         async def validate() -> None:
             async with guarded_operation(self._guard):
@@ -574,7 +575,13 @@ class CalendarTools:
                 return outcome(result)
 
         voice = self.voice_available and self.approval.prepare(
-            PendingCalendarAction(str(view.id) + ":" + view.digest, readback(view), validate, apply)
+            PendingCalendarAction(
+                str(view.id) + ":" + view.digest,
+                readback(view),
+                validate,
+                apply,
+                lambda: self._validate_readback(view, reviewed_snapshot, window),
+            )
         )
         await self._publish(view, voice)
         return {
@@ -612,6 +619,10 @@ class CalendarTools:
                 self.settings,
             )
             await database.commit()
+        self._compare_view(current, expected)
+
+    @staticmethod
+    def _compare_view(current: CalendarEventView, expected: CalendarEventView) -> None:
         observed, original = current.model_dump(), expected.model_dump()
         observed["expires_at"], original["expires_at"] = (
             utc(current.expires_at),
@@ -619,6 +630,50 @@ class CalendarTools:
         )
         if observed != original:
             raise schedule.StudentError(409, "The exact event review changed")
+
+    async def _validate_readback(
+        self,
+        view: CalendarEventView,
+        snapshot: AvailabilitySnapshot | None = None,
+        payload: AvailabilityPreview | None = None,
+    ) -> None:
+        """One owner-serialized local proof; never refresh providers per frame."""
+        async with guarded_operation(self._guard):
+            authority, token, _ = await self._session()
+            async with self.check.factory() as database:
+                await schedule.owner(database, authority.user_id, authority.workspace_id, lock=True)
+                current_view = await scheduling.event_view(
+                    database,
+                    authority.user_id,
+                    authority.workspace_id,
+                    token,
+                    view.id,
+                    self.settings,
+                )
+                self._compare_view(current_view, view)
+                if snapshot is not None:
+                    if payload is None:
+                        raise schedule.StudentError(
+                            409, "The private calendar review proof is unavailable"
+                        )
+                    current = await availability._internal(
+                        database,
+                        authority.user_id,
+                        authority.workspace_id,
+                        payload,
+                        settings=self.settings,
+                    )
+                    if (
+                        current.digest != snapshot.revision.student_revision
+                        or current.planning_revision != snapshot.revision.planning_revision
+                        or current.preferences_revision != snapshot.revision.preferences_revision
+                        or await database_now(database) >= snapshot.expires_at
+                    ):
+                        raise schedule.StudentError(
+                            409, "The private calendar review sources changed"
+                        )
+                await self._guard()
+                await database.commit()
 
     async def _undo(self) -> dict[str, Any]:
         self.approval.invalidate("new_undo")
@@ -662,7 +717,11 @@ class CalendarTools:
 
         voice = self.voice_available and self.approval.prepare(
             PendingCalendarAction(
-                str(view.id) + ":undo:" + view.digest, readback(view, undo=True), validate, apply
+                str(view.id) + ":undo:" + view.digest,
+                readback(view, undo=True),
+                validate,
+                apply,
+                lambda: self._validate_readback(view),
             )
         )
         await self._publish(view, voice)

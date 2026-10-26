@@ -61,6 +61,7 @@ class PendingCalendarAction:
     readback: str = field(repr=False)
     validate: Callable[[], Awaitable[None]] = field(repr=False)
     apply: Callable[[], Awaitable[str]] = field(repr=False)
+    read_guard: Callable[[], Awaitable[None]] | None = field(default=None, repr=False)
 
 
 class CalendarApprovalCoordinator(HostTurnHooks):
@@ -87,10 +88,39 @@ class CalendarApprovalCoordinator(HostTurnHooks):
         return True
 
     async def after_tool(self) -> HostReply | None:
-        if self._pending is None or not self._queued:
+        action = self._pending
+        if action is None or not self._queued:
             return None
         self._queued = False
-        return HostReply(self._pending.readback)
+        # A reviewed study source may have been erased after the tool prepared
+        # it. Recheck before releasing cached private fields to the TTS route.
+        try:
+            await action.validate()
+        except schedule.StudentError:
+            self.invalidate("source_changed_during_readback")
+            return HostReply(
+                "That calendar review changed before it could be read. "
+                "Please review it again; no new action is confirmed."
+            )
+        if self._pending is not action:
+            return None
+
+        async def authorize() -> None:
+            if self._pending is not action:
+                raise schedule.StudentError(
+                    409, "The exact calendar read-back is no longer current"
+                )
+            try:
+                await (action.read_guard or action.validate)()
+            except schedule.StudentError:
+                self.invalidate("source_changed_during_readback")
+                raise
+            if self._pending is not action:
+                raise schedule.StudentError(
+                    409, "The exact calendar read-back is no longer current"
+                )
+
+        return HostReply(action.readback, authorize)
 
     async def played(self, answer: str) -> None:
         action = self._pending

@@ -14,7 +14,7 @@ import httpx
 
 from navox.ai.message_limits import SPOKEN_MESSAGE_LIMIT, TYPED_MESSAGE_LIMIT
 from navox.core.settings import Settings
-from navox.vox.host_turn import HostTurnHooks
+from navox.vox.host_turn import HostTurnHooks, OutputAuthorization
 from navox.vox.inference_config import ProviderRoute, VoxInferenceConfig, route_credential
 from navox.vox.inference_speech import MAX_WIRE_BYTES, decode_speech_events
 from navox.vox.recall_tools import memory_message
@@ -168,6 +168,7 @@ class PipelineReply:
     question: str = field(repr=False)
     answer: str = field(repr=False)
     audio: bytes = field(repr=False)
+    authorize: OutputAuthorization | None = field(default=None, repr=False)
 
 
 class OpenAICompatiblePipeline:
@@ -196,6 +197,7 @@ class OpenAICompatiblePipeline:
         input_bound: int,
         payload: dict[str, Any] | None = None,
         audio: bytes | None = None,
+        publication_check: OutputAuthorization | None = None,
     ) -> tuple[bytes, dict[str, Any]]:
         await self.check()
         stream_id = uuid4()
@@ -221,6 +223,8 @@ class OpenAICompatiblePipeline:
                 else:
                     options = {"json": payload}
                 await self.check()
+                if publication_check is not None:
+                    await publication_check()
                 async with client.stream(
                     "POST",
                     route.base_url + path,
@@ -256,6 +260,8 @@ class OpenAICompatiblePipeline:
                             raise ProviderRejected("The voice provider response exceeded its bound")
                         chunks.extend(chunk)
             await self.check()
+            if publication_check is not None:
+                await publication_check()
             data: dict[str, Any] = {}
             if speech_events:
                 output, raw_usage = decode_speech_events(bytes(chunks))
@@ -356,7 +362,9 @@ class OpenAICompatiblePipeline:
             if self.host_hooks is not None:
                 host_reply = await self.host_hooks.input(question)
                 if host_reply is not None:
-                    return await self.speak(question, host_reply.answer)
+                    return await self.speak(
+                        question, host_reply.answer, authorize=host_reply.authorize
+                    )
             messages: list[dict[str, Any]] = [{"role": "system", "content": INSTRUCTIONS}]
             if self.memory_context is not None:
                 recalled = memory_message(await self.memory_context(question[:200]))
@@ -417,7 +425,9 @@ class OpenAICompatiblePipeline:
                 if self.host_hooks is not None:
                     host_reply = await self.host_hooks.after_tool()
                     if host_reply is not None:
-                        return await self.speak(question, host_reply.answer)
+                        return await self.speak(
+                            question, host_reply.answer, authorize=host_reply.authorize
+                        )
                 tool_text = json.dumps(observed, ensure_ascii=False)
                 if len(tool_text.encode()) > 32_768:
                     raise ProviderRejected("The schedule result is too large")
@@ -428,9 +438,13 @@ class OpenAICompatiblePipeline:
                 raise ProviderRejected("The voice tool limit was reached")
             return await self.speak(question, answer)
 
-    async def speak(self, question: str, answer: str) -> PipelineReply:
+    async def speak(
+        self, question: str, answer: str, *, authorize: OutputAuthorization | None = None
+    ) -> PipelineReply:
         """Exact host text uses the existing selected, metered TTS route only."""
         answer = bounded_text(answer, 600)
+        if authorize is not None:
+            await authorize()
         output, _ = await self._request(
             self.config.tts,
             "/audio/speech",
@@ -442,7 +456,8 @@ class OpenAICompatiblePipeline:
                 "response_format": "mp3",
                 **({"stream_format": "sse"} if self.config.tts_stream_format == "sse" else {}),
             },
+            publication_check=authorize,
         )
         if not output:
             raise ProviderRejected("The voice provider returned no audio")
-        return PipelineReply(question, answer, output)
+        return PipelineReply(question, answer, output, authorize)

@@ -411,7 +411,7 @@ class OpenAIRealtimeAdapter:
                 self.tool_started = True
             reply = await self.host_hooks.input(self._question)
             if reply is not None:
-                raise HostReplyRequired(self._question, reply.answer)
+                raise HostReplyRequired(self._question, reply.answer, reply.authorize)
 
     async def respond(
         self, emit: Callable[[bytes], Awaitable[None]], *, text: str | None = None
@@ -581,7 +581,7 @@ class OpenAIRealtimeAdapter:
                                 raise ProviderRejected(
                                     "The current question transcript is unavailable"
                                 )
-                            raise HostReplyRequired(self._question, reply.answer)
+                            raise HostReplyRequired(self._question, reply.answer, reply.authorize)
                     self._context_ceiling += len(tool_text.encode()) + 64
                     self._stream = uuid4()
                     await self.usage.begin(

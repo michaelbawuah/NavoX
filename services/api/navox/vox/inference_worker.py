@@ -9,7 +9,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
-from navox.vox.host_turn import HostReplyRequired, HostTurnHooks
+from navox.vox.host_turn import HostReplyRequired, HostTurnHooks, OutputAuthorization
 from navox.vox.inference_config import VoxInferenceConfig
 from navox.vox.inference_http import (
     OpenAICompatiblePipeline,
@@ -248,12 +248,15 @@ class ConfiguredVoiceWorker:
 
     async def _respond(self, pcm: bytes | None, epoch: int, text: str | None = None) -> None:
         output_started = False
+        output_authorize: OutputAuthorization | None = None
         notices: list[str] = []
 
         async def current() -> None:
             if self._closed or epoch != self._epoch:
                 raise WorkerAccessLost("The voice turn was interrupted")
             await self._authority()
+            if output_authorize is not None:
+                await output_authorize()
 
         async def emit(frame: bytes) -> None:
             await current()
@@ -304,7 +307,17 @@ class ConfiguredVoiceWorker:
                         # The next realtime socket restores the heard host turn.
                         await self.realtime.close()
                         await self.output.clear()
-                        reply = await self.pipeline.speak(host_reply.question, host_reply.answer)
+                        if host_reply.authorize is None:
+                            reply = await self.pipeline.speak(
+                                host_reply.question, host_reply.answer
+                            )
+                        else:
+                            reply = await self.pipeline.speak(
+                                host_reply.question,
+                                host_reply.answer,
+                                authorize=host_reply.authorize,
+                            )
+                        output_authorize = getattr(reply, "authorize", None)
                         await current()
                         await before_output()
                         await self.output.play(reply.audio, current)
@@ -333,6 +346,7 @@ class ConfiguredVoiceWorker:
                     reply = await self.pipeline.respond(
                         _wav(pcm) if pcm is not None else None, self._history(), question=text
                     )
+                    output_authorize = getattr(reply, "authorize", None)
                     await current()
                     await before_output()
                     await self.output.play(reply.audio, current)

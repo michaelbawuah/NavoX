@@ -15,6 +15,7 @@ from navox.connectors.sync_state import database_now
 from navox.db.student import StudentFixedBlock
 from navox.db.student_calendars import StudentCalendarEvent
 from navox.db.vox import VoxCall
+from navox.student import service as schedule
 from navox.student_calendars.provider import CalendarTarget
 from navox.student_planning import service as planning
 from navox.vox.calendar_approval import CalendarApprovalCoordinator
@@ -73,6 +74,8 @@ async def prepare(env, **changes):
 async def play_review(env):
     reply = await env.approval.after_tool()
     assert reply is not None
+    assert reply.authorize is not None
+    await reply.authorize()
     await env.approval.played(reply.answer)
     return reply.answer
 
@@ -167,6 +170,68 @@ async def test_changed_internal_source_after_readback_requires_new_review(calend
         await database.commit()
     result = await env.approval.input("yes")
     assert "changed" in result.answer and env.writes.inserts == []
+
+
+@pytest.mark.asyncio
+async def test_cached_readback_rechecks_native_sources_without_refreshing_a_provider(
+    calendar_voice_env, monkeypatch
+):
+    env = calendar_voice_env
+    await prepare(env)
+    staged = await env.approval.after_tool()
+    assert staged.authorize is not None
+
+    async def no_provider_refresh(*args):
+        raise AssertionError("Audio frame proof must remain local")
+
+    monkeypatch.setattr(env.tools, "_search", no_provider_refresh)
+    await staged.authorize()
+    await staged.authorize()
+    async with env.factory() as database:
+        database.add(
+            StudentFixedBlock(
+                user_id=env.user_id,
+                workspace_id=env.workspace_id,
+                title="Changed private source",
+                term_start=env.start_at.date(),
+                term_end=env.start_at.date(),
+                weekdays=[env.start_at.weekday()],
+                start_time="12:00",
+                end_time="13:00",
+                timezone="UTC",
+            )
+        )
+        await database.commit()
+    with pytest.raises(schedule.StudentError):
+        await staged.authorize()
+    assert "no longer active" in (await env.approval.input("yes")).answer
+    assert env.writes.inserts == []
+
+
+@pytest.mark.asyncio
+async def test_readback_receipt_is_read_after_acquiring_the_owned_source_lock(
+    calendar_voice_env, monkeypatch
+):
+    env = calendar_voice_env
+    await prepare(env)
+    staged = await env.approval.after_tool()
+    owner, waiting = schedule.owner, [True]
+
+    async def changed_before_lock(database, user_id, workspace_id, *, lock=False):
+        if lock and waiting[0]:
+            # Model a redaction/reset that completed while this publication
+            # proof waited to acquire User. It must precede the receipt read.
+            waiting[0] = False
+            row = await database.scalar(select(StudentCalendarEvent))
+            row.status, row.revision = "failed", row.revision + 1
+            await database.flush()
+        return await owner(database, user_id, workspace_id, lock=lock)
+
+    monkeypatch.setattr(schedule, "owner", changed_before_lock)
+    with pytest.raises(schedule.StudentError):
+        await staged.authorize()
+    assert not waiting[0] and not env.approval._pending
+    assert env.writes.inserts == []
 
 
 @pytest.mark.asyncio

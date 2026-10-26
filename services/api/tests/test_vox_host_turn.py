@@ -13,7 +13,7 @@ from navox.student import service as schedule
 from navox.vox.calendar_approval import CalendarApprovalCoordinator, PendingCalendarAction
 from navox.vox.host_turn import CompositeHostTurnHooks, HostReply, HostReplyRequired, HostTurnHooks
 from navox.vox.inference_config import VoxInferenceConfig
-from navox.vox.inference_http import OpenAICompatiblePipeline, PipelineReply
+from navox.vox.inference_http import OpenAICompatiblePipeline, PipelineReply, ProviderRejected
 from navox.vox.inference_realtime import OpenAIRealtimeAdapter
 from navox.vox.inference_worker import ConfiguredVoiceWorker
 from navox.vox.session_context import CallContextKey, InMemoryContextStore, VoxCallContext
@@ -55,12 +55,12 @@ async def test_exact_played_review_accepts_one_current_contextual_yes_only_once(
     host = CalendarApprovalCoordinator()
     assert host.prepare(action(calls))
     assert (await host.after_tool()).answer == READBACK
-    assert calls == []
-    await host.played(READBACK)
     assert calls == ["fresh"]
+    await host.played(READBACK)
+    assert calls == ["fresh", "fresh"]
     reply = await host.input(yes)
     assert "provider confirmed" in reply.answer
-    assert calls == ["fresh", "fresh", "apply"]
+    assert calls == ["fresh", "fresh", "fresh", "apply"]
     assert await host.input(yes) is None
 
 
@@ -109,18 +109,115 @@ async def test_unplayed_interrupted_expired_and_changed_sources_cannot_approve()
 async def test_source_change_during_readback_keeps_next_yes_in_host_failure_path():
     calls = []
 
+    source_changed = [False]
+
     async def changed():
-        raise schedule.StudentError(409, "changed synthetic source")
+        if source_changed[0]:
+            raise schedule.StudentError(409, "changed synthetic source")
 
     host = CalendarApprovalCoordinator()
     host.prepare(action(calls, validate=changed))
     await host.after_tool()
+    source_changed[0] = True
     await host.played(READBACK)
     assert host.needs_input
     assert "no longer active" in (await host.input("yes")).answer
     assert "apply" not in calls
     assert await host.input("Instead, find tomorrow's lunch options") is None
     assert not host.needs_input
+
+
+@pytest.mark.asyncio
+async def test_erased_source_before_host_reply_never_releases_cached_private_text():
+    calls = []
+
+    async def erased():
+        raise schedule.StudentError(409, "synthetic erased private title")
+
+    host = CalendarApprovalCoordinator()
+    host.prepare(action(calls, validate=erased))
+    reply = await host.after_tool()
+    assert reply.answer != READBACK and "private title" not in reply.answer
+    assert reply.authorize is None
+    assert "no longer active" in (await host.input("yes")).answer
+    assert "apply" not in calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("when,requests_expected", [("admission", 0), ("response", 1)])
+async def test_exact_readback_rechecks_after_admission_and_after_tts_response(
+    when, requests_expected
+):
+    changed, calls, requests = [False], [], []
+
+    async def current():
+        if changed[0]:
+            raise schedule.StudentError(409, "synthetic erased source")
+
+    host = CalendarApprovalCoordinator()
+    host.prepare(action(calls, validate=current))
+    reply = await host.after_tool()
+
+    class Admission(Hooks):
+        async def begin(self, *args):
+            await super().begin(*args)
+            if when == "admission":
+                changed[0] = True
+
+    async def handle(request):
+        requests.append(request)
+        changed[0] = True
+        return httpx.Response(200, content=b"cached-private-mp3")
+
+    pipeline = OpenAICompatiblePipeline(
+        VoxInferenceConfig(),
+        settings(),
+        Check(),
+        Admission(),
+        transport=httpx.MockTransport(handle),
+    )
+    with pytest.raises(ProviderRejected) as failure:
+        await pipeline.speak("prepare it", reply.answer, authorize=reply.authorize)
+    assert "erased" not in str(failure.value)
+    assert len(requests) == requests_expected
+    assert not host._pending and "apply" not in calls
+
+
+@pytest.mark.asyncio
+async def test_erasure_between_readback_frames_stops_cached_audio_and_never_arms():
+    changed, calls, frames = [False], [], []
+
+    async def current():
+        if changed[0]:
+            raise schedule.StudentError(409, "synthetic private source erased during playback")
+
+    host = CalendarApprovalCoordinator()
+    host.prepare(action(calls, validate=current))
+    staged = await host.after_tool()
+
+    class Realtime(FailingRealtime):
+        async def respond(self, emit, text=None):
+            raise HostReplyRequired("prepare it", staged.answer, staged.authorize)
+
+    class Playback(Output):
+        async def play(self, data, check):
+            await check()
+            frames.append("first")
+            changed[0] = True
+            await check()
+            frames.append("second")
+
+    async def handle(request):
+        return httpx.Response(200, content=b"cached-private-mp3")
+
+    pipeline = OpenAICompatiblePipeline(
+        VoxInferenceConfig(), settings(), Check(), Hooks(), transport=httpx.MockTransport(handle)
+    )
+    worker = await worker_parts(Realtime(False), pipeline, Playback(), host)
+    await worker._respond(b"pcm", 0)
+    assert frames == ["first"] and worker.failed
+    assert host._armed_until is None and "apply" not in calls
+    await worker.close()
 
 
 @pytest.mark.asyncio
@@ -260,7 +357,8 @@ async def test_notice_never_arms_approval_and_full_host_readback_must_finish():
     release.set()
     await task
     assert host._armed_until is not None
-    assert calls.index("played:" + READBACK) < calls.index("fresh")
+    assert calls.index("played:" + READBACK) < len(calls) - 1
+    assert calls[-1] == "fresh"
     await worker.close()
 
 

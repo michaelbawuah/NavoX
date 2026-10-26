@@ -7,21 +7,25 @@ route; full playback is a separate receipt from starting an output attempt.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+
+OutputAuthorization = Callable[[], Awaitable[None]]
 
 
 @dataclass(frozen=True)
 class HostReply:
     answer: str
+    authorize: OutputAuthorization | None = field(default=None, repr=False)
 
 
 class HostReplyRequired(Exception):
     """Realtime must hand this exact host text to its owner's existing TTS path."""
 
-    def __init__(self, question: str, answer: str):
+    def __init__(self, question: str, answer: str, authorize: OutputAuthorization | None = None):
         # Never put private input, event fields or reply text in exception args.
         super().__init__("A host-owned reply is required")
-        self.question, self.answer = question, answer
+        self.question, self.answer, self.authorize = question, answer, authorize
 
 
 class HostTurnHooks:
