@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 import pytest
 import pytest_asyncio
 from sqlalchemy import func, select
+from test_calendar_study_displacement import study_env as shared_study_env
 from test_student_calendar_consent import calendar_env as shared_calendar_env
 from test_student_calendar_events import event_env as shared_event_env
 from test_vox_media import begin, confirm
@@ -21,6 +22,7 @@ from navox.vox.calendar_tools import PREPARE_TOOL, SUGGEST_TOOL, UNDO_TOOL, Cale
 from navox.vox.worker import DatabaseAuthority, WorkerAccessLost, WorkerAssignment
 
 calendar_env, event_env = shared_calendar_env, shared_event_env
+study_env = shared_study_env
 
 
 @pytest_asyncio.fixture
@@ -244,3 +246,28 @@ async def test_overnight_awake_event_reads_both_exact_local_dates(calendar_voice
     assert start.strftime("%A, %B") in spoken and end.strftime("%A, %B") in spoken
     assert "11:30 PM" in spoken and "01:30 AM" in spoken
     assert env.writes.inserts == []
+
+
+@pytest.mark.asyncio
+async def test_voice_ranked_displacement_is_certified_minimized_and_unapplied(
+    calendar_voice_env,
+    study_env,
+):
+    env = calendar_voice_env
+    result = await env.tools.execute(
+        SUGGEST_TOOL,
+        {
+            "purpose": "lunch",
+            "date": env.start_at.date().isoformat(),
+            "days": 1,
+            "duration_minutes": 60,
+        },
+    )
+    assert result["status"] in {"ok", "partial_information"} and result["options"], result
+    assert all(option["requires_study_displacement_review"] for option in result["options"])
+    assert all(option["displaced_study_block_count"] == 1 for option in result["options"])
+    assert all("moves_study_block" in option["reasons"] for option in result["options"])
+    assert str(env.block_id) not in str(result)
+    assert "Private quantum reading plan" not in str(result)
+    assert not result["changes_applied"] and env.writes.inserts == []
+    assert env.approval.needs_input is False

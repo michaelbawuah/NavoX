@@ -26,8 +26,14 @@ from navox.db.vox import VoxCall
 from navox.db.vox_media import VoxMediaConnection
 from navox.student import service as schedule
 from navox.student_availability import service as availability
+from navox.student_availability.ranked import ranked_suggestions
 from navox.student_availability.schemas import AvailabilityPreview, AvailabilitySnapshot
-from navox.student_availability.selector import Purpose, SuggestionRequest, duration_for, suggest
+from navox.student_availability.selector import (
+    Purpose,
+    SuggestionRequest,
+    SuggestionResult,
+    duration_for,
+)
 from navox.student_calendars import scheduling
 from navox.student_calendars import service as calendars
 from navox.student_calendars.operation_guard import guarded_operation
@@ -346,6 +352,12 @@ class CalendarTools:
         )
 
     async def _search(self, payload: AvailabilityPreview) -> AvailabilitySnapshot:
+        snapshot, _ = await self._search_with_scope(payload)
+        return snapshot
+
+    async def _search_with_scope(
+        self, payload: AvailabilityPreview
+    ) -> tuple[AvailabilitySnapshot, calendars.CalendarScope]:
         authority, token, _ = await self._session()
         async with self.check.factory() as database:
             original = await calendars.scope_snapshot(
@@ -381,7 +393,59 @@ class CalendarTools:
                     409, "Calendar or planning sources changed. Check again"
                 )
             await database.commit()
-        return snapshot
+        return snapshot, original
+
+    async def _ranked(
+        self,
+        payload: AvailabilityPreview,
+        query: SuggestArguments,
+        snapshot: AvailabilitySnapshot,
+        original: calendars.CalendarScope,
+    ) -> SuggestionResult:
+        authority, token, _ = await self._session()
+        async with self.check.factory() as database:
+            await calendars.check_scope(database, original, token)
+            current = await availability._internal(
+                database,
+                authority.user_id,
+                authority.workspace_id,
+                payload,
+                settings=self.settings,
+            )
+            now = await database_now(database)
+            if (
+                current.digest != snapshot.revision.student_revision
+                or current.planning_revision != snapshot.revision.planning_revision
+                or current.preferences_revision != snapshot.revision.preferences_revision
+                or not snapshot.checked_at <= now < snapshot.expires_at
+            ):
+                raise schedule.StudentError(409, "Meeting sources changed. Check again")
+            selection = await ranked_suggestions(
+                database,
+                authority.user_id,
+                authority.workspace_id,
+                snapshot,
+                SuggestionRequest(
+                    availability=snapshot.result,
+                    now=now,
+                    purpose=query.purpose,
+                    duration_minutes=payload.duration_minutes,
+                    count=2,
+                ),
+                allow_study_displacement=self.settings.student_planning_enabled,
+            )
+            await calendars.check_scope(database, original, token)
+            after = await availability._internal(
+                database,
+                authority.user_id,
+                authority.workspace_id,
+                payload,
+                settings=self.settings,
+            )
+            if after != current or await database_now(database) >= snapshot.expires_at:
+                raise schedule.StudentError(409, "Meeting sources changed. Check again")
+            await database.commit()
+        return selection
 
     async def _publish(self, view: CalendarEventView, voice: bool = False) -> None:
         await self._guard()
@@ -642,16 +706,8 @@ class CalendarTools:
                         )
                     selected = datetime.combine(day, time.min, ZoneInfo(prefs.timezone))
                 payload = await self._window(selected, query.days, minutes)
-                snapshot = await self._search(payload)
-                selection = suggest(
-                    SuggestionRequest(
-                        availability=snapshot.result,
-                        now=snapshot.checked_at,
-                        purpose=query.purpose,
-                        duration_minutes=minutes,
-                        count=2,
-                    )
-                )
+                snapshot, original = await self._search_with_scope(payload)
+                selection = await self._ranked(payload, query, snapshot, original)
                 return {
                     "status": selection.status,
                     "timezone": selection.timezone,
@@ -666,12 +722,22 @@ class CalendarTools:
                             "end_at": item.end_at.isoformat(),
                             "local_time": _when(item.start_at, item.end_at, selection.timezone),
                             "reasons": list(item.reasons),
+                            "displaced_study_block_count": len(item.displaced_study_block_ids),
+                            "requires_study_displacement_review": bool(
+                                item.displaced_study_block_ids
+                            ),
                         }
                         for index, item in enumerate(selection.suggestions)
                     ],
                     "message": (
                         "No time is reserved. Unknown sources or travel are not free time; "
                         "these options do not imply another person's agreement."
+                    )
+                    if selection.suggestions
+                    else (
+                        "No meeting or study-compatible option was confirmed in this bounded "
+                        "check. Narrow the window or choose another duration; this does not "
+                        "prove no feasible time exists."
                     ),
                 }
         except schedule.StudentError as error:
