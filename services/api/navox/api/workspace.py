@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from navox.api.auth import CurrentAccountDependency, DatabaseSession
 from navox.db.models import User, WorkspaceDisplayPreference
@@ -108,20 +108,29 @@ async def initialize_timezone(
         .execution_options(populate_existing=True)
     )
     assert user is not None
-    preference = await database.scalar(
-        select(WorkspaceDisplayPreference.user_id).where(
-            WorkspaceDisplayPreference.user_id == user.id
+    # SQLite does not implement SELECT FOR UPDATE. Claim initialization with
+    # the first write, atomically checking both explicit-choice markers. The
+    # write lock then covers marker insertion, including an explicit UTC choice.
+    claimed = await database.scalar(
+        update(User)
+        .where(
+            User.id == user.id,
+            User.timezone == "UTC",
+            ~select(WorkspaceDisplayPreference.user_id)
+            .where(WorkspaceDisplayPreference.user_id == User.id)
+            .exists(),
+            ~select(StudentProfile.id).where(StudentProfile.user_id == User.id).exists(),
         )
+        .values(timezone=payload.timezone)
+        .returning(User.id)
+        .execution_options(synchronize_session=False)
     )
-    profile = await database.scalar(
-        select(StudentProfile.id).where(StudentProfile.user_id == user.id)
-    )
-    if preference is None and profile is None and user.timezone == "UTC":
-        user.timezone = payload.timezone
+    if claimed is not None:
         database.add(
             WorkspaceDisplayPreference(workspace_id=current_account.workspace.id, user_id=user.id)
         )
-        await database.commit()
+    await database.commit()
+    await database.refresh(user)
     return {
         "timezone": user.timezone,
         "user_id": str(user.id),
@@ -143,6 +152,11 @@ async def save_preferences(
     )
     if payload.weather_visible and not payload.weather_city:
         raise HTTPException(422, "Choose a city to show weather")
+    # Obtain SQLite's write serialization before reading a possibly absent
+    # preferences row. Explicit choices win against automatic initialization.
+    await database.execute(
+        update(User).where(User.id == current_account.user.id).values(timezone=payload.timezone)
+    )
     preference = await database.get(
         WorkspaceDisplayPreference, (current_account.workspace.id, current_account.user.id)
     )

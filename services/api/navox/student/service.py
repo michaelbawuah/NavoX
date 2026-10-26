@@ -7,7 +7,7 @@ from typing import Any, Literal, cast
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.agent.audit import add_audit_event
@@ -183,6 +183,10 @@ async def save_profile(
     database: AsyncSession, user_id: UUID, workspace_id: UUID, payload: ProfileInput
 ) -> ProfileView:
     user = await owner(database, user_id, workspace_id, lock=True)
+    # An unchanged explicit UTC value still needs SQLite's write lock before
+    # the profile-choice marker is read/inserted. Device initialization must
+    # never win merely because the ORM found no changed User attribute.
+    await database.execute(update(User).where(User.id == user_id).values(timezone=payload.timezone))
     row = await database.scalar(
         select(StudentProfile).where(
             StudentProfile.user_id == user_id, StudentProfile.workspace_id == workspace_id
