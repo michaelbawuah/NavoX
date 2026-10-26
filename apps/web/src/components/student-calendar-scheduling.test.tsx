@@ -349,6 +349,24 @@ describe("reviewed calendar scheduling screen", () => {
     expect(host.textContent).not.toContain("Approve and add event");
     expect(api.approveEvent).not.toHaveBeenCalled();
   });
+  it("does not reopen approval for an earlier-reset pending receipt recovered by ID", async () => {
+    const api = client();
+    await prepare(api);
+    vi.mocked(api.event).mockResolvedValue({
+      ...event(),
+      message:
+        "This request predates your reset; only its status can be checked here.",
+    });
+    await click("Check scheduling and recent actions");
+    expect(host.textContent).toContain(
+      "predates your reset and cannot be approved",
+    );
+    expect(host.textContent).not.toContain("Approve and add event");
+    expect(host.textContent).not.toContain("Ready for your review");
+    await click("Check scheduling and recent actions");
+    expect(api.event).toHaveBeenCalledTimes(1);
+    expect(api.approveEvent).not.toHaveBeenCalled();
+  });
   it("explicitly opts in only for a selected certified study-move option", async () => {
     const api = client();
     const displaced = options.map((option) => ({

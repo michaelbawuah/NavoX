@@ -442,11 +442,21 @@ export function StudentCalendarScheduling({
         setView(scheduling);
         setRecent(events.events);
         setCursor(events.next_cursor);
-        if (selected) acceptEvent(selected);
+        const priorPending =
+          selected?.status === "pending" &&
+          selected.message.startsWith("This request predates your reset;");
+        if (priorPending) {
+          selectedReceiptId.current = null;
+          setMustCheck(false);
+        } else if (selected) acceptEvent(selected);
         setTargets(null);
         setGrantId("");
         setCalendarId("");
-        setNotice("Scheduling access and recent calendar actions checked.");
+        setNotice(
+          priorPending
+            ? "That pending review predates your reset and cannot be approved. Review a fresh event using current openings."
+            : "Scheduling access and recent calendar actions checked.",
+        );
       },
     );
   };
