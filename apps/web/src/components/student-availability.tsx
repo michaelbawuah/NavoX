@@ -169,6 +169,10 @@ function AvailabilityWorkspace({
   const [searchRequest, setSearchRequest] =
     useState<AvailabilityPreviewInput | null>(null);
   const [options, setOptions] = useState<RankedOption[]>([]);
+  const studyWindows = snapshot?.result.provisional_openings.some(
+    (opening) =>
+      opening.reasons.length === 1 && opening.reasons[0] === "movable_study",
+  );
   const [purpose, setPurpose] = useState<MeetingPurpose>("other");
   const [duration, setDuration] = useState(30);
   const [routine, setRoutine] = useState<"" | "confirmed" | "unknown">("");
@@ -557,7 +561,9 @@ function AvailabilityWorkspace({
                 ? options[0].displaced_study_block_ids?.length
                   ? "One time to consider"
                   : "One time fits"
-                : "No confirmed option fits this search"}
+                : studyWindows
+                  ? "No study-compatible option was confirmed in this check"
+                  : "No confirmed option fits this search"}
           </h3>
           {snapshot.result.status === "needs_routine" && (
             <p className={styles.warning}>
@@ -585,9 +591,19 @@ function AvailabilityWorkspace({
           )}
           {options.length < 2 && (
             <p>
-              {options.length === 1
-                ? "A second distinct option did not fit with your duration and buffers."
-                : "NavoX has not invented a free time. Try a different window, confirm missing information or use a shorter duration."}
+              {studyWindows
+                ? "Other study-compatible times may exist. Try a narrower window or shorter duration."
+                : options.length === 1
+                  ? "A second distinct option did not fit with your duration and buffers."
+                  : "NavoX has not invented a free time. Try a different window, confirm missing information or use a shorter duration."}
+            </p>
+          )}
+          {options.some(
+            (option) => option.displaced_study_block_ids?.length,
+          ) && (
+            <p className={styles.hint}>
+              Study replacement checks cover a limited set of plans. Narrow your
+              search to check other times.
             </p>
           )}
           {snapshot.result.provisional_openings.length > 0 && (

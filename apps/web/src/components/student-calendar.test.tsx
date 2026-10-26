@@ -341,6 +341,57 @@ describe("private calendar connection and availability screens", () => {
     expect(duration?.value).toBe("60");
   });
 
+  it("marks certified study suggestions for exact review and describes the bounded search", async () => {
+    const client = api();
+    const current = snapshot();
+    current.result.status = "partial";
+    current.result.provisional_openings = [
+      {
+        ...current.result.confirmed_openings[0],
+        reasons: ["movable_study"],
+        displaced_study_block_ids: ["study"],
+      },
+    ];
+    current.result.confirmed_openings = [];
+    const suggest = vi.fn<StudentAvailabilitySuggestionsApi["suggest"]>(
+      async () => ({
+        changes_applied: false,
+        snapshot: current,
+        selection: {
+          status: "partial_information",
+          timezone: "UTC",
+          duration_minutes: 30,
+          suggestions: [
+            {
+              start_at: "2026-10-22T09:10:00Z",
+              end_at: "2026-10-22T09:40:00Z",
+              minutes: 30,
+              reasons: ["moves_study_block"],
+              displaced_study_block_ids: ["study"],
+            },
+          ],
+          alternatives_available: 0,
+          changes_applied: false,
+        },
+      }),
+    );
+    await mountAvailability(client, { suggest });
+    await chooseAssumptions();
+    await click("Find openings");
+    expect(host.textContent).toContain("One time to consider");
+    expect(host.textContent).toContain("Requires moving 1 study block");
+    expect(host.textContent).toContain("Review the exact replacement times");
+    expect(host.textContent).toContain("Nothing has moved");
+    expect(host.textContent).toContain("limited set of plans");
+    expect(host.textContent).toContain(
+      "Other study-compatible times may exist",
+    );
+    expect(host.textContent).not.toContain(
+      "A second distinct option did not fit",
+    );
+    expect(client.preview).not.toHaveBeenCalled();
+  });
+
   it("loads only saved routine metadata on mount and requires both explicit assumptions before provider reads", async () => {
     const client = api();
     await mountAvailability(client);
@@ -367,9 +418,7 @@ describe("private calendar connection and availability screens", () => {
     );
     expect(host.textContent).toContain("One time fits");
     expect(host.textContent).toContain("A second distinct option did not fit");
-    expect(host.textContent).toContain(
-      "10 minutes before and after kept clear",
-    );
+    expect(host.textContent).toContain("10-minute buffers before and after");
     expect(host.textContent).not.toContain("Option 2");
   });
   it("shows unknown coverage/travel/displaced study honestly and never promotes a provisional window", async () => {
