@@ -288,6 +288,52 @@ it("fences an older page when the owner is being rechecked", async () => {
   expect(host.textContent).not.toContain("Late private page");
   expect(host.textContent).not.toContain("Morning plan");
 });
+it("lets a new search replace a pending older page without mixing results", async () => {
+  await mount();
+  vi.mocked(fetch).mockImplementationOnce(async () =>
+    Response.json({
+      items: [call],
+      next_cursor: "older-proof",
+      search_complete: false,
+      scanned: 25,
+    }),
+  );
+  await click("View and search history");
+  let resolve: (response: Response) => void = () => {};
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  await act(async () => button("Load older conversations").click());
+  await type(
+    host.querySelector('input[type="search"]') as HTMLInputElement,
+    "different subject",
+  );
+  vi.mocked(fetch).mockImplementationOnce(async () =>
+    Response.json({
+      items: [{ ...call, id: "new-search", title: "Fresh search match" }],
+      next_cursor: null,
+      search_complete: true,
+      scanned: 1,
+    }),
+  );
+  await click("Search history");
+  await act(async () =>
+    resolve(
+      Response.json({
+        items: [{ ...call, id: "late-old", title: "Old search late page" }],
+        next_cursor: null,
+        search_complete: true,
+        scanned: 25,
+      }),
+    ),
+  );
+  expect(host.textContent).toContain("Fresh search match");
+  expect(host.textContent).not.toContain("Old search late page");
+  expect(host.textContent).toContain("Checked 1 saved conversation");
+});
 it("blocks delete-all until the exact phrase is entered", async () => {
   await mount();
   await click("Delete all memory");

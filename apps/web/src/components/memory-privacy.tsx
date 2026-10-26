@@ -238,7 +238,8 @@ export function MemoryPrivacyPanel({
     cursor: string | null = null,
   ) {
     event?.preventDefault();
-    if (!ready || busy || mustReload || historyLoadingMore) return;
+    if (!ready || busy || mustReload || (cursor !== null && historyLoadingMore))
+      return;
     const current = ++historyEpoch.current,
       ownerEpoch = epoch.current;
     setError("");
@@ -723,7 +724,7 @@ export function MemoryPrivacyPanel({
               <div className={styles.history}>
                 <p className={styles.muted}>
                   {historyScanned
-                    ? `Checked ${historyScanned} saved conversations${historyCursor ? "; older conversations are available." : "."}`
+                    ? `Checked ${historyScanned} saved conversation${historyScanned === 1 ? "" : "s"}${historyCursor ? "; older conversations are available." : "."}`
                     : "History is checked in private pages, including older conversations."}
                 </p>
                 <form
