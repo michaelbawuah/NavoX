@@ -27,6 +27,7 @@ import {
 } from "../lib/conversation-memory";
 import {
   consumeMemoryForgetDraft,
+  memoryForgetDraftKey,
   validMemoryForgetQuery,
 } from "../lib/vox-memory-review";
 import styles from "./memory-privacy.module.css";
@@ -104,6 +105,22 @@ export function MemoryPrivacyPanel({
     setLegacyOpen(false);
     setBusy(false);
   }, []);
+  const discardPendingReview = useCallback(() => {
+    try {
+      window.sessionStorage.removeItem(memoryForgetDraftKey(accountKey));
+    } catch {
+      /* No private browser draft is available. */
+    }
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("forget")) {
+      url.searchParams.delete("forget");
+      window.history.replaceState(
+        {},
+        "",
+        `${url.pathname}${url.search}${url.hash}`,
+      );
+    }
+  }, [accountKey]);
   const load = useCallback(async () => {
     const current = ++epoch.current;
     setLoading(true);
@@ -134,11 +151,13 @@ export function MemoryPrivacyPanel({
     const observer = observeAccountSession(
       {
         checking: clearPrivate,
+        revoking: discardPendingReview,
         restored: (access) => {
           if (
             !access.account ||
             `${access.account.workspace.id}:${access.account.id}` !== accountKey
           ) {
+            discardPendingReview();
             clearPrivate();
             return;
           }
@@ -146,6 +165,7 @@ export function MemoryPrivacyPanel({
           void load();
         },
         unavailable: () => {
+          discardPendingReview();
           clearPrivate();
           setLoading(false);
           setError("Check your sign-in to open your memory.");
@@ -159,14 +179,15 @@ export function MemoryPrivacyPanel({
       ++epoch.current;
       ++historyEpoch.current;
     };
-  }, [accountKey, clearPrivate, load]);
+  }, [accountKey, clearPrivate, discardPendingReview, load]);
   useEffect(() => {
     if (forget) document.getElementById(`${id}-forget`)?.focus();
   }, [forget, id]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: consume a one-use handoff only after fresh owner/privacy restoration.
   useEffect(() => {
-    if (!ready || !privacy) return;
+    if (!ready || !privacy || busy || mustReload || loading) return;
     const review = () => {
+      if (!ready || !privacy || busy || mustReload || loading) return;
       let query: string | null = null;
       try {
         query = consumeMemoryForgetDraft(window.sessionStorage, accountKey);
@@ -199,7 +220,7 @@ export function MemoryPrivacyPanel({
     window.addEventListener("navox:memory-forget-ready", review);
     return () =>
       window.removeEventListener("navox:memory-forget-ready", review);
-  }, [accountKey, ready, privacy?.generation]);
+  }, [accountKey, ready, privacy?.generation, busy, mustReload, loading]);
   async function searchHistory(event?: FormEvent, searchQuery = query) {
     event?.preventDefault();
     if (!ready || busy || mustReload) return;
@@ -477,9 +498,8 @@ export function MemoryPrivacyPanel({
                 </h3>
                 {editing?.source_conversation_id && (
                   <p className={styles.sensitiveNote}>
-                    Saving this correction also forgets its original
-                    conversation, summary and other facts learned from it. Your
-                    corrected fact stays.
+                    Your correction is what NavoX will use. The original
+                    conversation stays in History.
                   </p>
                 )}
                 <label>

@@ -2,7 +2,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { saveMemoryForgetDraft } from "../lib/vox-memory-review";
+import {
+  memoryForgetDraftKey,
+  saveMemoryForgetDraft,
+} from "../lib/vox-memory-review";
 import { MemoryPrivacyPanel } from "./memory-privacy";
 
 const session = vi.hoisted(() => ({
@@ -10,6 +13,7 @@ const session = vi.hoisted(() => ({
     checking: () => void;
     restored: (value: unknown) => void;
     unavailable: () => void;
+    revoking?: () => void;
   },
 }));
 vi.mock("../lib/account-session", () => ({
@@ -247,8 +251,17 @@ it("fences further writes after an uncertain mutation until the saved state is l
   await click("Save fact");
   expect(button("Add something").disabled).toBe(true);
   expect(host.textContent).toContain("Reload your memory");
+  saveMemoryForgetDraft(sessionStorage, "school:student", "morning");
+  await act(async () =>
+    window.dispatchEvent(new Event("navox:memory-forget-ready")),
+  );
+  expect(
+    sessionStorage.getItem(memoryForgetDraftKey("school:student")),
+  ).not.toBeNull();
+  expect(host.textContent).not.toContain("Review matches for “morning”");
   await click("Retry");
   expect(button("Add something").disabled).toBe(false);
+  expect(host.textContent).toContain("Review matches for “morning”");
 });
 
 it("explains that a corrected fact replaces current memory while preserving history", async () => {
@@ -258,7 +271,10 @@ it("explains that a corrected fact replaces current memory while preserving hist
   );
   if (!edit) throw new Error("Missing fact edit");
   await act(async () => edit.click());
-  expect(host.textContent).toContain("also forgets its original conversation");
+  expect(host.textContent).toContain("conversation stays in History");
+  expect(host.textContent).not.toContain(
+    "also forgets its original conversation",
+  );
   expect(button("Save correction").disabled).toBe(false);
   expect(
     vi
@@ -290,4 +306,13 @@ it("opens an owner-bound Vox search without deleting or putting its subject in t
       .mocked(fetch)
       .mock.calls.some(([, options]) => options?.method === "DELETE"),
   ).toBe(false);
+});
+
+it("discards a pending private review when its login is revoked", async () => {
+  await mount();
+  saveMemoryForgetDraft(sessionStorage, "school:student", "private subject");
+  await act(async () => session.callbacks?.revoking?.());
+  expect(
+    sessionStorage.getItem(memoryForgetDraftKey("school:student")),
+  ).toBeNull();
 });

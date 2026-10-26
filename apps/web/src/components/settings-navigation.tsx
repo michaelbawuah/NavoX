@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import styles from "./today-workspace.module.css";
 
 const sections = [
@@ -15,6 +15,7 @@ const sections = [
 
 export function SettingsNavigation() {
   const [active, setActive] = useState<string>("profile");
+  const navigation = useRef<HTMLElement>(null);
   useEffect(() => {
     const update = () => {
       const hash = window.location.hash.slice(1);
@@ -25,8 +26,25 @@ export function SettingsNavigation() {
     window.addEventListener("hashchange", update);
     return () => window.removeEventListener("hashchange", update);
   }, []);
+  useEffect(() => {
+    const nav = navigation.current;
+    const selected = nav?.querySelector<HTMLElement>(`a[href="#${active}"]`);
+    if (!nav || !selected || nav.scrollWidth <= nav.clientWidth) return;
+    const offset =
+      selected.getBoundingClientRect().left -
+      nav.getBoundingClientRect().left +
+      nav.scrollLeft;
+    nav.scrollLeft = Math.max(
+      0,
+      offset - (nav.clientWidth - selected.clientWidth) / 2,
+    );
+  }, [active]);
   return (
-    <nav className={styles.settingsNav} aria-label="Settings sections">
+    <nav
+      ref={navigation}
+      className={styles.settingsNav}
+      aria-label="Settings sections"
+    >
       {sections.map(([id, label]) => (
         <a
           key={id}
