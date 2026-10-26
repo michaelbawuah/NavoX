@@ -280,7 +280,8 @@ class ConfiguredVoiceWorker:
                     await current()
                     # A generic privacy notice is not private response exposure
                     # and cannot arm a consequential calendar approval.
-                    await self.output.play(spoken.audio, current)
+                    play_notice = getattr(self.output, "play_notice", self.output.play)
+                    await play_notice(spoken.audio, current)
                     await current()
                     await self.host_hooks.notice_played(notice)
                     notices.append(notice)

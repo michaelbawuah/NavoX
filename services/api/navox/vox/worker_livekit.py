@@ -118,6 +118,9 @@ class LiveKitAudioOutput:
         self._pcm_resampler: av.AudioResampler | None = None
         self._pcm_samples = 0
         self._pcm_decoded_samples = 0
+        self._output_epoch = 0
+        self._notice_playing = False
+        self._notice_provider_ms = 0
         self._output_frames = 0
         self._starvations = 0
         self._starvation_seconds = 0.0
@@ -126,6 +129,8 @@ class LiveKitAudioOutput:
         self.usage: UsageHooks | None = None
 
     def played_pcm_ms(self) -> int:
+        if self._notice_playing:
+            return self._notice_provider_ms
         return max(0, int(self._pcm_samples / 48 - self.source.queued_duration * 1000))
 
     def _report_playout(self) -> None:
@@ -144,6 +149,9 @@ class LiveKitAudioOutput:
         self._queued_until = None
 
     async def clear(self) -> None:
+        self._output_epoch += 1
+        self._notice_playing = False
+        self._notice_provider_ms = 0
         self.source.clear_queue()
         self._report_playout()
         self._pcm_resampler = None
@@ -195,6 +203,32 @@ class LiveKitAudioOutput:
         await self.source.wait_for_playout()
         self._report_playout()
         self._pcm_samples = 0
+
+    async def play_notice(self, mp3: bytes, check: Callable[[], Awaitable[None]]) -> None:
+        """Host notice audio never advances the provider's interruption timeline."""
+        await check()
+        await self.source.wait_for_playout()
+        await check()
+        epoch = self._output_epoch
+        samples, decoded, resampler = (
+            self._pcm_samples,
+            self._pcm_decoded_samples,
+            self._pcm_resampler,
+        )
+        self._notice_provider_ms = max(0, int(samples / 48))
+        self._notice_playing = True
+        try:
+            await self.play(mp3, check)
+        finally:
+            # An interrupt/clear wins over a cancelled notice's late completion.
+            if epoch == self._output_epoch:
+                self._pcm_samples, self._pcm_decoded_samples, self._pcm_resampler = (
+                    samples,
+                    decoded,
+                    resampler,
+                )
+                self._notice_playing = False
+                self._notice_provider_ms = 0
 
     async def _capture_pcm(
         self, frames: list[av.AudioFrame], check: Callable[[], Awaitable[None]]
