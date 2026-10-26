@@ -21,7 +21,7 @@ from navox.db.communications import AssistantSession
 from navox.db.conversation_memory import MemoryConversation, MemoryFact, MemoryPrivacy, MemoryThread
 from navox.db.memory import OwnerMemory
 from navox.memory.history_schemas import FactCreate, FactUpdate, PrivacyResponse, PrivacyUpdate
-from navox.memory.sensitivity import SENSITIVE
+from navox.memory.sensitivity import SENSITIVE as SENSITIVE
 from navox.memory.service import MemoryError, lock_owner
 
 DOMAIN = "navox-student-memory-v1"
