@@ -363,7 +363,14 @@ def _view(
             or type(study.get("applied")) is not bool
         ):
             raise schedule.StudentError(503, "This private study review could not be opened")
-        moves = [displacement.StudyMove.model_validate(value) for value in study["review"]["moves"]]
+        try:
+            moves = [
+                displacement.StudyMove.model_validate(value) for value in study["review"]["moves"]
+            ]
+        except (ValueError, TypeError, KeyError):
+            raise schedule.StudentError(
+                503, "This private study review could not be opened"
+            ) from None
         study_fields = {
             "study_changes_applied": study["applied"],
             "study_details_redacted": study.get("redacted") is True,
@@ -946,6 +953,7 @@ async def approve(
         if authority.grant_revision != row.grant_revision:
             raise schedule.StudentError(409, "Scheduling permission changed. Review a new event")
         draft = CalendarEventPreview.model_validate(payload["draft"])
+        await _check_claims(database, user_id, workspace_id, draft, settings, excluding=row.id)
         await database.commit()
     # Fresh complete all-calendar/internal availability is mandatory immediately
     # before the one submitted side effect; there is no override of unknowns.
@@ -996,10 +1004,25 @@ async def approve(
         if study is not None:
             if study.get("redacted") is True or study.get("applied") is not False:
                 raise schedule.StudentError(409, "The study review is no longer available")
-            review = displacement.StudyReview.model_validate(study["review"])
+            try:
+                review = displacement.StudyReview.model_validate(study["review"])
+            except (ValueError, TypeError, KeyError):
+                raise schedule.StudentError(
+                    503, "This private study review could not be opened"
+                ) from None
             await displacement.validate(
                 database, user_id, workspace_id, draft, fresh, review, current.now
             )
+        elif draft.allow_study_displacement:
+            if (
+                await displacement.prepare(
+                    database, user_id, workspace_id, draft, fresh, current.now
+                )
+                is not None
+            ):
+                raise schedule.StudentError(
+                    409, "This event now affects study work. Review all changes again"
+                )
         # Any own-app side effect admitted since another request's fresh read
         # invalidates that request, even after this event becomes confirmed.
         # Recapture our own authority at the new native revision so our bounded

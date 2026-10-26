@@ -1,6 +1,8 @@
 """Real owned reviews and receipts with synthetic provider transport only."""
 
+import asyncio
 import json
+import os
 from datetime import timedelta
 from uuid import UUID, uuid4
 
@@ -633,3 +635,72 @@ async def test_partial_source_erasure_keeps_other_approved_destinations_and_deta
     assert OTHER_STUDY in json.dumps(payload)
     assert (await saved_block(env, env.other_block_id)) == other
     assert len((await receipt(env, view["id"]))["study_moves"]) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("edge", ["before", "after"])
+async def test_breaks_of_adjacent_blocks_outside_checked_window_are_not_lost(study_env, edge):
+    env = study_env
+    body = await draft_body(env, allow_study_displacement=True)
+    if edge == "before":
+        body["start_at"] = env.start_at.replace(hour=13, minute=20).isoformat()
+        body["end_at"] = env.start_at.replace(hour=13, minute=50).isoformat()
+        body["availability"]["start_at"] = env.start_at.replace(hour=13, minute=5).isoformat()
+        expected = env.block_id
+    else:
+        body["start_at"] = env.start_at.replace(hour=16, minute=15).isoformat()
+        body["end_at"] = env.start_at.replace(hour=16, minute=45).isoformat()
+        body["availability"]["end_at"] = env.start_at.replace(hour=16, minute=55).isoformat()
+        expected = env.other_block_id
+    response = await env.client.post(BASE + "/events/preview", json=body, headers=env.headers)
+    assert response.status_code == 200, response.text
+    assert {move["block_id"] for move in response.json()["study_moves"]} == {str(expected)}
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not os.environ.get("NAVOX_CONNECTOR_TEST_DSN", "").startswith("postgresql"),
+    reason="Requires real PostgreSQL owner-row serialization",
+)
+async def test_two_approvals_apply_one_move_bundle_and_one_provider_insert(study_env):
+    env = study_env
+    other = await saved_block(env, env.other_block_id)
+    view = await preview(env, allow_study_displacement=True)
+    responses = await asyncio.gather(act(env, view, "approve"), act(env, view, "approve"))
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    assert len(env.writes.inserts) == 1
+    assert (await saved_block(env, env.block_id))["revision"] == 2
+    assert (await saved_block(env, env.other_block_id)) == other
+
+
+@pytest.mark.asyncio
+async def test_opt_in_without_initial_moves_does_not_approve_later_displacement(study_env):
+    env = study_env
+    view = await preview(
+        env,
+        allow_study_displacement=True,
+        start_at=env.start_at.replace(hour=9).isoformat(),
+        end_at=env.start_at.replace(hour=9, minute=30).isoformat(),
+    )
+    assert "study_moves" not in view
+    move = MoveInput(request_id=uuid4(), revision=1, start_at=env.start_at.replace(hour=9))
+    async with env.factory() as database:
+        checked = await moving.move(
+            database, env.user_id, env.workspace_id, env.block_id, move, session_hash=env.token_hash
+        )
+    async with env.factory() as database:
+        await moving.move(
+            database,
+            env.user_id,
+            env.workspace_id,
+            env.block_id,
+            move,
+            session_hash=env.token_hash,
+            expected_preview=checked["preview_hash"],
+        )
+    response = await act(env, view, "approve")
+    assert response.status_code == 409 and "Review all changes again" in response.text
+    assert env.writes.inserts == []
+    assert (await saved_block(env, env.block_id))["start_at"] == move.start_at.isoformat().replace(
+        "+00:00", "Z"
+    )

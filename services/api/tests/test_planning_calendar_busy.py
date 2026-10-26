@@ -27,6 +27,9 @@ async def test_planner_calendar_adapter_requires_complete_coverage(monkeypatch, 
     async def inventory(*args):
         return original
 
+    async def no_native_claims(*args, **kwargs):
+        return ()
+
     async def owner(*args):
         return SimpleNamespace(agent_paused=False)
 
@@ -58,6 +61,7 @@ async def test_planner_calendar_adapter_requires_complete_coverage(monkeypatch, 
             )
 
     monkeypatch.setattr(calendar_busy, "inventory", inventory)
+    monkeypatch.setattr(calendar_busy.calendar_claims, "snapshot", no_native_claims)
     monkeypatch.setattr(calendar_busy.schedule, "owner", owner)
     monkeypatch.setattr(calendar_busy.calendars, "owned_connection", owned)
     monkeypatch.setattr(calendar_busy, "access_token_for_connection", token)

@@ -195,6 +195,13 @@ def _affected(
 ) -> list[BlockView]:
     rest = timedelta(minutes=snapshot.input.preferences.break_minutes)
     first, last = draft.start_at - MEETING_BUFFER, draft.end_at + MEETING_BUFFER
+    if any(
+        row.start_at <= now and _overlaps(row.start_at - rest, row.end_at + rest, first, last)
+        for row in context.blocks
+    ):
+        raise schedule.StudentError(
+            409, "An affected study block has already started. Check availability again"
+        )
     affected = [
         row
         for row in _future(context, now)
@@ -220,7 +227,7 @@ def _affected(
             or row.minutes > task.remaining_minutes
             or sum(block.minutes for block in _future(context, now) if block.task_id == row.task_id)
             > task.remaining_minutes
-            or row.minutes > snapshot.input.preferences.max_study_minutes
+            or not 1 <= row.minutes <= snapshot.input.preferences.max_study_minutes
             or row.end_at - row.start_at != timedelta(minutes=row.minutes)
         ):
             raise schedule.StudentError(409, "An affected study block changed or cannot be moved")
