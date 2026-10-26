@@ -1,4 +1,4 @@
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -7,6 +7,97 @@ from navox.ai.manage import publish_policy
 from navox.ai.routing import PolicyRules, UserPreferences, preference_scope_key
 from navox.db.ai_registry import AIRoutingPolicy, AITaskRun
 from navox.db.models import User, Workspace, WorkspaceMembership
+
+
+@pytest.mark.asyncio
+async def test_captured_account_fences_ai_preferences_and_private_activity(subscription_env):
+    env = subscription_env
+    owner = f"{env.workspace_id}:{env.user_id}"
+    foreign = f"{uuid4()}:{uuid4()}"
+    payload = {"expected_revision": 0, "preferred_provider": "xai", "allow_fallback": True}
+    for headers in (
+        {"X-NavoX-Account": foreign},
+        {"X-NavoX-Account": ""},
+        [("X-NavoX-Account", owner), ("X-NavoX-Account", owner)],
+    ):
+        for method, path, body in (
+            ("GET", "/settings", None),
+            ("GET", "/activity", None),
+            ("PATCH", "/settings", payload),
+        ):
+            response = await env.client.request(
+                method, f"/api/v1/ai{path}", headers=headers, json=body
+            )
+            assert response.status_code == 409
+            assert response.headers["cache-control"] == "private, no-store"
+            assert "runs" not in response.json() and "available_providers" not in response.json()
+    current = await env.client.get("/api/v1/ai/settings", headers={"X-NavoX-Account": owner})
+    assert current.status_code == 200 and current.json()["revision"] == 0
+    saved = await env.client.patch(
+        "/api/v1/ai/settings", headers={"X-NavoX-Account": owner}, json=payload
+    )
+    assert saved.status_code == 200 and saved.json()["revision"] == 1
+    assert (await env.client.get("/api/v1/ai/activity")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_shared_cookie_switch_cannot_read_or_update_the_new_accounts_ai_data(
+    subscription_env,
+):
+    env = subscription_env
+    captured = f"{env.workspace_id}:{env.user_id}"
+    switched = await env.client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "ai-switch@example.com",
+            "password": "twelve-character-password",
+            "display_name": "Other owner",
+        },
+    )
+    assert switched.status_code == 201
+    account = switched.json()
+    current = f"{account['workspace']['id']}:{account['id']}"
+    initial = await env.client.patch(
+        "/api/v1/ai/settings",
+        headers={"X-NavoX-Account": current},
+        json={"expected_revision": 0, "preferred_provider": "xai", "allow_fallback": False},
+    )
+    assert initial.status_code == 200
+    async with env.factory() as database:
+        database.add(
+            AITaskRun(
+                task_id=uuid4(),
+                workspace_id=UUID(account["workspace"]["id"]),
+                user_id=UUID(account["id"]),
+                trace_id=uuid4(),
+                task_type="fixture",
+                profile="EXTRACTION_FAST",
+                prompt="fixture@v1",
+                schema="fixture@v1",
+                model="other-private-model",
+                status="FAILED",
+            )
+        )
+        await database.commit()
+    for method, path, payload in (
+        ("GET", "/settings", None),
+        ("GET", "/activity", None),
+        (
+            "PATCH",
+            "/settings",
+            {"expected_revision": 1, "preferred_provider": "openai", "allow_fallback": True},
+        ),
+    ):
+        rejected = await env.client.request(
+            method,
+            f"/api/v1/ai{path}",
+            headers={"X-NavoX-Account": captured},
+            json=payload,
+        )
+        assert rejected.status_code == 409 and "other-private-model" not in rejected.text
+    saved = await env.client.get("/api/v1/ai/settings", headers={"X-NavoX-Account": current})
+    assert saved.json()["revision"] == 1 and saved.json()["preferred_provider"] == "xai"
+    assert saved.json()["allow_fallback"] is False
 
 
 @pytest.mark.asyncio

@@ -1547,7 +1547,10 @@ function LegacyTodayWorkspace({
               )}
               <details className={styles.toolDisclosure}>
                 <summary>AI and usage</summary>
-                <AISettings />
+                <AISettings
+                  key={`${account.workspace.id}:${account.id}`}
+                  accountKey={`${account.workspace.id}:${account.id}`}
+                />
                 <VoxUsageReport
                   key={`${account.workspace.id}:${account.id}`}
                   accountId={`${account.workspace.id}:${account.id}`}

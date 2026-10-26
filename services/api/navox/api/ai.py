@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import Field
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -13,7 +13,18 @@ from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDe
 from navox.db.ai_registry import AIRoutingPolicy, AITaskRun
 from navox.db.models import User
 
-router = APIRouter(prefix="/ai", tags=["ai"])
+
+def expected_owner(request: Request, account: CurrentAccountDependency) -> None:
+    values = request.headers.getlist("X-NavoX-Account")
+    if values and values != [f"{account.workspace.id}:{account.user.id}"]:
+        raise HTTPException(
+            409,
+            "Your account changed. Reopen AI preferences and try again",
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+
+router = APIRouter(prefix="/ai", tags=["ai"], dependencies=[Depends(expected_owner)])
 
 
 class Preference(UserPreferences):
