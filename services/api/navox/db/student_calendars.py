@@ -100,6 +100,14 @@ class StudentCalendarWriteGrant(Base):
         CheckConstraint(
             "status != 'active' OR connection_id IS NOT NULL", name="ck_calendar_write_active"
         ),
+        CheckConstraint(
+            "provider IN ('google','microsoft','icloud')", name="ck_calendar_write_provider"
+        ),
+        CheckConstraint(
+            "(provider = 'icloud' AND oauth_attempt_id IS NULL) OR "
+            "(provider IN ('google','microsoft') AND oauth_attempt_id IS NOT NULL)",
+            name="ck_calendar_write_authorization_kind",
+        ),
     )
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     owner_scope_id: Mapped[UUID] = mapped_column(
@@ -112,9 +120,10 @@ class StudentCalendarWriteGrant(Base):
     connection_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("connections.id", ondelete="CASCADE"), nullable=True, index=True
     )
-    oauth_attempt_id: Mapped[UUID] = mapped_column(
-        ForeignKey("oauth_authorization_attempts.id", ondelete="CASCADE"), index=True
+    oauth_attempt_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("oauth_authorization_attempts.id", ondelete="CASCADE"), nullable=True, index=True
     )
+    provider: Mapped[str] = mapped_column(String(16), default="google", server_default="google")
     auth_session_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("user_sessions.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -139,6 +148,9 @@ class StudentCalendarEvent(Base):
             "'undoing','undone','failed')",
             name="ck_calendar_event_status",
         ),
+        CheckConstraint(
+            "provider IN ('google','microsoft','icloud')", name="ck_calendar_event_provider"
+        ),
     )
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     owner_scope_id: Mapped[UUID] = mapped_column(
@@ -159,6 +171,7 @@ class StudentCalendarEvent(Base):
     revision: Mapped[int] = mapped_column(Integer, default=1)
     grant_revision: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), default="pending")
+    provider: Mapped[str] = mapped_column(String(16), default="google", server_default="google")
     digest: Mapped[str] = mapped_column(String(64))
     encrypted_payload: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
