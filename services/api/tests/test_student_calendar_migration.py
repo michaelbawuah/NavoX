@@ -127,6 +127,8 @@ async def test_postgres_additive_migration_and_retained_reset_guard(ai_database)
     async with ai_database() as database:
         # Later additive children are outside this historical migration's DDL.
         # Remove their empty fixture tables before reconstructing its parents.
+        # Apple purpose consent was added in 0063 and is not part of 0051.
+        await database.execute(text("DROP TABLE apple_calendar_grants"))
         await database.execute(text("DROP TABLE student_calendar_events"))
         await database.execute(text("DROP TABLE student_calendar_write_grants"))
         await database.execute(text("DROP TABLE student_calendar_grants"))
