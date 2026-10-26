@@ -150,8 +150,112 @@ function response(): MeetingSuggestions {
     },
   };
 }
+const studyId = "33333333-3333-4333-8333-333333333333";
+function studyResponse(): MeetingSuggestions {
+  const value = response();
+  const study = {
+    id: studyId,
+    user_id: user,
+    workspace_id: workspace,
+    start_at: "2026-10-22T13:00:00Z",
+    end_at: "2026-10-22T14:00:00Z",
+    movable: true,
+    calendar_backed: false,
+    needs_review: false,
+  };
+  value.snapshot.input.study_blocks = [study];
+  value.snapshot.result.status = "partial";
+  const opening = value.snapshot.result.confirmed_openings[0];
+  value.snapshot.result.confirmed_openings = [];
+  value.snapshot.result.provisional_openings = [
+    {
+      ...opening,
+      reasons: ["movable_study"],
+      displaced_study_block_ids: [studyId],
+    },
+  ];
+  value.snapshot.result.warnings = [
+    {
+      code: "movable_study",
+      source_id: null,
+      record_id: studyId,
+      start_at: study.start_at,
+      end_at: study.end_at,
+    },
+  ];
+  value.selection.status = "partial_information";
+  value.selection.suggestions[0].displaced_study_block_ids = [studyId];
+  value.selection.suggestions[0].reasons = ["soonest", "moves_study_block"];
+  return value;
+}
 afterEach(() => vi.restoreAllMocks());
 describe("fresh server ranked meeting options", () => {
+  it("preserves certified exact study IDs as a separate review requirement", () => {
+    const answer = readMeetingSuggestions(
+      studyResponse(),
+      account,
+      preview,
+      now,
+    );
+    const option = answer.selection.suggestions[0];
+    expect(option.displaced_study_block_ids).toEqual([studyId]);
+    expect(meetingOption(option).displaced_study_block_ids).toEqual([studyId]);
+    expect(option.reasons).toContain("moves_study_block");
+    expect(answer.changes_applied).toBe(false);
+  });
+
+  it("permits a certified unaffected part of a study-only provisional window", () => {
+    const value = studyResponse();
+    value.snapshot.input.study_blocks[0].start_at = "2026-10-22T14:20:00Z";
+    value.snapshot.input.study_blocks[0].end_at = "2026-10-22T14:40:00Z";
+    value.selection.suggestions[0].displaced_study_block_ids = [];
+    value.selection.suggestions[0].reasons = ["soonest"];
+    expect(
+      readMeetingSuggestions(value, account, preview, now).selection
+        .suggestions,
+    ).toHaveLength(1);
+  });
+
+  it.each([
+    "missing",
+    "foreign",
+    "started",
+    "fixed",
+    "review",
+    "coverage",
+    "travel",
+    "reason",
+  ])(
+    "rejects unverified or inconsistent displaced study metadata: %s",
+    (change) => {
+      const value = studyResponse();
+      const option = value.selection.suggestions[0];
+      if (change === "missing") {
+        option.displaced_study_block_ids = [];
+        option.reasons = ["soonest"];
+      }
+      if (change === "foreign")
+        option.displaced_study_block_ids = [
+          "44444444-4444-4444-8444-444444444444",
+        ];
+      if (change === "started")
+        value.snapshot.input.study_blocks[0].start_at = checked;
+      if (change === "fixed")
+        value.snapshot.input.study_blocks[0].calendar_backed = true;
+      if (change === "review")
+        value.snapshot.input.study_blocks[0].needs_review = true;
+      if (change === "coverage")
+        value.snapshot.source_summary[0].state = "partial";
+      if (change === "travel")
+        value.snapshot.result.provisional_openings[0].reasons.push(
+          "travel_unknown",
+        );
+      if (change === "reason") option.reasons = ["soonest"];
+      expect(() =>
+        readMeetingSuggestions(value, account, preview, now),
+      ).toThrow();
+    },
+  );
   it("uses the private read-only endpoint and preserves expiry and scheduling buffers", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify(response()), {

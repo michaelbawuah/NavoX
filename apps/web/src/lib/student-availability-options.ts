@@ -15,6 +15,8 @@ export interface AvailabilityOption {
   duration_minutes: number;
   buffer_before_minutes: 10;
   buffer_after_minutes: 10;
+  /** Server-certified proposal only; exact replacements still need review. */
+  displaced_study_block_ids?: string[];
 }
 
 /** Position choices only inside confirmed gaps; this does not recalculate availability. */

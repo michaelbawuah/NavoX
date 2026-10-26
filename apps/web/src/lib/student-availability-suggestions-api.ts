@@ -24,7 +24,8 @@ export type MeetingSuggestionReason =
   | "right_before_commitment"
   | "lunch_time"
   | "soonest"
-  | "clear_of_deadlines";
+  | "clear_of_deadlines"
+  | "moves_study_block";
 export interface MeetingSuggestionsInput extends AvailabilityPreviewInput {
   purpose?: MeetingPurpose;
 }
@@ -33,7 +34,7 @@ export interface MeetingSuggestion {
   end_at: string;
   minutes: number;
   reasons: MeetingSuggestionReason[];
-  displaced_study_block_ids: [];
+  displaced_study_block_ids: string[];
 }
 export interface MeetingSuggestions {
   changes_applied: false;
@@ -68,6 +69,7 @@ const reasons: MeetingSuggestionReason[] = [
   "lunch_time",
   "soonest",
   "clear_of_deadlines",
+  "moves_study_block",
 ];
 const MINUTE = 60_000;
 const BUFFER = 10 * MINUTE;
@@ -142,21 +144,69 @@ export function readMeetingSuggestions(
       end_at = timestamp(item.end_at);
     const start = Date.parse(start_at),
       end = Date.parse(end_at);
+    if (!Array.isArray(item.displaced_study_block_ids)) return invalid();
+    const displaced = item.displaced_study_block_ids;
+    if (
+      displaced.length > 24 ||
+      displaced.some((id) => typeof id !== "string") ||
+      new Set(displaced).size !== displaced.length
+    )
+      return invalid();
+    const ordinary =
+      displaced.length === 0 &&
+      snapshot.result.confirmed_openings.some(
+        (opening) =>
+          Date.parse(opening.start_at) <= start - BUFFER &&
+          end + BUFFER <= Date.parse(opening.end_at),
+      );
+    const affected = snapshot.input.study_blocks.filter(
+      (block) =>
+        Date.parse(block.start_at) -
+          snapshot.input.preferences.break_minutes * MINUTE <
+          end + BUFFER &&
+        Date.parse(block.end_at) +
+          snapshot.input.preferences.break_minutes * MINUTE >
+          start - BUFFER,
+    );
+    const certifiedWindow =
+      snapshot.input.routine_confirmed &&
+      snapshot.result.status !== "needs_routine" &&
+      snapshot.input.uncertainties.length === 0 &&
+      snapshot.input.coverage.length ===
+        snapshot.input.required_source_ids.length &&
+      snapshot.input.coverage.every((source) => source.state === "complete") &&
+      snapshot.result.warnings.every(
+        (warning) => warning.code === "movable_study",
+      ) &&
+      snapshot.source_summary.every((source) => source.state === "complete") &&
+      snapshot.result.provisional_openings.some(
+        (opening) =>
+          opening.reasons.length === 1 &&
+          opening.reasons[0] === "movable_study" &&
+          opening.unchecked_source_ids.length === 0 &&
+          opening.unknown_travel_record_ids.length === 0 &&
+          Date.parse(opening.start_at) <= start - BUFFER &&
+          end + BUFFER <= Date.parse(opening.end_at),
+      ) &&
+      affected.every(
+        (block) =>
+          block.movable &&
+          !block.calendar_backed &&
+          !block.needs_review &&
+          Date.parse(block.start_at) > now,
+      ) &&
+      affected.length === displaced.length &&
+      affected.every((block) => displaced.includes(block.id));
     if (
       end - start !== request.duration_minutes * MINUTE ||
       item.minutes !== request.duration_minutes ||
       start - BUFFER < Date.parse(snapshot.checked_at) ||
-      !Array.isArray(item.displaced_study_block_ids) ||
-      item.displaced_study_block_ids.length !== 0 ||
       !Array.isArray(item.reasons) ||
       item.reasons.length > reasons.length ||
       new Set(item.reasons).size !== item.reasons.length ||
       item.reasons.some((reason) => !reasons.includes(reason)) ||
-      !snapshot.result.confirmed_openings.some(
-        (opening) =>
-          Date.parse(opening.start_at) <= start - BUFFER &&
-          end + BUFFER <= Date.parse(opening.end_at),
-      )
+      item.reasons.includes("moves_study_block") !== displaced.length > 0 ||
+      (!ordinary && !certifiedWindow)
     )
       return invalid();
     if (request.purpose === "coffee" || request.purpose === "lunch") {
@@ -193,7 +243,7 @@ export function readMeetingSuggestions(
       end_at,
       minutes: request.duration_minutes,
       reasons: item.reasons as MeetingSuggestionReason[],
-      displaced_study_block_ids: [],
+      displaced_study_block_ids: displaced as string[],
     };
   });
   if (
@@ -239,6 +289,9 @@ export function meetingOption(item: MeetingSuggestion): AvailabilityOption {
     duration_minutes: item.minutes,
     buffer_before_minutes: 10,
     buffer_after_minutes: 10,
+    ...(item.displaced_study_block_ids.length
+      ? { displaced_study_block_ids: [...item.displaced_study_block_ids] }
+      : {}),
   };
 }
 export function createStudentAvailabilitySuggestionsApi(

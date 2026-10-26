@@ -54,12 +54,15 @@ const suggestionLabels: Record<MeetingSuggestionReason, string> = {
   lunch_time: "During lunch hours",
   soonest: "Earliest suitable option",
   clear_of_deadlines: "Clear of the checked deadlines",
+  moves_study_block: "Needs reviewed study moves",
 };
 type RankedOption = AvailabilityOption & { reasons: MeetingSuggestionReason[] };
 
 function sourceLabel(sourceId: string, index: number) {
   if (sourceId === "student-timetable") return "Classes and fixed commitments";
   if (sourceId === "student-study-plan") return "Saved study plan";
+  if (sourceId === "student-calendar-actions")
+    return "Saved NavoX calendar events";
   if (sourceId.startsWith("google-")) return "Google calendar access";
   if (sourceId.startsWith("microsoft-")) return "Outlook calendar access";
   if (sourceId.startsWith("icloud-")) return "Apple calendar access";
@@ -90,8 +93,7 @@ function PositionedOption({
         {timeRange(option.start_at, option.end_at, timezone)}
       </p>
       <p className={styles.hint}>
-        {option.duration_minutes} minutes · 10 minutes before and after kept
-        clear
+        {option.duration_minutes} minutes · 10-minute buffers before and after
       </p>
       <p className={styles.hint}>
         Including buffers: {studentClock(option.reserved_start_at, timezone)}–
@@ -100,6 +102,14 @@ function PositionedOption({
       {option.reasons.length > 0 && (
         <p className={styles.hint}>
           {option.reasons.map((reason) => suggestionLabels[reason]).join(" · ")}
+        </p>
+      )}
+      {!!option.displaced_study_block_ids?.length && (
+        <p className={styles.warning}>
+          Requires moving {option.displaced_study_block_ids.length} study
+          {option.displaced_study_block_ids.length === 1 ? " block" : " blocks"}
+          . Review the exact replacement times before approving. Nothing has
+          moved.
         </p>
       )}
     </li>
@@ -544,7 +554,9 @@ function AvailabilityWorkspace({
             {options.length === 2
               ? "Two times to consider"
               : options.length === 1
-                ? "One time fits"
+                ? options[0].displaced_study_block_ids?.length
+                  ? "One time to consider"
+                  : "One time fits"
                 : "No confirmed option fits this search"}
           </h3>
           {snapshot.result.status === "needs_routine" && (
@@ -553,8 +565,10 @@ function AvailabilityWorkspace({
             </p>
           )}
           <p className={styles.hint}>
-            Clear within the checked sources and saved schedule. Other
-            commitments may be missing. Times shown in{" "}
+            {options.some((option) => option.displaced_study_block_ids?.length)
+              ? "Checked against calendar and fixed commitments. Marked study moves still require your exact review."
+              : "Clear within the checked sources and saved schedule."}{" "}
+            Other commitments may be missing. Times shown in{" "}
             {snapshot.result.timezone.replaceAll("_", " ")}.
           </p>
           {options.length > 0 && (
