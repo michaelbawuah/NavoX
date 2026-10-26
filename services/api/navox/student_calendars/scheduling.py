@@ -1025,23 +1025,27 @@ async def approve(
             planning.accepted_source_hash = await planning_service.stable_source_hash(
                 database, user_id, workspace_id, planning
             )
-            internal = await availability._internal(
-                database, user_id, workspace_id, draft.availability, settings=settings
-            )
-            fresh = fresh.model_copy(
-                update={
-                    "revision": fresh.revision.model_copy(
-                        update={
-                            "student_revision": internal.digest,
-                            "planning_revision": planning.revision,
-                        }
-                    )
-                }
-            )
-            latest = await service.boundary(database, user_id, workspace_id, session_hash)
-            await _fresh_internal(
-                database, latest, user_id, workspace_id, draft, fresh, settings=settings
-            )
+        # Admission creates a native interval claim even without study moves.
+        # Recapture only that authorized native transition; the provider facts
+        # and their original expiry remain the ones checked before admission.
+        await database.flush()
+        internal = await availability._internal(
+            database, user_id, workspace_id, draft.availability, settings=settings
+        )
+        fresh = fresh.model_copy(
+            update={
+                "revision": fresh.revision.model_copy(
+                    update={
+                        "student_revision": internal.digest,
+                        "planning_revision": internal.planning_revision,
+                    }
+                )
+            }
+        )
+        latest = await service.boundary(database, user_id, workspace_id, session_hash)
+        await _fresh_internal(
+            database, latest, user_id, workspace_id, draft, fresh, settings=settings
+        )
         body = _body(row, draft, description=payload.get("provenance", ""))
         schedule.audit(database, user_id, workspace_id, "student.calendar.event.submitted", row.id)
         await database.commit()
