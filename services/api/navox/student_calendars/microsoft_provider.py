@@ -1,4 +1,4 @@
-"""Unintegrated Microsoft personal-event prototype; writes default to disabled.
+"""Bounded Microsoft personal-event transport; writes default to disabled.
 
 Source and mock-wire checks do not qualify live scheduling. Graph supports a
 client transactionId and single-value extended properties on event creation:
@@ -95,6 +95,11 @@ def _utc(value: object) -> datetime:
     # Graph normally returns seven fractional digits and an offset-free UTC time.
     if re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,7})?Z?", raw) is None:
         raise GoogleCalendarWriteError("Microsoft calendar time could not be verified")
+    fraction = raw.removesuffix("Z").partition(".")[2]
+    if len(fraction) == 7 and fraction[-1] != "0":
+        # Python/native reviews have microsecond precision; never silently
+        # truncate a provider tick into an apparently exact reviewed instant.
+        raise CalendarWriteUncertain("The Microsoft event time is more precise than its review")
     try:
         return datetime.fromisoformat(raw.removesuffix("Z")).replace(tzinfo=UTC)
     except ValueError:
@@ -111,7 +116,7 @@ def _property(data: dict[str, Any], property_id: str) -> str:
 
 
 class MicrosoftCalendarWriteProvider:
-    """Create/read prototype. No production wiring, automatic retries or Undo."""
+    """One reviewed create or positive read; no automatic retries or unsafe Undo."""
 
     conditional_undo_supported = False
 
@@ -131,7 +136,19 @@ class MicrosoftCalendarWriteProvider:
         token = _text(access_token, 32000)
         if not token.isascii():
             raise CalendarWriteRejected("Microsoft calendar authorization is unavailable")
-        await check()
+        parts = urlsplit(_text(url, 8192))
+        if (
+            method not in {"GET", "POST"}
+            or parts.scheme != "https"
+            or parts.netloc != "graph.microsoft.com"
+            or parts.fragment
+            or not (
+                parts.path == "/v1.0/me"
+                or parts.path == "/v1.0/me/calendars"
+                or parts.path.startswith("/v1.0/me/calendars/")
+            )
+        ):
+            raise CalendarWriteRejected("The Microsoft calendar endpoint is unavailable")
         status, raw, failed = None, bytearray(), False
         try:
             async with (
@@ -146,14 +163,15 @@ class MicrosoftCalendarWriteProvider:
                         "Prefer": 'outlook.timezone="UTC", IdType="ImmutableId"',
                     },
                 ) as client,
-                client.stream(method, url, **kwargs) as response,
             ):
-                status = response.status_code
-                async for chunk in response.aiter_bytes():
-                    if len(raw) + len(chunk) > MAX_RESPONSE_BYTES:
-                        failed = True
-                        break
-                    raw.extend(chunk)
+                await check()
+                async with client.stream(method, url, **kwargs) as response:
+                    status = response.status_code
+                    async for chunk in response.aiter_bytes():
+                        if len(raw) + len(chunk) > MAX_RESPONSE_BYTES:
+                            failed = True
+                            break
+                        raw.extend(chunk)
         except (httpx.HTTPError, TimeoutError):
             failed = True
         await check()
@@ -280,24 +298,33 @@ class MicrosoftCalendarWriteProvider:
             raise CalendarWriteUncertain("The Microsoft event changed during verification")
         try:
             metadata = json.loads(_property(data, DATA_PROPERTY), object_pairs_hook=_unique)
+            if not isinstance(metadata, dict):
+                raise ValueError
+            marker_version = metadata.get("v")
+            if type(marker_version) is not int or marker_version not in {1, 2}:
+                raise ValueError
+            fields = {"v", "action", "digest", "timezone"}
+            if marker_version == 2:
+                fields.add("wire_timezone")
             if (
-                not isinstance(metadata, dict)
-                or set(metadata) != {"v", "action", "digest", "timezone"}
-                or metadata["v"] != 1
+                set(metadata) != fields
                 or metadata["action"] != action
                 or not re.fullmatch(r"[0-9a-f]{64}", metadata["digest"])
             ):
                 raise ValueError
             zone = _text(metadata["timezone"], 64)
             ZoneInfo(zone)
+            wire_zone = zone if marker_version == 1 else metadata["wire_timezone"]
+            if marker_version == 2 and wire_zone != "UTC":
+                raise ValueError
         except (KeyError, TypeError, ValueError):
             raise CalendarWriteUncertain(
                 "The Microsoft event review marker is unconfirmed"
             ) from None
         if (
             data.get("transactionId") != action
-            or data.get("originalStartTimeZone") != zone
-            or data.get("originalEndTimeZone") != zone
+            or data.get("originalStartTimeZone") != wire_zone
+            or data.get("originalEndTimeZone") != wire_zone
             or data.get("showAs") != "busy"
             or data.get("sensitivity") != "private"
             or data.get("isReminderOn") is not False
@@ -344,7 +371,7 @@ class MicrosoftCalendarWriteProvider:
             "end": {"dateTime": end.isoformat(), "timeZone": zone},
             "visibility": "private",
             "transparency": "opaque",
-            "description": "",
+            "description": "" if marker_version == 1 else NOTE,
             "reminders": {"useDefault": False},
             "extendedProperties": {
                 "private": {"navoxAction": action, "navoxDigest": metadata["digest"]}
@@ -355,6 +382,7 @@ class MicrosoftCalendarWriteProvider:
         self, *, access_token: str, calendar_id: str, event_id: str, check: Check
     ) -> dict[str, Any] | None:
         action = _action(event_id)
+        await self.target(access_token=access_token, calendar_id=calendar_id, check=check)
         data = await self._request(
             access_token=access_token,
             method="GET",
@@ -396,12 +424,14 @@ class MicrosoftCalendarWriteProvider:
             "transparency",
             "extendedProperties",
             "reminders",
+            "description",
         }
         if (
             not set(event).issubset(allowed)
             or event.get("visibility") != "private"
             or event.get("transparency") != "opaque"
             or event.get("reminders") != {"useDefault": False}
+            or event.get("description") != NOTE
         ):
             raise CalendarWriteRejected("Only a reviewed private personal event is supported")
         try:
@@ -415,7 +445,7 @@ class MicrosoftCalendarWriteProvider:
                 or zone != event["end"]["timeZone"]
             ):
                 raise ValueError
-            tz = ZoneInfo(zone)
+            ZoneInfo(zone)
             start = datetime.fromisoformat(event["start"]["dateTime"].replace("Z", "+00:00"))
             end = datetime.fromisoformat(event["end"]["dateTime"].replace("Z", "+00:00"))
             if (
@@ -424,30 +454,31 @@ class MicrosoftCalendarWriteProvider:
                 or not 60 <= (end - start).total_seconds() <= 8 * 3600
             ):
                 raise ValueError
-            # Offset-free Graph wall times cannot identify a repeated DST fold.
-            for moment in (start, end):
-                local = moment.astimezone(tz)
-                if local.replace(fold=0).utcoffset() != local.replace(fold=1).utcoffset():
-                    raise ValueError
             title = _text(event["summary"], 200)
             location = _text(event.get("location", ""), 500, empty=True)
         except (KeyError, TypeError, ValueError):
             raise CalendarWriteRejected("The reviewed Microsoft event is invalid") from None
         await self.target(access_token=access_token, calendar_id=calendar_id, check=check)
         metadata = json.dumps(
-            {"v": 1, "action": action, "digest": digest, "timezone": zone},
+            {
+                "v": 2,
+                "action": action,
+                "digest": digest,
+                "timezone": zone,
+                "wire_timezone": "UTC",
+            },
             separators=(",", ":"),
             sort_keys=True,
         )
         body = {
             "subject": title,
             "start": {
-                "dateTime": start.astimezone(tz).replace(tzinfo=None).isoformat(),
-                "timeZone": zone,
+                "dateTime": start.astimezone(UTC).replace(tzinfo=None).isoformat(),
+                "timeZone": "UTC",
             },
             "end": {
-                "dateTime": end.astimezone(tz).replace(tzinfo=None).isoformat(),
-                "timeZone": zone,
+                "dateTime": end.astimezone(UTC).replace(tzinfo=None).isoformat(),
+                "timeZone": "UTC",
             },
             "location": {"displayName": location},
             "body": {"contentType": "text", "content": NOTE},
