@@ -23,6 +23,7 @@ from navox.db.student_calendars import (
     StudentCalendarWriteGrant,
 )
 from navox.student import service as schedule
+from navox.student_calendars.operation_guard import check_operation
 from navox.student_calendars.schemas import (
     AVAILABILITY_SCOPES,
     CONSENT_VERSION,
@@ -97,6 +98,7 @@ async def boundary(
     lock: bool = True,
     allow_paused: bool = False,
 ) -> Boundary:
+    await check_operation()
     if lock:
         # Management/runtime serialize connector→membership→User→legacy. Take
         # the same ordered connector prefix before native student authority;
@@ -134,6 +136,7 @@ async def boundary(
         raise schedule.StudentError(401, "Your sign-in is no longer available")
     if user.agent_paused and not allow_paused:
         raise schedule.StudentError(409, "Resume NavoX before checking calendar availability")
+    await check_operation()
     return Boundary(await state(database, user_id, workspace_id), session, now)
 
 
