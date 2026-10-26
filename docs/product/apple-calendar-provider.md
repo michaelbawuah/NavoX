@@ -1,7 +1,8 @@
-# Apple/iCloud calendar provider foundation
+# Apple/iCloud calendar busy connection
 
-Status: provider implemented and synthetic protocol checks passed. This is not a
-connected-account flow, calendar-writing feature or live iCloud qualification.
+Status: provider and native busy-purpose connection flow implemented in source
+with synthetic protocol and native transaction checks. Live iCloud qualification,
+calendar event writes and supported-device acceptance remain open.
 
 ## Read boundary
 
@@ -40,39 +41,65 @@ coverage into confirmed free time. A real iCloud account may reject this REPORT;
 such a result requires a separately implemented and qualified bounded fallback,
 not a claim of empty calendars.
 
-## Required connection integration
+## Native connection flow
 
-Do not create an OAuth attempt for an app-specific-password connection. Current
-StudentCalendarGrant and StudentCalendarWriteGrant require an OAuth attempt FK;
-an actual credential-origin authorization method needs a schema change or a
-separate Apple purpose-consent entity under StudentCalendarState. A future
-connection must:
+Migration 0063 adds AppleCalendarGrant under the existing StudentCalendarState.
+No OAuth attempt is fabricated. The connection uses the current web cookie,
+exact account header, configured Origin, generation, revision, fresh owner lock
+and idempotent request identifier. The disclosed consent is busy-time use only;
+an Apple app-specific credential does not provide OAuth-style scope restrictions.
+Scheduling consent and event writes are not enabled by this connection.
 
-- use the current web cookie, exact account header, configured Origin, generation,
-  revision, fresh owner lock and idempotent request identifier;
-- disclose Apple app-specific credential access honestly and obtain separate
-  busy-read and scheduling choices; the provider credential is not OAuth-scoped;
-- encrypt the credential immediately, bind it to the exact owner/connection, and
-  never place it in URLs, return views, audit text, exceptions or logs;
-- verify discovery/read access before marking connected, then recheck native
-  authority before committing the connection;
-- revoke and remove only the matching native purpose/credential on disconnect,
-  fencing in-flight reads and reset generations;
-- feed complete/partial snapshots into the shared availability calculation.
+The app-specific credential is accepted only in its generated format. Discovery
+and a complete free-busy read must succeed before any credential or active grant
+is persisted. Provider I/O releases native locks and rechecks the exact owner,
+session and calendar revision immediately around each request. The final commit
+checks them again. Failed or cancelled verification persists no credential.
+
+Successful credentials are immediately encrypted in the existing server vault
+with an envelope binding the exact owner, personal account, connection and
+credential version. The entered account label is ordinary connection metadata;
+it is not represented as a separately verified email identity. Exact retries do
+not duplicate credentials or provider reads. Reconnecting rotates and erases the
+old credential. Disconnect erases its grant and unreferenced credential and
+advances the common calendar revision, including while new admission is disabled.
+Reset cleanup preserves the common generation fence.
+
+| Method/path under /api/v1/student/calendars/apple | Behavior |
+| --- | --- |
+| GET base path | Private generation/revision, setup availability and owned grants |
+| POST /connect | Exact busy consent, Apple Account email and app-specific password |
+| POST /{grant_id}/disconnect | Erase exact owned grant/credential using CalendarCommand |
+
+Request validation and failures never echo private values. Bodies are bounded
+by the common 4 KiB JSON limit. Responses use private/no-store caching. Only
+opaque grant IDs enter audit events; no password, event body or provider error
+body is logged or returned.
+
+Common integration calls apple.snapshots when capturing native calendar scope,
+apple.read for iCloud busy coverage and apple.forget_calendar_data during reset
+before the common generation advances. The separate API router and database
+model must be registered in the assembled application. The connection component
+clears the password on submission and owner/privacy transitions and never stores
+it in browser storage or a URL.
 
 Scheduling additionally needs an approved single writable target, exact reviewed
 event content, fresh conflict checks, a durable single-attempt receipt and
 verified completion. Conditional CalDAV ETag operations and exact-event Undo
-must be implemented independently. This provider has no PUT, DELETE, invitation,
-event-creation or credential-validation endpoint.
+must be implemented independently. The provider has no PUT, DELETE, invitation
+or event-creation operation.
 
 ## Validation
 
 54 synthetic mock-wire checks cover discovery, all-calendar reads, duration and
 multi-period free-busy, clipping, completeness failures, malformed XML/iCalendar,
 host/redirect restrictions, body/inventory limits, cancellation and authority
-revocation/timeout around I/O. Ruff and scoped mypy pass. No actual Apple
-credential or external calendar was used.
+revocation/timeout around I/O. Native transaction/API checks additionally cover
+encrypted owner binding, exact retries, credential rotation, incomplete provider
+coverage, generation/session changes during I/O, account isolation, disconnect,
+reset, validation privacy and cancellation. Ruff and scoped mypy pass. No actual
+Apple credential or external calendar was used. SQLite transaction tests are
+separate from PostgreSQL concurrency and live-provider qualification.
 
 References:
 - Apple app-specific passwords: https://support.apple.com/en-us/102654
