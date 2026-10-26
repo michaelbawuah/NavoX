@@ -203,3 +203,23 @@ it("does not retry an uncertain save before checking saved state", async () => {
   expect(fetch).toHaveBeenCalledOnce();
   expect(host.textContent).toContain("could not be confirmed");
 });
+it("does not claim a save when a valid-looking receipt belongs to another source", async () => {
+  saveMemoryCandidateDraft(
+    sessionStorage,
+    "school:student",
+    memorySaveReviewFixture().review,
+  );
+  await settings();
+  await agree();
+  vi.mocked(fetch).mockResolvedValueOnce(
+    Response.json(
+      { ...fact(), source_conversation_id: "other-source" },
+      { status: 201 },
+    ),
+  );
+  await click("Save this memory");
+  expect(onSaved).not.toHaveBeenCalled();
+  expect(onUncertain).toHaveBeenCalledOnce();
+  expect(button("Save this memory").disabled).toBe(true);
+  expect(host.textContent).toContain("could not be confirmed");
+});

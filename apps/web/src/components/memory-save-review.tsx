@@ -86,7 +86,19 @@ export function MemorySaveReviewPanel({
       await conversationMemoryRequest(
         accountKey,
         "/candidates/confirm",
-        (value) => readMemoryFacts([value])[0],
+        (value) => {
+          const fact = readMemoryFacts([value])[0];
+          if (
+            fact.id !== review.id ||
+            fact.source_conversation_id !== review.source_conversation_id ||
+            fact.source_kind !== "vox" ||
+            fact.label !== review.label ||
+            fact.content !== review.content ||
+            (review.sensitive && !fact.sensitive)
+          )
+            throw new Error("The exact saved memory could not be checked.");
+          return fact;
+        },
         "POST",
         {
           review_id: review.id,
