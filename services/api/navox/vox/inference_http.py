@@ -14,6 +14,7 @@ import httpx
 
 from navox.ai.message_limits import SPOKEN_MESSAGE_LIMIT, TYPED_MESSAGE_LIMIT
 from navox.core.settings import Settings
+from navox.vox.host_turn import HostTurnHooks
 from navox.vox.inference_config import ProviderRoute, VoxInferenceConfig, route_credential
 from navox.vox.inference_speech import MAX_WIRE_BYTES, decode_speech_events
 from navox.vox.recall_tools import memory_message
@@ -170,10 +171,12 @@ class OpenAICompatiblePipeline:
         *,
         transport: httpx.AsyncBaseTransport | None = None,
         memory_context: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
+        host_hooks: HostTurnHooks | None = None,
     ):
         self.config, self.settings, self.check, self.usage = config, settings, check, usage
         self.tools, self.transport = tools, transport
         self.memory_context = memory_context
+        self.host_hooks = host_hooks
 
     async def _request(
         self,
@@ -340,6 +343,10 @@ class OpenAICompatiblePipeline:
                 )
                 question = bounded_text(result.get("text"))
             question = bounded_text(question, TYPED_MESSAGE_LIMIT)
+            if self.host_hooks is not None:
+                host_reply = await self.host_hooks.input(question)
+                if host_reply is not None:
+                    return await self.speak(question, host_reply.answer)
             messages: list[dict[str, Any]] = [{"role": "system", "content": INSTRUCTIONS}]
             if self.memory_context is not None:
                 recalled = memory_message(await self.memory_context(question[:200]))
@@ -395,6 +402,10 @@ class OpenAICompatiblePipeline:
                 await self.check()
                 observed = await self.tools.execute(function["name"], arguments)
                 await self.check()
+                if self.host_hooks is not None:
+                    host_reply = await self.host_hooks.after_tool()
+                    if host_reply is not None:
+                        return await self.speak(question, host_reply.answer)
                 tool_text = json.dumps(observed, ensure_ascii=False)
                 if len(tool_text.encode()) > 32_768:
                     raise ProviderRejected("The schedule result is too large")
@@ -403,18 +414,23 @@ class OpenAICompatiblePipeline:
                 )
             else:
                 raise ProviderRejected("The voice tool limit was reached")
-            output, _ = await self._request(
-                self.config.tts,
-                "/audio/speech",
-                input_bound=len(answer.encode()) + 2048,
-                payload={
-                    "model": self.config.tts.model,
-                    "voice": self.config.tts.voice,
-                    "input": answer,
-                    "response_format": "mp3",
-                    **({"stream_format": "sse"} if self.config.tts_stream_format == "sse" else {}),
-                },
-            )
-            if not output:
-                raise ProviderRejected("The voice provider returned no audio")
-            return PipelineReply(question, answer, output)
+            return await self.speak(question, answer)
+
+    async def speak(self, question: str, answer: str) -> PipelineReply:
+        """Exact host text uses the existing selected, metered TTS route only."""
+        answer = bounded_text(answer, 600)
+        output, _ = await self._request(
+            self.config.tts,
+            "/audio/speech",
+            input_bound=len(answer.encode()) + 2048,
+            payload={
+                "model": self.config.tts.model,
+                "voice": self.config.tts.voice,
+                "input": answer,
+                "response_format": "mp3",
+                **({"stream_format": "sse"} if self.config.tts_stream_format == "sse" else {}),
+            },
+        )
+        if not output:
+            raise ProviderRejected("The voice provider returned no audio")
+        return PipelineReply(question, answer, output)

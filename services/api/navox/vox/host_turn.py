@@ -31,6 +31,10 @@ class HostTurnHooks:
     def needs_input(self) -> bool:
         return False
 
+    @property
+    def needs_output_boundary(self) -> bool:
+        return False
+
     async def input(self, question: str) -> HostReply | None:
         return None
 
@@ -67,6 +71,10 @@ class CompositeHostTurnHooks(HostTurnHooks):
     @property
     def needs_input(self) -> bool:
         return any(hook.needs_input for hook in self.hooks)
+
+    @property
+    def needs_output_boundary(self) -> bool:
+        return any(hook.needs_output_boundary for hook in self.hooks)
 
     async def input(self, question: str) -> HostReply | None:
         for hook in self.hooks:

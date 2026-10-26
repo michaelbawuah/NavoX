@@ -23,6 +23,7 @@ from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 from navox.ai.message_limits import TYPED_MESSAGE_LIMIT
 from navox.core.settings import Settings
+from navox.vox.host_turn import HostReplyRequired, HostTurnHooks
 from navox.vox.inference_config import VoxInferenceConfig, route_credential
 from navox.vox.inference_http import (
     INSTRUCTIONS,
@@ -93,10 +94,12 @@ class OpenAIRealtimeAdapter:
         connector: Callable[[str, dict[str, str]], Awaitable[Socket]] = open_socket,
         clock: Callable[[], float] = time.monotonic,
         memory_context: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
+        host_hooks: HostTurnHooks | None = None,
     ):
         self.config, self.settings, self.check, self.usage = config, settings, check, usage
         self.tools, self.connector, self.clock = tools, connector, clock
         self.memory_context = memory_context
+        self.host_hooks = host_hooks
         self.socket: Socket | None = None
         self.opened_at = 0.0
         self._lock = asyncio.Lock()
@@ -356,6 +359,23 @@ class OpenAIRealtimeAdapter:
         elif event["type"] == "conversation.item.input_audio_transcription.failed":
             raise ProviderRejected("The realtime question could not be transcribed")
 
+    async def _host_input(self) -> None:
+        if self.host_hooks is None:
+            return
+        # Only an outstanding host decision needs transcription before response
+        # generation. Ordinary realtime conversation keeps its streaming latency.
+        if self.host_hooks.needs_input and not self._question:
+            for _ in range(100):
+                await self._transcript(await self._event())
+                if self._question:
+                    break
+            else:
+                raise ProviderRejected("The current voice approval transcript is unavailable")
+        if self._question:
+            reply = await self.host_hooks.input(self._question)
+            if reply is not None:
+                raise HostReplyRequired(self._question, reply.answer)
+
     async def respond(
         self, emit: Callable[[bytes], Awaitable[None]], *, text: str | None = None
     ) -> MemoryTurn:
@@ -405,6 +425,7 @@ class OpenAIRealtimeAdapter:
                     else:
                         raise ProviderRejected("The realtime input was not acknowledged")
                 turn_id = uuid4().hex
+                await self._host_input()
                 for _ in range(4):
                     await self._send(
                         {
@@ -512,6 +533,18 @@ class OpenAIRealtimeAdapter:
                             },
                         }
                     )
+                    if self.host_hooks is not None:
+                        reply = await self.host_hooks.after_tool()
+                        if reply is not None:
+                            for _ in range(100):
+                                if self._question:
+                                    break
+                                await self._transcript(await self._event())
+                            if not self._question:
+                                raise ProviderRejected(
+                                    "The current question transcript is unavailable"
+                                )
+                            raise HostReplyRequired(self._question, reply.answer)
                     self._context_ceiling += len(tool_text.encode()) + 64
                     self._stream = uuid4()
                     await self.usage.begin(
