@@ -7,6 +7,11 @@ import {
   saveMemoryForgetDraft,
 } from "../lib/vox-memory-review";
 import { saveMemoryCandidateDraft } from "../lib/vox-memory-save-review";
+import {
+  memoryLearningFixture,
+  savedSuggestionFixture,
+  suggestion,
+} from "../test-fixtures/memory-learning";
 import { memorySaveReviewFixture } from "../test-fixtures/memory-save-review";
 import { MemoryPrivacyPanel } from "./memory-privacy";
 
@@ -104,6 +109,7 @@ afterEach(() => {
   host.remove();
   vi.unstubAllGlobals();
   session.callbacks = null;
+  vi.useRealTimers();
 });
 async function mount() {
   await act(async () =>
@@ -473,6 +479,44 @@ it("keeps other memory writes disabled while a candidate save is pending", async
   await act(async () => reject(Error("lost candidate response")));
   expect(button("Add something").disabled).toBe(true);
   expect(host.textContent).toContain("Reload your memory");
+});
+it("fences other memory writes during a private learning save and reloads its new privacy generation", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(Date.parse(suggestion.created_at));
+  await mount();
+  const original = vi.mocked(fetch).getMockImplementation();
+  let saved = false,
+    resolve!: (value: Response) => void;
+  const held = new Promise<Response>((yes) => {
+    resolve = yes;
+  });
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    if (String(url).endsWith("/learning"))
+      return Response.json(memoryLearningFixture());
+    if (String(url).endsWith("/confirm")) return held;
+    if (saved && String(url).endsWith("/privacy"))
+      return Response.json({ ...privacy, generation: 5 });
+    if (saved && String(url).endsWith("/facts"))
+      return Response.json([fact, savedSuggestionFixture()]);
+    if (!original) throw Error("Missing fixture");
+    return original(url, options);
+  });
+  await click("Check learning and suggestions");
+  const agreement = host.querySelector<HTMLInputElement>(
+    '[aria-label^="Private suggestion:"] input[type="checkbox"]',
+  );
+  if (!agreement) throw Error("Missing private suggestion agreement");
+  await act(async () => agreement.click());
+  await click("Save this suggestion");
+  expect(button("Add something").disabled).toBe(true);
+  expect(button("Delete all memory").disabled).toBe(true);
+  await act(async () => {
+    saved = true;
+    resolve(Response.json(savedSuggestionFixture(), { status: 201 }));
+  });
+  expect(button("Add something").disabled).toBe(false);
+  expect(host.textContent).toContain(suggestion.content);
+  expect(host.querySelector('[aria-label^="Private suggestion:"]')).toBeNull();
 });
 it("clears private data and fences a delayed history response when the session changes", async () => {
   await mount();

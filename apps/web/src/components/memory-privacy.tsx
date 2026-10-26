@@ -31,6 +31,7 @@ import {
   validMemoryForgetQuery,
 } from "../lib/vox-memory-review";
 import { memorySaveDraftKey } from "../lib/vox-memory-save-review";
+import { MemoryLearningPanel } from "./memory-learning";
 import styles from "./memory-privacy.module.css";
 import { MemorySaveReviewPanel } from "./memory-save-review";
 import { PersonalMemoryPanel } from "./personal-memory";
@@ -479,6 +480,24 @@ export function MemoryPrivacyPanel({
               );
             }}
             onBusyChange={setCandidateBusy}
+          />
+          <MemoryLearningPanel
+            key={`${accountKey}:${privacy.generation}`}
+            accountKey={accountKey}
+            generation={privacy.generation}
+            disabled={controlsDisabled}
+            onSaved={() => {
+              setNotice("Memory saved. You can correct or forget it here.");
+              void load();
+            }}
+            onUncertain={() => {
+              setMustReload(true);
+              setError(
+                "The change result could not be checked. Reload your memory before making another change.",
+              );
+            }}
+            onBusyChange={setCandidateBusy}
+            onPrivacyChanged={() => void load()}
           />
           <div className={styles.group}>
             <div className={styles.heading}>
