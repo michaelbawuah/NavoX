@@ -107,3 +107,54 @@ class MemoryThread(Base):
     status: Mapped[str] = mapped_column(String(16), default="open")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MemoryLearningJob(Base):
+    """Content-free work metadata plus encrypted, owner-bound private proposals.
+
+    Inputs are read from the live retained source, never copied into a queue.
+    A claimed/uncertain model attempt is never automatically submitted twice.
+    """
+
+    __tablename__ = "memory_learning_jobs"
+    __table_args__ = (
+        UniqueConstraint("source_conversation_id", "sequence", name="uq_memory_learning_source"),
+        CheckConstraint("generation >= 0 AND sequence > 0", name="ck_memory_learning_revision"),
+        CheckConstraint(
+            "message_count > 0 AND message_count <= 2000", name="ck_memory_learning_count"
+        ),
+        CheckConstraint(
+            "pending_count >= 0 AND pending_count <= 4", name="ck_memory_learning_pending"
+        ),
+        CheckConstraint(
+            "status IN ('queued','processing','completed','failed','superseded')",
+            name="ck_memory_learning_status",
+        ),
+        CheckConstraint(
+            "execution_kind IS NULL OR execution_kind IN ('native','background')",
+            name="ck_memory_learning_kind",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    source_conversation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("memory_conversations.id", ondelete="CASCADE"), index=True
+    )
+    generation: Mapped[int] = mapped_column(Integer)
+    sequence: Mapped[int] = mapped_column(Integer)
+    message_count: Mapped[int] = mapped_column(Integer)
+    source_digest: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
+    pending_count: Mapped[int] = mapped_column(Integer, default=0)
+    task_id: Mapped[UUID] = mapped_column(Uuid)
+    execution_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    claim_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    output_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    encrypted_result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

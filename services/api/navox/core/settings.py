@@ -126,6 +126,9 @@ class Settings(BaseSettings):
     google_pubsub_push_service_account: str = ""
     google_gmail_push_verification_token: SecretStr | None = None
     ai_provider: str = "disabled"
+    # Optional background gateway work only. Native learning uses the existing
+    # priced Vox call and current disclosed retention, never this fallback flag.
+    memory_semantic_learning_enabled: bool = False
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-5.6-luna"
     openai_read_timeout_seconds: float = Field(default=120.0, ge=1.0, le=300.0, allow_inf_nan=False)

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, date, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -21,6 +21,7 @@ from navox.db.models import User
 from navox.memory.extraction_rules import derive_literal_turn, excluded_source
 
 METHOD = "literal_v1"
+AUTOMATIC_METHODS = frozenset({METHOD, "semantic_v1"})
 MAX_AUTOMATIC_ROWS = 100
 
 
@@ -33,6 +34,10 @@ async def learn_completed_turn(
     question: str,
     sequence: int,
     now: datetime,
+    method: Literal["literal_v1", "semantic_v1"] = "literal_v1",
+    source_turn_index: int | None = None,
+    source_turn_sequence: int | None = None,
+    source_span_start: int | None = None,
 ) -> None:
     """Derive only recognized declarations, with exact source turn provenance."""
     from navox.memory import history
@@ -96,13 +101,13 @@ async def learn_completed_turn(
         for fact, value in fact_values:
             if (
                 fact.source_conversation_id == source.id
-                and value.get("extraction_method") == METHOD
+                and value.get("extraction_method") in AUTOMATIC_METHODS
             ):
                 await database.delete(fact)
         for thread, value in thread_values:
             if (
                 thread.source_conversation_id == source.id
-                and value.get("extraction_method") == METHOD
+                and value.get("extraction_method") in AUTOMATIC_METHODS
             ):
                 await database.delete(thread)
         return
@@ -118,7 +123,7 @@ async def learn_completed_turn(
             (
                 (fact, value)
                 for fact, value in fact_values
-                if value.get("extraction_method") == METHOD and value.get("key") == key
+                if value.get("extraction_method") in AUTOMATIC_METHODS and value.get("key") == key
             ),
             None,
         )
@@ -137,6 +142,25 @@ async def learn_completed_turn(
                 continue
         if existing:
             fact, old = existing
+            if history.utc(fact.updated_at) > history.utc(now):
+                continue  # A delayed job cannot replace a more recent declaration.
+            if method == "semantic_v1" and history.utc(fact.updated_at) == history.utc(now):
+                previous_index = old.get("source_turn_index")
+                previous_span = old.get("source_span_start", -1)
+                if (
+                    fact.source_conversation_id != source.id
+                    or source_turn_index is None
+                    or not isinstance(previous_index, int)
+                    or (source_turn_index, source_span_start or 0)
+                    <= (previous_index, previous_span)
+                ):
+                    continue  # Equal-clock ambiguity never grants an older job overwrite rights.
+            if (
+                method == "semantic_v1"
+                and old["content"] == candidate.content
+                and fact.source_conversation_id == source.id
+            ):
+                continue  # An already archived fact is not a new semantic write.
             if old["content"] != candidate.content and fact.source_conversation_id is not None:
                 old_source = await database.get(MemoryConversation, fact.source_conversation_id)
                 if old_source is not None:
@@ -158,11 +182,15 @@ async def learn_completed_turn(
         value = {
             "label": candidate.label,
             "content": candidate.content,
-            "extraction_method": METHOD,
+            "extraction_method": method,
             "key": key,
             "source_turn": sequence,
             "supersedes_source": bool(transcript.get("recall_superseded")),
         }
+        if source_turn_index is not None:
+            value["source_turn_index"] = source_turn_index
+            value["source_turn"] = source_turn_sequence
+            value["source_span_start"] = source_span_start
         fact.source_conversation_id, fact.source_kind = source.id, source.source_kind
         fact.updated_at = now
         fact.encrypted_content = history.encrypt(
@@ -182,7 +210,7 @@ async def learn_completed_turn(
                 "fact",
                 fact.encrypted_content,
             )
-            if value.get("extraction_method") == METHOD:
+            if value.get("extraction_method") in AUTOMATIC_METHODS:
                 value["supersedes_source"] = True
                 fact.encrypted_content = history.encrypt(
                     settings, source.user_id, source.workspace_id, fact.id, "fact", value
@@ -190,7 +218,7 @@ async def learn_completed_turn(
     for thread_candidate in extracted.threads:
         if (
             any(
-                value.get("extraction_method") == METHOD
+                value.get("extraction_method") in AUTOMATIC_METHODS
                 and value.get("key") == thread_candidate.key
                 for _, value in thread_values
             )
@@ -208,7 +236,7 @@ async def learn_completed_turn(
         )
         value = {
             "schema_version": "literal-thread.v1",
-            "extraction_method": METHOD,
+            "extraction_method": method,
             "key": thread_candidate.key,
             "topic": thread_candidate.topic,
             "statement": thread_candidate.statement,
@@ -217,6 +245,9 @@ async def learn_completed_turn(
             "prompt": thread_candidate.prompt,
             "source_turn": sequence,
         }
+        if source_turn_index is not None:
+            value["source_turn_index"] = source_turn_index
+            value["source_turn"] = source_turn_sequence
         thread.encrypted_content = history.encrypt(
             settings, source.user_id, source.workspace_id, thread.id, "thread", value
         )
@@ -236,7 +267,7 @@ async def learn_completed_turn(
 
 def eligible_followup(value: dict[str, Any], *, now: datetime, context_key: str | None) -> bool:
     """Never ask how an event went on the same local day it may still happen."""
-    if value.get("extraction_method") != METHOD or context_key is None:
+    if value.get("extraction_method") not in AUTOMATIC_METHODS or context_key is None:
         return False
     if value.get("offered_context") not in (None, context_key):
         return False
@@ -283,7 +314,7 @@ async def mark_responded_followups(
         )
         prompt = value.get("prompt")
         if (
-            value.get("extraction_method") == METHOD
+            value.get("extraction_method") in AUTOMATIC_METHODS
             and value.get("offered_context") == context_key
             and value.get("offered_generation") == generation
             and isinstance(prompt, str)
@@ -345,7 +376,7 @@ async def _offered_followups(
         )
         if (
             isinstance(value, dict)
-            and value.get("extraction_method") == METHOD
+            and value.get("extraction_method") in AUTOMATIC_METHODS
             and value.get("offered_context") == context_key
             and value.get("offered_generation") == generation
         ):

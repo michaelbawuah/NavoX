@@ -15,13 +15,19 @@ from uuid import UUID, uuid4
 
 from cryptography.fernet import Fernet, InvalidToken
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from navox.connectors.sync_state import database_now
 from navox.core.settings import Settings
 from navox.db.communications import AssistantSession
-from navox.db.conversation_memory import MemoryConversation, MemoryFact, MemoryPrivacy, MemoryThread
+from navox.db.conversation_memory import (
+    MemoryConversation,
+    MemoryFact,
+    MemoryLearningJob,
+    MemoryPrivacy,
+    MemoryThread,
+)
 from navox.db.memory import OwnerMemory
 from navox.memory.history_schemas import FactCreate, FactUpdate, PrivacyResponse, PrivacyUpdate
 from navox.memory.sensitivity import SENSITIVE as SENSITIVE
@@ -184,6 +190,7 @@ async def update_privacy(
     if changed:
         await invalidate_private_contexts(database, user_id, workspace_id)
         row.generation += 1
+        await clear_learning_proposals(database, user_id, workspace_id)
     row.history_enabled = payload.history_enabled
     row.retention_days = retained_days
     row.off_the_record = payload.off_the_record
@@ -230,6 +237,12 @@ async def expire_owner_history(
         row.encrypted_summary = None
         row.message_count = 0
         row.erased_at = now
+        await database.execute(
+            delete(MemoryLearningJob).where(
+                MemoryLearningJob.source_conversation_id == row.id,
+                *owner_scope(MemoryLearningJob, user_id, workspace_id),
+            )
+        )
         await database.execute(
             delete(MemoryThread).where(
                 MemoryThread.source_conversation_id == row.id,
@@ -337,6 +350,8 @@ async def append_completed_turn(
             {"role": "assistant", "content": answer, "created_at": now.isoformat()},
         ]
     )
+    # Provenance is native archive sequence, not an index guessed by a model.
+    transcript.setdefault("turn_sequences", {})[str(len(turns) - 2)] = sequence
     from navox.memory.extraction import learn_completed_turn
 
     await learn_completed_turn(
@@ -348,6 +363,8 @@ async def append_completed_turn(
         sequence=sequence,
         now=now,
     )
+    if transcript.get("automatic_extraction_blocked") or transcript.get("recall_superseded"):
+        await clear_learning_proposals(database, user_id, workspace_id, source_id=row.id)
     row.encrypted_transcript = encrypt(
         settings, user_id, workspace_id, row.id, "transcript", transcript
     )
@@ -361,6 +378,10 @@ async def append_completed_turn(
     )
     row.last_sequence, row.message_count, row.updated_at = sequence, len(turns), now
     await database.flush()
+    if settings.memory_semantic_learning_enabled:
+        from navox.memory.learning import enqueue_learning
+
+        await enqueue_learning(database, settings, row, transcript, now=now)
     return True
 
 
@@ -627,7 +648,26 @@ async def bump_and_invalidate(database: AsyncSession, user_id: UUID, workspace_i
     assert row is not None
     row.generation += 1
     row.updated_at = datetime.now(UTC)
+    await clear_learning_proposals(database, user_id, workspace_id)
     await invalidate_private_contexts(database, user_id, workspace_id)
+
+
+async def clear_learning_proposals(
+    database: AsyncSession, user_id: UUID, workspace_id: UUID, *, source_id: UUID | None = None
+) -> None:
+    """Remove derivative ciphertext on privacy/correction boundaries, retaining receipts."""
+    conditions = list(owner_scope(MemoryLearningJob, user_id, workspace_id))
+    if source_id is not None:
+        conditions.append(MemoryLearningJob.source_conversation_id == source_id)
+    await database.execute(
+        update(MemoryLearningJob)
+        .where(*conditions)
+        .values(
+            encrypted_result=None,
+            pending_count=0,
+            status="superseded",
+        )
+    )
 
 
 async def forget_conversation(
@@ -636,6 +676,12 @@ async def forget_conversation(
     await lock_owner(database, user_id)
     row = await owned_conversation(database, user_id, workspace_id, identifier)
     await bump_and_invalidate(database, user_id, workspace_id)
+    await database.execute(
+        delete(MemoryLearningJob).where(
+            MemoryLearningJob.source_conversation_id == row.id,
+            *owner_scope(MemoryLearningJob, user_id, workspace_id),
+        )
+    )
     await database.execute(
         delete(MemoryFact).where(
             *owner_scope(MemoryFact, user_id, workspace_id),
@@ -797,7 +843,7 @@ async def edit_fact(
     }
     if private_by_default:
         correction["private_by_default"] = True
-    if old_payload.get("extraction_method") in {"literal_v1", "user_corrected"}:
+    if old_payload.get("extraction_method") in {"literal_v1", "semantic_v1", "user_corrected"}:
         correction.update(
             extraction_method="user_corrected",
             key=old_payload["key"],
@@ -816,6 +862,12 @@ async def forget_fact(
     row = await owned_fact(database, user_id, workspace_id, identifier)
     await bump_and_invalidate(database, user_id, workspace_id)
     if row.source_conversation_id is not None:
+        await database.execute(
+            delete(MemoryLearningJob).where(
+                MemoryLearningJob.source_conversation_id == row.source_conversation_id,
+                *owner_scope(MemoryLearningJob, user_id, workspace_id),
+            )
+        )
         source = await database.get(MemoryConversation, row.source_conversation_id)
         if source is not None:
             source.encrypted_transcript = source.encrypted_summary = None
@@ -850,7 +902,7 @@ async def erase_all_memory(
     if expected_generation is not None and row.generation != expected_generation:
         raise MemoryError(409, "Memory changed. Open the deletion controls again.")
     await bump_and_invalidate(database, user_id, workspace_id)
-    for model in (MemoryThread, MemoryFact, OwnerMemory, AssistantSession):
+    for model in (MemoryLearningJob, MemoryThread, MemoryFact, OwnerMemory, AssistantSession):
         await database.execute(delete(model).where(*owner_scope(model, user_id, workspace_id)))
     conversations = list(
         await database.scalars(

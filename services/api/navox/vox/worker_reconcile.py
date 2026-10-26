@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from navox.core.settings import get_settings
 from navox.db.session import get_database_engine, get_session_factory
 from navox.memory.history import sweep_expired_history
+from navox.memory.learning import sweep_learning_jobs
 from navox.vox.provider import LiveKitCloudProvider, cloud_config
 from navox.vox.reconcile import MediaCleaner, reconcile_one
 
@@ -27,6 +28,7 @@ async def run_cleanup(
         if loop.time() >= next_retention_sweep:
             try:
                 await sweep_expired_history(factory)
+                await sweep_learning_jobs(factory)
             except Exception:
                 # Retry independently of Cloud cleanup. Never log private data.
                 pass
