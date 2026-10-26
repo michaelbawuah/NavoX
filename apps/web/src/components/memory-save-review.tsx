@@ -10,18 +10,22 @@ import {
   type MemorySaveCandidate,
 } from "../lib/vox-memory-save-review";
 import styles from "./memory-privacy.module.css";
+import { useVoxCall } from "./vox-call-provider";
 
 export function MemorySaveReviewPanel({
   accountKey,
   disabled,
   onSaved,
   onUncertain,
+  onBusyChange,
 }: {
   accountKey: string;
   disabled: boolean;
   onSaved: () => void;
   onUncertain: () => void;
+  onBusyChange?: (busy: boolean) => void;
 }) {
+  const call = useVoxCall();
   const [review, setReview] = useState<MemorySaveCandidate | null>(null);
   const [reviewOwner, setReviewOwner] = useState(accountKey);
   const [agreement, setAgreement] = useState(false);
@@ -106,9 +110,14 @@ export function MemorySaveReviewPanel({
       return;
     const current = epoch.current;
     flow.current.busy = true;
+    onBusyChange?.(true);
     setBusy(true);
     setNotice("");
     try {
+      if (review.sensitive && call?.state.callId) {
+        await call.controller.hangUp();
+        if (current !== epoch.current) return;
+      }
       await conversationMemoryRequest(
         accountKey,
         "/candidates/confirm",
@@ -154,6 +163,7 @@ export function MemorySaveReviewPanel({
       if (current === epoch.current) {
         flow.current.busy = false;
         setBusy(false);
+        onBusyChange?.(false);
         loadPending.current();
       }
     }
@@ -179,7 +189,10 @@ export function MemorySaveReviewPanel({
       {review.sensitive && (
         <p className={styles.sensitiveNote}>
           This may contain private details. It stays out of voice recall and
-          will not be spoken automatically.
+          will not be spoken automatically. Its source conversation also stays
+          out of automatic voice recall and remains readable in History. Saving
+          ends your current Vox call and clears active chat context. Saved
+          History remains available.
         </p>
       )}
       <label className={styles.check}>

@@ -7,8 +7,15 @@ import { memorySaveReviewFixture } from "../test-fixtures/memory-save-review";
 import { MemorySaveReviewPanel } from "./memory-save-review";
 import { VoxMemorySaveReview } from "./vox-memory-save-review";
 
-const mocks = vi.hoisted(() => ({ push: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  push: vi.fn(),
+  call: null as null | {
+    state: { callId: string };
+    controller: { hangUp: () => Promise<void> };
+  },
+}));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: mocks.push }) }));
+vi.mock("./vox-call-provider", () => ({ useVoxCall: () => mocks.call }));
 let root: Root, host: HTMLDivElement;
 const onSaved = vi.fn(),
   onUncertain = vi.fn(),
@@ -28,6 +35,7 @@ function fact() {
   };
 }
 beforeEach(() => {
+  mocks.call = null;
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal(
     "fetch",
@@ -264,4 +272,29 @@ it("queues a second review until an uncertain first save has been checked", asyn
     (host.querySelector('input[type="checkbox"]') as HTMLInputElement).checked,
   ).toBe(false);
   expect(fetch).toHaveBeenCalledOnce();
+});
+it("clears the local Vox call before confirming a private source memory", async () => {
+  let finish: () => void = () => {};
+  const hangUp = vi.fn(
+    () =>
+      new Promise<void>((done) => {
+        finish = done;
+      }),
+  );
+  mocks.call = { state: { callId: "active-call" }, controller: { hangUp } };
+  saveMemoryCandidateDraft(
+    sessionStorage,
+    "school:student",
+    memorySaveReviewFixture().review,
+  );
+  await settings();
+  await agree();
+  expect(host.textContent).toContain("source conversation also stays out");
+  expect(host.textContent).toContain("Saving ends your current Vox call");
+  await act(async () => button("Save this memory").click());
+  expect(hangUp).toHaveBeenCalledOnce();
+  expect(fetch).not.toHaveBeenCalled();
+  await act(async () => finish());
+  expect(fetch).toHaveBeenCalledOnce();
+  expect(onSaved).toHaveBeenCalledOnce();
 });

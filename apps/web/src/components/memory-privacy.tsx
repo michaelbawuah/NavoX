@@ -80,6 +80,7 @@ export function MemoryPrivacyPanel({
   const [legacyOpen, setLegacyOpen] = useState(false);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [candidateBusy, setCandidateBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -114,6 +115,7 @@ export function MemoryPrivacyPanel({
     setDeletePhrase("");
     setLegacyOpen(false);
     setBusy(false);
+    setCandidateBusy(false);
   }, []);
   const discardPendingReview = useCallback(() => {
     try {
@@ -332,7 +334,7 @@ export function MemoryPrivacyPanel({
     message: string,
     privacyChange = false,
   ) {
-    if (!ready || !privacy || busy || mustReload) return;
+    if (!ready || !privacy || busy || candidateBusy || mustReload) return;
     setBusy(true);
     setError("");
     setNotice("");
@@ -428,12 +430,13 @@ export function MemoryPrivacyPanel({
       !!editing,
     );
   }
-  const controlsDisabled = busy || loading || mustReload || !privacy || !ready;
+  const controlsDisabled =
+    busy || candidateBusy || loading || mustReload || !privacy || !ready;
   return (
     <section
       className={styles.panel}
       aria-labelledby={`${id}-title`}
-      aria-busy={loading || busy}
+      aria-busy={loading || busy || candidateBusy}
     >
       <div className={styles.heading}>
         <h2 id={`${id}-title`}>Memory &amp; privacy</h2>
@@ -449,7 +452,7 @@ export function MemoryPrivacyPanel({
           <p>{error}</p>
           <button
             type="button"
-            disabled={!ready || busy}
+            disabled={!ready || busy || candidateBusy}
             onClick={() => void load()}
           >
             Retry
@@ -473,6 +476,7 @@ export function MemoryPrivacyPanel({
                 "The save result could not be checked. Reload your memory before making another change.",
               );
             }}
+            onBusyChange={setCandidateBusy}
           />
           <div className={styles.group}>
             <div className={styles.heading}>
@@ -710,8 +714,9 @@ export function MemoryPrivacyPanel({
               </button>
             </form>
             <p className={styles.muted}>
-              Changing memory controls ends your current Vox call so the new
-              choice applies immediately.
+              Changing memory controls ends your current Vox call and clears
+              active chat context. Retained History follows your chosen
+              auto-delete policy.
             </p>
             <button
               type="button"
@@ -864,6 +869,7 @@ export function MemoryPrivacyPanel({
                     : "This deletes the saved fact. You can’t undo this."
                   : "This deletes the conversation, its summary and every fact learned from it. You can’t undo this."}
               </p>
+              <p>Active voice and chat context will be cleared.</p>
               <div className={styles.actions}>
                 <button
                   type="button"
@@ -941,7 +947,7 @@ export function MemoryPrivacyPanel({
                 </label>
                 <p>
                   This permanently deletes your memory and ends your current Vox
-                  call.
+                  call. Active chat context is also cleared.
                 </p>
                 <div className={styles.actions}>
                   <button

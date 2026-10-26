@@ -6,6 +6,8 @@ import {
   memoryForgetDraftKey,
   saveMemoryForgetDraft,
 } from "../lib/vox-memory-review";
+import { saveMemoryCandidateDraft } from "../lib/vox-memory-save-review";
+import { memorySaveReviewFixture } from "../test-fixtures/memory-save-review";
 import { MemoryPrivacyPanel } from "./memory-privacy";
 
 const session = vi.hoisted(() => ({
@@ -353,6 +355,32 @@ it("blocks delete-all until the exact phrase is entered", async () => {
     generation: 4,
     confirmation: "DELETE EVERYTHING",
   });
+});
+it("keeps other memory writes disabled while a candidate save is pending", async () => {
+  saveMemoryCandidateDraft(
+    sessionStorage,
+    "school:student",
+    memorySaveReviewFixture().review,
+  );
+  await mount();
+  const privateAgreement = host.querySelector<HTMLInputElement>(
+    '[aria-labelledby] input[type="checkbox"]',
+  );
+  if (!privateAgreement) throw Error("Missing private agreement");
+  await act(async () => privateAgreement.click());
+  let reject: (reason: Error) => void = () => {};
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+  );
+  await act(async () => button("Save this memory").click());
+  expect(button("Add something").disabled).toBe(true);
+  expect(button("Delete all memory").disabled).toBe(true);
+  await act(async () => reject(Error("lost candidate response")));
+  expect(button("Add something").disabled).toBe(true);
+  expect(host.textContent).toContain("Reload your memory");
 });
 it("clears private data and fences a delayed history response when the session changes", async () => {
   await mount();
