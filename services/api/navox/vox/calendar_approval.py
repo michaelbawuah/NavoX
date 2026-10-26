@@ -6,6 +6,7 @@ must finish playing before a short contextual affirmative can consume it.
 
 from __future__ import annotations
 
+import re
 import time
 import unicodedata
 from collections.abc import Awaitable, Callable
@@ -33,6 +34,14 @@ AFFIRMATIVE = frozenset(
         "do it",
         "please do",
         "absolutely",
+        "yes sure",
+        "yeah sure",
+        "sure go ahead",
+        "of course go ahead",
+        "okay go ahead",
+        "ok go ahead",
+        "yes please do",
+        "go ahead please",
     }
 )
 NEGATIVE = frozenset({"no", "no thanks", "no thank you", "don't", "do not", "cancel", "stop"})
@@ -42,8 +51,8 @@ MAX_READBACK = 600
 
 
 def normalized_reply(text: str) -> str:
-    value = unicodedata.normalize("NFKC", text).casefold().strip()
-    return " ".join(value.strip(" .,!?:;").split())
+    value = unicodedata.normalize("NFKC", text).casefold().strip().replace("’", "'")
+    return " ".join(re.sub(r"[-.,!?;:\u2013\u2014]+", " ", value).split())
 
 
 @dataclass(frozen=True)

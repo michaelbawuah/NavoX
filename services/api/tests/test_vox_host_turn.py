@@ -36,7 +36,20 @@ def action(calls, *, validate=None):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("yes", ["yes", "Yeah!", "of course", "sure", "go ahead", "yes please"])
+@pytest.mark.parametrize(
+    "yes",
+    [
+        "yes",
+        "Yeah!",
+        "of course",
+        "sure",
+        "go ahead",
+        "yes please",
+        "Sure, go ahead.",
+        "Of course — go ahead",
+        "Okay, go ahead!",
+    ],
+)
 async def test_exact_played_review_accepts_one_current_contextual_yes_only_once(yes):
     calls = []
     host = CalendarApprovalCoordinator()
