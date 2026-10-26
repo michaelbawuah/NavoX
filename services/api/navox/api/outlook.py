@@ -28,6 +28,7 @@ from navox.outlook import replies, service, tasks
 from navox.outlook.schemas import Connect, Generate, Preview, ReplyCheck, Revise, Send, TaskPreview
 from navox.providers.microsoft_mail import MicrosoftMailError
 from navox.student.service import StudentError
+from navox.student_calendars import microsoft as calendar_microsoft
 from navox.student_email.schemas import AcceptInput, CorrectionInput, EraseInput
 from navox.student_email.service import EmailError
 
@@ -173,6 +174,21 @@ async def callback(
         return RedirectResponse(
             settings.web_origin.rstrip("/")
             + "/connections?source=outlook&outlook_connection=failed",
+            status_code=303,
+            headers=PRIVATE,
+        )
+    if await calendar_microsoft.handles(database, scope.user_id, scope.workspace_id, states[0]):
+        await calendar_microsoft.finish(
+            database,
+            settings,
+            scope.user_id,
+            scope.workspace_id,
+            scope.session_hash,
+            state=states[0],
+            code=codes[0],
+        )
+        return RedirectResponse(
+            settings.web_origin.rstrip("/") + "/connections?calendar_connection=connected",
             status_code=303,
             headers=PRIVATE,
         )

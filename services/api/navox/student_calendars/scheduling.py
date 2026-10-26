@@ -489,11 +489,11 @@ async def _free(
         factory, settings, user_id, workspace_id, session_hash, draft.availability
     )
     if (
-        draft.start_at <= snapshot.checked_at
+        draft.start_at - MEETING_BUFFER < snapshot.checked_at
         or snapshot.result.status != "complete"
         or not any(
-            opening.start_at <= draft.start_at
-            and opening.end_at >= draft.end_at
+            opening.start_at <= draft.start_at - MEETING_BUFFER
+            and opening.end_at >= draft.end_at + MEETING_BUFFER
             and not opening.displaced_study_block_ids
             for opening in snapshot.result.confirmed_openings
         )

@@ -27,6 +27,7 @@ from navox.student_calendars.schemas import (
     AVAILABILITY_SCOPES,
     CONSENT_VERSION,
     MAX_REVISION,
+    MICROSOFT_AVAILABILITY_SCOPES,
     CalendarCommand,
     CalendarGrantView,
     CalendarProvider,
@@ -46,6 +47,7 @@ class CalendarGrantSnapshot:
     external_account_id: str | None = field(repr=False)
     granted_scopes: frozenset[str]
     connection_status: str | None
+    provider: str = "google"
 
 
 @dataclass(frozen=True)
@@ -190,11 +192,19 @@ async def owned_connection(
             Connection.id == connection_id,
             Connection.user_id == user_id,
             Connection.workspace_id == workspace_id,
-            Connection.provider == "google",
+            Connection.provider.in_(("google", "microsoft", "icloud")),
         )
         .execution_options(populate_existing=True)
     )
     return row
+
+
+def required_scopes(provider: str) -> tuple[str, ...]:
+    if provider == "microsoft":
+        return MICROSOFT_AVAILABILITY_SCOPES
+    if provider == "icloud":
+        return ("apple-calendar-busy.v1",)
+    return AVAILABILITY_SCOPES if provider == "google" else ("unsupported-calendar-provider",)
 
 
 def ready(connection: Connection | None) -> bool:
@@ -202,7 +212,7 @@ def ready(connection: Connection | None) -> bool:
         connection is not None
         and connection.status == "active"
         and connection.credential_reference is not None
-        and set(AVAILABILITY_SCOPES).issubset(connection.granted_scopes)
+        and set(required_scopes(connection.provider)).issubset(connection.granted_scopes)
     )
 
 
@@ -239,6 +249,7 @@ async def scope_snapshot(
                 else None,
                 granted_scopes=frozenset(connection.granted_scopes) if connection else frozenset(),
                 connection_status=connection.status if connection else None,
+                provider=connection.provider if connection else "google",
             )
         )
     return CalendarScope(user_id, workspace_id, current.generation, current.revision, tuple(items))
@@ -267,6 +278,10 @@ async def view(
     items = []
     for grant in await grants(database, user_id, workspace_id):
         connection = await owned_connection(database, user_id, workspace_id, grant.connection_id)
+        attempt = await database.get(OAuthAuthorizationAttempt, grant.oauth_attempt_id)
+        provider = (
+            connection.provider if connection else (attempt.provider if attempt else "google")
+        )
         status: Literal["pending", "connected", "unavailable", "revoked"] = (
             "revoked" if grant.status == "revoked" else "unavailable"
         )
@@ -283,6 +298,7 @@ async def view(
         items.append(
             CalendarGrantView(
                 id=grant.id,
+                provider="outlook" if provider == "microsoft" else "google",
                 connection_id=connection.id if connection else None,
                 account_label=connection.external_email if connection else None,
                 status=status,
@@ -305,7 +321,15 @@ async def view(
             CalendarProvider(
                 id="google", availability="available" if configured else "setup_pending"
             ),
-            CalendarProvider(id="outlook", availability="unavailable"),
+            CalendarProvider(
+                id="outlook",
+                availability="available"
+                if configured
+                and settings.microsoft_oauth_client_id.strip()
+                and settings.microsoft_oauth_client_secret
+                and settings.microsoft_oauth_client_secret.get_secret_value().strip()
+                else "setup_pending",
+            ),
             CalendarProvider(id="icloud", availability="unavailable"),
         ],
         grants=items,

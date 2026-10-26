@@ -6,7 +6,9 @@ import {
   CALENDAR_READ_SCOPES,
   type CalendarStartInput,
   createStudentCalendarApi,
+  MICROSOFT_CALENDAR_READ_SCOPES,
   readAvailabilitySnapshot,
+  readCalendarAuthorization,
   readCalendarView,
 } from "./student-calendar-api";
 
@@ -733,11 +735,79 @@ describe("calendar snapshot consistency", () => {
       readAvailabilitySnapshot(data, account, preview, now).expires_at,
     ).toBe(data.expires_at);
   });
-  it.each(["outlook", "missing-connection", "secret", "duplicate"])(
+  it("accepts explicitly configured Outlook and Apple provider status", () => {
+    const data = view();
+    data.providers[1].availability = "available";
+    data.providers[2].availability = "available";
+    data.grants[0].provider = "outlook";
+    expect(readCalendarView(data).grants[0].provider).toBe("outlook");
+  });
+  it("binds Microsoft authorization to calendar-only scopes and its exact host", () => {
+    const target = new URL(
+      "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+    );
+    for (const [key, value] of Object.entries({
+      client_id: "calendar-client",
+      response_type: "code",
+      redirect_uri: "https://api.example.test/api/v1/outlook/callback",
+      scope: MICROSOFT_CALENDAR_READ_SCOPES.join(" "),
+      state: "random-state",
+      code_challenge: "a".repeat(43),
+      code_challenge_method: "S256",
+    }))
+      target.searchParams.set(key, value);
+    const body = {
+      ...authorization(),
+      authorization_url: target.toString(),
+      requested_scopes: [...MICROSOFT_CALENDAR_READ_SCOPES],
+    };
+    expect(
+      readCalendarAuthorization(
+        body,
+        start,
+        MICROSOFT_CALENDAR_READ_SCOPES,
+        "outlook",
+      ).authorization_url,
+    ).toContain("login.microsoftonline.com");
+    expect(() =>
+      readCalendarAuthorization(
+        {
+          ...body,
+          authorization_url: body.authorization_url.replace(
+            "login.microsoftonline.com",
+            "login.microsoftonline.com.attacker.test",
+          ),
+        },
+        start,
+        MICROSOFT_CALENDAR_READ_SCOPES,
+        "outlook",
+      ),
+    ).toThrow();
+    expect(() =>
+      readCalendarAuthorization(
+        {
+          ...body,
+          requested_scopes: [...MICROSOFT_CALENDAR_READ_SCOPES, "Mail.Read"],
+        },
+        start,
+        MICROSOFT_CALENDAR_READ_SCOPES,
+        "outlook",
+      ),
+    ).toThrow();
+    target.searchParams.append("scope", "Mail.Read");
+    expect(() =>
+      readCalendarAuthorization(
+        { ...body, authorization_url: target.toString() },
+        start,
+        MICROSOFT_CALENDAR_READ_SCOPES,
+        "outlook",
+      ),
+    ).toThrow();
+  });
+  it.each(["missing-connection", "secret", "duplicate"])(
     "rejects misleading calendar status %s",
     (change) => {
       const data = view();
-      if (change === "outlook") data.providers[1].availability = "available";
       if (change === "missing-connection")
         Object.assign(data.grants[0], { connection_id: null });
       if (change === "secret")

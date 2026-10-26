@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from navox.connectors.sync_state import database_now, utc
+from navox.core.credential_vault import CredentialVaultError
 from navox.core.settings import Settings
 from navox.db.models import Connection
 from navox.db.student_planning import StudentPlanningState, StudentStudyBlock
@@ -20,6 +21,11 @@ from navox.providers.google_availability import (
     GoogleAvailabilitySnapshot,
 )
 from navox.providers.google_oauth import GoogleAccessTokenError, access_token_for_connection
+from navox.providers.microsoft_availability import (
+    MicrosoftAvailabilityProvider,
+    MicrosoftAvailabilitySnapshot,
+)
+from navox.providers.microsoft_mail import MicrosoftMailError
 from navox.student import service as schedule
 from navox.student.occurrences import ClassProjectionIssue, project
 from navox.student_availability.engine import compute_availability
@@ -34,8 +40,8 @@ from navox.student_availability.schemas import (
     SourceCoverage,
     StudyBlock,
 )
+from navox.student_calendars import microsoft
 from navox.student_calendars import service as calendars
-from navox.student_calendars.schemas import AVAILABILITY_SCOPES
 from navox.student_planning import service as planning_service
 from navox.student_planning.schemas import Preferences
 
@@ -309,6 +315,7 @@ async def preview(
     payload: AvailabilityPreview,
     *,
     provider: GoogleAvailabilityProvider | None = None,
+    microsoft_provider: MicrosoftAvailabilityProvider | None = None,
 ) -> AvailabilitySnapshot:
     async with factory() as database:
         scope = await calendars.scope_snapshot(database, user_id, workspace_id, session_hash)
@@ -318,8 +325,9 @@ async def preview(
     if len(scope.grants) > 198:
         raise schedule.StudentError(409, "Too many calendar permissions to check safely")
     provider = provider or GoogleAvailabilityProvider()
+    microsoft_provider = microsoft_provider or MicrosoftAvailabilityProvider()
     source_start, source_end = _source_window(payload, internal.timezone)
-    external: dict[UUID, GoogleAvailabilitySnapshot] = {}
+    external: dict[UUID, GoogleAvailabilitySnapshot | MicrosoftAvailabilitySnapshot] = {}
 
     async def check() -> None:
         async with factory() as database:
@@ -335,14 +343,24 @@ async def preview(
                     or grant.connection_status != "active"
                     or grant.credential_id is None
                     or grant.connection_id is None
-                    or not set(AVAILABILITY_SCOPES).issubset(grant.granted_scopes)
+                    or not set(calendars.required_scopes(grant.provider)).issubset(
+                        grant.granted_scopes
+                    )
                 ):
                     continue
                 try:
-                    token = await _token(factory, settings, scope, grant, session_hash)
-                except GoogleAccessTokenError:
+                    if grant.provider == "microsoft":
+                        token = await microsoft.access(
+                            factory, settings, scope, grant, session_hash
+                        )
+                    elif grant.provider == "google":
+                        token = await _token(factory, settings, scope, grant, session_hash)
+                    else:
+                        continue
+                except (GoogleAccessTokenError, MicrosoftMailError, CredentialVaultError):
                     continue
-                external[grant.id] = await provider.collect(
+                reader = microsoft_provider if grant.provider == "microsoft" else provider
+                external[grant.id] = await reader.collect(
                     access_token=token,
                     start_at=source_start,
                     end_at=source_end,
@@ -381,7 +399,7 @@ async def preview(
             summaries.append(
                 AvailabilitySourceSummary(source_id=source_id, state="complete", calendar_count=0)
             )
-        grant_sources = [(f"google-{grant.id.hex}", grant) for grant in scope.grants]
+        grant_sources = [(f"{grant.provider}-{grant.id.hex}", grant) for grant in scope.grants]
         if not grant_sources:
             required.append("google-calendar-availability")
             coverage.append(

@@ -146,7 +146,10 @@ export function StudentCalendarSchedulingConsent({
   };
   const active =
     connections?.grants.filter(
-      (grant) => grant.status === "connected" && grant.connection_id !== null,
+      (grant) =>
+        grant.provider === "google" &&
+        grant.status === "connected" &&
+        grant.connection_id !== null,
     ) ?? [];
   return (
     <section className={styles.panel} aria-labelledby={`${id}-heading`}>

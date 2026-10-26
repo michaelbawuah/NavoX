@@ -13,6 +13,7 @@ CONSENT_VERSION: Literal["calendar-availability.v1"] = "calendar-availability.v1
 CALENDAR_LIST_SCOPE = "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
 CALENDAR_BUSY_SCOPE = "https://www.googleapis.com/auth/calendar.events.freebusy"
 AVAILABILITY_SCOPES = (CALENDAR_LIST_SCOPE, CALENDAR_BUSY_SCOPE)
+MICROSOFT_AVAILABILITY_SCOPES = ("User.Read", "Calendars.Read")
 MAX_REVISION = 2147483647
 SCHEDULING_CONSENT_VERSION: Literal["calendar-scheduling.v1"] = "calendar-scheduling.v1"
 CALENDAR_WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.events.owned"
@@ -45,7 +46,7 @@ class CalendarProvider(Input):
 
 class CalendarGrantView(Input):
     id: UUID
-    provider: Literal["google"] = "google"
+    provider: Literal["google", "outlook", "icloud"] = "google"
     connection_id: UUID | None
     account_label: str | None
     status: Literal["pending", "connected", "unavailable", "revoked"]

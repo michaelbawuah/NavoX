@@ -42,16 +42,20 @@ function CalendarConnectionsWorkspace({
   );
   const [view, setView] = useState<CalendarView | null>(null);
   const [consent, setConsent] = useState(false);
+  const [outlookConsent, setOutlookConsent] = useState(false);
   const [notice, setNotice] = useState("");
   const privateState = useCalendarWorkspace(accountId, api, () => {
     setView(null);
     setConsent(false);
+    setOutlookConsent(false);
     setNotice("");
   });
   const google = view?.providers.find((provider) => provider.id === "google");
+  const outlook = view?.providers.find((provider) => provider.id === "outlook");
   const refresh = () => {
     setView(null);
     setConsent(false);
+    setOutlookConsent(false);
     setNotice("");
     void privateState.run(
       (signal) => api.calendars(signal),
@@ -107,6 +111,34 @@ function CalendarConnectionsWorkspace({
       },
     );
   };
+  const connectOutlook = () => {
+    if (
+      !view ||
+      !outlookConsent ||
+      outlook?.availability !== "available" ||
+      !api.startOutlook
+    )
+      return;
+    const captured = view;
+    const startOutlook = api.startOutlook;
+    setNotice("");
+    void privateState.run(
+      (signal) =>
+        startOutlook(
+          {
+            generation: captured.generation,
+            revision: captured.revision,
+            request_id: crypto.randomUUID(),
+            consent_version: "calendar-availability.v1",
+            confirmed: true,
+            connection_id: null,
+          },
+          signal,
+        ),
+      (authorization) =>
+        window.location.assign(authorization.authorization_url),
+    );
+  };
   return (
     <section className={styles.panel} aria-labelledby={`${id}-heading`}>
       <div className={styles.heading}>
@@ -124,7 +156,7 @@ function CalendarConnectionsWorkspace({
         </button>
       </div>
       <p>
-        Connect Google calendars for private busy-time checks in Planner. This
+        Connect calendars for private busy-time checks in Planner. This
         permission is separate from coursework and Gmail access.
       </p>
       <ul className={styles.providers} aria-label="Calendar providers">
@@ -140,7 +172,13 @@ function CalendarConnectionsWorkspace({
         </li>
         <li className={styles.provider}>
           <strong>Outlook / Microsoft 365</strong>
-          <span className={styles.status}>Unavailable here</span>
+          <span className={styles.status}>
+            {!view
+              ? "Access not checked"
+              : outlook?.availability === "available"
+                ? "Available to connect"
+                : "Setup unavailable here"}
+          </span>
         </li>
         <li className={styles.provider}>
           <strong>Apple / iCloud</strong>
@@ -150,12 +188,15 @@ function CalendarConnectionsWorkspace({
       {view?.grants.map((grant) => (
         <article className={styles.provider} key={grant.id}>
           <div>
-            <strong>{grant.account_label ?? "Google calendar account"}</strong>
+            <strong>
+              {grant.account_label ??
+                `${grant.provider === "outlook" ? "Microsoft" : "Google"} calendar account`}
+            </strong>
             <p className={styles.hint}>
               {grant.status === "connected"
                 ? "Busy-time access is on"
                 : grant.status === "pending"
-                  ? "Google setup has not completed"
+                  ? "Calendar setup has not completed"
                   : grant.status === "revoked"
                     ? "Availability access is off"
                     : "Calendar access is unavailable"}
@@ -190,6 +231,32 @@ function CalendarConnectionsWorkspace({
             onClick={connect}
           >
             Connect Google Calendar
+          </button>
+        </>
+      )}
+      {outlook?.availability === "available" && api.startOutlook && (
+        <>
+          <label className={styles.check}>
+            <input
+              type="checkbox"
+              checked={outlookConsent}
+              disabled={!privateState.ready || privateState.busy}
+              onChange={(event) => setOutlookConsent(event.target.checked)}
+            />
+            <span>
+              Use busy times from all my Outlook calendars to find openings.
+              Microsoft calendar read permission is separate from email. No
+              events or invitations are created. I can stop this use anytime.
+            </span>
+          </label>
+          <button
+            type="button"
+            disabled={
+              !privateState.ready || privateState.busy || !outlookConsent
+            }
+            onClick={connectOutlook}
+          >
+            Connect Outlook Calendar
           </button>
         </>
       )}

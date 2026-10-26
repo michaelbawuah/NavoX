@@ -21,7 +21,7 @@ from navox.api.auth import (
     hash_session_token,
 )
 from navox.api.student import result, scope
-from navox.student_calendars import oauth, scheduling, service
+from navox.student_calendars import microsoft, oauth, scheduling, service
 from navox.student_calendars.schemas import (
     CalendarAuthorization,
     CalendarCommand,
@@ -166,6 +166,20 @@ async def start_google(
 ) -> CalendarAuthorization:
     payload = await bounded_json(request, CalendarStart)
     return await result(oauth.start(database, *scope(account), token_hash, payload, settings))
+
+
+@router.post(
+    "/outlook/start", response_model=CalendarAuthorization, dependencies=[Depends(enabled)]
+)
+async def start_outlook(
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    token_hash: SessionHashDependency,
+) -> CalendarAuthorization:
+    payload = await bounded_json(request, CalendarStart)
+    return await result(microsoft.start(database, *scope(account), token_hash, payload, settings))
 
 
 @router.post("/{grant_id}/disconnect", response_model=CalendarView)

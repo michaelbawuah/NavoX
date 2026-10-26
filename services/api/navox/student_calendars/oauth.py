@@ -145,7 +145,7 @@ async def start(
         connection = await service.owned_connection(
             database, user_id, workspace_id, payload.connection_id
         )
-        if connection is None or connection.status != "active":
+        if connection is None or connection.provider != "google" or connection.status != "active":
             raise schedule.StudentError(404, "Active Google connection not found")
     if scheduling:
         if (
