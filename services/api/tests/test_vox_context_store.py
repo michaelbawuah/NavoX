@@ -325,8 +325,12 @@ async def test_checkpoint_migration_catalog_roundtrip_and_populated_downgrade_gu
                 module.upgrade()
                 catalog = inspect(sync)
                 table = VoxCallCheckpoint.__table__
-                assert {c["name"] for c in catalog.get_columns(table.name)} == set(
-                    table.columns.keys()
+                # This test rebuilds historical revision 0056, before the
+                # additive 0062 privacy fields. The full migration-chain check
+                # separately verifies those columns on the current schema.
+                memory_columns = {"memory_generation", "off_the_record"}
+                assert {c["name"] for c in catalog.get_columns(table.name)} == (
+                    set(table.columns.keys()) - memory_columns
                 )
                 assert {i["name"] for i in catalog.get_indexes(table.name)} == {
                     i.name for i in table.indexes
@@ -339,6 +343,10 @@ async def test_checkpoint_migration_catalog_roundtrip_and_populated_downgrade_gu
                 }
                 module.downgrade()
                 module.upgrade()
+                # Restore the assembled schema before exercising today's
+                # context store and the populated-table downgrade fence below.
+                table.drop(sync)
+                table.create(sync)
 
         await connection.run_sync(rebuild)
     async with store_for(env, base, settings) as (store, _):
