@@ -41,7 +41,7 @@ async def learning_status(
     user_id, workspace_id = scope(current_account)
     factory = get_session_factory()
     configured = await native_configured(
-        settings, factory, user_id, workspace_id
+        settings, database, user_id, workspace_id
     ) or await background_configured(settings, factory, user_id, workspace_id)
     return await list_reviews(database, settings, user_id, workspace_id, configured=configured)
 

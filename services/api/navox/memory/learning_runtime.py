@@ -118,7 +118,7 @@ async def background_configured(
 
 async def native_configured(
     settings: Settings,
-    factory: async_sessionmaker[AsyncSession],
+    database: AsyncSession,
     user_id: UUID,
     workspace_id: UUID,
 ) -> bool:
@@ -138,9 +138,11 @@ async def native_configured(
             return False
         route = config.realtime if config.mode == "realtime" else config.llm
         route_credential(route, settings)
-        async with factory() as database:
-            _, policy = await get_policy(database)
-            budget = await budget_status(database, user_id, workspace_id)
+        # Browser memory authority already holds the owner row in this
+        # transaction. A second session would deadlock on budget_status's owner
+        # lock; use the same transaction for the entire private status read.
+        _, policy = await get_policy(database)
+        budget = await budget_status(database, user_id, workspace_id)
         return not budget.blocked and any(
             (price.provider, price.model) == (route.provider, route.model)
             and price.input_text is not None
