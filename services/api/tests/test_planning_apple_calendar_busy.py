@@ -102,11 +102,11 @@ async def test_native_apple_inventory_and_busy_read_keep_parent_transaction(
         result = await collect(env, database)
         assert result.connected and result.digest != "unconnected"
         assert result.intervals == (
-            (env.busy_start - timedelta(minutes=15), env.busy_end + timedelta(minutes=15)),
+            (env.busy_start - timedelta(minutes=25), env.busy_end + timedelta(minutes=25)),
         )
         first, last = env.provider.queries[0]
-        assert first <= env.first - timedelta(minutes=15)
-        assert last >= env.first + timedelta(hours=16, minutes=15)
+        assert first <= env.first - timedelta(minutes=25)
+        assert last >= env.first + timedelta(hours=16, minutes=25)
 
 
 @pytest.mark.asyncio
@@ -170,8 +170,8 @@ async def test_planner_http_preview_places_study_outside_apple_busy_time(apple_p
     for block in result["result"]["blocks"]:
         first = datetime.fromisoformat(block["start_at"].replace("Z", "+00:00"))
         last = datetime.fromisoformat(block["end_at"].replace("Z", "+00:00"))
-        assert last <= env.busy_start - timedelta(minutes=15) or first >= env.busy_end + timedelta(
-            minutes=15
+        assert last <= env.busy_start - timedelta(minutes=25) or first >= env.busy_end + timedelta(
+            minutes=25
         )
     async with env.factory() as database:
         assert await database.scalar(select(func.count()).select_from(StudentStudyBlock)) == 0

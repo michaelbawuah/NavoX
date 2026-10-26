@@ -144,8 +144,8 @@ async def microsoft_busy_env(apple_env, monkeypatch):
     class BusyProvider:
         async def collect(self, *, access_token, start_at, end_at, check):
             assert access_token == ACCESS
-            assert start_at == START - timedelta(minutes=15)
-            assert end_at == START.replace(hour=23) + timedelta(minutes=15)
+            assert start_at == START - timedelta(minutes=25)
+            assert end_at == START.replace(hour=23) + timedelta(minutes=25)
             env.microsoft.busy_calls += 1
             await check()
             if env.microsoft.failure == "busy":
@@ -202,7 +202,7 @@ async def test_microsoft_busy_is_used_and_rotation_is_owned_by_parent_transactio
             result = await collect(env, database)
         assert result.connected
         assert result.intervals == (
-            (BUSY_START - timedelta(minutes=15), BUSY_END + timedelta(minutes=15)),
+            (BUSY_START - timedelta(minutes=25), BUSY_END + timedelta(minutes=25)),
         )
         credential = await database.get(ConnectionCredential, env.credential_id)
         assert (

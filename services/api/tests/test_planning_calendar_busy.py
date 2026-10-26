@@ -55,6 +55,8 @@ async def test_planner_calendar_adapter_requires_complete_coverage(monkeypatch, 
 
     class Provider:
         async def collect(self, **kwargs):
+            assert kwargs["start_at"] == now - timedelta(minutes=25)
+            assert kwargs["end_at"] == now + timedelta(days=1, minutes=25)
             await kwargs["check"]()
             return GoogleAvailabilitySnapshot(
                 coverage, 1, (ProviderBusy(now, now + timedelta(hours=1)),), now
@@ -86,6 +88,6 @@ async def test_planner_calendar_adapter_requires_complete_coverage(monkeypatch, 
             travel_minutes=15,
         )
         assert value.intervals == (
-            (now - timedelta(minutes=15), now + timedelta(hours=1, minutes=15)),
+            (now - timedelta(minutes=25), now + timedelta(hours=1, minutes=25)),
         )
         assert value.connected

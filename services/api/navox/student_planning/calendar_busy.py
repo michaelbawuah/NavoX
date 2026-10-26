@@ -33,6 +33,7 @@ from navox.providers.microsoft_availability import (
 )
 from navox.providers.microsoft_mail import MicrosoftMailError, MicrosoftMailGateway
 from navox.student import service as schedule
+from navox.student_availability.engine import MEETING_BUFFER
 from navox.student_calendars import apple
 from navox.student_calendars import claims as calendar_claims
 from navox.student_calendars import service as calendars
@@ -243,23 +244,31 @@ async def collect(
 ) -> CalendarBusy:
     original = await inventory(database, user_id, workspace_id)
     claims = await calendar_claims.snapshot(database, user_id, workspace_id)
+    claim_timezone = (
+        (await schedule.owner(database, user_id, workspace_id)).timezone if claims else None
+    )
     if not original:
         return CalendarBusy(
-            tuple(sorted({row.interval(travel_minutes) for row in claims})),
+            tuple(
+                sorted({row.interval(travel_minutes, timezone=claim_timezone) for row in claims})
+            ),
             calendar_claims.fingerprint(claims) or "unconnected",
             False,
             (
                 "No calendar is connected. This preview uses your saved classes, "
-                "shifts and routine only.",
+                "shifts and routine only."
+                + (" Retained NavoX calendar requests also remain busy." if claims else ""),
             ),
         )
     if len(original) > 8:
         raise schedule.StudentError(409, "Narrow calendar connections before planning")
     settings = get_settings()
-    intervals = [row.interval(travel_minutes) for row in claims]
+    intervals = [row.interval(travel_minutes, timezone=claim_timezone) for row in claims]
 
     async def check() -> None:
         user = await schedule.owner(database, user_id, workspace_id)
+        if claim_timezone is not None and user.timezone != claim_timezone:
+            raise schedule.StudentError(409, "Your timezone changed. Review a new plan")
         if user.agent_paused:
             raise schedule.StudentError(
                 409, "Resume NavoX to check connected calendars before planning"
@@ -270,8 +279,9 @@ async def collect(
             raise schedule.StudentError(409, "Calendar activity changed. Review a new plan")
 
     await check()
-    first = (start_at - timedelta(minutes=travel_minutes)).replace(microsecond=0)
-    last = end_at + timedelta(minutes=travel_minutes)
+    meeting_padding = MEETING_BUFFER + timedelta(minutes=travel_minutes)
+    first = (start_at - meeting_padding).replace(microsecond=0)
+    last = end_at + meeting_padding
     if last.microsecond:
         last = last.replace(microsecond=0) + timedelta(seconds=1)
     try:
@@ -345,8 +355,8 @@ async def collect(
                     )
                 intervals.extend(
                     (
-                        item.start_at - timedelta(minutes=travel_minutes),
-                        item.end_at + timedelta(minutes=travel_minutes),
+                        item.start_at - meeting_padding,
+                        item.end_at + meeting_padding,
                     )
                     for item in value.busy
                 )
@@ -368,5 +378,8 @@ async def collect(
         values,
         digest,
         True,
-        (f"Calendar meetings include your {travel_minutes}-minute travel buffer on both sides.",),
+        (
+            "Calendar meetings include 10 minutes plus your "
+            f"{travel_minutes} minutes of travel on both sides.",
+        ),
     )
