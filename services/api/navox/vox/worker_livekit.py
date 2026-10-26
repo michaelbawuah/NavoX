@@ -187,6 +187,9 @@ class LiveKitAudioOutput:
             data = raw[start : start + 1920]
             if self.usage:
                 await self.usage.note_audio(max(1, len(data) * 1000 // 96000), direction="output")
+                # Credit admission is an await too. Revocation or source
+                # erasure during it must win before the frame is published.
+                await check()
             now = time.monotonic()
             self._max_proof_seconds = max(self._max_proof_seconds, now - began)
             if self._queued_until is not None and now - self._queued_until > 0.002:

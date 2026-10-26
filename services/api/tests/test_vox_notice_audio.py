@@ -14,6 +14,7 @@ from navox.vox.host_turn import HostTurnHooks
 from navox.vox.inference_config import VoxInferenceConfig
 from navox.vox.inference_http import OpenAICompatiblePipeline
 from navox.vox.inference_realtime import OpenAIRealtimeAdapter
+from navox.vox.worker import WorkerAccessLost
 from navox.vox.worker_livekit import LiveKitAudioOutput
 
 
@@ -89,6 +90,31 @@ async def test_clear_during_notice_wins_over_late_provider_timeline_restore():
         await output.play_notice(synthetic_mp3(), check)
     assert output.played_pcm_ms() == 0
     assert output._pcm_resampler is None and output._pcm_decoded_samples == 0
+
+
+@pytest.mark.asyncio
+async def test_source_erasure_during_output_credit_admission_stops_frame_publication():
+    erased, frames, admissions = [False], [], []
+
+    class CapturedSource(Source):
+        async def capture_frame(self, frame):
+            frames.append(frame)
+
+    class Credit:
+        async def note_audio(self, duration_ms, *, direction):
+            admissions.append((duration_ms, direction))
+            erased[0] = True
+
+    async def current():
+        if erased[0]:
+            raise WorkerAccessLost("The synthetic private source was erased")
+
+    source = CapturedSource()
+    output = source.output = LiveKitAudioOutput(source)
+    output.usage = Credit()
+    with pytest.raises(WorkerAccessLost):
+        await output.play(synthetic_mp3(), current)
+    assert len(admissions) == 1 and frames == [] and output._pcm_samples == 0
 
 
 @pytest.mark.asyncio
