@@ -745,6 +745,13 @@ async def edit_fact(
     old_payload = decrypt(settings, user_id, workspace_id, row.id, "fact", row.encrypted_content)
     label, content = payload.label or old["label"], payload.content or old["content"]
     sensitive = require_sensitive_agreement(label, content, payload.sensitive_agreement)
+    private_by_default = old_payload.get("private_by_default") is True
+    if private_by_default:
+        if not payload.sensitive_agreement:
+            raise MemoryError(
+                422, "Agree separately before editing this private or sensitive detail."
+            )
+        sensitive = True
     await bump_and_invalidate(database, user_id, workspace_id)
     # Preserve the historical transcript and sibling saved facts. A missing
     # derived summary marks this source as obsolete for future recall; every
@@ -759,6 +766,8 @@ async def edit_fact(
         "content": content,
         "supersedes_source": row.source_conversation_id is not None,
     }
+    if private_by_default:
+        correction["private_by_default"] = True
     if old_payload.get("extraction_method") in {"literal_v1", "user_corrected"}:
         correction.update(
             extraction_method="user_corrected",
