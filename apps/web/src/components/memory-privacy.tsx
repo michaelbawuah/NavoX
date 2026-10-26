@@ -425,7 +425,7 @@ export function MemoryPrivacyPanel({
                 <label>
                   Label
                   <input
-                    maxLength={160}
+                    maxLength={80}
                     value={label}
                     onChange={(e) => setLabel(e.target.value)}
                     required
@@ -435,7 +435,7 @@ export function MemoryPrivacyPanel({
                 <label>
                   What should NavoX remember?
                   <textarea
-                    maxLength={4000}
+                    maxLength={500}
                     rows={3}
                     value={content}
                     onChange={(e) => setContent(e.target.value)}
