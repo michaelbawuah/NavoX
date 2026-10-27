@@ -112,8 +112,8 @@ async def test_postgres_provider_upgrade_keeps_legacy_proof_and_refuses_non_goog
         )
         await database.commit()
         connection = await database.connection()
-        async with database.begin_nested():
-            with pytest.raises(SQLAlchemyError, match="Provider calendar receipts prevent"):
+        with pytest.raises(SQLAlchemyError, match="Provider calendar receipts prevent"):
+            async with database.begin_nested():
                 await connection.run_sync(lambda value: apply(value, "downgrade"))
         assert (
             await database.scalar(text("SELECT provider FROM student_calendar_events")) == "icloud"

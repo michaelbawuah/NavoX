@@ -92,7 +92,7 @@ async def test_postgres_semantic_empty_reupgrade_preserves_history_and_populated
     await archive(env, generation, question="I prefer brief replies. I code in Python.")
     async with env.factory() as database:
         connection = await database.connection()
-        async with database.begin_nested():
-            with pytest.raises(SQLAlchemyError, match="Semantic memory work or reviews prevent"):
+        with pytest.raises(SQLAlchemyError, match="Semantic memory work or reviews prevent"):
+            async with database.begin_nested():
                 await connection.run_sync(lambda value: run(value, "downgrade"))
         assert await database.scalar(text("SELECT count(*) FROM memory_learning_jobs")) == 1
