@@ -2,7 +2,21 @@
 
 Vercel project: `navox-landing` (`prj_JBmdtF6mLTLDHqwXyoz87E9IYSpY`). Static root: `apps/landing/site`; no build/install command; output `.`. The deployed landing is https://navox-landing.vercel.app/.
 
-The current production app still serves **navox.net** through the VPS Caddy proxy. Neither `app.navox.net` nor `api.navox.net` has a DNS record. The API's configured WEB_ORIGIN and Google/Canvas OAuth callbacks still use navox.net. Do not move the apex until app-domain authentication works.
+The landing page is live on https://navox.net/ through Vercel, with www redirecting to the apex. The existing qualified app is live independently on https://app.navox.net/ and the public waitlist on https://api.navox.net/v1/waitlist.
+
+Active VPS targets for future app releases:
+
+| Service | Container | Host listener |
+| --- | --- | --- |
+| App web | navox-app-web-20261027 | 127.0.0.1:13001 |
+| App API | navox-app-api-20261027 | 127.0.0.1:18001 |
+| Public waitlist | navox-landing-waitlist-20261027 | 127.0.0.1:18081 |
+
+The prior navox-web-1/navox-api-1 containers remain available for rollback and cached legacy routes. The Vox test stack at 13000/18000 was not changed. Future milestone deployments must target the app host's active services above; updating only the old 3000/8000 listeners will not update app.navox.net.
+
+Private runtime configuration and rollback material stay on the VPS under `/opt/navox/operations/landing-app-cutover-20261027` and `/opt/navox/operations/landing-waitlist-20261027`. The app origin is app.navox.net. Exact callback redirects on both Vercel and the old VPS route the existing registered Google/Canvas callbacks to the app, preserving query parameters and app-domain sessions. No OAuth client secrets were moved into the landing site.
+
+The old VPS also proxies the static Vercel site for visitors whose DNS resolver still caches its old address. Its legacy API and `_next` handlers remain available. This provides the same landing page while caches expire.
 
 ## Domain records (IONOS)
 

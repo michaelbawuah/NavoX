@@ -44,15 +44,44 @@ api.navox.net {
  }
 }
 """
-    if not addition:
-        print("App and waitlist HTTPS hosts are already installed.")
+    config = original + addition
+    if "# landing-callback-bridge" not in original:
+        marker = "\thandle /api/v1/assistant/* {"
+        assert marker in config
+        bridge = """
+ # landing-callback-bridge: supports resolvers still caching the old apex IP.
+ handle /api/v1/connections/google/callback {
+  redir https://app.navox.net{uri} 307
+ }
+ handle /api/v1/connectors/canvas-lms/callback {
+  redir https://app.navox.net{uri} 307
+ }
+"""
+        config = config.replace(marker, bridge + marker, 1)
+    if "# landing-static-cache-bridge" not in original:
+        marker = "\thandle {\n\t\treverse_proxy 127.0.0.1:3000\n\t}\n}"
+        assert marker in config
+        bridge = """
+ # landing-static-cache-bridge: serves the same Vercel site to old DNS caches.
+ handle /_next/* {
+  reverse_proxy 127.0.0.1:3000
+ }
+ handle {
+  reverse_proxy https://navox-landing.vercel.app {
+   header_up Host navox-landing.vercel.app
+  }
+ }
+}"""
+        config = config.replace(marker, bridge, 1)
+    if config == original:
+        print("App/waitlist hosts and callback compatibility routes are installed.")
         return
     backup = Path("/opt/navox/operations/landing-app-cutover-20261027/Caddyfile.before")
     if not backup.exists():
         backup.write_text(original)
         backup.chmod(0o600)
     candidate = path.with_name("Caddyfile.landing-candidate")
-    candidate.write_text(original + addition)
+    candidate.write_text(config)
     subprocess.run(
         ["caddy", "validate", "--config", str(candidate), "--adapter", "caddyfile"], check=True
     )
