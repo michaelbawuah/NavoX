@@ -8,12 +8,10 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-from decimal import Decimal
 import hashlib
 import http.cookiejar
 import json
 import os
-from pathlib import Path
 import re
 import secrets
 import subprocess
@@ -22,7 +20,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-
+from decimal import Decimal
+from pathlib import Path
 
 ROOT = Path("/srv/navox-vox-test")
 SITE = "https://vox-test.66-175-235-169.nip.io"
@@ -34,6 +33,16 @@ PRIOR_CALL_HASHES = (
     "6610556071cc0879c0c9dcc1b6e066af769c19c7fb5444c2a663f26e08dfd698",
     "4ee683777b39bcbff366aae873a90a07ad69e9cc5788857fdeb812a4066e3bc6",
 )
+REPLACEMENT_PROFILE = "post-startup-audit-three-calls"
+PRESERVED_PROFILES = ("fresh-three-calls", REPLACEMENT_PROFILE)
+ORIGINAL_LEDGER_SHA256 = "5240f4cc1ce0d03391dad6edfef1acbd9732733fd48f31eb2ae963e583c6423a"
+STARTUP_CALL_SHA256 = "67c962125e8bc2c65e4cecbdbd20b0594007c3b20fa6da2363bfb41daa07f706"
+STARTUP_STREAM_SHA256 = "a08db9d48c31ee45d87735cd65465a81e8706b16d370bf08be69de6ec1bab8f2"
+STARTUP_OWNER_SHA256 = "5cb81d78d1db5cba24be5cc18ca1a3c8112e9dc01f6c040ad8e48b5b88690301"
+STARTUP_WORKSPACE_SHA256 = "366db296f459ee53e8821561bdbfb90c6e0e926bcbe7f759d5014f7648eba723"
+STOPPED_RUN_ID = "voice-memory-20261027-a"
+STOPPED_SOURCE_SHA = "d21bf978df3c14d393fe05acf0fe41772841b23a"
+STOPPED_RESULT_SHA256 = "2442c73461a9b6fa76ef05f3fc17ec55f60765a24572f66e6c1db9e06a3bd5ef"
 os.umask(0o077)
 sys.path.insert(0, str(ROOT / "ops"))
 
@@ -94,6 +103,25 @@ def qualification_limits(profile, prior_provider_usd=None, prior_connected_ms=No
               "total_call_ceiling": 3, "prior_provider_usd": "0", "prior_connected_ms": 0,
               "remaining_provider_usd": "2", "remaining_transport_ms": 135000}
     additional = (prior_uncertain_streams, prior_reserved_tokens, qualification_run_id)
+    if profile == REPLACEMENT_PROFILE:
+        if (not nonnegative(prior_provider_usd)
+                or Decimal(str(prior_provider_usd)) != Decimal("0.0745244")
+                or type(prior_connected_ms) is not int or prior_connected_ms != 65521
+                or type(prior_call_count) is not int or prior_call_count != 3
+                or type(prior_uncertain_streams) is not int or prior_uncertain_streams != 1
+                or type(prior_reserved_tokens) is not int or prior_reserved_tokens != 10525
+                or qualification_run_id != "voice-memory-20261027-b"):
+            raise ValueError("Replacement qualification requires the exact audited three-call baseline")
+        return {**limits, "max_calls": 3, "prior_call_count": 3,
+                "total_call_ceiling": 6, "prior_provider_usd": "0.0745244",
+                "prior_connected_ms": 65521, "prior_uncertain_streams": 1,
+                "prior_reserved_tokens": 10525, "prior_total_cost_usd": None,
+                "financial_qualified": False, "qualification_run_id": qualification_run_id,
+                "remaining_provider_usd": "1.9254756", "remaining_transport_ms": 117564,
+                "total_transport_ceiling_ms": 183085, "admission_limit_ms": 65000,
+                "media_call_limit_ms": 40000, "settled_call_limit_ms": 45000,
+                "prior_plan_status": "stopped-before-spoken-input-with-preserved-uncertainty",
+                "authorization_scope": "explicit-six-call-replacement-functional-only"}
     if profile == "fresh-three-calls":
         if (not nonnegative(prior_provider_usd)
                 or Decimal(str(prior_provider_usd)) != Decimal("0.0745244")
@@ -136,9 +164,12 @@ def qualification_limits(profile, prior_provider_usd=None, prior_connected_ms=No
 def prior_snapshot_checks(observed, limits):
     """Only content-free observations can authorize a new isolated fixture owner."""
     budgets = observed.get("owner_budgets", [])
+    replacement = limits["profile"] == REPLACEMENT_PROFILE
+    expected_hashes = PRIOR_CALL_HASHES + (STARTUP_CALL_SHA256,) if replacement else PRIOR_CALL_HASHES
+    required_voice = limits["remaining_transport_ms"] if replacement else 135000
     checks = {
         "read_only": observed.get("read_only") is True,
-        "exact_calls": sorted(observed.get("call_hashes", [])) == sorted(PRIOR_CALL_HASHES),
+        "exact_calls": sorted(observed.get("call_hashes", [])) == sorted(expected_hashes),
         "call_count": observed.get("call_count") == limits["prior_call_count"],
         "connected_ms": observed.get("connected_ms") == limits["prior_connected_ms"],
         "known_provider_usd": nonnegative(observed.get("known_provider_usd")) and
@@ -151,19 +182,80 @@ def prior_snapshot_checks(observed, limits):
         "no_unsettled_voice": observed.get("reserved_voice_ms") == 0 and
             observed.get("uncertain_voice_ms") == 0,
         "synthetic_owners": observed.get("synthetic_owners_verified") is True,
-        "prior_owner_allowance_sufficient": len(budgets) == 2 and all(
-            type(item.get("remaining_voice_ms")) is int and item["remaining_voice_ms"] >= 135000
+        "prior_owner_allowance_sufficient": len(budgets) == (3 if replacement else 2) and all(
+            type(item.get("remaining_voice_ms")) is int and item["remaining_voice_ms"] >= required_voice
             and type(item.get("remaining_tokens")) is int and item["remaining_tokens"] >= 40000
             for item in budgets if isinstance(item, dict)
         ) and all(isinstance(item, dict) for item in budgets),
         "ledger_fingerprint": isinstance(observed.get("ledger_sha256"), str) and
             re.fullmatch(r"[a-f0-9]{64}", observed["ledger_sha256"]) is not None,
     }
+    if replacement:
+        checks.update({
+            "original_frozen_ledger": observed.get("original_ledger_sha256") == ORIGINAL_LEDGER_SHA256
+                and observed.get("original_ledger_unchanged") is True,
+            "latest_startup_call": observed.get("latest_startup_call_verified") is True,
+            "stopped_parent_claims": observed.get("stopped_parent_claims_verified") is True,
+        })
     return checks
 
 
+def execution_authorized(profile, live_authorized, replacement_authorized):
+    """The enlarged call count needs separate explicit approval; preparation is not approval."""
+    if replacement_authorized and profile != REPLACEMENT_PROFILE:
+        return False
+    return bool(live_authorized and (profile != REPLACEMENT_PROFILE or replacement_authorized))
+
+
+def stopped_parent_claims():
+    """Inspect the consumed predecessor without changing its claims or execution report."""
+    try:
+        def bounded(path):
+            if path.is_symlink() or not path.is_file() or path.stat().st_size > 2 * 1024 * 1024:
+                raise ValueError("Missing bounded predecessor evidence")
+            return path.read_text()
+        run_path = DIRECTORY / ("run-" + STOPPED_RUN_ID + ".claim.json")
+        scope_path = DIRECTORY / ("scope-fresh-three-calls-" + ORIGINAL_LEDGER_SHA256 + ".claim.json")
+        run_text, scope_text = bounded(run_path), bounded(scope_path)
+        run, scope = json.loads(run_text), json.loads(scope_text)
+        if (run.get("qualification_run_id") != STOPPED_RUN_ID
+                or run.get("app_source_sha") != STOPPED_SOURCE_SHA
+                or run.get("prior_ledger_sha256") != ORIGINAL_LEDGER_SHA256
+                or run.get("scope_claim_filename") != scope_path.name
+                or run.get("state") != "stopped" or run.get("functional_passed") is not False
+                or run.get("financial_qualified") is not False
+                or run.get("live_calls_may_have_started") is not True
+                or run.get("limits", {}).get("profile") != "fresh-three-calls"
+                or scope.get("profile") != "fresh-three-calls"
+                or scope.get("qualification_run_id") != STOPPED_RUN_ID
+                or scope.get("run_claim_filename") != run_path.name
+                or scope.get("app_source_sha") != STOPPED_SOURCE_SHA
+                or scope.get("prior_ledger_sha256") != ORIGINAL_LEDGER_SHA256
+                or scope.get("state") != "admission-scope-consumed"):
+            raise ValueError("Unexpected predecessor claims")
+        objects = []
+        for line in bounded(DIRECTORY / ("execution-" + STOPPED_RUN_ID + ".log")).splitlines():
+            try:
+                value = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(value, dict):
+                objects.append(value)
+        if len(objects) != 1:
+            raise ValueError("Ambiguous predecessor execution")
+        result_sha = hashlib.sha256(json.dumps(objects[0], sort_keys=True).encode()).hexdigest()
+        if result_sha != STOPPED_RESULT_SHA256:
+            raise ValueError("Predecessor execution changed")
+        return {"verified": True, "parent_run_id": STOPPED_RUN_ID,
+                "run_claim_sha256": hashlib.sha256(run_text.encode()).hexdigest(),
+                "scope_claim_sha256": hashlib.sha256(scope_text.encode()).hexdigest(),
+                "execution_report_sha256": result_sha}
+    except Exception as error:  # noqa: BLE001 - predecessor diagnostics must remain content-free
+        return {"verified": False, "failure_class": type(error).__name__}
+
+
 def verify_prior_usage(ops, limits):
-    """Read the two exact historical calls and native quota math without locks/writes."""
+    """Read the selected frozen calls and native quota math without locks/writes."""
     code = r'''
 import asyncio, hashlib, json, re
 from decimal import Decimal
@@ -177,15 +269,28 @@ from navox.vox import usage
 from navox.vox.usage_schemas import UsageCounters
 
 HASHES = __PRIOR_HASHES__
+REPLACEMENT = __REPLACEMENT__
+STARTUP = __STARTUP__
+def digest(value):
+    return hashlib.sha256(str(value).encode()).hexdigest()
+def ledger_rows(rows):
+    return [{name: getattr(row, name) for name in (
+        "id", "user_id", "workspace_id", "call_id", "kind", "provider", "model", "status",
+        "sequence", "cumulative", "reserved_tokens", "pricing", "created_at", "observed_at",
+        "reconciled_cost_usd", "reconciliation_id")} for row in rows]
+def ledger_digest(rows):
+    return hashlib.sha256(json.dumps(ledger_rows(rows), sort_keys=True, default=str).encode()).hexdigest()
 async def main():
     phase = "read-only-snapshot"
     try:
         async with get_session_factory()() as database:
             await database.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+            if REPLACEMENT:
+                await database.execute(text("SET LOCAL statement_timeout = '15000ms'"))
             phase = "exact-historical-streams"
-            query = select(VoxUsageStream).where(text(
-                "encode(sha256(convert_to(call_id::text,'UTF8')),'hex') IN (:first,:second)"
-            )).params(first=HASHES[0], second=HASHES[1]).order_by(VoxUsageStream.id)
+            parameters = dict(zip(("first", "second", "third"), HASHES, strict=False))
+            predicate = "encode(sha256(convert_to(call_id::text,'UTF8')),'hex') IN (" + ",".join(":" + name for name in parameters) + ")"
+            query = select(VoxUsageStream).where(text(predicate)).params(**parameters).order_by(VoxUsageStream.id)
             streams = list(await database.scalars(query))
             calls = {}
             for row in streams:
@@ -199,13 +304,8 @@ async def main():
                       "open_provider_streams": 0, "active_calls": 0,
                       "synthetic_owners_verified": bool(owners), "owner_budgets": []}
             known = Decimal(0)
-            fingerprints = []
             for row in streams:
                 counters = UsageCounters.model_validate(row.cumulative)
-                fingerprints.append({name: getattr(row, name) for name in (
-                    "id", "user_id", "workspace_id", "call_id", "kind", "provider", "model", "status",
-                    "sequence", "cumulative", "reserved_tokens", "pricing", "created_at", "observed_at",
-                    "reconciled_cost_usd", "reconciliation_id")})
                 if row.kind == "provider":
                     result["uncertain_provider_streams"] += row.status == "uncertain"
                     result["open_provider_streams"] += row.status == "open"
@@ -215,7 +315,36 @@ async def main():
                     else:
                         known += cost
             result["known_provider_usd"] = str(known)
-            result["ledger_sha256"] = hashlib.sha256(json.dumps(fingerprints, sort_keys=True, default=str).encode()).hexdigest()
+            result["ledger_sha256"] = ledger_digest(streams)
+            if REPLACEMENT:
+                original = [row for row in streams if digest(row.call_id) in HASHES[:2]]
+                result["original_ledger_sha256"] = ledger_digest(original)
+                result["original_ledger_unchanged"] = result["original_ledger_sha256"] == STARTUP["original_ledger"]
+                latest = [row for row in streams if digest(row.call_id) == STARTUP["call"]]
+                verified_latest = False
+                if len(latest) == 1:
+                    row = latest[0]
+                    call = await database.get(VoxCall, row.call_id)
+                    owner_streams = list(await database.scalars(select(VoxUsageStream).where(
+                        VoxUsageStream.user_id == row.user_id, VoxUsageStream.workspace_id == row.workspace_id)))
+                    owner_calls = list(await database.scalars(select(VoxCall).where(
+                        VoxCall.user_id == row.user_id, VoxCall.workspace_id == row.workspace_id)))
+                    verified_latest = bool(
+                        digest(row.id) == STARTUP["stream"] and row.kind == "transport"
+                        and row.status == "open" and row.sequence == 15
+                        and row.provider is None and row.model is None and row.pricing is None
+                        and row.reserved_tokens == 0 and row.reconciled_cost_usd is None
+                        and row.reconciliation_id is None
+                        and UsageCounters.model_validate(row.cumulative) == UsageCounters(idle_ms=17436, connected_ms=17436)
+                        and digest(row.user_id) == STARTUP["owner"] and digest(row.workspace_id) == STARTUP["workspace"]
+                        and call is not None and call.status == "ended"
+                        and (call.user_id, call.workspace_id) == (row.user_id, row.workspace_id)
+                        and len(owner_streams) == 1 and owner_streams[0].id == row.id
+                        and len(owner_calls) == 1 and owner_calls[0].id == row.call_id)
+                result["latest_startup_call_verified"] = verified_latest
+                result["latest_startup_transport_status"] = "open" if verified_latest else "unverified"
+                result["latest_startup_transport_cost_usd"] = None
+                result["latest_startup_provider_cost_observation"] = "no-recorded-provider-streams" if verified_latest else "unverified"
             phase = "historical-call-totals"
             for call_id, (user_id, workspace_id) in calls.items():
                 totals = await usage.call_totals(database, user_id, workspace_id, call_id)
@@ -249,8 +378,18 @@ async def main():
     finally:
         await get_database_engine().dispose()
 asyncio.run(main())
-'''.replace("__PRIOR_HASHES__", repr(PRIOR_CALL_HASHES))
+'''
+    replacement = limits["profile"] == REPLACEMENT_PROFILE
+    hashes = PRIOR_CALL_HASHES + (STARTUP_CALL_SHA256,) if replacement else PRIOR_CALL_HASHES
+    startup = {"call": STARTUP_CALL_SHA256, "stream": STARTUP_STREAM_SHA256,
+               "owner": STARTUP_OWNER_SHA256, "workspace": STARTUP_WORKSPACE_SHA256,
+               "original_ledger": ORIGINAL_LEDGER_SHA256}
+    code = code.replace("__PRIOR_HASHES__", repr(hashes)).replace("__REPLACEMENT__", repr(replacement)).replace("__STARTUP__", repr(startup))
     observed = json.loads(ops.run(["docker", "exec", PROJECT + "-api-1", "/app/.venv/bin/python", "-B", "-c", code], text=True))
+    if replacement:
+        predecessor = stopped_parent_claims()
+        observed.update({"stopped_parent_claims_verified": predecessor["verified"],
+                         "stopped_parent_evidence": predecessor})
     checks = prior_snapshot_checks(observed, limits)
     return {**observed, "checks": checks, "verified": all(checks.values()),
             "prior_total_cost_usd": None, "financial_qualified": False}
@@ -258,14 +397,20 @@ asyncio.run(main())
 
 def scope_claim_path(limits, prior_usage):
     fingerprint = prior_usage.get("ledger_sha256")
-    if (limits["profile"] != "fresh-three-calls" or not isinstance(fingerprint, str)
+    if (limits["profile"] not in PRESERVED_PROFILES or not isinstance(fingerprint, str)
             or re.fullmatch(r"[a-f0-9]{64}", fingerprint) is None):
         raise ValueError("A verified historical fingerprint is required for the fresh scope")
-    return DIRECTORY / ("scope-fresh-three-calls-" + fingerprint + ".claim.json")
+    return DIRECTORY / ("scope-" + limits["profile"] + "-" + fingerprint + ".claim.json")
 
 
 def claim_run_id(limits, source_sha, prior_usage):
     """A failed or uncertain run ID is consumed; this never admits a retry itself."""
+    if limits["profile"] == REPLACEMENT_PROFILE:
+        predecessor = stopped_parent_claims()
+        if (limits.get("qualification_run_id") != "voice-memory-20261027-b"
+                or not prior_usage.get("verified") or not predecessor["verified"]
+                or predecessor != prior_usage.get("stopped_parent_evidence")):
+            raise ValueError("Replacement predecessor evidence must remain unchanged")
     destination = DIRECTORY / ("run-" + limits["qualification_run_id"] + ".claim.json")
     scope_path = scope_claim_path(limits, prior_usage)
     # This immutable claim consumes the reviewed scope, not merely its chosen
@@ -275,6 +420,8 @@ def claim_run_id(limits, source_sha, prior_usage):
              "qualification_run_id": limits["qualification_run_id"],
              "run_claim_filename": destination.name, "app_source_sha": source_sha,
              "state": "admission-scope-consumed", "claimed_at": dt.datetime.now(dt.UTC).isoformat()}
+    if limits["profile"] == REPLACEMENT_PROFILE:
+        scope["stopped_parent_evidence"] = predecessor
     with scope_path.open("x") as handle:
         json.dump(scope, handle, indent=2)
         handle.write("\n")
@@ -469,7 +616,7 @@ def main():
     parser.add_argument("mode", choices=("preflight", "authorized-run"))
     parser.add_argument("sha")
     parser.add_argument("--stt-billing-shape", choices=("tokens", "duration"), default="duration")
-    parser.add_argument("--profile", choices=("full-three-calls", "neutral-private-only", "fresh-three-calls"), default="full-three-calls")
+    parser.add_argument("--profile", choices=("full-three-calls", "neutral-private-only", *PRESERVED_PROFILES), default="full-three-calls")
     parser.add_argument("--prior-provider-usd")
     parser.add_argument("--prior-connected-ms", type=int)
     parser.add_argument("--prior-call-count", type=int)
@@ -477,6 +624,7 @@ def main():
     parser.add_argument("--prior-reserved-tokens", type=int)
     parser.add_argument("--qualification-run-id")
     parser.add_argument("--root-explicitly-authorized-live-provider-calls", action="store_true")
+    parser.add_argument("--root-explicitly-authorized-six-call-replacement-scope", action="store_true")
     arguments = parser.parse_args()
     if not re.fullmatch("[a-f0-9]{40}", arguments.sha):
         raise ValueError("Full immutable source SHA required")
@@ -488,7 +636,7 @@ def main():
     public["qualification_limits"] = limits
     prior_usage = None
     claim_path = None
-    if arguments.profile == "fresh-three-calls":
+    if arguments.profile in PRESERVED_PROFILES:
         import prepare_release as ops
         prior_usage = verify_prior_usage(ops, limits)
         claim_path = DIRECTORY / ("run-" + limits["qualification_run_id"] + ".claim.json")
@@ -499,11 +647,16 @@ def main():
                        "provider_estimated_spend_stop_usd": limits["remaining_provider_usd"],
                        "cumulative_known_provider_estimate_stop_usd": "2",
                        "cumulative_transport_ceiling_ms": limits["total_transport_ceiling_ms"]})
+        if arguments.profile == REPLACEMENT_PROFILE:
+            public["execution_requires_six_call_scope_approval"] = True
+            public["transport_usage_limit_ms"] = limits["remaining_transport_ms"]
         public["ready"] &= prior_usage["verified"] and not claim_path.exists() and scope_unused
     if arguments.mode == "preflight":
         print(json.dumps(public))
         return
-    if not arguments.root_explicitly_authorized_live_provider_calls or not public["ready"]:
+    if not execution_authorized(arguments.profile,
+                                arguments.root_explicitly_authorized_live_provider_calls,
+                                arguments.root_explicitly_authorized_six_call_replacement_scope) or not public["ready"]:
         print(json.dumps({**public, "execution_refused": True}))
         raise SystemExit(2)
     if prior_usage is not None:
@@ -545,11 +698,11 @@ def main():
         secret.clear()
         name = PROJECT + "-voice-qualification-" + secrets.token_hex(6)
         command = ["docker", "run", "--rm", "-i", "--name", name, "--network", "host", "--memory", "1g", "--cpus", "2", "--shm-size", "512m", "-v", str(ROOT / "browser") + ":/test", "-w", "/test", IMAGE, "node", "/test/voice-qualification/qualify.cjs", "--authorized-live-voice-qualification", arguments.sha]
-        if limits["profile"] in ("neutral-private-only", "fresh-three-calls"):
+        if limits["profile"] in ("neutral-private-only", *PRESERVED_PROFILES):
             command.extend(["--profile", limits["profile"], "--prior-provider-usd", limits["prior_provider_usd"],
                             "--prior-connected-ms", str(limits["prior_connected_ms"]),
                             "--prior-call-count", str(limits["prior_call_count"])])
-        if limits["profile"] == "fresh-three-calls":
+        if limits["profile"] in PRESERVED_PROFILES:
             command.extend(["--prior-uncertain-streams", str(limits["prior_uncertain_streams"]),
                             "--prior-reserved-tokens", str(limits["prior_reserved_tokens"]),
                             "--qualification-run-id", limits["qualification_run_id"]])
@@ -617,6 +770,10 @@ def main():
             report["prior_usage_after"] = after_prior
             report["prior_ledger_unchanged"] = (after_prior["verified"] and
                                                after_prior["ledger_sha256"] == prior_usage["ledger_sha256"])
+            if limits["profile"] == REPLACEMENT_PROFILE:
+                report["stopped_parent_evidence_unchanged"] = (
+                    after_prior.get("stopped_parent_evidence") == prior_usage.get("stopped_parent_evidence"))
+                report["prior_ledger_unchanged"] &= report["stopped_parent_evidence_unchanged"]
             report["historical_provider_uncertainty_retained"] = report["prior_ledger_unchanged"]
             report["passed"] &= report["prior_ledger_unchanged"]
             if claim_path is not None:

@@ -1,0 +1,120 @@
+{
+  "schema": "navox-user-supplied-readonly-audit-evidence.v1",
+  "provenance": "User supplied Terminal output of pinned inspect_completed_run.py at f0aac93a3e4a799745afbaf3b6691aca81e3faa8; reviewed offline, not independently re-read by the agent from the live host.",
+  "review": {
+    "functional_qualification": "failed-before-spoken-input",
+    "selected_historical_and_fresh_call_count": 3,
+    "selected_historical_and_fresh_recorded_transport_ms": 65521,
+    "fresh_recorded_transport_ms": 17436,
+    "fresh_transport_counter_terminal": false,
+    "fresh_recorded_provider_stream_count": 0,
+    "empty_provider_streams_prove_zero_bill": false,
+    "fresh_qa_content_and_active_sessions_empty": true,
+    "retained_historical_ledger_unchanged": true,
+    "historical_uncertain_provider_streams": 1,
+    "historical_unsettled_token_hold": 10525,
+    "temporary_audio_removal": "unconfirmed",
+    "starts_or_authorizes_additional_live_calls": false,
+    "transport_status_interpretation": "Worker teardown flushes the shared same-call transport without terminalizing it. Delayed or replacement media epochs may still contribute counters. Preserve the live row and its unknown unpriced cost; this snapshot does not justify completing or reconciling it."
+  },
+  "supplied_audit": {
+    "schema": "navox-stopped-voice-run-readonly-audit.v1",
+    "run_id": "voice-memory-20261027-a",
+    "expected_app_sha": "d21bf978df3c14d393fe05acf0fe41772841b23a",
+    "execution_report_sha256": "2442c73461a9b6fa76ef05f3fc17ec55f60765a24572f66e6c1db9e06a3bd5ef",
+    "qualification_passed": false,
+    "audit": {
+      "ok": true,
+      "read_only": true,
+      "synthetic_owner_verified": true,
+      "expected_native_call_observed": true,
+      "new_call_count": 1,
+      "unexpected_additional_native_calls": false,
+      "new_calls": [
+        {
+          "native_call_sha256": "67c962125e8bc2c65e4cecbdbd20b0594007c3b20fa6da2363bfb41daa07f706",
+          "stream_count": 1,
+          "reservation_row_present": true,
+          "reservation_status": "ended",
+          "recorded_totals": {
+            "speaking_ms": 0,
+            "idle_ms": 17436,
+            "connected_ms": 17436,
+            "tokens": 0,
+            "reserved_tokens": 0,
+            "reserved_voice_ms": 0,
+            "uncertain_voice_ms": 0,
+            "unknown_cost_components": 1
+          },
+          "recorded_known_estimate_usd": "0",
+          "recorded_total_estimate_usd": null,
+          "cost_basis": "unknown"
+        }
+      ],
+      "new_streams": [
+        {
+          "stream_sha256": "a08db9d48c31ee45d87735cd65465a81e8706b16d370bf08be69de6ec1bab8f2",
+          "native_call_sha256": "67c962125e8bc2c65e4cecbdbd20b0594007c3b20fa6da2363bfb41daa07f706",
+          "kind": "transport",
+          "status": "open",
+          "provider": null,
+          "model": null,
+          "model_sha256": null,
+          "sequence": 15,
+          "counters": {
+            "billed_audio_ms": 0,
+            "speaking_ms": 0,
+            "idle_ms": 17436,
+            "connected_ms": 17436,
+            "unclassified_input": 0,
+            "unclassified_output": 0,
+            "input_text": 0,
+            "cached_text": 0,
+            "output_text": 0,
+            "input_audio": 0,
+            "cached_audio": 0,
+            "output_audio": 0
+          },
+          "reserved_tokens": 0,
+          "unsettled_token_hold": 0,
+          "pricing_present": false,
+          "pricing_sha256": null,
+          "complete_known_estimate_usd": null,
+          "reconciled_cost_usd": null
+        }
+      ],
+      "recorded_provider_stream_count": 0,
+      "provider_cost_observation": "no-recorded-provider-streams",
+      "provider_known_estimate_subtotal_usd": null,
+      "provider_unknown_or_incomplete_cost_components": 0,
+      "open_provider_streams": 0,
+      "uncertain_provider_streams": 0,
+      "transport_stream_count": 1,
+      "transport_complete": false,
+      "cleanup_counts": {
+        "memory_fact_rows": 0,
+        "memory_thread_rows": 0,
+        "owner_memory_rows": 0,
+        "learning_job_rows": 0,
+        "learning_result_ciphertexts": 0,
+        "conversation_rows": 0,
+        "conversation_ciphertext_rows": 0,
+        "active_calls": 0,
+        "active_sessions": 0,
+        "unsettled_voice_credits": 0,
+        "history_disabled": true,
+        "off_the_record": true
+      },
+      "prior_ledger_sha256": "5240f4cc1ce0d03391dad6edfef1acbd9732733fd48f31eb2ae963e583c6423a",
+      "prior_call_hashes": [
+        "4ee683777b39bcbff366aae873a90a07ad69e9cc5788857fdeb812a4066e3bc6",
+        "6610556071cc0879c0c9dcc1b6e066af769c19c7fb5444c2a663f26e08dfd698"
+      ],
+      "prior_uncertain_provider_streams": 1,
+      "prior_unsettled_token_hold": 10525,
+      "prior_ledger_unchanged": true,
+      "financial_qualified": false,
+      "starts_or_authorizes_live_calls": false
+    }
+  }
+}

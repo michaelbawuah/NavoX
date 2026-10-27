@@ -14,6 +14,27 @@ independent database cleanup audit were not included. Empty STT/provider-stream
 lists do not establish financial settlement. The original historical ledger and
 uncertain usage were unchanged. The run and scope claims remain consumed.
 
+The subsequent user-supplied read-only audit is retained in
+`results/voice-memory-20261027-a-audit.json`. Its execution-report fingerprint
+matches the original report. It confirms one ended fresh call with 17,436 ms of
+idle transport, zero speech/tokens/holds and no recorded provider streams.
+Facts, threads, learning jobs, conversation ciphertexts, active calls, active
+sessions and unsettled voice credits were all zero; History was disabled and
+off-record enabled. The historical ledger fingerprint, uncertain provider stream
+and 10,525-token hold were unchanged. Selected historical plus fresh recorded
+transport is 65,521 ms across three admitted calls. Financial qualification and
+all unrun live memory scenarios remain incomplete; temporary audio removal is
+still unconfirmed.
+
+The fresh shared transport row remains `open`, with unknown unpriced cost.
+Current worker teardown flushes counters without terminalizing the shared
+same-call meter. Same-call replacement epochs may contribute final updates, so
+an ended reservation and zero holds alone cannot justify marking it complete.
+This is not evidence of an active call or provider request. Preserve the live
+row; do not manufacture a final counter, price or reconciliation. An open
+unpriced transport is already allowed by the functional harness's settlement
+rules and is not an additional functional acceptance gate.
+
 Offline review found an invalid pre-speech RTP prerequisite: normal local VAD
 pauses upstream until speech begins. The revised harness waits for application
 enablement of the initially disabled raw fixture track after processed audio
@@ -31,6 +52,57 @@ text or provider request. It neither removes audio nor alters claims or usage.
 Run it through the existing SSH connection with `python3 -` and the reviewed
 script on stdin; no new host file is required. Its local scope/read-only
 regressions are `python3 check_completed_run_offline.py`.
+
+## Proposed replacement after the audited startup failure
+
+Preparation is complete for `post-startup-audit-three-calls`, fixed run ID
+`voice-memory-20261027-b`. This profile is **not approved or launched** by its
+creation. Completing all three live scenarios requires three additional
+admissions: six selected calls cumulatively instead of the previous five-call
+ceiling. The profile refuses execution without both the existing live-call flag
+and `--root-explicitly-authorized-six-call-replacement-scope`.
+
+The original 183,085 ms cumulative transport ceiling stays unchanged. All
+65,521 ms already recorded remain charged, leaving at most 117,564 ms for this
+replacement. The known-provider estimate stop stays $2 cumulatively, with
+$0.0745244 retained and $1.9254756 remaining. This is not an all-in dollar cap:
+the old provider uncertainty and unpriced transport remain unknown, with the
+10,525-token hold preserved. Native policy, routes and quotas remain unchanged.
+Admission is bounded to 65 seconds, input to 40 seconds after owned media is
+ready, and passing settled transport to 45 seconds per call. Every new call's
+provider receipts and holds must settle before the next admission. The remaining
+transport must support a full 45-second window before each admission; the
+harness stops rather than extending the budget if it cannot finish within it.
+
+Read-only preflight independently checks all three exact prior calls, the frozen
+original two-call ledger and the latest open, unpriced, idle-only transport.
+It also verifies the stopped predecessor's exact report and consumed claims.
+These records are read again before claiming the new scope and after cleanup.
+An immutable claim binds the new profile to the complete three-call ledger;
+the fixed run ID cannot be replaced to retry or grant additional calls. Existing
+claims, usage records and results are never overwritten or reset.
+
+`stage_replacement.py` supports one manual SSH-stdin handoff when device access
+is unavailable. Its default stages only eight pinned QA helpers and runs
+preflight; no account or call is created. It refuses unexpected existing helper
+bytes, saves an exclusive copy of the reviewed old helpers, preserves fixture
+audio and prior claims/results, then checks the exact new hashes in preflight.
+Application source/images and private configuration are not changed.
+Only `--mode launch --approve-six-call-replacement` permits a detached execution
+after successful preflight. Optional `--wait-result` prints the launch record
+immediately and waits up to 420 seconds for the content-free result. Timeout or
+disconnect does not retry, reset claims or terminate the detached cleanup owner.
+The caller must explicitly approve the enlarged admission scope before using
+those launch flags. Local stager regressions are
+`python3 check_stage_replacement_offline.py`; they make no external request.
+
+A separate prepared application patch,
+`82e32008063a36f003e455b5b84ab4bae45e5e4a` on
+`fix/vox-shutdown-meter-flush-20261027`, ensures usage shutdown is attempted when
+voice-worker shutdown raises or is cancelled. Its 57 focused backend tests,
+Ruff/format and strict worker mypy checks pass. It is not integrated or deployed
+by this qualification preparation, which still targets the deployed d21bf978
+application. No historical usage status is changed by that patch.
 
 ## Prepared files
 

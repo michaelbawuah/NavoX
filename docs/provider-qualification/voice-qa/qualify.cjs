@@ -19,6 +19,24 @@ function options(argv) {
     totalTransportCeilingMs: 135000, priorUncertainStreams: 0, priorReservedTokens: 0,
     qualificationRunId: null, admissionLimitMs: null };
   if (argv.length === 2) return result;
+  if (argv[3] === 'post-startup-audit-three-calls') {
+    if (argv.length !== 16 || argv[2] !== '--profile' ||
+        argv[4] !== '--prior-provider-usd' || argv[5] !== '0.0745244' ||
+        argv[6] !== '--prior-connected-ms' || argv[7] !== '65521' ||
+        argv[8] !== '--prior-call-count' || argv[9] !== '3' ||
+        argv[10] !== '--prior-uncertain-streams' || argv[11] !== '1' ||
+        argv[12] !== '--prior-reserved-tokens' || argv[13] !== '10525' ||
+        argv[14] !== '--qualification-run-id' || argv[15] !== 'voice-memory-20261027-b') {
+      throw new Error('Post-startup qualification requires the exact audited three-call manifest and fixed run identity');
+    }
+    // This consumes a separate explicit six-call scope. It cannot restart or
+    // amend the earlier run/claim, whose admission and transport remain charged.
+    return { ...result, profile: 'post-startup-audit-three-calls', priorCallCount: 3,
+      priorConnectedMs: 65521, priorProviderUsd: 0.0745244, totalCallCeiling: 6,
+      maxTransportMs: 117564, totalTransportCeilingMs: 183085, stopThresholdUsd: 2 - 0.0745244,
+      priorUncertainStreams: 1, priorReservedTokens: 10525,
+      qualificationRunId: argv[15], admissionLimitMs: 65000 };
+  }
   if (argv[3] === 'fresh-three-calls') {
     if (argv.length !== 16 || argv[2] !== '--profile' ||
         argv[4] !== '--prior-provider-usd' || argv[5] !== '0.0745244' ||
@@ -55,6 +73,49 @@ function validDecimal(value) {
   if (typeof value !== 'string' && typeof value !== 'number') return null;
   const result = Number(value);
   return Number.isFinite(result) && result >= 0 ? result : null;
+}
+function monotonicMediaProfile(profile) {
+  return profile === 'fresh-three-calls' || profile === 'post-startup-audit-three-calls';
+}
+function completeStoryProfile(profile) {
+  return ['full-three-calls', 'fresh-three-calls', 'post-startup-audit-three-calls'].includes(profile);
+}
+function postStartupInputMatches(settings, secret) {
+  if (settings.profile !== 'post-startup-audit-three-calls') return true;
+  const limits = secret?.qualification_limits, prior = secret?.prior_usage_manifest;
+  if (!limits || typeof limits !== 'object' || Array.isArray(limits) ||
+      !prior || typeof prior !== 'object' || Array.isArray(prior)) return false;
+  const requiredLimits = { profile: settings.profile, max_calls: 3, prior_call_count: 3,
+    total_call_ceiling: 6, prior_provider_usd: '0.0745244', prior_connected_ms: 65521,
+    prior_uncertain_streams: 1, prior_reserved_tokens: 10525, prior_total_cost_usd: null,
+    financial_qualified: false, qualification_run_id: 'voice-memory-20261027-b',
+    remaining_provider_usd: '1.9254756', remaining_transport_ms: 117564,
+    total_transport_ceiling_ms: 183085, admission_limit_ms: 65000,
+    media_call_limit_ms: 40000, settled_call_limit_ms: 45000,
+    authorization_scope: 'explicit-six-call-replacement-functional-only',
+    prior_plan_status: 'stopped-before-spoken-input-with-preserved-uncertainty' };
+  if (!Object.entries(requiredLimits).every(([key, value]) => limits[key] === value)) return false;
+  const callHashes = [
+    '4ee683777b39bcbff366aae873a90a07ad69e9cc5788857fdeb812a4066e3bc6',
+    '6610556071cc0879c0c9dcc1b6e066af769c19c7fb5444c2a663f26e08dfd698',
+    '67c962125e8bc2c65e4cecbdbd20b0594007c3b20fa6da2363bfb41daa07f706',
+  ];
+  return prior.verified === true && prior.read_only === true &&
+    prior.call_count === 3 && prior.connected_ms === 65521 &&
+    validDecimal(prior.known_provider_usd) === settings.priorProviderUsd &&
+    prior.uncertain_provider_streams === 1 && prior.unknown_provider_cost_components === 1 &&
+    prior.reserved_tokens === 10525 && prior.reserved_voice_ms === 0 && prior.uncertain_voice_ms === 0 &&
+    prior.open_provider_streams === 0 && prior.active_calls === 0 && prior.synthetic_owners_verified === true &&
+    prior.financial_qualified === false && prior.prior_total_cost_usd === null &&
+    Number.isSafeInteger(secret.policy_revision) && secret.policy_revision > 0 && prior.policy_revision === secret.policy_revision &&
+    typeof prior.ledger_sha256 === 'string' && /^[a-f0-9]{64}$/.test(prior.ledger_sha256) &&
+    prior.original_ledger_sha256 === '5240f4cc1ce0d03391dad6edfef1acbd9732733fd48f31eb2ae963e583c6423a' &&
+    prior.original_ledger_unchanged === true && prior.latest_startup_call_verified === true &&
+    prior.stopped_parent_claims_verified === true &&
+    Array.isArray(prior.call_hashes) && prior.call_hashes.length === callHashes.length &&
+    [...prior.call_hashes].sort().every((value, index) => value === callHashes[index]) &&
+    !!prior.checks && typeof prior.checks === 'object' && !Array.isArray(prior.checks) &&
+    Object.keys(prior.checks).length > 0 && Object.values(prior.checks).every(value => value === true);
 }
 function qaError(code) { const error = new Error('Qualification boundary failed'); error.qaCode = code; return error; }
 function assert(condition, boundary) { if (!condition) throw qaError(boundary); }
@@ -108,7 +169,7 @@ function responseAudioReady(value, baseline) {
     value.playingRemoteAudioTracks > 0 && value.playReady > 0;
 }
 function clockFailure(settings, clocks, wallNow, monotonicNow) {
-  if (settings.profile === 'fresh-three-calls') {
+  if (monotonicMediaProfile(settings.profile)) {
     if (clocks.admission !== null && monotonicNow - clocks.admission >= settings.admissionLimitMs)
       return 'admission-wall-clock-stop';
     if (clocks.media !== null && monotonicNow - clocks.media >= settings.callLimitMs)
@@ -175,7 +236,7 @@ async function run(settings, secret) {
     prior_total_provider_cost_usd: settings.priorUncertainStreams ? null : String(settings.priorProviderUsd),
     financial_qualified: false, qualification_run_id: settings.qualificationRunId,
     per_call_input_stop_ms: settings.callLimitMs, target_call_limit_ms: 45000,
-    input_clock_basis: settings.profile === 'fresh-three-calls' ? 'monotonic-owned-media-ready' : 'reservation-created-at',
+    input_clock_basis: monotonicMediaProfile(settings.profile) ? 'monotonic-owned-media-ready' : 'reservation-created-at',
     admission_wall_stop_ms: settings.admissionLimitMs,
     max_transport_usage_ms: settings.maxTransportMs,
     cumulative_transport_ceiling_ms: settings.totalTransportCeilingMs,
@@ -260,7 +321,7 @@ async function run(settings, secret) {
     if (providerKnown === null || !Number.isFinite(providerKnown) || value.policy_revision !== secret.policy_revision || value.blocked || providerKnown >= settings.stopThresholdUsd || Number(value.daily.connected_ms) + Number(value.daily.reserved_voice_ms) >= settings.maxTransportMs - 5000) {
       throw qaError('budget-or-policy-stop');
     }
-    if (settings.profile === 'fresh-three-calls' && lastCall?.status === 'reserved' && admissionStart !== null) {
+    if (monotonicMediaProfile(settings.profile) && lastCall?.status === 'reserved' && admissionStart !== null) {
       const callUsage = await owned('GET', '/vox/usage/calls/' + lastCall.id);
       if (callUsage.metering_started && Number(callUsage.totals.connected_ms) >= 40000)
         throw qaError('per-call-transport-stop');
@@ -413,7 +474,7 @@ async function run(settings, secret) {
     check(mediaReady(media), 'call' + index + ':actual-owned-output-and-input-ready');
     // This fresh plan explicitly grants a media input window separate from
     // bounded admission/warmup. Late 201 responses never update either clock.
-    if (settings.profile === 'fresh-three-calls') mediaStart = performance.now();
+    if (monotonicMediaProfile(settings.profile)) mediaStart = performance.now();
     phase('owned-media-ready');
     item.actual_owned_output_and_input_ready = true;
     return { call: lastCall, item };
@@ -476,6 +537,7 @@ async function run(settings, secret) {
   const startedMonotonic = performance.now();
   try {
     assert(UUID.test(secret.user_id) && UUID.test(secret.workspace_id) && Array.isArray(secret.cookies), 'private-stdin-shape');
+    assert(postStartupInputMatches(settings, secret), 'post-startup-audit-stdin-manifest-or-limits-mismatch');
     assert(typeof secret.livekit_host === 'string' && /^[a-z0-9.-]+$/i.test(secret.livekit_host), 'livekit-host-invalid');
     browser = await chromium.launch({ headless: true, args: [
       '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream',
@@ -627,7 +689,7 @@ async function run(settings, secret) {
     evidence.private_native_end_response_sequence = endConfirmedBefore;
     await closeCall(two);
 
-    if (['full-three-calls', 'fresh-three-calls'].includes(settings.profile)) {
+    if (completeStoryProfile(settings.profile)) {
       const three = await startCall(3); three.started = currentStart;
       const recalled = await speak('recall-and-withhold', three);
       check(!/\bamber\b|\bmeridian\b|\bcobalt\b|\blantern\b|\barch\b/i.test(recalled.question), 'recall-question-does-not-supply-historical-or-private-answer');
@@ -647,7 +709,7 @@ async function run(settings, secret) {
     evidence.total_transport_connected_ms = settings.priorConnectedMs + Number(finalBudget.daily.connected_ms);
     evidence.total_native_calls = settings.priorCallCount + evidence.calls.length;
     check(evidence.calls.every(item => item.metering_complete) && finalBudget.known_provider_estimate <= settings.stopThresholdUsd,
-      settings.profile === 'fresh-three-calls' ? 'all-new-provider-usage-known-prior-uncertainty-retained' : 'all-invoked-provider-usage-known');
+      monotonicMediaProfile(settings.profile) ? 'all-new-provider-usage-known-prior-uncertainty-retained' : 'all-invoked-provider-usage-known');
     check(finalBudget.daily.connected_ms <= settings.maxTransportMs && evidence.calls.every(item => item.connected_ms <= 45000), 'bounded-transport-time-with-explicit-usd-status');
     check(evidence.calls.length === settings.maxCalls && evidence.total_native_calls <= settings.totalCallCeiling && evidence.total_transport_connected_ms <= settings.totalTransportCeilingMs && Number(evidence.total_known_provider_estimated_cost_usd) <= 2 && evidence.typed_vox_requests === 0 && evidence.blocked_unexpected_writes === 0 && evidence.blocked_external_requests === 0 && errors.length === 0, 'bounded-no-typed-no-unexpected-traffic');
     await finishWatchdog(watchdog, watchdogState, guard);
@@ -720,6 +782,91 @@ if (require.main === module) {
       const changed = [...freshArguments]; changed[index] = invalid;
       assert.throws(() => options(changed));
     }
+    const postStartupArguments = [...freshArguments];
+    postStartupArguments[3] = 'post-startup-audit-three-calls';
+    postStartupArguments[7] = '65521'; postStartupArguments[9] = '3';
+    postStartupArguments[15] = 'voice-memory-20261027-b';
+    const postStartup = options(postStartupArguments);
+    assert.equal(postStartup.maxCalls, 3);
+    assert.equal(postStartup.priorCallCount, 3);
+    assert.equal(postStartup.totalCallCeiling, 6);
+    assert.equal(postStartup.maxCalls + postStartup.priorCallCount, postStartup.totalCallCeiling);
+    assert.equal(postStartup.maxTransportMs, 117564);
+    assert.equal(postStartup.maxTransportMs + postStartup.priorConnectedMs, postStartup.totalTransportCeilingMs);
+    assert.equal(postStartup.totalTransportCeilingMs, fresh.totalTransportCeilingMs);
+    assert.equal(postStartup.stopThresholdUsd + postStartup.priorProviderUsd, 2);
+    assert.equal(postStartup.priorUncertainStreams, 1);
+    assert.equal(postStartup.priorReservedTokens, 10525);
+    assert.equal(monotonicMediaProfile(postStartup.profile), true);
+    assert.equal(completeStoryProfile(postStartup.profile), true);
+    assert.equal(completeStoryProfile('fresh-three-calls'), true);
+    assert.equal(completeStoryProfile('full-three-calls'), true);
+    assert.equal(completeStoryProfile('neutral-private-only'), false);
+    assert.equal(completeStoryProfile('unknown'), false);
+    assert.equal(monotonicMediaProfile('neutral-private-only'), false);
+    assert.throws(() => options(postStartupArguments.slice(0, -2)));
+    assert.throws(() => options([...postStartupArguments, '--extra']));
+    for (const [index, invalid] of [[0, '--not-authorized'], [2, '--unknown'],
+      [5, '0'], [5, '0.07452440'], [7, '48085'], [7, '65520'], [7, '65521.0'],
+      [9, '2'], [9, '4'], [11, '0'], [13, '0'], [15, 'voice-memory-20261027-a'],
+      [15, 'voice-memory-20261027-c']]) {
+      const changed = [...postStartupArguments]; changed[index] = invalid;
+      assert.throws(() => options(changed));
+    }
+    const postStartupSecret = {
+      policy_revision: 52,
+      qualification_limits: { profile: postStartup.profile, max_calls: 3, prior_call_count: 3,
+        total_call_ceiling: 6, prior_provider_usd: '0.0745244', prior_connected_ms: 65521,
+        prior_uncertain_streams: 1, prior_reserved_tokens: 10525, prior_total_cost_usd: null,
+        financial_qualified: false, qualification_run_id: 'voice-memory-20261027-b',
+        remaining_provider_usd: '1.9254756', remaining_transport_ms: 117564,
+        total_transport_ceiling_ms: 183085, admission_limit_ms: 65000,
+        media_call_limit_ms: 40000, settled_call_limit_ms: 45000,
+        authorization_scope: 'explicit-six-call-replacement-functional-only',
+        prior_plan_status: 'stopped-before-spoken-input-with-preserved-uncertainty' },
+      prior_usage_manifest: { verified: true, read_only: true, call_count: 3, connected_ms: 65521,
+        known_provider_usd: '0.0745244', uncertain_provider_streams: 1, unknown_provider_cost_components: 1,
+        reserved_tokens: 10525, reserved_voice_ms: 0, uncertain_voice_ms: 0,
+        open_provider_streams: 0, active_calls: 0, synthetic_owners_verified: true,
+        financial_qualified: false, prior_total_cost_usd: null, policy_revision: 52,
+        ledger_sha256: 'a'.repeat(64),
+        original_ledger_sha256: '5240f4cc1ce0d03391dad6edfef1acbd9732733fd48f31eb2ae963e583c6423a',
+        original_ledger_unchanged: true, latest_startup_call_verified: true, stopped_parent_claims_verified: true,
+        call_hashes: ['4ee683777b39bcbff366aae873a90a07ad69e9cc5788857fdeb812a4066e3bc6',
+          '6610556071cc0879c0c9dcc1b6e066af769c19c7fb5444c2a663f26e08dfd698',
+          '67c962125e8bc2c65e4cecbdbd20b0594007c3b20fa6da2363bfb41daa07f706'],
+        checks: { exact_calls: true, preserved_uncertainty: true } },
+    };
+    assert.equal(postStartupInputMatches(postStartup, postStartupSecret), true);
+    assert.equal(postStartupInputMatches(postStartup, {}), false);
+    assert.equal(postStartupInputMatches(fresh, {}), true); // Existing scopes keep their contract.
+    for (const [key, original] of Object.entries(postStartupSecret.qualification_limits)) {
+      const changed = structuredClone(postStartupSecret);
+      changed.qualification_limits[key] = typeof original === 'number' ? original + 1 : 'wrong';
+      assert.equal(postStartupInputMatches(postStartup, changed), false, key);
+    }
+    for (const [key, invalid] of Object.entries({ verified: false, read_only: false, call_count: 2,
+      connected_ms: 48085, known_provider_usd: '0', uncertain_provider_streams: 0,
+      unknown_provider_cost_components: 0, reserved_tokens: 0, reserved_voice_ms: 1,
+      uncertain_voice_ms: 1, open_provider_streams: 1, active_calls: 1, synthetic_owners_verified: false,
+      financial_qualified: true, prior_total_cost_usd: '0.0745244', policy_revision: 51,
+      ledger_sha256: 'invalid', original_ledger_sha256: 'b'.repeat(64), original_ledger_unchanged: false,
+      latest_startup_call_verified: false, stopped_parent_claims_verified: false,
+      checks: {}, call_hashes: postStartupSecret.prior_usage_manifest.call_hashes.slice(0, 2) })) {
+      const changed = structuredClone(postStartupSecret);
+      changed.prior_usage_manifest[key] = invalid;
+      assert.equal(postStartupInputMatches(postStartup, changed), false, key);
+    }
+    for (const checks of [[], [true], { exact_calls: false }, { exact_calls: 'true' }]) {
+      const changed = structuredClone(postStartupSecret); changed.prior_usage_manifest.checks = checks;
+      assert.equal(postStartupInputMatches(postStartup, changed), false);
+    }
+    const duplicateHash = structuredClone(postStartupSecret);
+    duplicateHash.prior_usage_manifest.call_hashes[2] = duplicateHash.prior_usage_manifest.call_hashes[0];
+    assert.equal(postStartupInputMatches(postStartup, duplicateHash), false);
+    const arrayLedger = structuredClone(postStartupSecret);
+    arrayLedger.prior_usage_manifest.ledger_sha256 = ['a'.repeat(64)];
+    assert.equal(postStartupInputMatches(postStartup, arrayLedger), false);
     const clocks = { created: 1000, admission: 500, media: null };
     assert.equal(clockFailure(fresh, clocks, 1000000, 40500), null);
     assert.equal(clockFailure(fresh, clocks, 1000, 65500), 'admission-wall-clock-stop');
@@ -730,6 +877,16 @@ if (require.main === module) {
     assert.equal(clockFailure(fresh, clocks, 0, 50500), 'call-wall-clock-stop');
     clocks.admission = clocks.media = null; // Positively confirmed retirement.
     assert.equal(clockFailure(fresh, clocks, 1000000000, 1000000000), null);
+    const postStartupClocks = { created: 1000, admission: 500, media: null };
+    assert.equal(clockFailure(postStartup, postStartupClocks, 1000000000, 65499), null);
+    assert.equal(clockFailure(postStartup, postStartupClocks, 0, 65500), 'admission-wall-clock-stop');
+    postStartupClocks.media = 10500;
+    assert.equal(clockFailure(postStartup, postStartupClocks, 1000000000, 50499), null);
+    assert.equal(clockFailure(postStartup, postStartupClocks, 0, 50500), 'call-wall-clock-stop');
+    postStartupClocks.created = 999999999;
+    assert.equal(clockFailure(postStartup, postStartupClocks, 0, 50500), 'call-wall-clock-stop');
+    postStartupClocks.media = postStartupClocks.admission = null;
+    assert.equal(clockFailure(postStartup, postStartupClocks, 1000000000, 1000000000), null);
     assert.equal(clockFailure(limited, { created: 1000 }, 41000, 0), 'call-wall-clock-stop');
     assert.equal(validDecimal('0E-10'), 0);
     assert.equal(validDecimal('unknown'), null);
@@ -909,7 +1066,7 @@ if (require.main === module) {
       captureStream.getTracks().forEach(current => current.stop());
       assert.equal(state.current, null);
       assert.equal(state.contextsCreated, state.contextsClosed);
-      console.log(JSON.stringify({ offline_self_test: 'pass', fresh_scope_historical_uncertainty_preserved: 'pass', monotonic_media_and_admission_clocks: 'pass', stopped_watchdog_cannot_launch_late_budget: 'pass', late_fatal_rejects_success: 'pass', deadline_during_slow_usage_regression: 'pass', silent_remote_pending_play_regression: 'pass', initially_disabled_synthetic_capture_regression: 'pass', silent_vad_startup_and_post_speech_rtp_regression: 'pass', bounded_content_free_startup_observation: 'pass', provider_calls: 0 }));
+      console.log(JSON.stringify({ offline_self_test: 'pass', post_startup_profile_parser_and_stdin_manifest: 'pass', post_startup_three_scenario_scope_and_clocks: 'pass', fresh_scope_historical_uncertainty_preserved: 'pass', monotonic_media_and_admission_clocks: 'pass', stopped_watchdog_cannot_launch_late_budget: 'pass', late_fatal_rejects_success: 'pass', deadline_during_slow_usage_regression: 'pass', silent_remote_pending_play_regression: 'pass', initially_disabled_synthetic_capture_regression: 'pass', silent_vad_startup_and_post_speech_rtp_regression: 'pass', bounded_content_free_startup_observation: 'pass', provider_calls: 0 }));
     })().catch(error => { console.error(error?.name || 'Error'); process.exitCode = 1; });
   } else {
     let selected;
@@ -931,4 +1088,4 @@ if (require.main === module) {
     });
   }
 }
-module.exports = { options, validDecimal, currentAdmission, currentEndResponse, blockedWriteDiagnostic, timezoneInitialization, mediaReady, spokenInputReached, startupMediaObservation, responseAudioReady, clockFailure, startWatchdog, finishWatchdog, run };
+module.exports = { options, validDecimal, monotonicMediaProfile, completeStoryProfile, postStartupInputMatches, currentAdmission, currentEndResponse, blockedWriteDiagnostic, timezoneInitialization, mediaReady, spokenInputReached, startupMediaObservation, responseAudioReady, clockFailure, startWatchdog, finishWatchdog, run };
