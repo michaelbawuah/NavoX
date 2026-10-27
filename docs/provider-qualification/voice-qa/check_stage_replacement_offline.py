@@ -463,6 +463,35 @@ try:
     assert status == 1 and json.loads(output.getvalue().splitlines()[-1]) == parent
 finally:
     helper.execute, helper.wait_result = actual_execute, actual_wait
+
+# A recognized public guard identifies the boundary; unknown exception text
+# stays private. Reporting this failure must not invoke any staging or launch.
+actual_execute, actual_started = helper.execute, helper.LIVE_CALLS_MAY_HAVE_STARTED
+try:
+    for message, check in (
+        ("Exact regular isolated QA directory required", "isolated-qa-directory"),
+        (
+            "Current helper source differs from reviewed stopped run",
+            "installed-helper-fingerprints",
+        ),
+        ("private runtime detail must stay hidden", "unclassified"),
+    ):
+
+        def failure(*args, _message=message, **kwargs):
+            raise ValueError(_message)
+
+        helper.execute = failure
+        helper.LIVE_CALLS_MAY_HAVE_STARTED = False
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            status = helper.main([QA_SHA])
+        result = json.loads(output.getvalue())
+        assert status == 1 and result["validation_check"] == check
+        assert result["provider_calls_may_have_started"] is False
+        assert result["retry_authorized"] is False
+        assert message not in output.getvalue()
+finally:
+    helper.execute, helper.LIVE_CALLS_MAY_HAVE_STARTED = actual_execute, actual_started
 print(
     json.dumps(
         {

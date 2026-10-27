@@ -61,6 +61,44 @@ BASELINE_HASHES = {
     "README.md": "2ba4713e49b058a506ee0751752459b925eac9cc08f6d89aa0d2df1e74682d47",
 }
 
+# Public, fixed validation names only. Arbitrary runtime exception text can
+# contain private data and must never be forwarded to a diagnostic report.
+VALIDATION_CHECKS = {
+    "Full immutable QA commit required": "immutable-qa-commit",
+    "Only the fixed QA file list may be fetched": "source-file-whitelist",
+    "Pinned official raw GitHub URL required": "pinned-source-url",
+    "Unexpected raw GitHub response": "pinned-source-response",
+    "Oversized QA source": "source-content-length",
+    "Empty or oversized QA source": "source-byte-bound",
+    "Regular file required": "regular-file",
+    "Bounded regular file required": "regular-file-byte-bound",
+    "Exact bounded QA file set required": "exact-source-file-set",
+    "QA source exceeded total byte limit": "source-total-byte-bound",
+    "Existing fixture contract must stay unchanged": "fixture-contract",
+    "One exact stopped execution report required": "single-predecessor-report",
+    "Stopped execution report changed": "predecessor-report-fingerprint",
+    "Replacement launch scope already consumed": "replacement-scope-unused",
+    "Staged helper manifest or source changed": "staged-source-manifest",
+    "Exact helper backup required": "helper-backup-directory",
+    "Helper backup changed": "helper-backup-fingerprint",
+    "Current helper source differs from reviewed stopped run": "installed-helper-fingerprints",
+    "Fixed parent mode required": "parent-mode",
+    "Parent preflight object required": "preflight-json-object",
+    "Exact replacement limits required": "preflight-limit-object",
+    "Preflight source or replacement limits differ": "preflight-source-and-limits",
+    "Explicit six-call approval and successful preflight required": "approved-ready-launch",
+    "Bounded own result log required": "result-log-byte-bound",
+    "Ambiguous own result log": "single-parent-result",
+    "Bounded result wait required": "result-wait-bound",
+    "Launch requires a separate explicit scope approval": "launch-scope-approval",
+    "Approval flag requires explicit launch mode": "explicit-launch-mode",
+    "Exact regular isolated QA directory required": "isolated-qa-directory",
+    "Exact isolated root required": "isolated-root",
+    "Unexpected isolated project": "isolated-project",
+    "Staged source changed after preflight": "post-preflight-source-fingerprint",
+    "Result waiting requires explicitly approved launch": "approved-result-wait",
+}
+
 
 def digest(value):
     return hashlib.sha256(value).hexdigest()
@@ -604,6 +642,11 @@ def main(argv=None):
                 {
                     "ok": False,
                     "failure_class": type(error).__name__,
+                    "validation_check": VALIDATION_CHECKS.get(
+                        str(error), "unclassified"
+                    )
+                    if isinstance(error, ValueError)
+                    else None,
                     "run_id": RUN_ID,
                     "retry_authorized": False,
                     "provider_calls_may_have_started": LIVE_CALLS_MAY_HAVE_STARTED,

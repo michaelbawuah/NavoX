@@ -1,0 +1,21 @@
+{
+  "schema": "navox-user-supplied-prelaunch-failure-evidence.v1",
+  "provenance": "User supplied Terminal output of two invocations of stage_replacement.py pinned to 83530395f83525a25563caa83ccbf2ce88a2a722 with explicit six-call launch approval and result waiting.",
+  "run_id": "voice-memory-20261027-b",
+  "reported_attempt_count": 2,
+  "reported_identical_result": {
+    "ok": false,
+    "failure_class": "ValueError",
+    "run_id": "voice-memory-20261027-b",
+    "retry_authorized": false,
+    "provider_calls_may_have_started": false
+  },
+  "review": {
+    "launch_not_reached_according_to_stager": true,
+    "exact_failed_validation": "not_reported",
+    "helper_staging_or_claim_state": "not_independently_verified",
+    "live_voice_memory_qualified": false,
+    "automatic_launch_retry_authorized": false,
+    "next_step": "Read-only inspection of exact guards, pinned downloads and installed helper/manifest state; preserve existing claims and usage."
+  }
+}
