@@ -15,8 +15,28 @@ function options(argv) {
   }
   const result = { sha: argv[1], profile: 'full-three-calls', maxCalls: 3,
     callLimitMs: 40000, maxTransportMs: 135000, stopThresholdUsd: 2,
-    priorCallCount: 0, priorConnectedMs: 0, priorProviderUsd: 0, totalCallCeiling: 3 };
+    priorCallCount: 0, priorConnectedMs: 0, priorProviderUsd: 0, totalCallCeiling: 3,
+    totalTransportCeilingMs: 135000, priorUncertainStreams: 0, priorReservedTokens: 0,
+    qualificationRunId: null, admissionLimitMs: null };
   if (argv.length === 2) return result;
+  if (argv[3] === 'fresh-three-calls') {
+    if (argv.length !== 16 || argv[2] !== '--profile' ||
+        argv[4] !== '--prior-provider-usd' || argv[5] !== '0.0745244' ||
+        argv[6] !== '--prior-connected-ms' || argv[7] !== '48085' ||
+        argv[8] !== '--prior-call-count' || argv[9] !== '2' ||
+        argv[10] !== '--prior-uncertain-streams' || argv[11] !== '1' ||
+        argv[12] !== '--prior-reserved-tokens' || argv[13] !== '10525' ||
+        argv[14] !== '--qualification-run-id' || !/^[a-z0-9][a-z0-9_-]{7,63}$/.test(argv[15] || '')) {
+      throw new Error('Fresh qualification requires the exact preserved historical usage and run identity');
+    }
+    // A separately authorized new qualification, not a retry of the stopped
+    // plan. Old uncertain usage is preserved and never relabeled settled/free.
+    return { ...result, profile: 'fresh-three-calls', priorCallCount: 2,
+      priorConnectedMs: 48085, priorProviderUsd: 0.0745244, totalCallCeiling: 5,
+      totalTransportCeilingMs: 183085, stopThresholdUsd: 2 - 0.0745244,
+      priorUncertainStreams: 1, priorReservedTokens: 10525,
+      qualificationRunId: argv[15], admissionLimitMs: 65000 };
+  }
   if (argv.length !== 10 || argv[2] !== '--profile' || argv[3] !== 'neutral-private-only' ||
       argv[4] !== '--prior-provider-usd' || argv[6] !== '--prior-connected-ms' ||
       argv[8] !== '--prior-call-count' || argv[9] !== '1') {
@@ -40,6 +60,9 @@ function qaError(code) { const error = new Error('Qualification boundary failed'
 function assert(condition, boundary) { if (!condition) throw qaError(boundary); }
 function currentAdmission(admitted, serial, launches, completed) {
   return !!admitted && UUID.test(admitted.client_call_id || '') && launches.get(admitted.client_call_id) === serial && !completed.has(admitted.client_call_id);
+}
+function currentEndResponse(id, current, serial, launches, status) {
+  return status === 204 && UUID.test(id || '') && id === current?.client_call_id && launches.get(id) === serial;
 }
 
 function blockedWriteDiagnostic(method, pathname) {
@@ -66,25 +89,54 @@ function responseAudioReady(value, baseline) {
   return value.receivedBytes > baseline.receivedBytes && value.receivedEnergy > baseline.receivedEnergy &&
     value.playingRemoteAudioTracks > 0 && value.playReady > 0;
 }
-function startWatchdog({ guard, budget, stop, fail, failed }, schedule = setInterval) {
+function clockFailure(settings, clocks, wallNow, monotonicNow) {
+  if (settings.profile === 'fresh-three-calls') {
+    if (clocks.admission !== null && monotonicNow - clocks.admission >= settings.admissionLimitMs)
+      return 'admission-wall-clock-stop';
+    if (clocks.media !== null && monotonicNow - clocks.media >= settings.callLimitMs)
+      return 'call-wall-clock-stop';
+  } else if (clocks.created && wallNow - clocks.created >= settings.callLimitMs) return 'call-wall-clock-stop';
+  return null;
+}
+function startWatchdog({ guard, budget, stop, fail, failed, state = {} }, schedule = setInterval) {
   let budgetBusy = false;
+  let stopped = false;
+  const pendingTicks = new Set();
+  state.stop = () => { stopped = true; };
+  state.drain = async () => { await Promise.all([...pendingTicks]); };
   const retire = async error => {
     if (failed()) return;
     fail(error);
     await stop().catch(() => {});
   };
-  return schedule(async () => {
-    if (failed()) return;
+  const tick = async () => {
+    if (stopped || failed()) return;
     // A slow usage request must not hold the wall-clock cutoff. Every tick
     // checks the deadline even while an earlier tick is awaiting that request.
     try { await guard(); }
     catch (error) { await retire(error); return; }
-    if (budgetBusy || failed()) return;
+    if (stopped || budgetBusy || failed()) return;
     budgetBusy = true;
     try { await budget(); }
     catch (error) { await retire(error); }
     finally { budgetBusy = false; }
+  };
+  return schedule(() => {
+    if (stopped) return;
+    const pending = tick();
+    pendingTicks.add(pending);
+    const remove = () => pendingTicks.delete(pending);
+    pending.then(remove, remove);
+    return pending;
   }, 750);
+}
+async function finishWatchdog(timer, state, guard, cancel = clearInterval) {
+  if (state.stop) state.stop();
+  cancel(timer);
+  // An already-started tick may be waiting in either guard or usage polling.
+  // Stop new work before draining it and checking the final fatal state.
+  if (state.drain) await state.drain();
+  await guard();
 }
 
 async function run(settings, secret) {
@@ -100,12 +152,19 @@ async function run(settings, secret) {
     prior_call_count: settings.priorCallCount, total_call_ceiling: settings.totalCallCeiling,
     prior_known_provider_estimated_cost_usd: String(settings.priorProviderUsd),
     prior_transport_connected_ms: settings.priorConnectedMs,
+    prior_uncertain_provider_streams: settings.priorUncertainStreams,
+    prior_reserved_tokens: settings.priorReservedTokens,
+    prior_total_provider_cost_usd: settings.priorUncertainStreams ? null : String(settings.priorProviderUsd),
+    financial_qualified: false, qualification_run_id: settings.qualificationRunId,
     per_call_input_stop_ms: settings.callLimitMs, target_call_limit_ms: 45000,
+    input_clock_basis: settings.profile === 'fresh-three-calls' ? 'monotonic-owned-media-ready' : 'reservation-created-at',
+    admission_wall_stop_ms: settings.admissionLimitMs,
     max_transport_usage_ms: settings.maxTransportMs,
+    cumulative_transport_ceiling_ms: settings.totalTransportCeilingMs,
     known_provider_cost_stop_threshold_usd: settings.stopThresholdUsd,
     transport_usd_known: secret.transport_pricing_known === true,
     transport_estimated_cost_usd: null, combined_estimated_cost_usd: null,
-    transcript_or_provider_audio_saved: false, calls: [], checkpoints: [],
+    transcript_or_provider_audio_saved: false, calls: [], checkpoints: [], phases: [],
     blocked_external_requests: 0, blocked_unexpected_writes: 0,
     blocked_write_diagnostics: [],
     allowed_timezone_initialization: { route_template: '/api/v1/workspace/timezone/initialize', count: 0 },
@@ -115,15 +174,26 @@ async function run(settings, secret) {
     first_failure_boundary: null, failure_class: null, passed: false,
   };
   let browser, context, page, lastCall = null, currentStart = 0, browserTimezone = null;
+  let admissionStart = null, mediaStart = null, currentItem = null, neutralSourceId = null;
+  let privateSourceQuestion = null;
   let boundary = 'private-stdin', fatal = null, stopping = null, sequence = 0;
   let watchdog, expectedStart = false, privateReceipt = null, privateSuggestionId = null, launchSerial = 0;
-  const errors = [], warnings = [], endSequences = new Map(), callIds = new Set();
+  const watchdogState = {};
+  const errors = [], warnings = [], endSequences = new Map(), endResponses = new Map(), callIds = new Set();
   const accountKey = secret.workspace_id + ':' + secret.user_id;
   const fixtureMetadata = JSON.parse(fs.readFileSync(path.join(__dirname, 'audio-metadata.json'), 'utf8'));
   const files = new Map(fixtureMetadata.fixtures.map(item => [item.id, item]));
   const nodeAdmissionAttempts = new Set();
   const admissionLaunch = new Map();
   const check = (value, name) => { assert(value, name); evidence.checkpoints.push(name); };
+  const phase = (name, item = currentItem) => {
+    if (evidence.phases.length >= 64) return;
+    const now = performance.now();
+    evidence.phases.push({ phase: name, call_number: item?.number ?? null,
+      elapsed_from_run_ms: Math.round(now - startedMonotonic),
+      elapsed_from_admission_ms: admissionStart === null ? null : Math.round(now - admissionStart),
+      elapsed_from_media_ms: mediaStart === null ? null : Math.round(now - mediaStart) });
+  };
   const blockedWrite = request => {
     evidence.blocked_unexpected_writes++;
     if (evidence.blocked_write_diagnostics.length < 8)
@@ -161,6 +231,7 @@ async function run(settings, secret) {
       assert(!after.call || after.call.status !== 'reserved', 'native-call-cleanup-unconfirmed');
       lastCall = null;
       currentStart = 0;
+      admissionStart = mediaStart = null;
     })().finally(() => { stopping = null; });
     return stopping;
   }
@@ -171,13 +242,47 @@ async function run(settings, secret) {
     if (providerKnown === null || !Number.isFinite(providerKnown) || value.policy_revision !== secret.policy_revision || value.blocked || providerKnown >= settings.stopThresholdUsd || Number(value.daily.connected_ms) + Number(value.daily.reserved_voice_ms) >= settings.maxTransportMs - 5000) {
       throw qaError('budget-or-policy-stop');
     }
+    if (settings.profile === 'fresh-three-calls' && lastCall?.status === 'reserved' && admissionStart !== null) {
+      const callUsage = await owned('GET', '/vox/usage/calls/' + lastCall.id);
+      if (callUsage.metering_started && Number(callUsage.totals.connected_ms) >= 40000)
+        throw qaError('per-call-transport-stop');
+    }
     value.known_provider_estimate = providerKnown;
     return value;
   }
   async function guard() {
     if (fatal) throw fatal;
-    if (currentStart && Date.now() - currentStart >= settings.callLimitMs) throw qaError('call-wall-clock-stop');
+    const failure = clockFailure(settings, { created: currentStart, admission: admissionStart, media: mediaStart }, Date.now(), performance.now());
+    if (failure) throw qaError(failure);
     if (Date.now() - startedAt > 240000) throw qaError('run-wall-clock-stop');
+  }
+  async function observeLearning(record, completed = false) {
+    const facts = await owned('GET', '/memory/facts');
+    const suggestions = await owned('GET', '/memory/learning');
+    const reply = facts.find(item => !item.sensitive && /brief|short|concise/i.test(item.content) && /repl|answer|respons/i.test(item.content));
+    const language = facts.find(item => !item.sensitive && /Python/i.test(item.content));
+    const neutral = !!(reply && language && reply.source_kind === 'vox' && language.source_kind === 'vox' &&
+      UUID.test(reply.source_conversation_id || '') && reply.source_conversation_id === language.source_conversation_id);
+    const pending = (suggestions.pending || []).filter(item => item.source_kind === 'vox' && item.sensitive === true &&
+      (!privateSourceQuestion || privateSourceQuestion.includes(item.content)) && /cobalt/i.test(item.content) && /lantern/i.test(item.content) && /arch/i.test(item.content));
+    const snapshot = { fact_count: facts.length, pending_count: (suggestions.pending || []).length,
+      two_neutral_source_linked_facts: neutral,
+      neutral_source_sha256: neutral ? hash(reply.source_conversation_id) : null,
+      private_suggestion_count: pending.length,
+      private_source_separate: pending.length === 1 && neutralSourceId !== null && pending[0].source_conversation_id !== neutralSourceId,
+      transcript_completion_already_observed: completed };
+    if (record) {
+      record.item.learning_observation = snapshot;
+      if (neutral && !record.item.neutral_learning_observed) {
+        record.item.neutral_learning_observed = true;
+        phase('neutral-learning-observed', record.item);
+      }
+      if (pending.length && !record.item.private_learning_observed) {
+        record.item.private_learning_observed = true;
+        phase('private-learning-observed', record.item);
+      }
+    }
+    return snapshot;
   }
   async function stats() {
     return page.evaluate(async () => {
@@ -233,9 +338,11 @@ async function run(settings, secret) {
     }
     throw qaError('metering-remains-uncertain');
   }
-  async function startCall(index) {
+  async function startCall(index, { navigate = true } = {}) {
+    await guard();
     await budget();
     const remaining = settings.maxTransportMs - Number((await budget()).daily.connected_ms);
+    await guard();
     assert(remaining >= 45000, 'insufficient-remaining-transport-window');
     boundary = 'call' + index + ':start';
     // A late JSON body from an earlier launch may not restore its old identity
@@ -243,10 +350,15 @@ async function run(settings, secret) {
     launchSerial++;
     lastCall = null;
     currentStart = 0;
+    admissionStart = mediaStart = null;
+    currentItem = null;
     expectedStart = false;
-    await page.goto(SITE + '/', { waitUntil: 'domcontentloaded' });
+    if (navigate) await page.goto(SITE + '/', { waitUntil: 'domcontentloaded' });
     await page.locator('[data-vox-launcher]').first().waitFor({ timeout: 15000 });
+    await guard();
     expectedStart = true;
+    admissionStart = performance.now();
+    phase('admission-start', { number: index });
     await page.locator('[data-vox-launcher]').first().click({ timeout: 10000 });
     const textbox = page.getByRole('textbox', { name: 'Message NavoX', exact: true });
     await textbox.waitFor({ timeout: 25000 });
@@ -261,6 +373,7 @@ async function run(settings, secret) {
     callIds.add(lastCall.client_call_id);
     const item = { number: index, call_hash: hash(lastCall.client_call_id), native_call_hash: hash(lastCall.id), source_sha: settings.sha, turns: [] };
     evidence.calls.push(item);
+    currentItem = item;
     const privacy = await owned('GET', '/vox/calls/' + lastCall.client_call_id + '/privacy');
     check(privacy.mode === 'saved-history' && privacy.retention_days === 30, 'call' + index + ':server-retention-proof');
     // The textbox alone used to become enabled before the native worker warmed.
@@ -275,6 +388,10 @@ async function run(settings, secret) {
       await pause(100);
     } while (Date.now() < mediaDeadline);
     check(mediaReady(media), 'call' + index + ':actual-owned-output-and-input-ready');
+    // This fresh plan explicitly grants a media input window separate from
+    // bounded admission/warmup. Late 201 responses never update either clock.
+    if (settings.profile === 'fresh-three-calls') mediaStart = performance.now();
+    phase('owned-media-ready');
     item.actual_owned_output_and_input_ready = true;
     return { call: lastCall, item };
   }
@@ -291,15 +408,24 @@ async function run(settings, secret) {
     const previous = new Set((before.turns || []).map(turn => turn.sequence ?? JSON.stringify(turn)));
     const baseline = await stats();
     check(mediaReady(baseline), 'call' + record.item.number + ':' + id + ':current-owned-media-ready');
+    phase('speech-start:' + id, record.item);
     await page.evaluate(encoded => window.__qaSpeakFixture(encoded), bytes.toString('base64'));
+    phase('speech-finished:' + id, record.item);
     let completed, completedCount = 0, completedRevision = null;
+    let lastLearningObservation = -Infinity;
     while (!completed) {
       await guard();
       const transcript = await owned('GET', '/vox/calls/' + record.call.client_call_id + '/transcript?after=0');
       const fresh = transcript.turns?.filter(turn => turn.kind === 'dialogue' && !previous.has(turn.sequence ?? JSON.stringify(turn)) && typeof turn.question === 'string' && turn.question.trim() && typeof turn.answer === 'string' && turn.answer.trim()) || [];
       completed = fresh[0]; completedCount = fresh.length; completedRevision = transcript.revision;
+      if (['learn-earlier', 'private-review'].includes(id) &&
+          (completed || performance.now() - lastLearningObservation >= 1500)) {
+        await observeLearning(record, !!completed);
+        lastLearningObservation = performance.now();
+      }
       if (!completed) await pause(500);
     }
+    phase('completed-turn:' + id, record.item);
     const audio = await stats();
     assert(audio.sentBytes > baseline.sentBytes, 'spoken-input-did-not-reach-rtc');
     assert(responseAudioReady(audio, baseline), 'browser-provider-playback-unconfirmed');
@@ -318,11 +444,13 @@ async function run(settings, secret) {
     await stopCurrent();
     record.item.elapsed_ms = Date.now() - record.started;
     record.item.ended = true;
+    phase('native-retired', record.item);
     const retired = await context.request.get(SITE + '/api/v1/vox/calls/' + record.call.client_call_id + '/transcript?after=0', { headers: { Origin: SITE, 'X-NavoX-Account': accountKey } });
     check(retired.status() === 410, 'call' + record.item.number + ':transient-transcript-retired');
     await settleCall(record.call, record.item);
   }
   const startedAt = Date.now();
+  const startedMonotonic = performance.now();
   try {
     assert(UUID.test(secret.user_id) && UUID.test(secret.workspace_id) && Array.isArray(secret.cookies), 'private-stdin-shape');
     assert(typeof secret.livekit_host === 'string' && /^[a-z0-9.-]+$/i.test(secret.livekit_host), 'livekit-host-invalid');
@@ -389,6 +517,16 @@ async function run(settings, secret) {
             currentStart = Number.isFinite(Date.parse(admitted.created_at)) ? Date.parse(admitted.created_at) : Date.now();
           }
         }
+        const end = /^\/api\/v1\/vox\/calls\/([^/]+)\/end$/.exec(url.pathname);
+        if (request.method() === 'POST' && end && currentEndResponse(end[1], lastCall, launchSerial, admissionLaunch, response.status())) {
+          endResponses.set(end[1], ++sequence);
+          phase('native-end-confirmed');
+          if (currentItem) currentItem.native_end_response_confirmed = true;
+          // The real Save handler has already retired this exact call. A slow
+          // private confirmation must not time out an ended media epoch.
+          currentStart = 0;
+          admissionStart = mediaStart = null;
+        }
         if (request.method() === 'POST' && url.pathname === '/api/v1/memory/learning/' + privateSuggestionId + '/confirm' && [200, 201].includes(response.status())) {
           privateReceipt = await response.json(); evidence.private_confirmation_status = response.status();
         }
@@ -404,7 +542,7 @@ async function run(settings, secret) {
     check(learning.enabled === true && learning.configured === true && learning.status_reason === 'ready' && learning.generation === privacy.generation, 'native-semantic-learning-ready-for-current-privacy');
     const initialBudget = await budget();
     check(initialBudget.remaining_voice_ms >= settings.maxCalls * settings.callLimitMs && initialBudget.remaining_tokens >= 40000, 'existing-allowance-sufficient');
-    watchdog = startWatchdog({ guard, budget, stop: stopCurrent,
+    watchdog = startWatchdog({ guard, budget, stop: stopCurrent, state: watchdogState,
       failed: () => fatal !== null, fail: error => { fatal = error; } });
 
     const one = await startCall(1); one.started = currentStart;
@@ -414,16 +552,25 @@ async function run(settings, secret) {
     check(factsBefore.length === 0, 'multi-statement-source-not-whole-turn-literal');
     const remembered = await speak('learn-earlier', one);
     check(/evaporation|condensation/i.test(remembered.question), 'real-asr-later-history-source');
+    check(/\bamber\b/i.test(remembered.question) && /\bmeridian\b/i.test(remembered.question), 'real-asr-distinctive-historical-source');
     const facts = await owned('GET', '/memory/facts');
     const replyFact = facts.find(fact => !fact.sensitive && /brief|short|concise/i.test(fact.content) && /repl|answer|respons/i.test(fact.content));
     const languageFact = facts.find(fact => !fact.sensitive && /Python/i.test(fact.content));
     check(replyFact && languageFact && replyFact.source_kind === 'vox' && languageFact.source_kind === 'vox' && replyFact.source_conversation_id === languageFact.source_conversation_id, 'two-source-linked-semantic-facts');
     const neutralSource = replyFact.source_conversation_id;
+    neutralSourceId = neutralSource;
     await closeCall(one);
 
-    const two = await startCall(2); two.started = currentStart;
+    boundary = 'call2:settings-preload';
+    await page.goto(SITE + '/settings#memory-privacy', { waitUntil: 'domcontentloaded' });
+    const panel = page.getByRole('region', { name: 'Private memory suggestions', exact: true });
+    await panel.waitFor({ timeout: 8000 });
+    await panel.getByRole('button', { name: 'Check learning and suggestions', exact: true }).waitFor({ timeout: 8000 });
+    phase('settings-preloaded');
+    const two = await startCall(2, { navigate: false }); two.started = currentStart;
     const privateTurn = await speak('private-source', two);
     check(/cobalt/i.test(privateTurn.question) && /lantern/i.test(privateTurn.question) && /arch/i.test(privateTurn.question), 'real-asr-private-source');
+    privateSourceQuestion = privateTurn.question;
     await speak('private-review', two);
     const suggestions = await owned('GET', '/memory/learning');
     const suggestion = suggestions.pending?.find(item => item.source_kind === 'vox' && item.sensitive === true && privateTurn.question.includes(item.content) && /cobalt/i.test(item.content) && /lantern/i.test(item.content) && /arch/i.test(item.content));
@@ -436,33 +583,34 @@ async function run(settings, secret) {
     if (evidence.existing_candidate_topic_observed) evidence.existing_candidate_data_frames_observed = (await stats()).dataFrames > 0;
     // learn_completed_memory intentionally returns counts and a fixed Settings
     // instruction, not a fabricated version of the old candidate RTC topic.
-    const dialog = page.getByRole('dialog', { name: 'NavoX Vox', exact: true });
-    const link = dialog.locator('a[href="/settings#memory-privacy"]').first();
-    if (!(await link.isVisible())) await dialog.locator('summary[aria-label="Vox settings"]').click();
-    await link.click();
-    await page.waitForURL(url => url.pathname === '/settings' && url.hash === '#memory-privacy', { timeout: 8000 });
-    const panel = page.getByRole('region', { name: 'Private memory suggestions', exact: true });
+    await page.getByRole('button', { name: 'Minimize call', exact: true }).click();
+    check(new URL(page.url()).pathname === '/settings' && new URL(page.url()).hash === '#memory-privacy', 'private-review-on-preloaded-settings');
     await panel.getByRole('button', { name: 'Check learning and suggestions', exact: true }).click();
     const review = panel.getByRole('article', { name: 'Private suggestion: ' + suggestion.label, exact: true });
     await review.waitFor({ timeout: 8000 });
     check(!(await review.getByRole('checkbox').isChecked()), 'private-learning-agreement-initially-unchecked');
     check(!(await review.getByRole('button', { name: 'Save this suggestion', exact: true }).isEnabled()), 'private-learning-save-disabled-before-agreement');
     await review.getByRole('checkbox').check();
+    phase('private-save-requested', two.item);
     await review.getByRole('button', { name: 'Save this suggestion', exact: true }).click();
     const receiptDeadline = Date.now() + 5000;
     while (!privateReceipt && Date.now() < receiptDeadline) { await guard(); await pause(100); }
     check(privateReceipt && privateReceipt.id === suggestion.id && privateReceipt.source_kind === 'vox' && privateReceipt.sensitive === true && privateReceipt.label === suggestion.label && privateReceipt.content === suggestion.content && privateReceipt.source_conversation_id === suggestion.source_conversation_id, 'exact-real-private-receipt');
     const endedBefore = endSequences.get(two.call.client_call_id);
     check(endedBefore && endedBefore < evidence.private_confirmation_request_sequence, 'native-hangup-before-private-confirmation');
+    const endConfirmedBefore = endResponses.get(two.call.client_call_id);
+    check(endConfirmedBefore && endConfirmedBefore < evidence.private_confirmation_request_sequence, 'native-end-response-before-private-confirmation');
     evidence.private_native_end_sequence = endedBefore;
+    evidence.private_native_end_response_sequence = endConfirmedBefore;
     await closeCall(two);
 
-    if (settings.profile === 'full-three-calls') {
+    if (['full-three-calls', 'fresh-three-calls'].includes(settings.profile)) {
       const three = await startCall(3); three.started = currentStart;
       const recalled = await speak('recall-and-withhold', three);
+      check(!/\bamber\b|\bmeridian\b|\bcobalt\b|\blantern\b|\barch\b/i.test(recalled.question), 'recall-question-does-not-supply-historical-or-private-answer');
       check(/brief|short|concise/i.test(recalled.answer) && /Python/i.test(recalled.answer), 'cross-call-neutral-recall');
       evidence.cross_call_recall = { status: 'passed', live_qualified: true };
-      check(recalled.answer.startsWith(NOTICE) && /water cycle|evaporation|condensation/i.test(recalled.answer), 'host-privacy-notice-before-historical-answer');
+      check(recalled.answer.startsWith(NOTICE) && /\bamber\b/i.test(recalled.answer) && /\bmeridian\b/i.test(recalled.answer), 'host-privacy-notice-before-previously-unstated-historical-answer');
       evidence.host_notice_before_history = { status: 'passed', live_qualified: true };
       check(!/\bcobalt\b|\blantern\b|\barch\b/i.test(recalled.answer), 'private-source-withheld-from-voice');
       evidence.private_withheld_from_voice = { status: 'passed', live_qualified: true };
@@ -475,9 +623,12 @@ async function run(settings, secret) {
     evidence.total_known_provider_estimated_cost_usd = String(settings.priorProviderUsd + finalBudget.known_provider_estimate);
     evidence.total_transport_connected_ms = settings.priorConnectedMs + Number(finalBudget.daily.connected_ms);
     evidence.total_native_calls = settings.priorCallCount + evidence.calls.length;
-    check(evidence.calls.every(item => item.metering_complete) && finalBudget.known_provider_estimate <= settings.stopThresholdUsd, 'all-invoked-provider-usage-known');
+    check(evidence.calls.every(item => item.metering_complete) && finalBudget.known_provider_estimate <= settings.stopThresholdUsd,
+      settings.profile === 'fresh-three-calls' ? 'all-new-provider-usage-known-prior-uncertainty-retained' : 'all-invoked-provider-usage-known');
     check(finalBudget.daily.connected_ms <= settings.maxTransportMs && evidence.calls.every(item => item.connected_ms <= 45000), 'bounded-transport-time-with-explicit-usd-status');
-    check(evidence.calls.length === settings.maxCalls && evidence.total_native_calls <= settings.totalCallCeiling && evidence.total_transport_connected_ms <= 135000 && Number(evidence.total_known_provider_estimated_cost_usd) <= 2 && evidence.typed_vox_requests === 0 && evidence.blocked_unexpected_writes === 0 && evidence.blocked_external_requests === 0 && errors.length === 0, 'bounded-no-typed-no-unexpected-traffic');
+    check(evidence.calls.length === settings.maxCalls && evidence.total_native_calls <= settings.totalCallCeiling && evidence.total_transport_connected_ms <= settings.totalTransportCeilingMs && Number(evidence.total_known_provider_estimated_cost_usd) <= 2 && evidence.typed_vox_requests === 0 && evidence.blocked_unexpected_writes === 0 && evidence.blocked_external_requests === 0 && errors.length === 0, 'bounded-no-typed-no-unexpected-traffic');
+    await finishWatchdog(watchdog, watchdogState, guard);
+    check(!fatal, 'no-pending-watchdog-failure');
     boundary = 'completed';
     evidence.passed = true;
   } catch (error) {
@@ -488,11 +639,18 @@ async function run(settings, secret) {
     const code = /HTTP(\d{3})/.exec(safeCode || '');
     if (code) evidence.failure_http_status = Number(code[1]);
   } finally {
+    if (watchdogState.stop) watchdogState.stop();
     clearInterval(watchdog);
     if (context) {
       try { await stopCurrent(); evidence.calls_stopped = true; }
       catch { evidence.calls_stopped = false; evidence.passed = false; }
     }
+    if (watchdogState.drain) await watchdogState.drain();
+    if (context) {
+      try { evidence.memory_snapshot_before_parent_erasure = await observeLearning(null); }
+      catch { evidence.memory_snapshot_before_parent_erasure = { available: false }; }
+    }
+    if (fatal) { evidence.passed = false; evidence.watchdog_failure_code = fatal.qaCode; }
     if (context) await context.close().catch(() => {});
     if (browser) await browser.close().catch(() => {});
     evidence.page_error_count = errors.length;
@@ -522,6 +680,34 @@ if (require.main === module) {
       const changed = [...continuation]; changed[index] = invalid;
       assert.throws(() => options(changed));
     }
+    const freshArguments = ['--authorized-live-voice-qualification', 'a'.repeat(40), '--profile', 'fresh-three-calls',
+      '--prior-provider-usd', '0.0745244', '--prior-connected-ms', '48085', '--prior-call-count', '2',
+      '--prior-uncertain-streams', '1', '--prior-reserved-tokens', '10525', '--qualification-run-id', 'voice-qa-20261027'];
+    const fresh = options(freshArguments);
+    assert.equal(fresh.maxCalls, 3);
+    assert.equal(fresh.totalCallCeiling, fresh.maxCalls + fresh.priorCallCount);
+    assert.equal(fresh.maxTransportMs, 135000);
+    assert.equal(fresh.totalTransportCeilingMs, fresh.maxTransportMs + fresh.priorConnectedMs);
+    assert.equal(fresh.totalTransportCeilingMs, 183085);
+    assert.equal(fresh.stopThresholdUsd + fresh.priorProviderUsd, 2);
+    assert.equal(fresh.priorUncertainStreams, 1);
+    assert.equal(fresh.priorReservedTokens, 10525);
+    assert.throws(() => options(freshArguments.slice(0, -2)));
+    for (const [index, invalid] of [[5, '0'], [7, '0'], [9, '0'], [11, '0'], [13, '0'], [15, 'bad run id']]) {
+      const changed = [...freshArguments]; changed[index] = invalid;
+      assert.throws(() => options(changed));
+    }
+    const clocks = { created: 1000, admission: 500, media: null };
+    assert.equal(clockFailure(fresh, clocks, 1000000, 40500), null);
+    assert.equal(clockFailure(fresh, clocks, 1000, 65500), 'admission-wall-clock-stop');
+    clocks.media = 10500;
+    assert.equal(clockFailure(fresh, clocks, 1000000, 50499), null);
+    assert.equal(clockFailure(fresh, clocks, 0, 50500), 'call-wall-clock-stop');
+    clocks.created = 999999999; // Late 201/server wall time cannot extend monotonic clocks.
+    assert.equal(clockFailure(fresh, clocks, 0, 50500), 'call-wall-clock-stop');
+    clocks.admission = clocks.media = null; // Positively confirmed retirement.
+    assert.equal(clockFailure(fresh, clocks, 1000000000, 1000000000), null);
+    assert.equal(clockFailure(limited, { created: 1000 }, 41000, 0), 'call-wall-clock-stop');
     assert.equal(validDecimal('0E-10'), 0);
     assert.equal(validDecimal('unknown'), null);
     assert.equal(validDecimal('-1'), null);
@@ -549,6 +735,10 @@ if (require.main === module) {
     completed.add(newId);
     assert.equal(currentAdmission({ client_call_id: newId }, 2, launches, completed), false);
     assert.equal(currentAdmission({ client_call_id: 'malformed' }, 2, launches, completed), false);
+    assert.equal(currentEndResponse(newId, { client_call_id: newId }, 2, launches, 204), true);
+    assert.equal(currentEndResponse(newId, { client_call_id: newId }, 1, launches, 204), false);
+    assert.equal(currentEndResponse(oldId, { client_call_id: newId }, 2, launches, 204), false);
+    assert.equal(currentEndResponse(newId, { client_call_id: newId }, 2, launches, 500), false);
     (async () => {
       // The first usage request is still pending when the next clock tick
       // reaches the cutoff. Retirement must start without waiting for its HTTP
@@ -577,6 +767,47 @@ if (require.main === module) {
       assert.equal(stopped, 1);
       assert.equal(budgetReads, 1);
       assert.equal(failed.qaCode, 'call-wall-clock-stop');
+      // Success must wait for a usage request already in flight. Its late error
+      // remains fatal even after the final call has been positively retired.
+      let finalTick, finalFailed = null, rejectFinalBudget, cancelled = false;
+      const finalState = {};
+      const finalBudget = new Promise((resolve, reject) => { rejectFinalBudget = reject; });
+      const finalTimer = startWatchdog({
+        guard: async () => { if (finalFailed) throw finalFailed; },
+        budget: async () => finalBudget,
+        stop: async () => {}, state: finalState,
+        failed: () => finalFailed !== null, fail: error => { finalFailed = error; },
+      }, callback => { finalTick = callback; return 'final-timer'; });
+      const finalReading = finalTick();
+      await Promise.resolve();
+      const finishing = finishWatchdog(finalTimer, finalState,
+        async () => { if (finalFailed) throw finalFailed; },
+        timer => { assert.equal(timer, 'final-timer'); cancelled = true; });
+      rejectFinalBudget(qaError('budget-or-policy-stop'));
+      await assert.rejects(finishing, error => error.qaCode === 'budget-or-policy-stop');
+      await finalReading;
+      assert.equal(cancelled, true);
+      // A timer suspended at await guard must not launch a new usage read
+      // after finalization has latched stop. Finalization also drains that tick.
+      let deferredTick, releaseGuard, deferredBudgets = 0, finishDone = false;
+      const deferredState = {};
+      const deferredGuard = new Promise(resolve => { releaseGuard = resolve; });
+      const deferredTimer = startWatchdog({
+        guard: async () => deferredGuard,
+        budget: async () => { deferredBudgets++; },
+        stop: async () => {}, state: deferredState,
+        failed: () => false, fail: () => { throw new Error('Unexpected deferred failure'); },
+      }, callback => { deferredTick = callback; return 'deferred-timer'; });
+      const checking = deferredTick();
+      const stoppedBeforeGuard = finishWatchdog(deferredTimer, deferredState, async () => {}, () => {}).then(() => { finishDone = true; });
+      await Promise.resolve();
+      assert.equal(finishDone, false);
+      releaseGuard();
+      await checking;
+      await stoppedBeforeGuard;
+      await deferredTick();
+      assert.equal(deferredBudgets, 0);
+      assert.equal(finishDone, true);
       // A published native AudioSource has no frames until the first reply.
       // The real play wrapper must permit input while its promise is pending,
       // then require actual resolved playback plus received bytes/energy.
@@ -614,7 +845,7 @@ if (require.main === module) {
       release(); await played;
       assert.equal(responseAudioReady(snapshot(), baseline), false);
       assert.equal(responseAudioReady({ ...snapshot(), receivedBytes: 1, receivedEnergy: 0.1 }, baseline), true);
-      console.log(JSON.stringify({ offline_self_test: 'pass', deadline_during_slow_usage_regression: 'pass', silent_remote_pending_play_regression: 'pass', provider_calls: 0 }));
+      console.log(JSON.stringify({ offline_self_test: 'pass', fresh_scope_historical_uncertainty_preserved: 'pass', monotonic_media_and_admission_clocks: 'pass', stopped_watchdog_cannot_launch_late_budget: 'pass', late_fatal_rejects_success: 'pass', deadline_during_slow_usage_regression: 'pass', silent_remote_pending_play_regression: 'pass', provider_calls: 0 }));
     })().catch(error => { console.error(error?.name || 'Error'); process.exitCode = 1; });
   } else {
     let selected;
@@ -636,4 +867,4 @@ if (require.main === module) {
     });
   }
 }
-module.exports = { options, validDecimal, currentAdmission, blockedWriteDiagnostic, timezoneInitialization, mediaReady, responseAudioReady, startWatchdog, run };
+module.exports = { options, validDecimal, currentAdmission, currentEndResponse, blockedWriteDiagnostic, timezoneInitialization, mediaReady, responseAudioReady, clockFailure, startWatchdog, finishWatchdog, run };

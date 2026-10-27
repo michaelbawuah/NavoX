@@ -9,9 +9,10 @@ signup, login, memory change, quota reset or runtime configuration change.
 
 - `fixtures.json`: five predefined synthetic utterances; no student content.
 - `prepare_audio.py`: local macOS Samantha/afconvert synthesis only, PCM16 mono
-  at 16kHz, with bounded leading/trailing silence. The prepared Mac fixtures have
-  a maximum duration of 10.844 seconds. Regenerate after any manifest change and
-  use the updated metadata/hash values.
+  at 16kHz, with bounded leading/trailing silence. Regenerate after any manifest
+  change and use the updated metadata/hash values. Preflight checks the exact
+  spoken-text hash as well as each WAV hash, format and duration; old audio with
+  the same fixture IDs cannot qualify a changed utterance manifest.
 - `synthetic-mic.cjs`: fake-device permission surface followed by a controlled
   WebAudio microphone track. It records numeric RTP/playback counters only and
   never captures provider audio. The local browser probe verified three nonzero
@@ -66,6 +67,55 @@ cross-call recall, historical host notice and private withholding fields remain
 `not_run` with `live_qualified: false`. Those checks require future authorized
 qualification; the two-call result must not be described as full qualification.
 
+## Fresh functional qualification after the closed plan
+
+The earlier plan remains stopped with two calls, 48,085 ms of metered transport,
+$0.0745244 of known provider estimates and one uncertain realtime stream retaining
+10,525 tokens. Its total provider cost is unknown. A calculated rate allowance is
+not a provider receipt, and no reservation or uncertainty is erased by this run.
+
+The separately authorized `fresh-three-calls` profile admits at most three new
+calls for the complete functional story, retaining a cumulative five-call ceiling.
+It permits at most 135,000 ms of new metered transport and reports the separate
+183,085 ms cumulative ceiling. The known-provider estimate stop remains $2 across
+the historical and new calls, leaving $1.9254756 for the new run. This is a stop
+threshold for known estimates, not a hard all-in spending cap; old uncertain
+provider usage and unpriced transport remain unknown. Every new call must settle
+its provider streams and reservations before the next call can start. Any new
+uncertainty stops progression.
+
+The fresh profile has a 65-second admission safety deadline and a separate
+40-second deadline from media readiness. A passing call must still have no more
+than 45 seconds of actual metered transport. These are explicit new-plan limits;
+they do not relabel the earlier plan's cutoff. Completed native hang-up clears
+the active-call clock before private Settings confirmation is processed.
+
+Before signup, the parent reads the two exact historical call hashes from the
+running application's database inside a repeatable-read, READ ONLY transaction.
+It verifies the original known totals, uncertain stream and token hold, zero old
+active calls/unsettled voice credits and sufficient unchanged prior-owner native
+allowance. Historical synthetic-owner identities are checked privately; only
+counts, allowance summaries and a ledger fingerprint are reported. A fresh owner
+isolates the fixture content and never supplies a quota reset. The old ledger is
+fingerprinted again after cleanup, and any change fails this qualification.
+
+The fresh run requires a new content-free run ID. An exclusive claim is written
+before signup; that ID cannot be restarted automatically, including after a
+pre-signup failure. The retained claim records whether calls may have started.
+An additional immutable scope claim is keyed by the original ledger fingerprint
+and the fresh profile. Choosing a different run ID cannot grant three more calls
+against that same historical baseline. Both claims remain after failure. The
+scope claim links to its run record and deliberately reports no live-started
+boolean; only the execution record and actual ledger can establish that outcome.
+Read-only preflight never claims a run or opens an account. Application source
+SHA and each helper's SHA-256 are recorded separately, so preparation against
+the deployed app revision does not pretend the new harness was already in that
+application image.
+
+Even a functional pass records `financial_qualified:false` and a null prior total
+cost. It cannot establish invoice reconciliation, human microphone quality,
+physical audibility, a physical phone or student acceptance.
+
 Before any fixture, the harness requires current native remote audio attachment,
 an attached audio element with a play attempt for that live remote track, a live
 synthetic input track and outbound RTP. A silent worker may leave play pending
@@ -88,7 +138,8 @@ assistant session creation and provider writes remain blocked.
 The parent then erases QA memory and disables History, ends any owned reservation,
 logs out the same session and preserves billing/audit records. No email/calendar
 write is permitted. No typed Vox message endpoint is permitted. A failed or
-uncertain bill stops additional calls; no automatic fourth call is available.
+uncertain new bill stops additional calls; the earlier plan remains stopped and
+the fresh profile never admits an automatic fourth new call.
 
 ## Current blockers
 
@@ -134,6 +185,18 @@ python3 /srv/navox-vox-test/browser/voice-qualification/run_on_isolated.py autho
 
 The placeholders are mandatory, non-secret billing metadata, not inferred
 estimates. No command above authorizes itself; root still controls execution.
+
+For the separately authorized fresh functional plan, use one new lowercase run ID
+and preserve the exact historical manifest on both preflight and execution:
+
+```bash
+python3 /srv/navox-vox-test/browser/voice-qualification/run_on_isolated.py preflight FULL_SHA --profile fresh-three-calls --prior-provider-usd 0.0745244 --prior-connected-ms 48085 --prior-call-count 2 --prior-uncertain-streams 1 --prior-reserved-tokens 10525 --qualification-run-id voice-memory-20261027-01
+python3 /srv/navox-vox-test/browser/voice-qualification/run_on_isolated.py authorized-run FULL_SHA --profile fresh-three-calls --prior-provider-usd 0.0745244 --prior-connected-ms 48085 --prior-call-count 2 --prior-uncertain-streams 1 --prior-reserved-tokens 10525 --qualification-run-id voice-memory-20261027-01 --root-explicitly-authorized-live-provider-calls
+```
+
+The second command consumes that run ID. Do not remove its claim or choose a new
+ID to retry an uncertain run; independently review the retained usage and the
+remaining authorized scope first.
 
 `--stt-billing-shape duration` is the default only for exact `gpt-transcribe`,
 whose duration contract root verified. It never adds missing prices or changes
