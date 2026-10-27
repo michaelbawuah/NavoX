@@ -754,9 +754,22 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                 },
             )
             try:
-                await worker.close()
-                if isinstance(worker, ConfiguredVoiceWorker):
-                    await usage.close()
+                worker_close_failed = False
+                try:
+                    await worker.close()
+                except BaseException:
+                    worker_close_failed = True
+                    raise
+                finally:
+                    if isinstance(worker, ConfiguredVoiceWorker):
+                        try:
+                            await usage.close()
+                        except BaseException as error:
+                            if not worker_close_failed:
+                                raise
+                            # Keep the worker shutdown failure while reporting
+                            # only a secondary metering error's type/location.
+                            log_worker_failure("usage_close", error)
             finally:
                 for task in tuple(streams):
                     task.cancel()

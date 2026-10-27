@@ -30,6 +30,8 @@ def startup(monkeypatch):
         published=asyncio.Event(),
         with_microphone=True,
         publish_error=None,
+        worker_close_error=None,
+        usage_close_error=None,
         pcm=b"\x01\x01" * 320,
     )
     authority = WorkerAuthority(uuid4(), uuid4())
@@ -77,6 +79,8 @@ def startup(monkeypatch):
 
         async def close(self):
             state.events.append("usage_closed")
+            if state.usage_close_error is not None:
+                raise state.usage_close_error
 
     class Worker:
         failed = False
@@ -103,6 +107,8 @@ def startup(monkeypatch):
 
         async def close(self):
             state.events.append("worker_closed")
+            if state.worker_close_error is not None:
+                raise state.worker_close_error
 
     class Stream:
         def __init__(self, *args, **kwargs):
@@ -266,3 +272,43 @@ async def test_output_publish_failure_stops_already_started_input_and_usage(star
     assert not state.received.is_set()
     assert "watch_started" not in state.events
     assert state.events[-2:] == ["source_closed", "disconnected"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("worker_error", "usage_error"),
+    [
+        (RuntimeError("synthetic worker shutdown"), None),
+        (None, RuntimeError("synthetic private usage detail")),
+        (
+            RuntimeError("synthetic worker shutdown"),
+            RuntimeError("synthetic private usage detail"),
+        ),
+        (asyncio.CancelledError(), RuntimeError("synthetic private usage detail")),
+    ],
+)
+async def test_shutdown_flushes_usage_and_preserves_the_first_close_failure(
+    startup, caplog, worker_error, usage_error
+):
+    ctx, settings, state = startup
+    state.with_microphone = False
+    state.worker_close_error = worker_error
+    state.usage_close_error = usage_error
+    state.warm_release.set()
+    expected = worker_error if worker_error is not None else usage_error
+    with pytest.raises(type(expected)) as raised:
+        await asyncio.wait_for(worker_livekit.serve_job(ctx, settings), 2)
+    assert raised.value is expected
+    assert state.events.count("worker_closed") == state.events.count("usage_closed") == 1
+    assert state.events.index("worker_closed") < state.events.index("usage_closed")
+    assert {"consumer_stopped", "heartbeat_stopped"} <= set(state.events)
+    assert not state.handlers
+    assert state.events[-2:] == ["source_closed", "disconnected"]
+    secondary = [
+        record for record in caplog.records if getattr(record, "stage", None) == "usage_close"
+    ]
+    assert len(secondary) == (1 if worker_error is not None and usage_error is not None else 0)
+    if secondary:
+        assert secondary[0].getMessage() == "Vox worker stopped"
+        assert secondary[0].error_type == "RuntimeError"
+    assert "synthetic private usage detail" not in caplog.text
