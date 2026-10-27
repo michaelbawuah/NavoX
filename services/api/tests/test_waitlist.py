@@ -1,12 +1,16 @@
 import importlib.util
+import os
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import create_engine, func, inspect, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -15,14 +19,27 @@ from navox.api.waitlist import create_waitlist_app
 from navox.core.settings import Settings
 from navox.db.base import Base
 from navox.db.session import get_database_session
-from navox.db.waitlist import WaitlistEntry
+from navox.db.waitlist import WaitlistEntry, WaitlistRateLimit
 
 
 @pytest_asyncio.fixture
 async def env(tmp_path):
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/waitlist.db")
+    dsn = os.environ.get("NAVOX_CONNECTOR_TEST_DSN", f"sqlite+aiosqlite:///{tmp_path}/waitlist.db")
+    schema = f"waitlist_test_{uuid4().hex}"
+    admin = None
+    if dsn.startswith("postgresql"):
+        admin = create_async_engine(dsn)
+        async with admin.begin() as connection:
+            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        engine = create_async_engine(dsn, connect_args={"server_settings": {"search_path": schema}})
+    else:
+        engine = create_async_engine(dsn)
     async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+        await connection.run_sync(
+            lambda sync: Base.metadata.create_all(
+                sync, tables=[WaitlistEntry.__table__, WaitlistRateLimit.__table__]
+            )
+        )
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async def database():
@@ -38,6 +55,10 @@ async def env(tmp_path):
     app.mount("/v1", public)
     yield app, factory, public
     await engine.dispose()
+    if admin:
+        async with admin.begin() as connection:
+            await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        await admin.dispose()
 
 
 @pytest.mark.asyncio
@@ -164,14 +185,25 @@ def test_migration_upgrade_and_downgrade():
     spec = importlib.util.spec_from_file_location("waitlist_migration", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    with patch.object(module, "op") as op:
-        module.upgrade()
-        assert [call.args[0] for call in op.create_table.call_args_list] == [
-            "waitlist_entries",
-            "waitlist_rate_limits",
-        ]
-        module.downgrade()
-        assert [call.args[0] for call in op.drop_table.call_args_list] == [
-            "waitlist_rate_limits",
-            "waitlist_entries",
-        ]
+    engine = create_engine("sqlite://")
+    with engine.begin() as connection:
+        with patch.object(module, "op", Operations(MigrationContext.configure(connection))):
+            module.upgrade()
+            assert set(inspect(connection).get_table_names()) == {
+                "waitlist_entries",
+                "waitlist_rate_limits",
+            }
+            # The migration creates a real unique email index/primary key.
+            connection.execute(
+                text(
+                    "INSERT INTO waitlist_entries (email, source, school_domain) "
+                    "VALUES ('test@example.edu', 'landing', 'example.edu')"
+                )
+            )
+            assert connection.scalar(text("SELECT created_at FROM waitlist_entries"))
+            assert inspect(connection).get_pk_constraint("waitlist_entries")[
+                "constrained_columns"
+            ] == ["email"]
+            module.downgrade()
+            assert inspect(connection).get_table_names() == []
+    engine.dispose()
