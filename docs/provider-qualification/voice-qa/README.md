@@ -5,6 +5,33 @@ locked until root explicitly starts a run after deployment and pricing readiness
 Preparation and the read-only preflight made no native call, provider request,
 signup, login, memory change, quota reset or runtime configuration change.
 
+The October 27 run `voice-memory-20261027-a` stopped during its first call's
+startup check, before any fixture or completed spoken turn. The user-supplied
+execution report is retained in `results/voice-memory-20261027-a.json`, including
+its provenance and the limits of its evidence. The parent reported call
+retirement, erasure, disabled History and logout; fresh transport totals and an
+independent database cleanup audit were not included. Empty STT/provider-stream
+lists do not establish financial settlement. The original historical ledger and
+uncertain usage were unchanged. The run and scope claims remain consumed.
+
+Offline review found an invalid pre-speech RTP prerequisite: normal local VAD
+pauses upstream until speech begins. The revised harness waits for application
+enablement of the initially disabled raw fixture track after processed audio
+publication, permits silent zero-RTP startup, and retains strict post-speech
+RTP/playback proof. The old report omits individual readiness counters, so this
+proven defect cannot establish the sole runtime cause. This revision has not
+been staged or run live, and the examples below do not authorize another run.
+
+`inspect_completed_run.py` is a standalone, read-only audit for this exact stopped
+run on the existing isolated host. It checks the report and synthetic identity,
+reads current usage and cleanup counts in a repeatable-read READ ONLY database
+transaction, and recomputes the historical ledger fingerprint. It emits only
+hashes, fixed enums, numeric counts and booleans, with no credentials, student
+text or provider request. It neither removes audio nor alters claims or usage.
+Run it through the existing SSH connection with `python3 -` and the reviewed
+script on stdin; no new host file is required. Its local scope/read-only
+regressions are `python3 check_completed_run_offline.py`.
+
 ## Prepared files
 
 - `fixtures.json`: five predefined synthetic utterances; no student content.
@@ -118,10 +145,17 @@ physical audibility, a physical phone or student acceptance.
 
 Before any fixture, the harness requires current native remote audio attachment,
 an attached audio element with a play attempt for that live remote track, a live
-synthetic input track and outbound RTP. A silent worker may leave play pending
-until its first reply; pre-speech readiness permits that. Post-response checks
-still require resolved playback, live playing output and increased received
-bytes/energy. The product admits only the leased agent's output audio and now
+synthetic input track enabled by the application after its processed publication
+completes. The synthetic raw track starts disabled to prevent an initial
+pre-caller race; the offline lifecycle probe explicitly enables its own track
+because it has no application publication. The product pauses upstream outside detected
+speech, so zero outbound RTP is legitimate before the first fixture. A silent
+worker may also leave play pending until its first reply. Pre-speech readiness
+permits both conditions; after each spoken fixture, outbound RTP must increase,
+and the completed response still requires resolved playback, live playing output
+and increased received bytes/energy. A fixed, bounded numeric/boolean startup
+observation records the failed readiness condition without retaining content.
+The product admits only the leased agent's output audio and now
 waits for its actual output subscription. An enabled textbox by itself is not
 sufficient, and no arbitrary startup sleep substitutes for readiness. Completed
 dialogue counts and revision numbers expose unexpected split-turn behavior

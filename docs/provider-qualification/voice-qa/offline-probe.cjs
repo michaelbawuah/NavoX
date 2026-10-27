@@ -39,6 +39,9 @@ function wav(samples, audible) {
       const observations = [];
       for (let index = 0; index < 3; index++) {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        const initiallyDisabled = stream.getAudioTracks()[0].enabled === false;
+        // This local lifecycle probe has no application publication to enable it.
+        stream.getAudioTracks()[0].enabled = true;
         const context = new AudioContext(); await context.resume();
         const source = context.createMediaStreamSource(stream), analyser = context.createAnalyser();
         source.connect(analyser);
@@ -48,14 +51,14 @@ function wav(samples, audible) {
         const rms = Math.sqrt(samples.reduce((sum, sample) => sum + sample * sample, 0) / samples.length);
         await playing;
         stream.getTracks().forEach(track => track.stop());
-        observations.push({ nonzeroSignal: rms > 0.01, trackEnded: stream.getAudioTracks()[0].readyState === 'ended' });
+        observations.push({ initiallyDisabled, nonzeroSignal: rms > 0.01, trackEnded: stream.getAudioTracks()[0].readyState === 'ended' });
         await context.close();
       }
       return { observations, created: window.__qaVoice.contextsCreated, closed: window.__qaVoice.contextsClosed, plays: window.__qaVoice.fixturePlays, rtcPeers: window.__qaVoice.peers.length };
     }, wav(16000, true).toString('base64'));
     assert.equal(external, 0);
     assert.equal(probe.created, 3); assert.equal(probe.closed, 3); assert.equal(probe.plays, 3); assert.equal(probe.rtcPeers, 0);
-    assert(probe.observations.every(item => item.nonzeroSignal && item.trackEnded));
+    assert(probe.observations.every(item => item.initiallyDisabled && item.nonzeroSignal && item.trackEnded));
     result.passed = true; result.synthetic_tracks = 3; result.contexts_closed = 3; result.external_requests = 0;
   } catch (error) { result.failure_class = error?.name || 'Error'; }
   finally {

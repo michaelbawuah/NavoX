@@ -24,6 +24,9 @@ function installSyntheticMic() {
     const destination = context.createMediaStreamDestination();
     await context.resume();
     const track = destination.stream.getAudioTracks()[0];
+    // The application enables raw capture only after its processed publication
+    // completes. Do not expose an initially enabled pre-caller readiness race.
+    track.enabled = false;
     const record = { context, destination, track, sources: new Set(), closed: false };
     state.contextsCreated++;
     state.current = record;
@@ -46,7 +49,7 @@ function installSyntheticMic() {
   };
   window.__qaSpeakFixture = async function(encodedWave) {
     const record = state.current;
-    if (!record || record.closed || record.track.readyState !== 'live') {
+    if (!record || record.closed || record.track.readyState !== 'live' || !record.track.enabled) {
       throw new Error('No current synthetic microphone track');
     }
     if (typeof encodedWave !== 'string' || encodedWave.length > 2800000) {

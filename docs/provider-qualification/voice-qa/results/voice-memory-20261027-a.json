@@ -1,0 +1,451 @@
+{
+  "schema": "navox-user-supplied-qualification-evidence.v1",
+  "provenance": "User-supplied isolated execution log; reviewed offline, not independently re-read from the live database.",
+  "review": {
+    "functional_qualification": "failed-before-spoken-input",
+    "fresh_call_admission_attempts": 1,
+    "completed_spoken_turns": 0,
+    "remaining_scenarios": "not_run",
+    "fresh_transport_totals": "not_reported-read-only-audit-required",
+    "empty_provider_streams_prove_settlement": false,
+    "startup_failure_counter_details": "not_reported",
+    "cleanup": "parent-reported-complete",
+    "independent_database_cleanup_verification": "pending",
+    "temporary_audio_removal": "unconfirmed",
+    "paid_retry_authorized_by_this_artifact": false,
+    "source_attachment_sha256": "99f951768c70b4e4bdc47777760eccb86c23304b1d81206c2b68617a1b3d5171"
+  },
+  "supplied_report": {
+    "sha": "d21bf978df3c14d393fe05acf0fe41772841b23a",
+    "scope": "isolated-test",
+    "provider_calls_authorized": true,
+    "qualification_limits": {
+      "profile": "fresh-three-calls",
+      "max_calls": 3,
+      "prior_call_count": 2,
+      "total_call_ceiling": 5,
+      "prior_provider_usd": "0.0745244",
+      "prior_connected_ms": 48085,
+      "remaining_provider_usd": "1.9254756",
+      "remaining_transport_ms": 135000,
+      "prior_uncertain_streams": 1,
+      "prior_reserved_tokens": 10525,
+      "prior_total_cost_usd": null,
+      "financial_qualified": false,
+      "qualification_run_id": "voice-memory-20261027-a",
+      "total_transport_ceiling_ms": 183085,
+      "admission_limit_ms": 65000,
+      "media_call_limit_ms": 40000,
+      "settled_call_limit_ms": 45000,
+      "prior_plan_status": "stopped_for_uncertain_usage",
+      "authorization_scope": "new-functional-qualification-only"
+    },
+    "pass_scope": "functional-live-voice-memory-only",
+    "source_preflight": {
+      "sha": "d21bf978df3c14d393fe05acf0fe41772841b23a",
+      "app_source_sha": "d21bf978df3c14d393fe05acf0fe41772841b23a",
+      "helper_sha256": {
+        "run_on_isolated.py": "8192943ee88e918dcdb8a79fb2e566f6e9a830c94abf5f14a549f6779d11f6d5",
+        "qualify.cjs": "7c625a55780cb271398b8fa2e642c13db617ff37566e19bfb642728cab5c90d8",
+        "synthetic-mic.cjs": "1294647003d0832a16f1169ba915936ac96ff9d49fb9428430bd09693717065e",
+        "fixtures.json": "cb4a58651d40d60b86c7551a07a4f84464f27580178907e45b6d67c6723c5e1c",
+        "prepare_audio.py": "0cb57124de40bfc5b6b6860582cb90562e4c2231f3cded3afa654cbaa2a0f147",
+        "check_limits_offline.py": "427f761489d1b3c9aa301d2b696734fb013dcb6eab6e5f1474a30f550d107316",
+        "offline-probe.cjs": "cde150d842fb925b89b0a75a3ad24c3e9a444e7df864829fd5082fd747f4a1e7",
+        "README.md": "2ba4713e49b058a506ee0751752459b925eac9cc08f6d89aa0d2df1e74682d47"
+      },
+      "scope": "isolated-test",
+      "readiness_only": true,
+      "provider_calls": 0,
+      "ready": true,
+      "media_enabled": true,
+      "native_learning_bound": true,
+      "native_learning_artifact": {
+        "module_present": true,
+        "worker_group_binding": true,
+        "current_call_bound": true,
+        "tool_name_matches": true,
+        "native_enqueue": true,
+        "background_flag_independent": true,
+        "source_hashes": {
+          "worker": "039c24634670730e51d58a4179f03214416424015b974012ba73ba59e394e6e8",
+          "tool": "e55c2526086cabf0ba5682d6724f72990591d90f54c9b67711e50d36f8e8c898",
+          "status": "57e42965d7b1dd20745170d6bc42704dbd189b81aaf1905bb76c393699774dc2"
+        },
+        "matches_exact_release_source": true,
+        "ready": true
+      },
+      "background_learning_env_enabled_informational_only": false,
+      "metered_host_speech": true,
+      "transport_priced": false,
+      "transport_usd_status": "unknown",
+      "transport_usage_limit_ms": 135000,
+      "provider_estimated_spend_stop_usd": "1.9254756",
+      "routes": [
+        {
+          "role": "realtime",
+          "provider": "openai",
+          "model": "gpt-realtime-2.1",
+          "pricing_version": "openai-2026-10-23",
+          "missing_rate_fields": [],
+          "credential_present": true,
+          "ready": true
+        },
+        {
+          "role": "llm",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "pricing_version": "openai-2026-10-23",
+          "missing_rate_fields": [],
+          "credential_present": true,
+          "ready": true
+        },
+        {
+          "role": "tts",
+          "provider": "openai",
+          "model": "gpt-4o-mini-tts-2025-12-15",
+          "pricing_version": "openai-2026-10-23",
+          "missing_rate_fields": [],
+          "credential_present": true,
+          "ready": true
+        },
+        {
+          "role": "stt",
+          "provider": "openai",
+          "model": "gpt-transcribe",
+          "pricing_version": "openai-2026-10-23",
+          "missing_rate_fields": [],
+          "credential_present": true,
+          "ready": true
+        },
+        {
+          "role": "web_search",
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "pricing_version": "openai-2026-10-23",
+          "missing_rate_fields": [],
+          "credential_present": true,
+          "ready": true
+        }
+      ],
+      "stt_expected_billing_shape": "duration",
+      "active_calls": {
+        "reserved_total": 0,
+        "unexpired_reserved": 0
+      },
+      "offline_audio_valid": true,
+      "cached_browser_ready": true,
+      "policy_revision": 52,
+      "qualification_limits": {
+        "profile": "fresh-three-calls",
+        "max_calls": 3,
+        "prior_call_count": 2,
+        "total_call_ceiling": 5,
+        "prior_provider_usd": "0.0745244",
+        "prior_connected_ms": 48085,
+        "remaining_provider_usd": "1.9254756",
+        "remaining_transport_ms": 135000,
+        "prior_uncertain_streams": 1,
+        "prior_reserved_tokens": 10525,
+        "prior_total_cost_usd": null,
+        "financial_qualified": false,
+        "qualification_run_id": "voice-memory-20261027-a",
+        "total_transport_ceiling_ms": 183085,
+        "admission_limit_ms": 65000,
+        "media_call_limit_ms": 40000,
+        "settled_call_limit_ms": 45000,
+        "prior_plan_status": "stopped_for_uncertain_usage",
+        "authorization_scope": "new-functional-qualification-only"
+      },
+      "prior_usage": {
+        "read_only": true,
+        "call_count": 2,
+        "call_hashes": [
+          "4ee683777b39bcbff366aae873a90a07ad69e9cc5788857fdeb812a4066e3bc6",
+          "6610556071cc0879c0c9dcc1b6e066af769c19c7fb5444c2a663f26e08dfd698"
+        ],
+        "connected_ms": 48085,
+        "known_provider_usd": "0.0745244",
+        "uncertain_provider_streams": 1,
+        "unknown_provider_cost_components": 1,
+        "reserved_tokens": 10525,
+        "reserved_voice_ms": 0,
+        "uncertain_voice_ms": 0,
+        "open_provider_streams": 0,
+        "active_calls": 0,
+        "synthetic_owners_verified": true,
+        "owner_budgets": [
+          {
+            "owner_index": 0,
+            "remaining_voice_ms": 3575951,
+            "remaining_tokens": 281673
+          },
+          {
+            "owner_index": 1,
+            "remaining_voice_ms": 3590150,
+            "remaining_tokens": 296326
+          }
+        ],
+        "ledger_sha256": "5240f4cc1ce0d03391dad6edfef1acbd9732733fd48f31eb2ae963e583c6423a",
+        "policy_revision": 52,
+        "checks": {
+          "read_only": true,
+          "exact_calls": true,
+          "call_count": true,
+          "connected_ms": true,
+          "known_provider_usd": true,
+          "uncertainty": true,
+          "reserved_tokens": true,
+          "no_open_provider_streams": true,
+          "no_old_active_calls": true,
+          "no_unsettled_voice": true,
+          "synthetic_owners": true,
+          "prior_owner_allowance_sufficient": true,
+          "ledger_fingerprint": true
+        },
+        "verified": true,
+        "prior_total_cost_usd": null,
+        "financial_qualified": false
+      },
+      "prior_total_cost_usd": null,
+      "financial_qualified": false,
+      "run_id_unused": true,
+      "scope_unused": true,
+      "cumulative_known_provider_estimate_stop_usd": "2",
+      "cumulative_transport_ceiling_ms": 183085
+    },
+    "registration_session_revoked": true,
+    "passed": false,
+    "prior_usage": {
+      "read_only": true,
+      "call_count": 2,
+      "call_hashes": [
+        "4ee683777b39bcbff366aae873a90a07ad69e9cc5788857fdeb812a4066e3bc6",
+        "6610556071cc0879c0c9dcc1b6e066af769c19c7fb5444c2a663f26e08dfd698"
+      ],
+      "connected_ms": 48085,
+      "known_provider_usd": "0.0745244",
+      "uncertain_provider_streams": 1,
+      "unknown_provider_cost_components": 1,
+      "reserved_tokens": 10525,
+      "reserved_voice_ms": 0,
+      "uncertain_voice_ms": 0,
+      "open_provider_streams": 0,
+      "active_calls": 0,
+      "synthetic_owners_verified": true,
+      "owner_budgets": [
+        {
+          "owner_index": 0,
+          "remaining_voice_ms": 3575951,
+          "remaining_tokens": 281673
+        },
+        {
+          "owner_index": 1,
+          "remaining_voice_ms": 3590150,
+          "remaining_tokens": 296326
+        }
+      ],
+      "ledger_sha256": "5240f4cc1ce0d03391dad6edfef1acbd9732733fd48f31eb2ae963e583c6423a",
+      "policy_revision": 52,
+      "checks": {
+        "read_only": true,
+        "exact_calls": true,
+        "call_count": true,
+        "connected_ms": true,
+        "known_provider_usd": true,
+        "uncertainty": true,
+        "reserved_tokens": true,
+        "no_open_provider_streams": true,
+        "no_old_active_calls": true,
+        "no_unsettled_voice": true,
+        "synthetic_owners": true,
+        "prior_owner_allowance_sufficient": true,
+        "ledger_fingerprint": true
+      },
+      "verified": true,
+      "prior_total_cost_usd": null,
+      "financial_qualified": false
+    },
+    "prior_total_cost_usd": null,
+    "financial_qualified": false,
+    "qualification_run_id": "voice-memory-20261027-a",
+    "run_id_claimed": true,
+    "live_calls_may_have_started": true,
+    "qa_owner_sha256": "5cb81d78d1db5cba24be5cc18ca1a3c8112e9dc01f6c040ad8e48b5b88690301",
+    "qa_workspace_sha256": "366db296f459ee53e8821561bdbfb90c6e0e926bcbe7f759d5014f7648eba723",
+    "browser": {
+      "schema": "navox-live-synthetic-voice-qualification.v1",
+      "sha": "d21bf978df3c14d393fe05acf0fe41772841b23a",
+      "qualification_profile": "fresh-three-calls",
+      "pass_scope": "selected-profile-only",
+      "scope": "isolated-test",
+      "physical_phone_acceptance": false,
+      "human_microphone_acceptance": false,
+      "input": "offline synthetic speech via actual LiveKit capture track",
+      "output": "real provider audio via browser playback path",
+      "fixture_native_topic_or_archive_injection": false,
+      "typed_vox_requests": 0,
+      "configured_policy_changed": false,
+      "max_calls": 3,
+      "prior_call_count": 2,
+      "total_call_ceiling": 5,
+      "prior_known_provider_estimated_cost_usd": "0.0745244",
+      "prior_transport_connected_ms": 48085,
+      "prior_uncertain_provider_streams": 1,
+      "prior_reserved_tokens": 10525,
+      "prior_total_provider_cost_usd": null,
+      "financial_qualified": false,
+      "qualification_run_id": "voice-memory-20261027-a",
+      "per_call_input_stop_ms": 40000,
+      "target_call_limit_ms": 45000,
+      "input_clock_basis": "monotonic-owned-media-ready",
+      "admission_wall_stop_ms": 65000,
+      "max_transport_usage_ms": 135000,
+      "cumulative_transport_ceiling_ms": 183085,
+      "known_provider_cost_stop_threshold_usd": 1.9254756,
+      "transport_usd_known": false,
+      "transport_estimated_cost_usd": null,
+      "combined_estimated_cost_usd": null,
+      "transcript_or_provider_audio_saved": false,
+      "calls": [
+        {
+          "number": 1,
+          "call_hash": "a9e165927bfc3565240b1d17de7c1768e3f1a394933fb289b67a5b6d999bf48e",
+          "native_call_hash": "67c962125e8bc2c65e4cecbdbd20b0594007c3b20fa6da2363bfb41daa07f706",
+          "source_sha": "d21bf978df3c14d393fe05acf0fe41772841b23a",
+          "turns": [],
+          "native_end_response_confirmed": true
+        }
+      ],
+      "checkpoints": [
+        "exact-browser-account",
+        "explicit-30day-disclosure-ready",
+        "native-semantic-learning-ready-for-current-privacy",
+        "existing-allowance-sufficient",
+        "call1:media-ready",
+        "call1:server-retention-proof"
+      ],
+      "phases": [
+        {
+          "phase": "admission-start",
+          "call_number": 1,
+          "elapsed_from_run_ms": 1610,
+          "elapsed_from_admission_ms": 0,
+          "elapsed_from_media_ms": null
+        },
+        {
+          "phase": "native-end-confirmed",
+          "call_number": 1,
+          "elapsed_from_run_ms": 25355,
+          "elapsed_from_admission_ms": 23744,
+          "elapsed_from_media_ms": null
+        }
+      ],
+      "blocked_external_requests": 0,
+      "blocked_unexpected_writes": 0,
+      "blocked_write_diagnostics": [],
+      "allowed_timezone_initialization": {
+        "route_template": "/api/v1/workspace/timezone/initialize",
+        "count": 1
+      },
+      "cross_call_recall": {
+        "status": "not_run",
+        "live_qualified": false
+      },
+      "host_notice_before_history": {
+        "status": "not_run",
+        "live_qualified": false
+      },
+      "private_withheld_from_voice": {
+        "status": "not_run",
+        "live_qualified": false
+      },
+      "first_failure_boundary": "call1:start",
+      "failure_class": "Error",
+      "passed": false,
+      "failure_code": "call1:actual-owned-output-and-input-ready",
+      "calls_stopped": true,
+      "memory_snapshot_before_parent_erasure": {
+        "fact_count": 0,
+        "pending_count": 0,
+        "two_neutral_source_linked_facts": false,
+        "neutral_source_sha256": null,
+        "private_suggestion_count": 0,
+        "private_source_separate": false,
+        "transcript_completion_already_observed": false
+      },
+      "page_error_count": 0,
+      "console_warning_or_error_count": 2,
+      "duration_ms": 25477,
+      "native_call_admission_attempts": 1
+    },
+    "cleanup": {
+      "call_stopped": true,
+      "qa_memory_erased": true,
+      "history_disabled": true,
+      "test_session_logged_out": true
+    },
+    "actual_stt_duration_receipts": [],
+    "duration_billing_verified_for_every_admitted_call": false,
+    "provider_stream_states": [],
+    "all_provider_streams_complete": false,
+    "provider_stream_states_scope": "new-synthetic-owner-only",
+    "new_run_provider_streams_complete": false,
+    "private_configuration_unchanged": true,
+    "policy_unchanged": true,
+    "prior_usage_after": {
+      "read_only": true,
+      "call_count": 2,
+      "call_hashes": [
+        "4ee683777b39bcbff366aae873a90a07ad69e9cc5788857fdeb812a4066e3bc6",
+        "6610556071cc0879c0c9dcc1b6e066af769c19c7fb5444c2a663f26e08dfd698"
+      ],
+      "connected_ms": 48085,
+      "known_provider_usd": "0.0745244",
+      "uncertain_provider_streams": 1,
+      "unknown_provider_cost_components": 1,
+      "reserved_tokens": 10525,
+      "reserved_voice_ms": 0,
+      "uncertain_voice_ms": 0,
+      "open_provider_streams": 0,
+      "active_calls": 0,
+      "synthetic_owners_verified": true,
+      "owner_budgets": [
+        {
+          "owner_index": 0,
+          "remaining_voice_ms": 3575951,
+          "remaining_tokens": 281673
+        },
+        {
+          "owner_index": 1,
+          "remaining_voice_ms": 3590150,
+          "remaining_tokens": 296326
+        }
+      ],
+      "ledger_sha256": "5240f4cc1ce0d03391dad6edfef1acbd9732733fd48f31eb2ae963e583c6423a",
+      "policy_revision": 52,
+      "checks": {
+        "read_only": true,
+        "exact_calls": true,
+        "call_count": true,
+        "connected_ms": true,
+        "known_provider_usd": true,
+        "uncertainty": true,
+        "reserved_tokens": true,
+        "no_open_provider_streams": true,
+        "no_old_active_calls": true,
+        "no_unsettled_voice": true,
+        "synthetic_owners": true,
+        "prior_owner_allowance_sufficient": true,
+        "ledger_fingerprint": true
+      },
+      "verified": true,
+      "prior_total_cost_usd": null,
+      "financial_qualified": false
+    },
+    "prior_ledger_unchanged": true,
+    "historical_provider_uncertainty_retained": true,
+    "source_scope": "isolated-test-only; main/public production unchanged",
+    "physical_phone_acceptance": false
+  }
+}

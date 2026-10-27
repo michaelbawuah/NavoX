@@ -82,8 +82,26 @@ function timezoneInitialization(payload, secret, browserTimezone) {
     typeof browserTimezone === 'string' && payload.timezone === browserTimezone;
 }
 function mediaReady(value) {
-  return value.liveSyntheticMicrophone === true && value.liveRemoteAudioTracks > 0 &&
-    value.attemptedRemoteAudioTracks > 0 && value.sentBytes > 0;
+  return value.liveSyntheticMicrophone === true && value.syntheticMicrophoneEnabled === true && value.liveRemoteAudioTracks > 0 &&
+    value.attemptedRemoteAudioTracks > 0;
+}
+function spokenInputReached(value, baseline) {
+  return Number.isFinite(value.sentBytes) && Number.isFinite(baseline.sentBytes) &&
+    baseline.sentBytes >= 0 && value.sentBytes > baseline.sentBytes;
+}
+function startupMediaObservation(value) {
+  // Fixed numeric/boolean fields only; never serialize browser objects or text.
+  const counter = (number, maximum = Number.MAX_SAFE_INTEGER) =>
+    Number.isFinite(number) && number >= 0 ? Math.min(maximum, Math.floor(number)) : null;
+  return {
+    live_synthetic_microphone: value?.liveSyntheticMicrophone === true,
+    synthetic_microphone_enabled: value?.syntheticMicrophoneEnabled === true,
+    live_remote_audio_tracks: counter(value?.liveRemoteAudioTracks, 256),
+    attempted_remote_audio_tracks: counter(value?.attemptedRemoteAudioTracks, 256),
+    playing_remote_audio_tracks: counter(value?.playingRemoteAudioTracks, 256),
+    sent_bytes: counter(value?.sentBytes), received_bytes: counter(value?.receivedBytes),
+    play_ready_count: counter(value?.playReady),
+  };
 }
 function responseAudioReady(value, baseline) {
   return value.receivedBytes > baseline.receivedBytes && value.receivedEnergy > baseline.receivedEnergy &&
@@ -299,6 +317,7 @@ async function run(settings, secret) {
       }
       return { receivedBytes, receivedEnergy, sentBytes, sentEnergy,
         liveSyntheticMicrophone: state?.current?.track?.readyState === 'live',
+        syntheticMicrophoneEnabled: state?.current?.track?.enabled === true,
         liveRemoteAudioTracks: [...(state?.remoteAudioTracks || [])].filter(track => track.readyState === 'live').length,
         attemptedRemoteAudioTracks: [...(state?.attemptedAudioElements || [])].filter(element =>
           !element.muted && [...(element.srcObject?.getAudioTracks?.() || [])].some(track =>
@@ -364,7 +383,7 @@ async function run(settings, secret) {
     await textbox.waitFor({ timeout: 25000 });
     const ready = Date.now() + 20000;
     while (!(await textbox.isEnabled()) && Date.now() < ready) { await guard(); await pause(200); }
-    check(await textbox.isEnabled(), 'call' + index + ':media-ready');
+    check(await textbox.isEnabled(), 'call' + index + ':textbox-enabled');
     if (!lastCall) lastCall = (await owned('GET', '/vox/calls/context')).call;
     assert(lastCall?.status === 'reserved' && UUID.test(lastCall.id) && UUID.test(lastCall.client_call_id), 'call-admission-unconfirmed');
     if (!currentStart) currentStart = Number.isFinite(Date.parse(lastCall.created_at)) ? Date.parse(lastCall.created_at) : Date.now();
@@ -378,7 +397,10 @@ async function run(settings, secret) {
     check(privacy.mode === 'saved-history' && privacy.retention_days === 30, 'call' + index + ':server-retention-proof');
     // The textbox alone used to become enabled before the native worker warmed.
     // Product transport admits only the leased agent's output track. Require its
-    // actual current remote attachment and play completion, plus live input RTP.
+    // actual current remote attachment/play attempt and live synthetic input
+    // enabled by the application after its processed publication completes.
+    // Product VAD deliberately pauses upstream before speech, so outbound RTP
+    // cannot be required until after we supply the spoken fixture.
     let media;
     const mediaDeadline = Date.now() + 15000;
     do {
@@ -387,6 +409,7 @@ async function run(settings, secret) {
       if (mediaReady(media)) break;
       await pause(100);
     } while (Date.now() < mediaDeadline);
+    item.startup_media_observation = startupMediaObservation(media);
     check(mediaReady(media), 'call' + index + ':actual-owned-output-and-input-ready');
     // This fresh plan explicitly grants a media input window separate from
     // bounded admission/warmup. Late 201 responses never update either clock.
@@ -427,7 +450,7 @@ async function run(settings, secret) {
     }
     phase('completed-turn:' + id, record.item);
     const audio = await stats();
-    assert(audio.sentBytes > baseline.sentBytes, 'spoken-input-did-not-reach-rtc');
+    assert(spokenInputReached(audio, baseline), 'spoken-input-did-not-reach-rtc');
     assert(responseAudioReady(audio, baseline), 'browser-provider-playback-unconfirmed');
     const item = { fixture: id, fixture_sha256: fixture.sha256,
       completed_spoken_turn: true, transcribed_question_sha256: hash(completed.question),
@@ -725,7 +748,7 @@ if (require.main === module) {
     assert.equal(hidden.pathname_sha256, hash(hiddenPath));
     assert.equal(JSON.stringify(hidden).includes('arbitrary-value'), false);
     assert.equal(blockedWriteDiagnostic('DELETE', '/api/v1/vox/calls/private-id/end').route_template, '/api/v1/vox/calls/:call/end');
-    const media = { liveSyntheticMicrophone: true, liveRemoteAudioTracks: 1, attemptedRemoteAudioTracks: 1, sentBytes: 1 };
+    const media = { liveSyntheticMicrophone: true, syntheticMicrophoneEnabled: true, liveRemoteAudioTracks: 1, attemptedRemoteAudioTracks: 1 };
     assert.equal(mediaReady(media), true);
     for (const field of Object.keys(media)) assert.equal(mediaReady({ ...media, [field]: 0 }), false);
     const oldId = '11111111-1111-4111-8111-111111111111', newId = '22222222-2222-4222-8222-222222222222';
@@ -827,25 +850,66 @@ if (require.main === module) {
         constructor() { this.tagName = 'AUDIO'; this.muted = false; this.paused = true; this.srcObject = { getAudioTracks: () => [track] }; }
         play() { return new Promise(resolve => { release = () => { this.paused = false; resolve(); }; }); }
       }
-      const scope = { window: { RTCPeerConnection: Peer }, navigator: { mediaDevices: { getUserMedia() {} } }, HTMLMediaElement: Audio };
+      const captureTrack = { kind: 'audio', readyState: 'live', enabled: true, stop() { this.readyState = 'ended'; } };
+      const permissionTrack = { stopped: false, stop() { this.stopped = true; } };
+      class CaptureContext {
+        createMediaStreamDestination() {
+          return { stream: { getAudioTracks: () => [captureTrack], getTracks: () => [captureTrack] } };
+        }
+        async resume() {}
+        async close() {}
+      }
+      const scope = { window: { RTCPeerConnection: Peer, AudioContext: CaptureContext },
+        navigator: { mediaDevices: { async getUserMedia() { return { getTracks: () => [permissionTrack] }; } } },
+        HTMLMediaElement: Audio };
       vm.runInNewContext('(' + installSyntheticMic.toString() + ')()', scope);
+      const captureStream = await scope.navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      assert.equal(permissionTrack.stopped, true);
+      assert.equal(captureStream.getAudioTracks()[0].readyState, 'live');
+      assert.equal(captureStream.getAudioTracks()[0].enabled, false);
+      await assert.rejects(() => scope.window.__qaSpeakFixture(''), /No current synthetic microphone track/);
       const peer = new scope.window.RTCPeerConnection();
       peer.emitTrack();
       const audio = new Audio(), played = audio.play(), state = scope.window.__qaVoice;
       const snapshot = () => ({
-        liveSyntheticMicrophone: true, liveRemoteAudioTracks: state.remoteAudioTracks.size,
-        attemptedRemoteAudioTracks: state.attemptedAudioElements.size, sentBytes: 1,
+        liveSyntheticMicrophone: state.current.track.readyState === 'live', syntheticMicrophoneEnabled: state.current.track.enabled === true,
+        liveRemoteAudioTracks: state.remoteAudioTracks.size,
+        attemptedRemoteAudioTracks: state.attemptedAudioElements.size, sentBytes: 0,
         playingRemoteAudioTracks: [...state.playingAudioElements].filter(element => !element.paused).length,
         playReady: state.playbackResolved, receivedBytes: 0, receivedEnergy: 0,
       });
       const baseline = { receivedBytes: 0, receivedEnergy: 0 };
+      // Model the product's enable only after processed publication settles.
+      let acknowledgePublication;
+      const publication = new Promise(resolve => { acknowledgePublication = resolve; });
+      const enabledAfterPublication = publication.then(() => { captureStream.getAudioTracks()[0].enabled = true; });
+      assert.equal(mediaReady(snapshot()), false);
+      acknowledgePublication(); await enabledAfterPublication;
       assert.equal(mediaReady(snapshot()), true);
+      assert.equal(spokenInputReached(snapshot(), { sentBytes: 0 }), false);
+      assert.equal(spokenInputReached({ ...snapshot(), sentBytes: 1 }, { sentBytes: 0 }), true);
+      assert.equal(spokenInputReached({ ...snapshot(), sentBytes: NaN }, { sentBytes: 0 }), false);
+      assert.equal(mediaReady({ ...snapshot(), liveSyntheticMicrophone: false }), false);
+      assert.equal(mediaReady({ ...snapshot(), syntheticMicrophoneEnabled: false }), false);
+      assert.equal(mediaReady({ ...snapshot(), liveRemoteAudioTracks: 0 }), false);
+      assert.equal(mediaReady({ ...snapshot(), attemptedRemoteAudioTracks: 0 }), false);
+      assert.deepEqual(startupMediaObservation({ ...snapshot(), sentBytes: Infinity,
+        receivedBytes: -1, playReady: Number.MAX_SAFE_INTEGER * 2,
+        liveRemoteAudioTracks: 1000, attemptedRemoteAudioTracks: 1.5,
+        privateText: 'must never appear' }), {
+        live_synthetic_microphone: true, synthetic_microphone_enabled: true, live_remote_audio_tracks: 256,
+        attempted_remote_audio_tracks: 1, playing_remote_audio_tracks: 0,
+        sent_bytes: null, received_bytes: null, play_ready_count: Number.MAX_SAFE_INTEGER,
+      });
       assert.equal(state.playbackResolved, 0);
       assert.equal(responseAudioReady(snapshot(), baseline), false);
       release(); await played;
       assert.equal(responseAudioReady(snapshot(), baseline), false);
       assert.equal(responseAudioReady({ ...snapshot(), receivedBytes: 1, receivedEnergy: 0.1 }, baseline), true);
-      console.log(JSON.stringify({ offline_self_test: 'pass', fresh_scope_historical_uncertainty_preserved: 'pass', monotonic_media_and_admission_clocks: 'pass', stopped_watchdog_cannot_launch_late_budget: 'pass', late_fatal_rejects_success: 'pass', deadline_during_slow_usage_regression: 'pass', silent_remote_pending_play_regression: 'pass', provider_calls: 0 }));
+      captureStream.getTracks().forEach(current => current.stop());
+      assert.equal(state.current, null);
+      assert.equal(state.contextsCreated, state.contextsClosed);
+      console.log(JSON.stringify({ offline_self_test: 'pass', fresh_scope_historical_uncertainty_preserved: 'pass', monotonic_media_and_admission_clocks: 'pass', stopped_watchdog_cannot_launch_late_budget: 'pass', late_fatal_rejects_success: 'pass', deadline_during_slow_usage_regression: 'pass', silent_remote_pending_play_regression: 'pass', initially_disabled_synthetic_capture_regression: 'pass', silent_vad_startup_and_post_speech_rtp_regression: 'pass', bounded_content_free_startup_observation: 'pass', provider_calls: 0 }));
     })().catch(error => { console.error(error?.name || 'Error'); process.exitCode = 1; });
   } else {
     let selected;
@@ -867,4 +931,4 @@ if (require.main === module) {
     });
   }
 }
-module.exports = { options, validDecimal, currentAdmission, currentEndResponse, blockedWriteDiagnostic, timezoneInitialization, mediaReady, responseAudioReady, clockFailure, startWatchdog, finishWatchdog, run };
+module.exports = { options, validDecimal, currentAdmission, currentEndResponse, blockedWriteDiagnostic, timezoneInitialization, mediaReady, spokenInputReached, startupMediaObservation, responseAudioReady, clockFailure, startWatchdog, finishWatchdog, run };
