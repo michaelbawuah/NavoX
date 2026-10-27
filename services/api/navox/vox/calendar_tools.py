@@ -11,7 +11,7 @@ import json
 import unicodedata
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
@@ -74,6 +74,7 @@ class EventArguments(Arguments):
     duration_minutes: int = Field(ge=5, le=480)
     calendar_name: str | None = Field(default=None, max_length=1024)
     account_name: str | None = Field(default=None, max_length=320)
+    provider: Literal["google", "outlook", "icloud"] | None = None
     allow_study_displacement: bool = False
 
     @field_validator("title", "location", "calendar_name", "account_name")
@@ -108,14 +109,26 @@ def _when(start: datetime, end: datetime, timezone: str) -> str:
     ending = f"{last:%I:%M %p}"
     if first.date() != last.date():
         ending = f"{last:%A, %B} {last.day}, {last.year}, {ending}"
+    if first.utcoffset() != last.utcoffset() or any(
+        moment.replace(fold=0).utcoffset() != moment.replace(fold=1).utcoffset()
+        for moment in (first, last)
+    ):
+
+        def offset(moment: datetime) -> str:
+            value = moment.strftime("%z")
+            return f" {moment.tzname()}, UTC{value[:3]}:{value[3:5]}"
+
+        beginning += offset(first)
+        ending += offset(last)
     return f"{beginning} to {ending}, {timezone}"
 
 
 def readback(view: CalendarEventView, *, undo: bool = False) -> str:
+    provider = {"google": "Google", "outlook": "Microsoft", "icloud": "Apple"}[view.provider]
     text = (
         "I'll read your private calendar review aloud now. "
         f"{'Remove only' if undo else 'Add'} the event “{view.title}” "
-        f"{'from' if undo else 'to'} Google calendar “{view.calendar_label}”, "
+        f"{'from' if undo else 'to'} {provider} calendar “{view.calendar_label}”, "
         f"{_when(view.start_at, view.end_at, view.timezone)}. "
     )
     if view.location:
@@ -150,6 +163,7 @@ def readback(view: CalendarEventView, *, undo: bool = False) -> str:
 
 
 def outcome(view: CalendarEventView) -> str:
+    provider = {"google": "Google", "outlook": "Microsoft", "icloud": "Apple"}[view.provider]
     result = {
         "created": "Google confirmed this exact event was added.",
         "undone": "Google confirmed this exact calendar event is absent.",
@@ -167,7 +181,9 @@ def outcome(view: CalendarEventView) -> str:
         result += " Your approved study moves were saved; calendar Undo does not restore them."
     if view.status == "created" and view.can_undo:
         result += " You can ask me to prepare Undo for this unchanged event."
-    return result
+    elif view.status == "created":
+        result += " Exact unchanged-event Undo is unavailable; check the on-screen receipt."
+    return result.replace("Google", provider)
 
 
 class CalendarTools:
@@ -238,13 +254,17 @@ class CalendarTools:
                         "name": PREPARE_TOOL,
                         "strict": True,
                         "description": (
-                            "Prepare one exact personal Google event for host read-back and the "
+                            "Prepare one exact eligible personal calendar event for host read-back "
+                            "and the "
                             "student's next contextual answer. Ask for missing/ambiguous time or "
                             "target first. The host reads every exact field and affected study "
                             "move; do not claim anything was added or supply approval. Choose "
                             "calendar/account by exact known name, or null only when one eligible "
-                            "choice exists. This cannot grant permission or write Microsoft/Apple "
-                            "calendars. Study displacement requests review, never applies it."
+                            "choice exists. Provider only selects an already eligible owned grant; "
+                            "it cannot grant permission or enable a provider. "
+                            "Microsoft creation/Undo "
+                            "remain unavailable. Apple requires separate current write consent. "
+                            "Study displacement requests review, never applies it."
                         ),
                         "parameters": {
                             "type": "object",
@@ -264,6 +284,10 @@ class CalendarTools:
                                 },
                                 "calendar_name": {"type": ["string", "null"]},
                                 "account_name": {"type": ["string", "null"]},
+                                "provider": {
+                                    "type": ["string", "null"],
+                                    "enum": ["google", "outlook", "icloud", None],
+                                },
                                 "allow_study_displacement": {"type": "boolean"},
                             },
                             "required": [
@@ -273,6 +297,7 @@ class CalendarTools:
                                 "duration_minutes",
                                 "calendar_name",
                                 "account_name",
+                                "provider",
                                 "allow_study_displacement",
                             ],
                             "additionalProperties": False,
@@ -470,10 +495,17 @@ class CalendarTools:
                 database, authority.user_id, authority.workspace_id, token, self.settings
             )
             await database.commit()
+        available = (
+            {"google"}
+            if view.providers is None
+            else {item.id for item in view.providers if item.availability == "available"}
+        )
         grants = [
             g
             for g in view.grants
             if g.status == "connected"
+            and g.provider in available
+            and (query.provider is None or query.provider == g.provider)
             and (
                 query.account_name is None
                 or (g.account_label is not None and _same(g.account_label, query.account_name))
@@ -481,7 +513,7 @@ class CalendarTools:
         ]
         if len(grants) != 1:
             raise schedule.StudentError(
-                409, "Choose one connected Google scheduling account in Connections first"
+                409, "Choose one eligible connected scheduling account in Connections first"
             )
         targets = await scheduling.targets(
             self.check.factory,

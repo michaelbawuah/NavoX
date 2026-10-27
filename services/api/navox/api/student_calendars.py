@@ -1,4 +1,4 @@
-"""Cookie/account-bound calendar-purpose consent. No calendar writes."""
+"""Cookie/account-bound consent and exact reviewed personal calendar actions."""
 
 import asyncio
 import json
@@ -223,6 +223,42 @@ async def start_scheduling(
     payload = await bounded_json(request, CalendarSchedulingStart)
     return await result(
         oauth.start(database, *scope(account), token_hash, payload, settings, scheduling=True)
+    )
+
+
+@router.post(
+    "/outlook/scheduling/start",
+    response_model=CalendarAuthorization,
+    dependencies=[Depends(enabled_writes)],
+)
+async def start_outlook_scheduling(
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    token_hash: SessionHashDependency,
+) -> CalendarAuthorization:
+    payload = await bounded_json(request, CalendarSchedulingStart)
+    return await result(
+        microsoft.start(database, *scope(account), token_hash, payload, settings, scheduling=True)
+    )
+
+
+@router.post(
+    "/apple/scheduling/start",
+    response_model=CalendarSchedulingView,
+    dependencies=[Depends(enabled_writes)],
+)
+async def start_apple_scheduling(
+    request: Request,
+    account: CurrentAccountDependency,
+    database: DatabaseSession,
+    settings: SettingsDependency,
+    token_hash: SessionHashDependency,
+) -> CalendarSchedulingView:
+    payload = await bounded_json(request, CalendarSchedulingStart)
+    return await result(
+        scheduling.start_apple(database, *scope(account), token_hash, payload, settings)
     )
 
 

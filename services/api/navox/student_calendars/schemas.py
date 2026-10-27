@@ -14,6 +14,7 @@ CALENDAR_LIST_SCOPE = "https://www.googleapis.com/auth/calendar.calendarlist.rea
 CALENDAR_BUSY_SCOPE = "https://www.googleapis.com/auth/calendar.events.freebusy"
 AVAILABILITY_SCOPES = (CALENDAR_LIST_SCOPE, CALENDAR_BUSY_SCOPE)
 MICROSOFT_AVAILABILITY_SCOPES = ("User.Read", "Calendars.Read")
+MICROSOFT_SCHEDULING_SCOPES = (*MICROSOFT_AVAILABILITY_SCOPES, "Calendars.ReadWrite")
 MAX_REVISION = 2147483647
 SCHEDULING_CONSENT_VERSION: Literal["calendar-scheduling.v1"] = "calendar-scheduling.v1"
 CALENDAR_WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.events.owned"
@@ -81,11 +82,20 @@ class CalendarSchedulingStart(CalendarCommand):
         return CalendarStart.explicit_confirmation(value)
 
 
+class CalendarWriteProviderView(Input):
+    id: Literal["google", "outlook", "icloud"]
+    availability: Literal["available", "setup_pending", "unavailable"]
+    message: str = Field(max_length=500)
+
+
 class CalendarSchedulingView(Input):
     generation: int
     revision: int
     consent_version: Literal["calendar-scheduling.v1"] = SCHEDULING_CONSENT_VERSION
     grants: list[CalendarGrantView]
+    providers: list[CalendarWriteProviderView] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     changes_applied: Literal[False] = False
 
 
@@ -104,6 +114,9 @@ class CalendarTargetsView(Input):
     revision: int
     grant_id: UUID
     targets: list[CalendarTargetView]
+    provider: Literal["google", "outlook", "icloud"] = Field(
+        default="google", exclude_if=lambda value: value == "google"
+    )
     changes_applied: Literal[False] = False
 
 
@@ -184,6 +197,9 @@ class CalendarEventView(Input):
     changes_applied: bool | None
     can_undo: bool
     message: str
+    provider: Literal["google", "outlook", "icloud"] = Field(
+        default="google", exclude_if=lambda value: value == "google"
+    )
     study_changes_applied: bool | None = Field(default=None, exclude_if=lambda value: value is None)
     study_moves: list[CalendarStudyMove] | None = Field(
         default=None, exclude_if=lambda value: value is None

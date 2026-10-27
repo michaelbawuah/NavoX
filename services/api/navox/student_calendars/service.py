@@ -357,7 +357,11 @@ async def retire(
         return
     grant.status, grant.revoked_at = "revoked", now
     grant.revision = min(MAX_REVISION, grant.revision + 1)
-    attempt = await database.get(OAuthAuthorizationAttempt, grant.oauth_attempt_id)
+    attempt = (
+        await database.get(OAuthAuthorizationAttempt, grant.oauth_attempt_id)
+        if grant.oauth_attempt_id is not None
+        else None
+    )
     if attempt is not None and attempt.used_at is None:
         attempt.used_at = now
 

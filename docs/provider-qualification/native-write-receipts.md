@@ -22,3 +22,29 @@ downgrade.
 The schema change enables no feature flag, provider configuration, connection,
 or background replay. Provider qualification and explicit write consent remain
 separate gates.
+
+Native provider integration keeps the existing Google commands and omitted
+Google provider fields compatible. Microsoft and Apple setup use separate
+`/outlook/scheduling/start` and `/apple/scheduling/start` routes. Targets and
+event commands derive the provider from the current owned grant or saved
+receipt; a request cannot override it. Apple consent binds the current busy-time
+credential without fabricating an OAuth attempt or resubmitting a password.
+Both new provider settings default to false, in addition to the existing global
+write gate. Busy-time and mail permissions remain separate from write consent.
+
+Apple times must have whole-second precision before a review or any local study
+admission. The transport keeps the original strong PUT ETag separate from a
+later GET observation. A matching event can therefore be confirmed as created
+while exact Undo remains unavailable when the original version was not proven.
+Unknown writes and deletions retain their native claims and are never replayed.
+Calendar Undo does not undo separately saved study moves.
+
+Microsoft OAuth can record a separate exact write-purpose consent, and bounded
+same-account positive recovery can confirm a saved action. New Microsoft
+creation and deletion stay unavailable even when the new setting and OAuth
+scopes are present: the event endpoint's exact-version conditional deletion
+contract remains unproven. An empty or ambiguous search never proves absence.
+
+The synthetic source fixtures do not qualify real iCloud ownership, privilege,
+normalization, stale-ETag, or no-invitation behavior. Those checks and secure
+provider app/account setup remain prerequisites for live activation.

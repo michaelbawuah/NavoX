@@ -6,6 +6,7 @@ Only an explicit approval can submit; only an explicit Undo can conditionally de
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, cast
@@ -19,15 +20,19 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from navox.connectors.contracts import ConnectorRuntimeError
 from navox.connectors.import_storage import cipher
 from navox.connectors.sync_state import utc
+from navox.core.credential_vault import CredentialVault, CredentialVaultError
 from navox.core.settings import Settings
 from navox.db.models import OAuthAuthorizationAttempt
 from navox.db.student_calendars import StudentCalendarEvent, StudentCalendarWriteGrant
 from navox.providers.google_oauth import GoogleAccessTokenError
+from navox.providers.microsoft_mail import MicrosoftMailError
 from navox.student import service as schedule
 from navox.student_availability import service as availability
 from navox.student_availability.engine import MEETING_BUFFER, _uncertain_day_span
 from navox.student_availability.schemas import AvailabilitySnapshot
-from navox.student_calendars import displacement, service
+from navox.student_calendars import apple, displacement, microsoft, service
+from navox.student_calendars.apple_provider import AppleCalendarWriteProvider
+from navox.student_calendars.microsoft_provider import MicrosoftCalendarWriteProvider
 from navox.student_calendars.provider import (
     CalendarWriteChanged,
     CalendarWriteRejected,
@@ -36,6 +41,7 @@ from navox.student_calendars.provider import (
 )
 from navox.student_calendars.schemas import (
     MAX_REVISION,
+    MICROSOFT_SCHEDULING_SCOPES,
     SCHEDULING_CONSENT_VERSION,
     SCHEDULING_SCOPES,
     CalendarCommand,
@@ -45,11 +51,22 @@ from navox.student_calendars.schemas import (
     CalendarEventStatus,
     CalendarEventView,
     CalendarGrantView,
+    CalendarSchedulingStart,
     CalendarSchedulingView,
     CalendarStudyMove,
     CalendarTargetsRequest,
     CalendarTargetsView,
     CalendarTargetView,
+    CalendarWriteProviderView,
+)
+from navox.student_calendars.write_protocol import (
+    AppleWriteCredential,
+    AppleWriteProvider,
+    BearerWriteProvider,
+    BoundAppleWriter,
+    BoundBearerWriter,
+    BoundWriteProvider,
+    WriteCredential,
 )
 
 DRAFT_TTL = timedelta(minutes=10)
@@ -75,13 +92,163 @@ class WriteAuthority:
     grant_revision: int
     connection_id: UUID
     session_id: UUID
+    provider: str = "google"
 
 
-def _admission(settings: Settings) -> None:
+def _admission(settings: Settings, provider: str | None = None) -> None:
     if not settings.student_calendar_availability_enabled or not getattr(
         settings, "student_calendar_writes_enabled", False
     ):
         raise schedule.StudentError(404, "Calendar scheduling is not enabled")
+    if provider == "microsoft":
+        # Graph's event endpoint has no proven exact-version DELETE contract.
+        # A broad OAuth scope, model request, or flag cannot invent that proof.
+        raise schedule.StudentError(
+            409, "Microsoft event creation and exact Undo are not available here"
+        )
+    if provider == "icloud" and not settings.student_apple_calendar_writes_enabled:
+        raise schedule.StudentError(404, "Apple calendar scheduling is not enabled")
+
+
+def _kind(value: str | None) -> str:
+    if value is None:
+        return "google"
+    if not isinstance(value, str) or value not in {"google", "microsoft", "icloud"}:
+        raise schedule.StudentError(503, "The calendar provider could not be verified")
+    return value
+
+
+def _api_provider(value: str | None) -> Any:
+    return "outlook" if _kind(value) == "microsoft" else _kind(value)
+
+
+def _label(value: str | None) -> str:
+    return {"google": "Google", "microsoft": "Microsoft", "icloud": "Apple"}[_kind(value)]
+
+
+def _scopes(provider: str) -> tuple[str, ...]:
+    return MICROSOFT_SCHEDULING_SCOPES if provider == "microsoft" else SCHEDULING_SCOPES
+
+
+def _undo_supported(provider: str) -> bool:
+    return provider != "microsoft"
+
+
+def _exact_version(value: object) -> bool:
+    return isinstance(value, str) and re.fullmatch(r'"[\x21\x23-\x7e]+"', value) is not None
+
+
+def _capabilities(settings: Settings) -> list[CalendarWriteProviderView]:
+    enabled = (
+        settings.student_calendar_availability_enabled and settings.student_calendar_writes_enabled
+    )
+    google_configured = bool(
+        settings.google_oauth_client_id.strip()
+        and settings.google_oauth_client_secret
+        and settings.google_oauth_client_secret.get_secret_value().strip()
+    )
+    try:
+        CredentialVault(settings)
+        vault = True
+    except CredentialVaultError:
+        vault = False
+    google_state = (
+        "available"
+        if enabled and google_configured and vault
+        else "setup_pending"
+        if enabled
+        else "unavailable"
+    )
+    apple_enabled = enabled and settings.student_apple_calendar_writes_enabled
+    apple_state = (
+        "available"
+        if apple_enabled and vault
+        else "setup_pending"
+        if apple_enabled
+        else "unavailable"
+    )
+    return [
+        CalendarWriteProviderView(
+            id="google",
+            availability=cast(Any, google_state),
+            message="Review one personal Google event and exact unchanged-event Undo."
+            if google_state == "available"
+            else "Google calendar setup is pending."
+            if google_state == "setup_pending"
+            else "New Google calendar actions are disabled here.",
+        ),
+        CalendarWriteProviderView(
+            id="outlook",
+            availability="unavailable",
+            message="Microsoft event creation and exact Undo are not available here yet.",
+        ),
+        CalendarWriteProviderView(
+            id="icloud",
+            availability=cast(Any, apple_state),
+            message="Separately approve Apple event writes using your current busy-time connection."
+            if apple_state == "available"
+            else "Apple calendar setup is pending."
+            if apple_state == "setup_pending"
+            else "New Apple calendar actions are disabled here.",
+        ),
+    ]
+
+
+def _transport_draft(provider: str, draft: CalendarEventPreview) -> None:
+    if provider == "icloud" and (
+        draft.start_at.microsecond
+        or draft.end_at.microsecond
+        or any(
+            ord(char) < 32 or 127 <= ord(char) <= 159
+            for value in (draft.title, draft.location)
+            for char in value
+        )
+    ):
+        raise schedule.StudentError(
+            422, "Use plain event fields and whole-second Apple event times"
+        )
+
+
+async def _has_other_sources(database: AsyncSession, user_id: UUID, workspace_id: UUID) -> bool:
+    if await apple._grants(database, user_id, workspace_id):
+        return True
+    for grant in await service.grants(database, user_id, workspace_id):
+        connection = await service.owned_connection(
+            database, user_id, workspace_id, grant.connection_id
+        )
+        if connection is not None and connection.provider != "google":
+            return True
+    return False
+
+
+def _writer(
+    authority: WriteAuthority,
+    credential: WriteCredential,
+    settings: Settings,
+    timezone: str,
+    provider: BearerWriteProvider | AppleWriteProvider | None,
+) -> BoundWriteProvider:
+    if authority.provider == "icloud":
+        if not isinstance(credential, AppleWriteCredential):
+            raise schedule.StudentError(503, "Apple calendar authorization could not be verified")
+        return BoundAppleWriter(
+            cast(AppleWriteProvider, provider)
+            if provider is not None
+            else AppleCalendarWriteProvider(
+                enabled=settings.student_apple_calendar_writes_enabled, timezone=timezone
+            ),
+            credential,
+        )
+    if not isinstance(credential, str):
+        raise schedule.StudentError(503, "Calendar authorization could not be verified")
+    implementation: BearerWriteProvider
+    if provider is not None:
+        implementation = cast(BearerWriteProvider, provider)
+    elif authority.provider == "microsoft":
+        implementation = MicrosoftCalendarWriteProvider(timezone=timezone)
+    else:
+        implementation = GoogleCalendarWriteProvider()
+    return BoundBearerWriter(implementation, credential)
 
 
 def _digest(value: object) -> str:
@@ -99,6 +266,7 @@ def _seal(row: StudentCalendarEvent, payload: dict[str, Any], settings: Settings
         "workspace": str(row.workspace_id),
         "generation": row.generation,
         "digest": row.digest,
+        "provider": _kind(row.provider),
         "payload": payload,
     }
     try:
@@ -130,6 +298,10 @@ def _open(row: StudentCalendarEvent, settings: Settings) -> dict[str, Any]:
             row.digest,
         ) or not isinstance(envelope["payload"], dict):
             raise ValueError
+        if _kind(envelope.get("provider")) != _kind(row.provider) or _kind(
+            envelope["payload"].get("provider")
+        ) != _kind(row.provider):
+            raise ValueError
         return cast(dict[str, Any], envelope["payload"])
     except (ConnectorRuntimeError, InvalidToken, ValueError, KeyError, TypeError):
         raise schedule.StudentError(503, "This private event receipt could not be opened") from None
@@ -142,13 +314,19 @@ async def scheduling_view(
         database, user_id, workspace_id, session_hash, lock=False, allow_paused=True
     )
     items = []
-    for grant in await service.grants(database, user_id, workspace_id, scheduling=True):
+    for entry in await service.grants(database, user_id, workspace_id, scheduling=True):
+        grant = cast(StudentCalendarWriteGrant, entry)
+        provider = _kind(grant.provider)
         connection = await service.owned_connection(
             database, user_id, workspace_id, grant.connection_id
         )
         status = "revoked" if grant.status == "revoked" else "unavailable"
         if grant.status == "pending":
-            attempt = await database.get(OAuthAuthorizationAttempt, grant.oauth_attempt_id)
+            attempt = (
+                await database.get(OAuthAuthorizationAttempt, grant.oauth_attempt_id)
+                if grant.oauth_attempt_id
+                else None
+            )
             if (
                 attempt is not None
                 and attempt.used_at is None
@@ -159,7 +337,8 @@ async def scheduling_view(
             grant.status == "active"
             and service.ready(connection)
             and connection is not None
-            and set(SCHEDULING_SCOPES).issubset(connection.granted_scopes)
+            and connection.provider == provider
+            and (provider == "icloud" or set(_scopes(provider)).issubset(connection.granted_scopes))
             and grant.generation == current.generation
             and grant.consent_version == SCHEDULING_CONSENT_VERSION
         ):
@@ -171,10 +350,21 @@ async def scheduling_view(
                 account_label=connection.external_email if connection else None,
                 status=cast(Any, status),
                 revision=grant.revision,
+                provider=_api_provider(provider),
             )
         )
     return CalendarSchedulingView(
-        generation=current.generation, revision=current.revision, grants=items
+        generation=current.generation,
+        revision=current.revision,
+        grants=items,
+        providers=_capabilities(settings)
+        if (
+            settings.student_apple_calendar_writes_enabled
+            or settings.student_microsoft_calendar_writes_enabled
+            or any(item.provider != "google" for item in items)
+            or await _has_other_sources(database, user_id, workspace_id)
+        )
+        else None,
     )
 
 
@@ -218,6 +408,84 @@ async def disconnect(
     return await scheduling_view(database, user_id, workspace_id, session_hash, settings)
 
 
+async def start_apple(
+    database: AsyncSession,
+    user_id: UUID,
+    workspace_id: UUID,
+    session_hash: str,
+    payload: CalendarSchedulingStart,
+    settings: Settings,
+) -> CalendarSchedulingView:
+    """New native write consent for the exact current Apple busy credential."""
+    _admission(settings, "icloud")
+    if payload.consent_version != SCHEDULING_CONSENT_VERSION:
+        raise schedule.StudentError(422, "Confirm the separate calendar write purpose")
+    current = await service.boundary(database, user_id, workspace_id, session_hash)
+    service.check_command(current, payload)
+    state = await service.ensure_state(database, current, user_id, workspace_id)
+    connection = await apple._connection(database, user_id, workspace_id, payload.connection_id)
+    busy = next(
+        (
+            grant
+            for grant in await apple._grants(database, user_id, workspace_id)
+            if grant.connection_id == payload.connection_id
+            and grant.owner_scope_id == state.id
+            and grant.generation == current.generation
+            and grant.consent_version == apple.CONSENT_VERSION
+        ),
+        None,
+    )
+    if connection is None or not apple._ready(connection) or busy is None:
+        raise schedule.StudentError(409, "Connect current Apple busy-time access before scheduling")
+    scope = await service.scope_snapshot(database, user_id, workspace_id, session_hash)
+    snapshot = next(
+        (
+            grant
+            for grant in scope.grants
+            if grant.provider == "icloud"
+            and grant.id == busy.id
+            and grant.connection_id == connection.id
+        ),
+        None,
+    )
+    if snapshot is None:
+        raise schedule.StudentError(409, "Apple busy-time permission changed. Review again")
+    # Opening the owner-bound envelope proves current credential/account linkage;
+    # the credential is neither copied into the grant nor sent to another API.
+    await apple.credentials(database, scope, snapshot, settings)
+    existing = await service.grants(database, user_id, workspace_id, scheduling=True)
+    if len(existing) >= service.MAX_GRANTS or any(
+        grant.request_id == payload.request_id for grant in existing
+    ):
+        raise schedule.StudentError(409, "This scheduling consent needs a new review")
+    for grant in existing:
+        if grant.connection_id == connection.id and grant.status != "revoked":
+            await service.retire(database, grant, current.now)
+    grant = StudentCalendarWriteGrant(
+        owner_scope_id=state.id,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        connection_id=connection.id,
+        oauth_attempt_id=None,
+        provider="icloud",
+        auth_session_id=current.session.id,
+        request_id=payload.request_id,
+        generation=current.generation,
+        revision=1,
+        status="active",
+        consent_version=SCHEDULING_CONSENT_VERSION,
+        accepted_at=current.now,
+    )
+    database.add(grant)
+    service.advance(state)
+    await database.flush()
+    schedule.audit(
+        database, user_id, workspace_id, "student.calendar.scheduling.consented", grant.id
+    )
+    await database.commit()
+    return await scheduling_view(database, user_id, workspace_id, session_hash, settings)
+
+
 async def _authority(
     database: AsyncSession,
     user_id: UUID,
@@ -253,15 +521,24 @@ async def _authority(
     if (
         not service.ready(connection)
         or connection is None
-        or not set(SCHEDULING_SCOPES).issubset(connection.granted_scopes)
+        or connection.provider != _kind(grant.provider)
+        or (
+            connection.provider != "icloud"
+            and not set(_scopes(connection.provider)).issubset(connection.granted_scopes)
+        )
     ):
-        raise schedule.StudentError(409, "Google scheduling permission is unavailable")
+        raise schedule.StudentError(409, "Calendar scheduling permission is unavailable")
     scope = await service.scope_snapshot(database, user_id, workspace_id, session_hash)
     if not any(
-        item.connection_id == connection.id and item.status == "active" for item in scope.grants
+        item.connection_id == connection.id
+        and item.status == "active"
+        and item.provider == connection.provider
+        for item in scope.grants
     ):
         raise schedule.StudentError(409, "Busy-time permission is required before scheduling")
-    return WriteAuthority(scope, grant.id, grant.revision, connection.id, current.session.id)
+    return WriteAuthority(
+        scope, grant.id, grant.revision, connection.id, current.session.id, connection.provider
+    )
 
 
 async def _check(
@@ -289,19 +566,32 @@ async def _token(
     settings: Settings,
     authority: WriteAuthority,
     session_hash: str,
-) -> str:
+) -> WriteCredential:
     grant = next(
         item
         for item in authority.scope.grants
         if item.connection_id == authority.connection_id and item.status == "active"
     )
     try:
-        token = await availability._token(factory, settings, authority.scope, grant, session_hash)
+        if authority.provider == "icloud":
+            async with factory() as database:
+                await service.check_scope(database, authority.scope, session_hash)
+                account, password = await apple.credentials(
+                    database, authority.scope, grant, settings
+                )
+                await database.commit()
+            token: WriteCredential = AppleWriteCredential(account, password)
+        elif authority.provider == "microsoft":
+            token = await microsoft.access(factory, settings, authority.scope, grant, session_hash)
+        else:
+            token = await availability._token(
+                factory, settings, authority.scope, grant, session_hash
+            )
         await _check(factory, authority, session_hash)
         return token
-    except GoogleAccessTokenError:
+    except (GoogleAccessTokenError, MicrosoftMailError):
         raise schedule.StudentError(
-            503, "Google scheduling is unavailable. Check the connection"
+            503, "Calendar scheduling is unavailable. Check the connection"
         ) from None
 
 
@@ -313,7 +603,7 @@ async def targets(
     session_hash: str,
     payload: CalendarTargetsRequest,
     *,
-    provider: GoogleCalendarWriteProvider | None = None,
+    provider: BearerWriteProvider | AppleWriteProvider | None = None,
 ) -> CalendarTargetsView:
     _admission(settings)
     async with factory() as database:
@@ -322,26 +612,25 @@ async def targets(
         authority = await _authority(
             database, user_id, workspace_id, session_hash, payload.grant_id
         )
+        timezone = (await schedule.owner(database, user_id, workspace_id, lock=False)).timezone
         await database.commit()
     token = await _token(factory, settings, authority, session_hash)
+    writer = _writer(authority, token, settings, timezone, provider)
 
     async def check() -> None:
         _admission(settings)
         await _check(factory, authority, session_hash)
 
     try:
-        items = await (provider or GoogleCalendarWriteProvider()).owned_calendars(
-            access_token=token, check=check
-        )
+        items = await writer.owned_calendars(check=check)
     except GoogleCalendarWriteError:
-        raise schedule.StudentError(
-            503, "Google calendars could not be checked. Try again"
-        ) from None
+        raise schedule.StudentError(503, "Calendars could not be checked. Try again") from None
     await check()
     return CalendarTargetsView(
         generation=authority.scope.generation,
         revision=authority.scope.revision,
         grant_id=authority.grant_id,
+        provider=_api_provider(authority.provider),
         targets=[
             CalendarTargetView(id=item.id, label=item.label, timezone=item.timezone)
             for item in items
@@ -418,27 +707,35 @@ def _view(
         ),
         can_undo=(
             row.status == "created"
-            and isinstance(payload.get("etag"), str)
+            and _undo_supported(_kind(row.provider))
+            and _exact_version(payload.get("etag"))
             and payload.get("creation_etag") == payload.get("etag")
             and row.generation == current.generation
         ),
         message=(
-            "This request predates your reset; only its status can be checked here. "
-            if row.generation != current.generation
-            else ""
-        )
-        + (
-            "Google confirmed the event, but its original creation version was not confirmed. "
-            "Review it in Google Calendar to make changes."
-            if row.status == "created" and payload.get("creation_etag") != payload.get("etag")
-            else (
-                "This study review was explicitly forgotten and cannot be approved. "
-                "Nothing was submitted."
+            (
+                "This request predates your reset; only its status can be checked here. "
+                if row.generation != current.generation
+                else ""
             )
-            if study is not None and study.get("redacted") is True and not study["applied"]
-            else MESSAGES[row.status]
-        )
-        + study_message,
+            + (
+                "Exact unchanged-event Undo is not available for this provider. "
+                "Review the event there."
+                if row.status == "created" and not _undo_supported(_kind(row.provider))
+                else "Google confirmed the event, but its original creation version "
+                "was not confirmed. "
+                "Review it in Google Calendar to make changes."
+                if row.status == "created" and payload.get("creation_etag") != payload.get("etag")
+                else (
+                    "This study review was explicitly forgotten and cannot be approved. "
+                    "Nothing was submitted."
+                )
+                if study is not None and study.get("redacted") is True and not study["applied"]
+                else MESSAGES[row.status]
+            )
+            + study_message
+        ).replace("Google", _label(row.provider)),
+        provider=_api_provider(row.provider),
         **study_fields,
     )
 
@@ -650,7 +947,7 @@ async def preview(
     session_hash: str,
     draft: CalendarEventPreview,
     *,
-    provider: GoogleCalendarWriteProvider | None = None,
+    provider: BearerWriteProvider | AppleWriteProvider | None = None,
 ) -> CalendarEventView:
     _admission(settings)
     # Require valid encrypted storage before contacting any provider.
@@ -662,6 +959,8 @@ async def preview(
         current = await service.boundary(database, user_id, workspace_id, session_hash)
         service.check_command(current, draft)
         authority = await _authority(database, user_id, workspace_id, session_hash, draft.grant_id)
+        _admission(settings, authority.provider)
+        _transport_draft(authority.provider, draft)
         previous = (
             await database.scalar(
                 select(StudentCalendarEvent).where(
@@ -681,17 +980,16 @@ async def preview(
             return _view(previous, payload, current)
         await _check_claims(database, user_id, workspace_id, draft, settings)
         await database.commit()
+    _admission(settings, authority.provider)
     token = await _token(factory, settings, authority, session_hash)
 
     async def check() -> None:
-        _admission(settings)
+        _admission(settings, authority.provider)
         await _check(factory, authority, session_hash)
 
-    provider = provider or GoogleCalendarWriteProvider()
+    writer = _writer(authority, token, settings, draft.timezone, provider)
     try:
-        target = await provider.target(
-            access_token=token, calendar_id=draft.calendar_id, check=check
-        )
+        target = await writer.target(calendar_id=draft.calendar_id, check=check)
     except GoogleCalendarWriteError:
         raise schedule.StudentError(
             409, "The selected writable calendar could not be confirmed"
@@ -753,6 +1051,7 @@ async def preview(
             grant_revision=authority.grant_revision,
             revision=1,
             status="pending",
+            provider=authority.provider,
             created_at=current.now,
             expires_at=current.now + DRAFT_TTL,
             encrypted_payload="",
@@ -766,6 +1065,8 @@ async def preview(
             "creation_etag": None,
             "provenance": "Added by NavoX",
         }
+        if authority.provider != "google":
+            payload["provider"] = authority.provider
         if draft.allow_study_displacement:
             review = await displacement.prepare(
                 database, user_id, workspace_id, draft, fresh, current.now, settings=settings
@@ -838,10 +1139,15 @@ async def _recover_authority(
     payload: dict[str, Any],
 ) -> WriteAuthority:
     for grant in await service.grants(database, user_id, workspace_id, scheduling=True):
-        if grant.status == "active" and str(grant.connection_id) == payload["connection_id"]:
+        if (
+            grant.status == "active"
+            and str(grant.connection_id) == payload["connection_id"]
+            and _kind(cast(StudentCalendarWriteGrant, grant).provider)
+            == _kind(payload.get("provider"))
+        ):
             return await _authority(database, user_id, workspace_id, session_hash, grant.id)
     raise schedule.StudentError(
-        409, "Reconnect scheduling access to this same Google account before checking the event"
+        409, "Reconnect scheduling access to this same calendar account before checking the event"
     )
 
 
@@ -947,7 +1253,7 @@ async def approve(
     event_id: UUID,
     command: CalendarEventApproval,
     *,
-    provider: GoogleCalendarWriteProvider | None = None,
+    provider: BearerWriteProvider | AppleWriteProvider | None = None,
 ) -> CalendarEventView:
     _admission(settings)
     async with factory() as database:
@@ -965,18 +1271,21 @@ async def approve(
             )
         assert row.grant_id is not None
         authority = await _authority(database, user_id, workspace_id, session_hash, row.grant_id)
+        _admission(settings, authority.provider)
         if authority.grant_revision != row.grant_revision:
             raise schedule.StudentError(409, "Scheduling permission changed. Review a new event")
         draft = CalendarEventPreview.model_validate(payload["draft"])
+        _transport_draft(authority.provider, draft)
         await _check_claims(database, user_id, workspace_id, draft, settings, excluding=row.id)
         await database.commit()
     # Fresh complete all-calendar/internal availability is mandatory immediately
     # before the one submitted side effect; there is no override of unknowns.
     fresh = await _free(factory, settings, user_id, workspace_id, session_hash, draft)
+    _admission(settings, authority.provider)
     token = await _token(factory, settings, authority, session_hash)
 
     async def check() -> None:
-        _admission(settings)
+        _admission(settings, authority.provider)
         await _check(factory, authority, session_hash)
         async with factory() as database:
             current = await service.boundary(database, user_id, workspace_id, session_hash)
@@ -985,11 +1294,9 @@ async def approve(
             )
             await database.commit()
 
-    provider = provider or GoogleCalendarWriteProvider()
+    writer = _writer(authority, token, settings, draft.timezone, provider)
     try:
-        target = await provider.target(
-            access_token=token, calendar_id=draft.calendar_id, check=check
-        )
+        target = await writer.target(calendar_id=draft.calendar_id, check=check)
     except GoogleCalendarWriteError:
         raise schedule.StudentError(409, "The selected calendar is no longer writable") from None
     if target.label != payload["calendar_label"]:
@@ -1097,9 +1404,8 @@ async def approve(
     # Once this receipt is durable no code path returns the action to pending.
     rejected = False
     try:
-        inserted = await provider.insert(
-            access_token=token, calendar_id=draft.calendar_id, event=body, check=check
-        )
+        receipt = await writer.insert(calendar_id=draft.calendar_id, event=body, check=check)
+        inserted = receipt.event
         if not _matches(row, draft, inserted, description=payload.get("provenance", "")):
             return await _finish(
                 factory,
@@ -1111,7 +1417,10 @@ async def approve(
                 None,
                 expected_revision=command.event_revision + 1,
             )
-        await _pin_creation(factory, settings, authority, session_hash, event_id, inserted["etag"])
+        if receipt.creation_etag is not None:
+            await _pin_creation(
+                factory, settings, authority, session_hash, event_id, receipt.creation_etag
+            )
     except CalendarWriteRejected as error:
         rejected = error.status_code != 409  # 409 needs exact-ID reconciliation.
     except GoogleCalendarWriteError:
@@ -1127,7 +1436,7 @@ async def approve(
             None,
             expected_revision=command.event_revision + 1,
         )
-    return await _observe(factory, settings, authority, session_hash, event_id, token, provider)
+    return await _observe(factory, settings, authority, session_hash, event_id, token, writer)
 
 
 async def _pin_creation(
@@ -1250,8 +1559,8 @@ async def _observe(
     authority: WriteAuthority,
     session_hash: str,
     event_id: UUID,
-    token: str,
-    provider: GoogleCalendarWriteProvider,
+    token: WriteCredential,
+    provider: BoundWriteProvider,
 ) -> CalendarEventView:
     async with factory() as database:
         current = await service.boundary(
@@ -1277,7 +1586,7 @@ async def _observe(
 
     try:
         event = await provider.event(
-            access_token=token, calendar_id=draft.calendar_id, event_id=event_id.hex, check=check
+            calendar_id=draft.calendar_id, event_id=event_id.hex, check=check
         )
     except GoogleCalendarWriteError:
         # Keep undoing as its own uncertainty: later absence confirms deletion.
@@ -1295,7 +1604,8 @@ async def _observe(
     if event is None:
         status = (
             "undone"
-            if previous_status in {"undoing", "created", "changed", "undone"}
+            if authority.provider != "microsoft"
+            and previous_status in {"undoing", "created", "changed", "undone"}
             else "uncertain"
         )
         return await _finish(
@@ -1338,7 +1648,7 @@ async def reconcile(
     event_id: UUID,
     command: CalendarEventCommand,
     *,
-    provider: GoogleCalendarWriteProvider | None = None,
+    provider: BearerWriteProvider | AppleWriteProvider | None = None,
 ) -> CalendarEventView:
     async with factory() as database:
         current, row, payload = await _record(
@@ -1363,7 +1673,13 @@ async def reconcile(
         session_hash,
         event_id,
         token,
-        provider or GoogleCalendarWriteProvider(),
+        _writer(
+            authority,
+            token,
+            settings,
+            CalendarEventPreview.model_validate(payload["draft"]).timezone,
+            provider,
+        ),
     )
 
 
@@ -1376,7 +1692,7 @@ async def undo(
     event_id: UUID,
     command: CalendarEventApproval,
     *,
-    provider: GoogleCalendarWriteProvider | None = None,
+    provider: BearerWriteProvider | AppleWriteProvider | None = None,
 ) -> CalendarEventView:
     _admission(settings)
     async with factory() as database:
@@ -1386,7 +1702,7 @@ async def undo(
         service.check_command(current, command)
         if (
             row.status != "created"
-            or not isinstance(payload.get("etag"), str)
+            or not _exact_version(payload.get("etag"))
             or payload.get("creation_etag") != payload.get("etag")
         ):
             raise schedule.StudentError(
@@ -1395,20 +1711,22 @@ async def undo(
         authority = await _recover_authority(database, user_id, workspace_id, session_hash, payload)
         draft = CalendarEventPreview.model_validate(payload["draft"])
         await database.commit()
+    _admission(settings, authority.provider)
     token = await _token(factory, settings, authority, session_hash)
 
     async def check() -> None:
-        _admission(settings)
+        _admission(settings, authority.provider)
         await _check(factory, authority, session_hash)
 
-    provider = provider or GoogleCalendarWriteProvider()
+    writer = _writer(authority, token, settings, draft.timezone, provider)
     try:
-        event = await provider.event(
-            access_token=token, calendar_id=draft.calendar_id, event_id=event_id.hex, check=check
+        event = await writer.event(
+            calendar_id=draft.calendar_id, event_id=event_id.hex, check=check
         )
     except GoogleCalendarWriteError:
         raise schedule.StudentError(
-            503, "Google could not confirm the event. No Undo was submitted"
+            503,
+            f"{_label(authority.provider)} could not confirm the event. No Undo was submitted",
         ) from None
     if event is None:
         return await _finish(
@@ -1459,8 +1777,7 @@ async def undo(
         row.revision += 1
         await database.commit()
     try:
-        await provider.delete(
-            access_token=token,
+        await writer.delete(
             calendar_id=draft.calendar_id,
             event_id=event_id.hex,
             etag=payload["etag"],
@@ -1490,4 +1807,4 @@ async def undo(
         )
     except GoogleCalendarWriteError:
         pass
-    return await _observe(factory, settings, authority, session_hash, event_id, token, provider)
+    return await _observe(factory, settings, authority, session_hash, event_id, token, writer)

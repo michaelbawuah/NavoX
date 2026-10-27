@@ -3,6 +3,7 @@
 from datetime import timedelta
 from hashlib import sha256
 from secrets import token_urlsafe
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -12,7 +13,7 @@ from navox.connectors.sync_state import utc
 from navox.core.credential_vault import CredentialVault, CredentialVaultError
 from navox.core.settings import Settings
 from navox.db.models import Connection, ConnectionCredential, OAuthAuthorizationAttempt
-from navox.db.student_calendars import StudentCalendarGrant
+from navox.db.student_calendars import StudentCalendarGrant, StudentCalendarWriteGrant
 from navox.providers.microsoft_mail import (
     MicrosoftMailError,
     MicrosoftMailGateway,
@@ -23,13 +24,18 @@ from navox.student_calendars import service
 from navox.student_calendars.schemas import (
     CONSENT_VERSION,
     MICROSOFT_AVAILABILITY_SCOPES,
+    MICROSOFT_SCHEDULING_SCOPES,
+    SCHEDULING_CONSENT_VERSION,
     CalendarAuthorization,
+    CalendarSchedulingStart,
     CalendarStart,
 )
 
 PURPOSE = "microsoft_calendar_availability"
+SCHEDULING_PURPOSE = "microsoft_calendar_scheduling"
 IDENTITY_SCOPES = ("openid", "profile", "email", "offline_access")
 SCOPES = (*IDENTITY_SCOPES, *MICROSOFT_AVAILABILITY_SCOPES)
+WRITE_SCOPES = (*IDENTITY_SCOPES, *MICROSOFT_SCHEDULING_SCOPES)
 
 
 def configured(settings: Settings) -> bool:
@@ -49,15 +55,27 @@ async def start(
     user_id: UUID,
     workspace_id: UUID,
     session_hash: str,
-    payload: CalendarStart,
+    payload: CalendarStart | CalendarSchedulingStart,
     settings: Settings,
+    *,
+    scheduling: bool = False,
 ) -> CalendarAuthorization:
+    if scheduling and (
+        not settings.student_calendar_writes_enabled
+        or not settings.student_microsoft_calendar_writes_enabled
+    ):
+        raise schedule.StudentError(404, "Microsoft scheduling authorization is not enabled")
+    if payload.consent_version != (SCHEDULING_CONSENT_VERSION if scheduling else CONSENT_VERSION):
+        raise schedule.StudentError(422, "Confirm this separate calendar purpose")
+    model = StudentCalendarWriteGrant if scheduling else StudentCalendarGrant
+    purpose = SCHEDULING_PURPOSE if scheduling else PURPOSE
+    scopes = WRITE_SCOPES if scheduling else SCOPES
     if not configured(settings):
         raise schedule.StudentError(503, "Microsoft calendar connection setup is pending")
     current = await service.boundary(database, user_id, workspace_id, session_hash)
     service.check_command(current, payload)
     state = await service.ensure_state(database, current, user_id, workspace_id)
-    existing = await service.grants(database, user_id, workspace_id)
+    existing = await service.grants(database, user_id, workspace_id, scheduling=scheduling)
     if len(existing) >= service.MAX_GRANTS or any(
         g.request_id == payload.request_id for g in existing
     ):
@@ -73,6 +91,23 @@ async def start(
             or connection.status != "active"
         ):
             raise schedule.StudentError(404, "Microsoft calendar connection not found")
+    if scheduling:
+        busy = await service.grants(database, user_id, workspace_id)
+        if (
+            connection is None
+            or not service.ready(connection)
+            or not any(
+                grant.connection_id == connection.id
+                and grant.status == "active"
+                and grant.owner_scope_id == state.id
+                and grant.generation == current.generation
+                and grant.consent_version == CONSENT_VERSION
+                for grant in busy
+            )
+        ):
+            raise schedule.StudentError(
+                409, "Connect current Microsoft busy-time access before scheduling"
+            )
     for previous in existing:
         if previous.status == "pending":
             await service.retire(database, previous, current.now)
@@ -81,16 +116,16 @@ async def start(
         user_id=user_id,
         workspace_id=workspace_id,
         provider="microsoft",
-        purpose=PURPOSE,
+        purpose=purpose,
         connection_id=payload.connection_id,
-        requested_scopes=list(SCOPES),
+        requested_scopes=list(scopes),
         state_hash=sha256(nonce.encode()).hexdigest(),
         code_verifier=verifier,
         expires_at=current.now + timedelta(minutes=10),
     )
     database.add(attempt)
     await database.flush()
-    grant = StudentCalendarGrant(
+    grant = model(
         owner_scope_id=state.id,
         user_id=user_id,
         workspace_id=workspace_id,
@@ -101,8 +136,9 @@ async def start(
         generation=current.generation,
         revision=1,
         status="pending",
-        consent_version=CONSENT_VERSION,
+        consent_version=SCHEDULING_CONSENT_VERSION if scheduling else CONSENT_VERSION,
         accepted_at=current.now,
+        **({"provider": "microsoft"} if scheduling else {}),
     )
     database.add(grant)
     service.advance(state)
@@ -112,10 +148,10 @@ async def start(
             settings,
             state=nonce,
             verifier=verifier,
-            scopes=list(SCOPES),
+            scopes=list(scopes),
             login_hint=connection.external_email if connection else None,
         ),
-        requested_scopes=list(SCOPES),
+        requested_scopes=list(scopes),
         generation=state.generation,
         revision=state.revision,
         grant_id=grant.id,
@@ -135,7 +171,7 @@ async def handles(database: AsyncSession, user_id: UUID, workspace_id: UUID, sta
                 OAuthAuthorizationAttempt.user_id == user_id,
                 OAuthAuthorizationAttempt.workspace_id == workspace_id,
                 OAuthAuthorizationAttempt.provider == "microsoft",
-                OAuthAuthorizationAttempt.purpose == PURPOSE,
+                OAuthAuthorizationAttempt.purpose.in_((PURPOSE, SCHEDULING_PURPOSE)),
             )
         )
         is not None
@@ -151,19 +187,31 @@ async def pending(
     attempt_id: UUID,
     *,
     consumed: bool,
-) -> tuple[service.Boundary, StudentCalendarGrant, OAuthAuthorizationAttempt]:
+    scheduling: bool = False,
+) -> tuple[
+    service.Boundary, StudentCalendarGrant | StudentCalendarWriteGrant, OAuthAuthorizationAttempt
+]:
     if not settings.student_calendar_availability_enabled or not configured(settings):
         raise schedule.StudentError(403, "Microsoft calendar access is unavailable")
+    if scheduling and (
+        not settings.student_calendar_writes_enabled
+        or not settings.student_microsoft_calendar_writes_enabled
+    ):
+        raise schedule.StudentError(403, "Microsoft scheduling authorization is unavailable")
+    model = StudentCalendarWriteGrant if scheduling else StudentCalendarGrant
     current = await service.boundary(database, user_id, workspace_id, session_hash)
     attempt = await database.get(OAuthAuthorizationAttempt, attempt_id, populate_existing=True)
-    grant = await database.scalar(
-        select(StudentCalendarGrant)
-        .where(
-            StudentCalendarGrant.oauth_attempt_id == attempt_id,
-            StudentCalendarGrant.user_id == user_id,
-            StudentCalendarGrant.workspace_id == workspace_id,
-        )
-        .execution_options(populate_existing=True)
+    grant = cast(
+        StudentCalendarGrant | StudentCalendarWriteGrant | None,
+        await database.scalar(
+            select(model)
+            .where(
+                model.oauth_attempt_id == attempt_id,
+                model.user_id == user_id,
+                model.workspace_id == workspace_id,
+            )
+            .execution_options(populate_existing=True)
+        ),
     )
     if (
         attempt is None
@@ -172,16 +220,40 @@ async def pending(
         or attempt.user_id != user_id
         or attempt.workspace_id != workspace_id
         or attempt.provider != "microsoft"
-        or attempt.purpose != PURPOSE
+        or attempt.purpose != (SCHEDULING_PURPOSE if scheduling else PURPOSE)
+        or attempt.requested_scopes != list(WRITE_SCOPES if scheduling else SCOPES)
+        or grant.connection_id != attempt.connection_id
         or (attempt.used_at is not None) != consumed
         or utc(attempt.expires_at) <= current.now
         or grant.status != "pending"
-        or grant.consent_version != CONSENT_VERSION
+        or grant.consent_version != (SCHEDULING_CONSENT_VERSION if scheduling else CONSENT_VERSION)
         or grant.owner_scope_id != current.state.id
         or grant.generation != current.generation
         or grant.auth_session_id != current.session.id
     ):
         raise schedule.StudentError(409, "This calendar sign-in expired or changed. Start again")
+    if scheduling:
+        connection = await service.owned_connection(
+            database, user_id, workspace_id, attempt.connection_id
+        )
+        if (
+            connection is None
+            or connection.provider != "microsoft"
+            or not service.ready(connection)
+            or not isinstance(grant, StudentCalendarWriteGrant)
+            or grant.provider != "microsoft"
+            or not any(
+                item.connection_id == connection.id
+                and item.status == "active"
+                and item.owner_scope_id == current.state.id
+                and item.generation == current.generation
+                and item.consent_version == CONSENT_VERSION
+                for item in await service.grants(database, user_id, workspace_id)
+            )
+        ):
+            raise schedule.StudentError(
+                409, "Busy-time permission changed before scheduling consent"
+            )
     return current, grant, attempt
 
 
@@ -197,19 +269,32 @@ async def finish(
 ) -> None:
     if not 20 <= len(state) <= 200 or not 1 <= len(code) <= 8192:
         raise schedule.StudentError(400, "This Microsoft calendar sign-in is invalid")
-    attempt_id = await database.scalar(
-        select(OAuthAuthorizationAttempt.id).where(
-            OAuthAuthorizationAttempt.state_hash == sha256(state.encode()).hexdigest(),
-            OAuthAuthorizationAttempt.user_id == user_id,
-            OAuthAuthorizationAttempt.workspace_id == workspace_id,
-            OAuthAuthorizationAttempt.provider == "microsoft",
-            OAuthAuthorizationAttempt.purpose == PURPOSE,
+    match = (
+        await database.execute(
+            select(OAuthAuthorizationAttempt.id, OAuthAuthorizationAttempt.purpose).where(
+                OAuthAuthorizationAttempt.state_hash == sha256(state.encode()).hexdigest(),
+                OAuthAuthorizationAttempt.user_id == user_id,
+                OAuthAuthorizationAttempt.workspace_id == workspace_id,
+                OAuthAuthorizationAttempt.provider == "microsoft",
+                OAuthAuthorizationAttempt.purpose.in_((PURPOSE, SCHEDULING_PURPOSE)),
+            )
         )
-    )
-    if attempt_id is None:
+    ).one_or_none()
+    if match is None:
         raise schedule.StudentError(409, "This Microsoft calendar sign-in is unavailable")
+    attempt_id, purpose = match
+    scheduling = purpose == SCHEDULING_PURPOSE
+    scopes = WRITE_SCOPES if scheduling else SCOPES
+    required = MICROSOFT_SCHEDULING_SCOPES if scheduling else MICROSOFT_AVAILABILITY_SCOPES
     current, _, attempt = await pending(
-        database, settings, user_id, workspace_id, session_hash, attempt_id, consumed=False
+        database,
+        settings,
+        user_id,
+        workspace_id,
+        session_hash,
+        attempt_id,
+        consumed=False,
+        scheduling=scheduling,
     )
     verifier = attempt.code_verifier
     attempt.used_at = current.now
@@ -217,23 +302,44 @@ async def finish(
 
     async def check() -> None:
         await pending(
-            database, settings, user_id, workspace_id, session_hash, attempt_id, consumed=True
+            database,
+            settings,
+            user_id,
+            workspace_id,
+            session_hash,
+            attempt_id,
+            consumed=True,
+            scheduling=scheduling,
         )
         await database.commit()
 
     gateway = MicrosoftMailGateway(check=check)
     tokens = await gateway.token(
-        settings, code=code, verifier=verifier, fallback_scopes=frozenset(SCOPES)
+        settings, code=code, verifier=verifier, fallback_scopes=frozenset(scopes)
     )
     await pending(
-        database, settings, user_id, workspace_id, session_hash, attempt_id, consumed=True
+        database,
+        settings,
+        user_id,
+        workspace_id,
+        session_hash,
+        attempt_id,
+        consumed=True,
+        scheduling=scheduling,
     )
     await database.commit()
     identity = await gateway.identity(tokens.access_token)
-    if not set(MICROSOFT_AVAILABILITY_SCOPES).issubset(tokens.scopes):
-        raise schedule.StudentError(403, "Microsoft did not grant calendar busy-time access")
+    if not set(required).issubset(tokens.scopes):
+        raise schedule.StudentError(403, "Microsoft did not grant the requested calendar purpose")
     current, grant, attempt = await pending(
-        database, settings, user_id, workspace_id, session_hash, attempt_id, consumed=True
+        database,
+        settings,
+        user_id,
+        workspace_id,
+        session_hash,
+        attempt_id,
+        consumed=True,
+        scheduling=scheduling,
     )
     # A distinct purpose identity cannot attach calendar access to an email connector.
     external_id = "calendar:" + identity.account_id
@@ -274,10 +380,10 @@ async def finish(
     old_credential = connection.credential_reference
     connection.external_email = identity.email.casefold()
     connection.credential_reference = credential.id
-    connection.granted_scopes = sorted(tokens.scopes.intersection(SCOPES))
+    connection.granted_scopes = sorted(tokens.scopes.intersection(scopes))
     connection.last_checked_at = current.now
     await database.flush()
-    for old in await service.grants(database, user_id, workspace_id):
+    for old in await service.grants(database, user_id, workspace_id, scheduling=scheduling):
         if old.id != grant.id and old.connection_id == connection.id and old.status != "revoked":
             await service.retire(database, old, current.now)
     grant.connection_id, grant.status = connection.id, "active"

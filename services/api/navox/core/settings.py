@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     student_planning_enabled: bool = False
     student_calendar_availability_enabled: bool = False
     student_calendar_writes_enabled: bool = False
+    student_microsoft_calendar_writes_enabled: bool = False
+    student_apple_calendar_writes_enabled: bool = False
     student_lms_feeds_enabled: bool = False
     student_coursework_enabled: bool = False
     student_board_enabled: bool = False

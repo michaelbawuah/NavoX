@@ -77,7 +77,10 @@ creation yourself. A long review requires complete on-screen approval in Connect
 Only use prepare_calendar_undo when the student asks to undo the last event created
 in this call; the host asks again about the exact event. Unknown calendar outcomes
 need status review, never another insert. Calendar Undo does not restore separately
-approved study moves. Microsoft and Apple event writes remain unavailable.
+approved study moves. Only the server's independently available calendar provider
+and current write consent can be selected; Apple requires separate write consent.
+Microsoft creation and exact Undo remain unavailable. Provider names never grant
+permission or bypass the host approval.
 Use prepare_student_task to capture
 student-supplied work after asking for a missing deadline time or effort estimate;
 use prepare_task_remaining when work is unfinished, after asking which exact task
