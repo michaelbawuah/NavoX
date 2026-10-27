@@ -105,8 +105,16 @@ def _signature(snapshot: AvailabilitySnapshot) -> str:
 def _when(start: datetime, end: datetime, timezone: str) -> str:
     zone = ZoneInfo(timezone)
     first, last = start.astimezone(zone), end.astimezone(zone)
-    beginning = f"{first:%A, %B} {first.day}, {first.year}, {first:%I:%M %p}"
-    ending = f"{last:%I:%M %p}"
+
+    def clock(moment: datetime) -> str:
+        # Retained receipts and model-prepared drafts can include sub-minute
+        # instants. The exact approval must never silently round their time.
+        if moment.microsecond:
+            return f"{moment:%I:%M:%S}.{moment.microsecond:06d} {moment:%p}"
+        return moment.strftime("%I:%M:%S %p" if moment.second else "%I:%M %p")
+
+    beginning = f"{first:%A, %B} {first.day}, {first.year}, {clock(first)}"
+    ending = clock(last)
     if first.date() != last.date():
         ending = f"{last:%A, %B} {last.day}, {last.year}, {ending}"
     if first.utcoffset() != last.utcoffset() or any(

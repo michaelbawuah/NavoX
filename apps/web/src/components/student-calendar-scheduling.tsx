@@ -50,7 +50,8 @@ function providerAvailable(
       )
     : provider === "google";
 }
-const MAX_LOADED_ACTIONS = 551;
+// Match the activity endpoint's 500 current reviews + 500 retained claims.
+const MAX_LOADED_ACTIONS = 1_000;
 const command = (view: { generation: number; revision: number }) => ({
   generation: view.generation,
   revision: view.revision,
@@ -59,6 +60,13 @@ const command = (view: { generation: number; revision: number }) => ({
 function eventTime(
   event: Pick<CalendarEventView, "start_at" | "end_at" | "timezone">,
 ) {
+  const instants = [event.start_at, event.end_at];
+  const fractional = instants.some((instant) =>
+    /\.\d*[1-9]\d*(?:Z|[+-]\d{2}:\d{2})$/.test(instant),
+  );
+  const seconds =
+    fractional ||
+    instants.some((instant) => new Date(instant).getUTCSeconds() !== 0);
   const format = new Intl.DateTimeFormat("en-US", {
     timeZone: event.timezone,
     weekday: "short",
@@ -67,9 +75,15 @@ function eventTime(
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    ...(seconds ? { second: "2-digit" as const } : {}),
     timeZoneName: "short",
   });
-  return `${format.format(new Date(event.start_at))} – ${format.format(new Date(event.end_at))}`;
+  const local = `${format.format(new Date(event.start_at))} – ${format.format(new Date(event.end_at))}`;
+  // Date/Intl cannot preserve microseconds. Keep the original instants visible
+  // when a review or retained receipt contains fractional-second precision.
+  return fractional
+    ? `${local} (exact instants: ${event.start_at} – ${event.end_at})`
+    : local;
 }
 function studyMoveCount(option: AvailabilityOption) {
   return "displaced_study_block_ids" in option &&
@@ -475,12 +489,15 @@ export function StudentCalendarScheduling({
     setMustCheck(
       ["executing", "uncertain", "undoing"].includes(current.status),
     );
-    setRecent((rows) =>
-      [current, ...rows.filter((row) => row.id !== current.id)].slice(
-        0,
-        MAX_LOADED_ACTIONS,
-      ),
-    );
+    setRecent((rows) => {
+      const remaining = rows.filter((row) => row.id !== current.id);
+      // A separately recovered exact receipt stays visible in the selected
+      // card; never evict an already loaded action to put it in the list.
+      return remaining.length === rows.length &&
+        rows.length >= MAX_LOADED_ACTIONS
+        ? rows
+        : [current, ...remaining];
+    });
     setView((old) =>
       old
         ? {
@@ -553,13 +570,16 @@ export function StudentCalendarScheduling({
           next.calendar_revision < view.revision
         )
           throw new Error("Calendar access changed. Check scheduling again.");
-        setRecent((rows) =>
-          [
-            ...new Map(
-              [...rows, ...next.events].map((row) => [row.id, row]),
-            ).values(),
-          ].slice(0, MAX_LOADED_ACTIONS),
-        );
+        const combined = [
+          ...new Map(
+            [...recent, ...next.events].map((row) => [row.id, row]),
+          ).values(),
+        ];
+        if (combined.length > MAX_LOADED_ACTIONS)
+          throw new Error(
+            "Calendar activity changed. Check scheduling again before loading more actions.",
+          );
+        setRecent(combined);
         setCursor(next.next_cursor);
         setView((old) =>
           old ? { ...old, revision: next.calendar_revision } : old,

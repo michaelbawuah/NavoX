@@ -16,4 +16,10 @@ Native locked-phone/background audio is a separate later part. The approved spec
 
 For each milestone, provide a test deployment/link after engineering gates pass. Michael tests and records the physical phone. Mobile emulation is reported separately and cannot pass phone acceptance. Publish acceptance status and every deviation/spacing change. Student usage targets remain **Waiting on real usage** until observed.
 
-Current milestone: **1, in progress**. See [acceptance](vox-m1-acceptance.md), [verification](vox-m1-verification.md), [accepted decisions](vox-m1-decisions.md), and [account/permission setup](vox-m1-accounts.md).
+Current engineering work: **M3–5 completion**, building on the pushed M1 and M2
+checkpoints. The isolated test build and exact revision/check results are recorded
+in [PR 59](https://github.com/michaelbawuah/NavoX/pull/59). No milestone is marked
+student-accepted by its source checkpoint. See the
+[M3–5 record](m3-m5-20261026.md), [calendar/account/device qualification](m3-m5-live-qualification-20261026.md),
+and M1's [acceptance](vox-m1-acceptance.md), [verification](vox-m1-verification.md),
+[accepted decisions](vox-m1-decisions.md), and [account/permission setup](vox-m1-accounts.md).

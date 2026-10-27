@@ -66,6 +66,26 @@ function responseAudioReady(value, baseline) {
   return value.receivedBytes > baseline.receivedBytes && value.receivedEnergy > baseline.receivedEnergy &&
     value.playingRemoteAudioTracks > 0 && value.playReady > 0;
 }
+function startWatchdog({ guard, budget, stop, fail, failed }, schedule = setInterval) {
+  let budgetBusy = false;
+  const retire = async error => {
+    if (failed()) return;
+    fail(error);
+    await stop().catch(() => {});
+  };
+  return schedule(async () => {
+    if (failed()) return;
+    // A slow usage request must not hold the wall-clock cutoff. Every tick
+    // checks the deadline even while an earlier tick is awaiting that request.
+    try { await guard(); }
+    catch (error) { await retire(error); return; }
+    if (budgetBusy || failed()) return;
+    budgetBusy = true;
+    try { await budget(); }
+    catch (error) { await retire(error); }
+    finally { budgetBusy = false; }
+  }, 750);
+}
 
 async function run(settings, secret) {
   const { chromium } = require('playwright');
@@ -96,7 +116,7 @@ async function run(settings, secret) {
   };
   let browser, context, page, lastCall = null, currentStart = 0, browserTimezone = null;
   let boundary = 'private-stdin', fatal = null, stopping = null, sequence = 0;
-  let watchdog, guardBusy = false, expectedStart = false, privateReceipt = null, privateSuggestionId = null, launchSerial = 0;
+  let watchdog, expectedStart = false, privateReceipt = null, privateSuggestionId = null, launchSerial = 0;
   const errors = [], warnings = [], endSequences = new Map(), callIds = new Set();
   const accountKey = secret.workspace_id + ':' + secret.user_id;
   const fixtureMetadata = JSON.parse(fs.readFileSync(path.join(__dirname, 'audio-metadata.json'), 'utf8'));
@@ -384,13 +404,8 @@ async function run(settings, secret) {
     check(learning.enabled === true && learning.configured === true && learning.status_reason === 'ready' && learning.generation === privacy.generation, 'native-semantic-learning-ready-for-current-privacy');
     const initialBudget = await budget();
     check(initialBudget.remaining_voice_ms >= settings.maxCalls * settings.callLimitMs && initialBudget.remaining_tokens >= 40000, 'existing-allowance-sufficient');
-    watchdog = setInterval(async () => {
-      if (guardBusy || fatal) return;
-      guardBusy = true;
-      try { await guard(); await budget(); }
-      catch (error) { fatal = error; await stopCurrent().catch(() => {}); }
-      finally { guardBusy = false; }
-    }, 750);
+    watchdog = startWatchdog({ guard, budget, stop: stopCurrent,
+      failed: () => fatal !== null, fail: error => { fatal = error; } });
 
     const one = await startCall(1); one.started = currentStart;
     const neutral = await speak('neutral-source', one);
@@ -535,6 +550,33 @@ if (require.main === module) {
     assert.equal(currentAdmission({ client_call_id: newId }, 2, launches, completed), false);
     assert.equal(currentAdmission({ client_call_id: 'malformed' }, 2, launches, completed), false);
     (async () => {
+      // The first usage request is still pending when the next clock tick
+      // reaches the cutoff. Retirement must start without waiting for its HTTP
+      // timeout; a late budget error must not replace that first failure.
+      let tick, now = 0, failed = null, stopped = 0, budgetReads = 0, rejectBudget;
+      const pendingBudget = new Promise((resolve, reject) => { rejectBudget = reject; });
+      const timer = startWatchdog({
+        guard: async () => { if (now >= 40000) throw qaError('call-wall-clock-stop'); },
+        budget: async () => { budgetReads++; return pendingBudget; },
+        stop: async () => { stopped++; },
+        failed: () => failed !== null, fail: error => { failed = error; },
+      }, (callback, delay) => { tick = callback; assert.equal(delay, 750); return 'fake-timer'; });
+      assert.equal(timer, 'fake-timer');
+      const reading = tick();
+      await Promise.resolve();
+      assert.equal(budgetReads, 1);
+      await tick();
+      assert.equal(budgetReads, 1);
+      now = 40000;
+      await tick();
+      assert.equal(stopped, 1);
+      assert.equal(failed.qaCode, 'call-wall-clock-stop');
+      rejectBudget(qaError('ownedHTTP503'));
+      await reading;
+      await tick();
+      assert.equal(stopped, 1);
+      assert.equal(budgetReads, 1);
+      assert.equal(failed.qaCode, 'call-wall-clock-stop');
       // A published native AudioSource has no frames until the first reply.
       // The real play wrapper must permit input while its promise is pending,
       // then require actual resolved playback plus received bytes/energy.
@@ -572,7 +614,7 @@ if (require.main === module) {
       release(); await played;
       assert.equal(responseAudioReady(snapshot(), baseline), false);
       assert.equal(responseAudioReady({ ...snapshot(), receivedBytes: 1, receivedEnergy: 0.1 }, baseline), true);
-      console.log(JSON.stringify({ offline_self_test: 'pass', silent_remote_pending_play_regression: 'pass', provider_calls: 0 }));
+      console.log(JSON.stringify({ offline_self_test: 'pass', deadline_during_slow_usage_regression: 'pass', silent_remote_pending_play_regression: 'pass', provider_calls: 0 }));
     })().catch(error => { console.error(error?.name || 'Error'); process.exitCode = 1; });
   } else {
     let selected;
@@ -594,4 +636,4 @@ if (require.main === module) {
     });
   }
 }
-module.exports = { options, validDecimal, currentAdmission, blockedWriteDiagnostic, timezoneInitialization, mediaReady, responseAudioReady, run };
+module.exports = { options, validDecimal, currentAdmission, blockedWriteDiagnostic, timezoneInitialization, mediaReady, responseAudioReady, startWatchdog, run };

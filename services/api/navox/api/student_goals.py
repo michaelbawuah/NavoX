@@ -15,6 +15,7 @@ from pydantic import BaseModel, ValidationError
 
 from navox.api.auth import CurrentAccountDependency, DatabaseSession, SettingsDependency
 from navox.api.connector_management import require_origin
+from navox.api.student import expected_owner
 from navox.student.service import StudentError
 from navox.student_goals import service
 from navox.student_goals.schemas import (
@@ -63,7 +64,7 @@ router = APIRouter(
     prefix="/student/goals",
     tags=["student goals"],
     route_class=PrivateGoalsRoute,
-    dependencies=[Depends(enabled)],
+    dependencies=[Depends(enabled), Depends(expected_owner)],
 )
 
 

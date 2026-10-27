@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  createStudentGoalsApi,
   type GoalCheckIn,
   type GoalDefinition,
   type GoalsApi,
@@ -263,6 +264,74 @@ describe("honest goal and report readers", () => {
 });
 
 describe("goals transport", () => {
+  it("captures the browser owner on every goals read and mutation", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async () =>
+        Response.json({ detail: "Account changed" }, { status: 409 }),
+      );
+    vi.stubGlobal("fetch", fetcher);
+    const api = createStudentGoalsApi(accountId),
+      signal = new AbortController().signal,
+      erase = { request_id: userId, revision: 2 };
+    const requests = [
+      () => api.board(signal),
+      () => api.day(goalId, "2026-10-19", signal),
+      () =>
+        api.create(
+          { ...definition, request_id: userId, generation: 0 },
+          signal,
+        ),
+      () =>
+        api.update(
+          goalId,
+          { ...definition, ...erase, status: "active" },
+          signal,
+        ),
+      () =>
+        api.checkin(
+          goalId,
+          {
+            ...erase,
+            goal_revision: 2,
+            on_date: "2026-10-19",
+            expected_timezone: "America/New_York",
+            count: null,
+            completed: true,
+            note: "",
+          },
+          signal,
+        ),
+      () => api.eraseGoal(goalId, erase, signal),
+      () => api.eraseCheckin(goalId, checkinId, erase, signal),
+      () => api.reset(erase, signal),
+    ];
+    for (const request of requests)
+      await expect(request()).rejects.toMatchObject({
+        status: 409,
+        uncertain: false,
+      });
+    expect(fetcher).toHaveBeenCalledTimes(8);
+    for (const [, init] of fetcher.mock.calls)
+      expect(new Headers(init?.headers).get("X-NavoX-Account")).toBe(accountId);
+  });
+  it("binds a summary request to the captured browser account", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(Response.json(boardFixture()));
+    vi.stubGlobal("fetch", fetcher);
+    await goalsRequest(
+      "",
+      readStudentGoalsBoard,
+      "GET",
+      undefined,
+      undefined,
+      accountId,
+    );
+    expect(
+      new Headers(fetcher.mock.calls[0][1]?.headers).get("X-NavoX-Account"),
+    ).toBe(accountId);
+  });
   it("uses credentialed uncached fixed routes and does not automatically retry", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
@@ -341,6 +410,48 @@ describe("goals transport", () => {
 });
 
 describe("owned private goals workspace", () => {
+  it("prevents a cookie switch after the account precheck from creating a goal in the new account", async () => {
+    let switched = false,
+      mutated = false;
+    const otherAccount = `${workspaceId}:${otherGoalId}`;
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (url, init) => {
+        if (String(url).endsWith("/auth/me"))
+          return Response.json({
+            id: switched ? otherGoalId : userId,
+            workspace: { id: workspaceId },
+          });
+        if (init?.method === "POST") {
+          switched = true;
+          const expected = new Headers(init.headers).get("X-NavoX-Account");
+          // The server accepts legacy absent headers; a captured stale owner must reject.
+          if (expected && expected !== otherAccount)
+            return Response.json(
+              { detail: "Account changed" },
+              { status: 409 },
+            );
+          mutated = true;
+          return Response.json(goalFixture({ id: otherGoalId }));
+        }
+        return Response.json(boardFixture());
+      });
+    vi.stubGlobal("fetch", fetcher);
+    const controller = new StudentGoalsController(accountId);
+    controllers.push(controller);
+    await controller.load();
+    await controller.create(definition);
+    expect(switched).toBe(true);
+    expect(mutated).toBe(false);
+    expect(controller.getSnapshot().blocked).toBe(true);
+    expect(controller.getSnapshot().board).toBeNull();
+    const write = fetcher.mock.calls.find(
+      ([, init]) => init?.method === "POST",
+    );
+    expect(new Headers(write?.[1]?.headers).get("X-NavoX-Account")).toBe(
+      accountId,
+    );
+  });
   it("makes no request until explicitly loaded and does not infer any check-in", async () => {
     const rig = fixture();
     expect(rig.api.account).not.toHaveBeenCalled();

@@ -46,13 +46,19 @@ async def memory_tool_env(ai_database):
     settings = Settings(
         _env_file=None, connector_secret_encryption_key=Fernet.generate_key().decode()
     )
+    published = []
+
+    async def publish(value):
+        published.append(value)
+
     return SimpleNamespace(
         user_id=user_id,
         workspace_id=workspace_id,
         factory=ai_database,
         check=check,
         settings=settings,
-        tools=MemoryTools(cast(DatabaseAuthority, check), settings),
+        tools=MemoryTools(cast(DatabaseAuthority, check), settings, publish),
+        published=published,
     )
 
 
@@ -138,24 +144,84 @@ async def test_forget_returns_only_bounded_review_metadata_and_does_not_write(me
     finally:
         event.remove(engine, "before_cursor_execute", record)
     assert result["status"] == "review_required" and result["applied"] is False
-    assert {match["id"] for match in result["matches"]} == {
+    assert len(env.published) == 1
+    browser_review = env.published[0]
+    assert {match["id"] for match in browser_review["matches"]} == {
         str(saved_fact.id),
         str(saved_conversation.id),
         str(legacy.id),
     }
-    assert {match["kind"] for match in result["matches"]} == {"fact", "conversation", "legacy_fact"}
+    assert {match["kind"] for match in browser_review["matches"]} == {
+        "fact",
+        "conversation",
+        "legacy_fact",
+    }
+    assert result["match_count"] == 3
     assert result["ambiguous"] is result["search_complete"] is True
     assert result["has_more_matches"] is False and result["searched_items"] == 3
-    assert result["destination"].startswith("/settings?section=memory&forget=")
+    assert browser_review["destination"].startswith("/settings?section=memory&forget=")
     assert "unique secret phrase" not in json.dumps(result)
-    assert all("content" not in match and "turns" not in match for match in result["matches"])
+    assert all(
+        "content" not in match and "turns" not in match for match in browser_review["matches"]
+    )
     assert set(statements) == {"SELECT"}
-    assert env.check.calls == 2
+    assert env.check.calls == 3
     async with env.factory() as database:
         assert (await database.get(MemoryConversation, saved_conversation.id)).erased_at is None
         assert await database.get(MemoryFact, saved_fact.id) is not None
         assert await database.get(OwnerMemory, legacy.id) is not None
         assert await database.get(MemoryPrivacy, (env.user_id, env.workspace_id)) is None
+
+
+@pytest.mark.asyncio
+async def test_forget_private_matches_reach_only_verified_browser_not_model(memory_tool_env):
+    env = memory_tool_env
+    saved_fact = fact(env, label="Family medical treatment", text="A private topic to forget")
+    saved_fact.sensitive = True
+    saved_conversation = conversation(
+        env, title="Private diagnosis discussion", text="A private topic to forget"
+    )
+    published = []
+
+    async def publish(value):
+        published.append(value)
+
+    env.tools.publish = publish
+    async with env.factory() as database:
+        database.add_all([saved_fact, saved_conversation])
+        await database.commit()
+    result = await env.tools.execute(FORGET_TOOL, {"query": "private topic"})
+    assert len(published) == 1
+    assert {match["id"] for match in published[0]["matches"]} == {
+        str(saved_fact.id),
+        str(saved_conversation.id),
+    }
+    assert {match["label"] for match in published[0]["matches"]} == {
+        "Family medical treatment",
+        "Private diagnosis discussion",
+    }
+    # execute's return is serialized directly into the provider's tool output.
+    # A model instruction not to repeat labels cannot enforce private recall.
+    assert set(result) == {
+        "status",
+        "applied",
+        "match_count",
+        "ambiguous",
+        "has_more_matches",
+        "search_complete",
+        "searched_items",
+        "message",
+    }
+    assert result["match_count"] == 2 and result["ambiguous"] is True
+    serialized = json.dumps(result)
+    for private in (
+        "Family medical treatment",
+        "Private diagnosis discussion",
+        "private topic",
+        str(saved_fact.id),
+        str(saved_conversation.id),
+    ):
+        assert private not in serialized
 
 
 @pytest.mark.asyncio
@@ -180,7 +246,8 @@ async def test_forget_never_matches_other_owner_or_other_workspace(memory_tool_e
             )
         await database.commit()
     result = await env.tools.execute(FORGET_TOOL, {"query": "job"})
-    assert result["matches"] == [] and result["searched_items"] == 0
+    assert result["match_count"] == 0 and result["searched_items"] == 0
+    assert env.published[0]["matches"] == []
     assert result["applied"] is False and "No matching" in result["message"]
 
 
@@ -193,7 +260,8 @@ async def test_forget_excludes_expired_and_erased_history_without_erasing_it(mem
         database.add_all([expired, erased])
         await database.commit()
     result = await env.tools.execute(FORGET_TOOL, {"query": "job"})
-    assert result["matches"] == [] and result["searched_items"] == 0
+    assert result["match_count"] == 0 and result["searched_items"] == 0
+    assert env.published[0]["matches"] == []
     async with env.factory() as database:
         row = await database.get(MemoryConversation, expired.id)
         assert row.encrypted_transcript == expired.encrypted_transcript and row.erased_at is None
@@ -208,7 +276,8 @@ async def test_forget_bounds_total_scan_and_discloses_partial_results(memory_too
         )
         await database.commit()
     result = await env.tools.execute(FORGET_TOOL, {"query": "job"})
-    assert len(result["matches"]) == 4
+    assert result["match_count"] == 4
+    assert len(env.published[0]["matches"]) == 4
     assert result["has_more_matches"] is result["ambiguous"] is True
     assert result["searched_items"] == 100 and result["search_complete"] is False
     assert "100 most recently updated" in result["message"]
@@ -243,6 +312,37 @@ async def test_forget_drops_results_when_fresh_authority_changes(memory_tool_env
     env.check.changed = True
     with pytest.raises(WorkerAccessLost):
         await env.tools.execute(FORGET_TOOL, {"query": "job"})
+    assert env.published == []
+
+
+@pytest.mark.asyncio
+async def test_forget_never_returns_model_result_after_browser_publish_loses_owner(memory_tool_env):
+    env = memory_tool_env
+    async with env.factory() as database:
+        database.add(fact(env))
+        await database.commit()
+
+    async def publish(value):
+        env.check.changed = True
+
+    env.tools.publish = publish
+    with pytest.raises(WorkerAccessLost):
+        await env.tools.execute(FORGET_TOOL, {"query": "job"})
+
+
+@pytest.mark.asyncio
+async def test_forget_without_browser_handoff_still_withholds_private_metadata(memory_tool_env):
+    env = memory_tool_env
+    saved = fact(env, label="Private family topic")
+    async with env.factory() as database:
+        database.add(saved)
+        await database.commit()
+    env.tools.publish = None
+    result = await env.tools.execute(FORGET_TOOL, {"query": "job"})
+    assert result["match_count"] == 1 and result["applied"] is False
+    assert result["ambiguous"] is False and result["search_complete"] is True
+    assert "Private family topic" not in json.dumps(result)
+    assert not {"query", "matches", "destination"} & result.keys()
 
 
 @pytest.mark.asyncio

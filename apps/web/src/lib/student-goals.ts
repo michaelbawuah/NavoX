@@ -448,6 +448,7 @@ export async function goalsRequest<T>(
   method = "GET",
   body?: unknown,
   signal?: AbortSignal,
+  accountKey?: string,
 ): Promise<T> {
   try {
     const response = await fetch(`${apiBaseUrl}/student/goals${path}`, {
@@ -458,10 +459,13 @@ export async function goalsRequest<T>(
       signal: signal
         ? AbortSignal.any([signal, AbortSignal.timeout(15_000)])
         : AbortSignal.timeout(15_000),
+      headers: {
+        ...(accountKey ? { "X-NavoX-Account": accountKey } : {}),
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
       ...(body === undefined
         ? {}
         : {
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
           }),
     });
@@ -505,47 +509,74 @@ export async function goalsRequest<T>(
 const empty = (value: unknown) => {
   if (value !== undefined) return invalid();
 };
-export const studentGoalsApi: GoalsApi = {
-  async account(signal) {
-    const response = await fetch(`${apiBaseUrl}/auth/me`, {
-      credentials: "include",
-      cache: "no-store",
-      redirect: "error",
-      signal: AbortSignal.any([signal, AbortSignal.timeout(12_000)]),
-    });
-    if (!response.ok)
-      throw new Error("Sign in again to open your private goals.");
-    const v = obj(await response.json());
-    return `${id(obj(v.workspace).id)}:${id(v.id)}`;
-  },
-  board: (signal) =>
-    goalsRequest("", readStudentGoalsBoard, "GET", undefined, signal),
-  day: (goalId, date, signal) =>
-    goalsRequest(
-      `/${goalId}/checkins?on_date=${encodeURIComponent(date)}`,
-      (value) => nullable(value, readGoalCheckIn),
-      "GET",
-      undefined,
-      signal,
-    ),
-  create: (input, signal) =>
-    goalsRequest("", readStudentGoal, "POST", input, signal),
-  update: (goalId, input, signal) =>
-    goalsRequest(`/${goalId}`, readStudentGoal, "PATCH", input, signal),
-  checkin: (goalId, input, signal) =>
-    goalsRequest(`/${goalId}/checkins`, readGoalCheckIn, "POST", input, signal),
-  eraseGoal: (goalId, input, signal) =>
-    goalsRequest(`/${goalId}`, empty, "DELETE", input, signal),
-  eraseCheckin: (goalId, checkinId, input, signal) =>
-    goalsRequest(
-      `/${goalId}/checkins/${checkinId}`,
-      empty,
-      "DELETE",
-      input,
-      signal,
-    ),
-  reset: (input, signal) => goalsRequest("", empty, "DELETE", input, signal),
-};
+export function createStudentGoalsApi(accountKey?: string): GoalsApi {
+  return {
+    async account(signal) {
+      const response = await fetch(`${apiBaseUrl}/auth/me`, {
+        credentials: "include",
+        cache: "no-store",
+        redirect: "error",
+        signal: AbortSignal.any([signal, AbortSignal.timeout(12_000)]),
+      });
+      if (!response.ok)
+        throw new Error("Sign in again to open your private goals.");
+      const v = obj(await response.json());
+      return `${id(obj(v.workspace).id)}:${id(v.id)}`;
+    },
+    board: (signal) =>
+      goalsRequest(
+        "",
+        readStudentGoalsBoard,
+        "GET",
+        undefined,
+        signal,
+        accountKey,
+      ),
+    day: (goalId, date, signal) =>
+      goalsRequest(
+        `/${goalId}/checkins?on_date=${encodeURIComponent(date)}`,
+        (value) => nullable(value, readGoalCheckIn),
+        "GET",
+        undefined,
+        signal,
+        accountKey,
+      ),
+    create: (input, signal) =>
+      goalsRequest("", readStudentGoal, "POST", input, signal, accountKey),
+    update: (goalId, input, signal) =>
+      goalsRequest(
+        `/${goalId}`,
+        readStudentGoal,
+        "PATCH",
+        input,
+        signal,
+        accountKey,
+      ),
+    checkin: (goalId, input, signal) =>
+      goalsRequest(
+        `/${goalId}/checkins`,
+        readGoalCheckIn,
+        "POST",
+        input,
+        signal,
+        accountKey,
+      ),
+    eraseGoal: (goalId, input, signal) =>
+      goalsRequest(`/${goalId}`, empty, "DELETE", input, signal, accountKey),
+    eraseCheckin: (goalId, checkinId, input, signal) =>
+      goalsRequest(
+        `/${goalId}/checkins/${checkinId}`,
+        empty,
+        "DELETE",
+        input,
+        signal,
+        accountKey,
+      ),
+    reset: (input, signal) =>
+      goalsRequest("", empty, "DELETE", input, signal, accountKey),
+  };
+}
+export const studentGoalsApi: GoalsApi = createStudentGoalsApi();
 export function initialGoalsState(): GoalsState {
   return {
     board: null,
@@ -573,7 +604,7 @@ export class StudentGoalsController {
   private disposed = false;
   constructor(
     readonly accountId: string,
-    private api: GoalsApi = studentGoalsApi,
+    private api: GoalsApi = createStudentGoalsApi(accountId),
     private requestId: () => string = () => crypto.randomUUID(),
   ) {}
   getSnapshot = () => this.state;

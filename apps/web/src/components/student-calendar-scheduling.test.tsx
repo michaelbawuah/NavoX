@@ -342,6 +342,39 @@ afterEach(async () => {
 });
 
 describe("reviewed calendar scheduling screen", () => {
+  it.each([
+    ["2026-10-22T13:00:30Z", "2026-10-22T13:30:30Z", "1:00:30 PM"],
+    [
+      "2026-10-22T13:00:00.000123Z",
+      "2026-10-22T13:30:00.000123Z",
+      "exact instants: 2026-10-22T13:00:00.000123Z – 2026-10-22T13:30:00.000123Z",
+    ],
+  ])(
+    "preserves exact historical receipt times %s",
+    async (start_at, end_at, exact) => {
+      const api = client();
+      vi.mocked(api.events).mockResolvedValue({
+        generation: 2,
+        calendar_revision: 5,
+        next_cursor: null,
+        events: [
+          {
+            ...event(),
+            start_at,
+            end_at,
+            status: "uncertain",
+            changes_applied: null,
+          },
+        ],
+      });
+      await mount(api);
+      await click("Check scheduling and recent actions");
+      await click("Study with Sam · Needs a status check");
+      expect(host.querySelector("article")?.textContent).toContain(exact);
+      expect(api.approveEvent).not.toHaveBeenCalled();
+      expect(api.undoEvent).not.toHaveBeenCalled();
+    },
+  );
   it("distinguishes both offsets in an exact receipt across a repeated DST hour", async () => {
     const api = client();
     vi.mocked(api.events).mockResolvedValue({
@@ -1031,6 +1064,59 @@ describe("reviewed calendar scheduling screen", () => {
       ),
     ).toBe(false);
   });
+  it("keeps every action reachable across the full current-and-retained inventory", async () => {
+    const api = client();
+    const inventory = Array.from({ length: 1_000 }, (_, index) => ({
+      ...event(),
+      id: `90000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      title: `Saved calendar action ${index + 1}`,
+      ...(index >= 500
+        ? {
+            status: "created" as const,
+            changes_applied: true,
+            can_undo: false,
+            message:
+              "This request predates your reset; only its status can be checked here.",
+          }
+        : {}),
+    }));
+    vi.mocked(api.events).mockImplementation(async (_signal, cursor) => {
+      const offset = cursor
+        ? inventory.findIndex((row) => row.id === cursor) + 1
+        : 0;
+      const events = inventory.slice(offset, offset + 20);
+      return {
+        generation: 2,
+        calendar_revision: 5,
+        events,
+        next_cursor:
+          offset + events.length < inventory.length
+            ? events[events.length - 1].id
+            : null,
+      };
+    });
+    const oldest = inventory[inventory.length - 1];
+    vi.mocked(api.reconcileEvent).mockResolvedValue({ ...oldest, revision: 2 });
+    await mount(api);
+    await click("Check scheduling and recent actions");
+    for (let page = 1; page < 50; page++) await click("More saved actions");
+    expect(host.querySelectorAll("details li")).toHaveLength(1_000);
+    expect(host.textContent).not.toContain("More saved actions");
+    await click("Saved calendar action 1000 · Added");
+    expect(host.querySelector("article")?.textContent).toContain(
+      "predates your reset",
+    );
+    await click("Check event status");
+    expect(api.reconcileEvent).toHaveBeenCalledWith(
+      oldest.id,
+      expect.objectContaining({ generation: 2, event_revision: 1 }),
+      expect.any(AbortSignal),
+    );
+    expect(host.querySelectorAll("details li")).toHaveLength(1_000);
+    expect(api.events).toHaveBeenCalledTimes(50);
+    expect(api.approveEvent).not.toHaveBeenCalled();
+    expect(api.undoEvent).not.toHaveBeenCalled();
+  }, 20_000);
   it("can leave an externally changed event without trying to modify it", async () => {
     const api = client();
     vi.mocked(api.events).mockResolvedValue({

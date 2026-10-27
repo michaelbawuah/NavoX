@@ -314,6 +314,32 @@ async def test_overnight_awake_event_reads_both_exact_local_dates(calendar_voice
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("second,microsecond", [(30, 0), (0, 123456)])
+async def test_voice_calendar_review_preserves_exact_subminute_instants(
+    calendar_voice_env, second, microsecond
+):
+    env = calendar_voice_env
+    start = env.start_at.replace(second=second, microsecond=microsecond)
+    await prepare(env, start_at=start.isoformat())
+    spoken = await play_review(env)
+    expected = (
+        f"{start:%I:%M:%S}.{microsecond:06d} {start:%p}"
+        if microsecond
+        else start.strftime("%I:%M:%S %p")
+    )
+    end = start + timedelta(minutes=30)
+    expected_end = (
+        f"{end:%I:%M:%S}.{microsecond:06d} {end:%p}" if microsecond else end.strftime("%I:%M:%S %p")
+    )
+    assert expected in spoken and expected_end in spoken
+    assert env.writes.inserts == []
+    added = await env.approval.input("yes")
+    assert "confirmed this exact event was added" in added.answer
+    assert env.writes.inserts[0]["start"]["dateTime"] == start.isoformat()
+    assert env.writes.inserts[0]["end"]["dateTime"] == end.isoformat()
+
+
+@pytest.mark.asyncio
 async def test_voice_ranked_displacement_is_certified_minimized_and_unapplied(
     calendar_voice_env,
     study_env,

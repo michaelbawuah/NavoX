@@ -23,6 +23,9 @@ signup, login, memory change, quota reset or runtime configuration change.
   transport at most 135 seconds. Transport USD remains explicitly UNKNOWN when
   its price is absent; no combined dollar total or zero transport price is claimed.
   Unchanged native quotas and metering still apply.
+  Wall-clock checks run independently of pending usage-status requests; a slow
+  usage response cannot defer the cutoff. The offline self-test holds a usage
+  request across the cutoff and verifies immediate retirement without a live call.
   The explicit `neutral-private-only` continuation permits exactly two new calls
   after one root-verified prior call. Its prior provider estimate and transport
   duration are subtracted from the original $2 / 135-second limits, and its
