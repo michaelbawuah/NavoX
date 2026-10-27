@@ -793,6 +793,7 @@ export function createLiveKitVoxTransport(options: {
               return;
             }
             remoteTracks.add(track);
+            agentReady?.();
             play(track);
           },
           trackUnsubscribed(track) {
@@ -853,15 +854,29 @@ export function createLiveKitVoxTransport(options: {
           room.identity() !== lease.participantIdentity
         )
           throw unavailable();
-        if (!room.hasParticipant(lease.agentIdentity)) {
+        // Presence precedes worker warm-up and input setup. The leased agent
+        // publishes its output only after those boundaries are ready; subscribe
+        // before waiting so already-present publications are handled as well.
+        const agentAudioReady = () =>
+          fresh() &&
+          visible() &&
+          room?.isConnected() === true &&
+          room.name() === lease?.roomName &&
+          room.identity() === lease?.participantIdentity &&
+          room.hasParticipant(lease?.agentIdentity ?? "") &&
+          (!request.mayRenewReservation || request.mayRenewReservation()) &&
+          remoteTracks.size > 0;
+        room.subscribeAgent(lease.agentIdentity);
+        if (!agentAudioReady()) {
           await new Promise<void>((resolve, reject) => {
-            agentReady = resolve;
+            agentReady = () => {
+              if (agentAudioReady()) resolve();
+            };
             agentFailed = () => reject(unavailable());
             agentTimer = setTimeout(() => reject(unavailable()), 15_000);
           });
         }
-        if (!fresh() || !room.hasParticipant(lease.agentIdentity))
-          throw unavailable();
+        if (!agentAudioReady()) throw unavailable();
         if (agentTimer !== null) clearTimeout(agentTimer);
         agentReady = agentFailed = null;
         joined = true;
@@ -909,7 +924,6 @@ export function createLiveKitVoxTransport(options: {
               });
           },
         });
-        room.subscribeAgent(lease.agentIdentity);
         if (!fresh() || !joined) throw unavailable();
         timer = setInterval(() => {
           resumeSignalling();

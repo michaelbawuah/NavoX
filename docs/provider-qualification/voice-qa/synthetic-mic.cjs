@@ -9,6 +9,7 @@ function installSyntheticMic() {
     contextsCreated: 0, contextsClosed: 0, fixturePlays: 0,
     injectedSamples: 0, closed: false, current: null, peers: [],
     playbackResolved: 0, dataFrames: 0, dataBytes: 0,
+    remoteAudioTracks: new Set(), attemptedAudioElements: new Set(), playingAudioElements: new Set(),
   };
   devices.getUserMedia = async function(constraints) {
     if (!constraints || !constraints.audio || constraints.video) {
@@ -81,6 +82,9 @@ function installSyntheticMic() {
     window.RTCPeerConnection = new Proxy(NativePeer, { construct(Target, args) {
       const peer = new Target(...args);
       state.peers.push(peer);
+      peer.addEventListener('track', event => {
+        if (event.track.kind === 'audio') state.remoteAudioTracks.add(event.track);
+      });
       const observe = channel => channel.addEventListener('message', event => {
         state.dataFrames++;
         state.dataBytes += typeof event.data === 'string' ? event.data.length : event.data?.byteLength || event.data?.size || 0;
@@ -93,9 +97,19 @@ function installSyntheticMic() {
   }
   const play = HTMLMediaElement.prototype.play;
   HTMLMediaElement.prototype.play = function(...args) {
+    if (this.tagName === 'AUDIO' && !this.muted) {
+      for (const track of this.srcObject?.getAudioTracks?.() || []) {
+        if (state.remoteAudioTracks.has(track) && track.readyState === 'live') state.attemptedAudioElements.add(this);
+      }
+    }
     const result = play.apply(this, args);
     return Promise.resolve(result).then(value => {
-      if (this.tagName === 'AUDIO' && !this.muted) state.playbackResolved++;
+      if (this.tagName === 'AUDIO' && !this.muted) {
+        state.playbackResolved++;
+        for (const track of this.srcObject?.getAudioTracks?.() || []) {
+          if (state.remoteAudioTracks.has(track) && track.readyState === 'live') state.playingAudioElements.add(this);
+        }
+      }
       return value;
     });
   };

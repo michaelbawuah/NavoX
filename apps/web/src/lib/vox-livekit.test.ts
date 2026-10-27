@@ -67,6 +67,8 @@ function token(changes: Record<string, unknown> = {}) {
 class FakeRoom implements VoxLiveKitRoom {
   events: VoxRoomEvents | null = null;
   participants = new Set([agent]);
+  readyAudio: ReturnType<typeof remoteAudio>["track"] | null =
+    readyAudio().track;
   name = vi.fn(() => "navox-room");
   isConnected = vi.fn(() => true);
   identity = vi.fn(() => participant);
@@ -81,7 +83,10 @@ class FakeRoom implements VoxLiveKitRoom {
     this.events = events;
     return this.unlisten;
   }
-  subscribeAgent = vi.fn();
+  subscribeAgent = vi.fn((identity: string) => {
+    if (identity === agent && this.participants.has(agent) && this.readyAudio)
+      this.events?.trackSubscribed(this.readyAudio, agent);
+  });
   publishAudio = vi.fn(
     async (_track: LocalAudioTrack, _identity: string) => {},
   );
@@ -199,6 +204,26 @@ function remoteAudio() {
   return { track, element };
 }
 
+function readyAudio() {
+  // A silent server output publication without jsdom media-element timers.
+  const element = {
+    muted: true,
+    autoplay: false,
+    srcObject: null,
+    play: vi.fn(async () => {}),
+    pause: vi.fn(),
+    remove: vi.fn(),
+  } as unknown as HTMLAudioElement;
+  return {
+    element,
+    track: {
+      kind: "audio",
+      attach: vi.fn(() => element),
+      detach: vi.fn(() => [] as HTMLAudioElement[]),
+    },
+  };
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(1_800_000_000_000);
@@ -266,6 +291,104 @@ describe("qualified LiveKit Vox adapter", () => {
     await rejected;
     expect(absent.factory.create).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps a present agent connecting until its exact audio output is subscribed", async () => {
+    const env = environment();
+    env.room.readyAudio = null;
+    let resolved = false;
+    const pending = env.transport.connect(env.request).then((value) => {
+      resolved = true;
+      return value;
+    });
+    await settle();
+    expect(resolved).toBe(false);
+    expect(env.factory.create).not.toHaveBeenCalled();
+    const foreign = remoteAudio(),
+      video = remoteAudio(),
+      own = remoteAudio();
+    env.room.events?.trackSubscribed(foreign.track, "foreign-agent");
+    env.room.events?.trackSubscribed({ ...video.track, kind: "video" }, agent);
+    env.room.events?.trackPublished(agent);
+    await settle();
+    expect(resolved).toBe(false);
+    expect(foreign.track.detach).toHaveBeenCalled();
+    expect(env.factory.create).not.toHaveBeenCalled();
+    env.room.events?.trackSubscribed(own.track, agent);
+    const connection = await pending;
+    expect(resolved).toBe(true);
+    expect(env.factory.create).not.toHaveBeenCalled();
+    connection.setMicrophoneEnabled(true);
+    await settle();
+    expect(env.factory.create).toHaveBeenCalledOnce();
+    await connection.close();
+  });
+  it("retains an owned audio subscription received during the initial SDK join", async () => {
+    const env = environment();
+    const own = remoteAudio();
+    env.room.readyAudio = null;
+    env.room.connect.mockImplementation(async () => {
+      env.room.events?.trackSubscribed(own.track, agent);
+    });
+    const connection = await env.transport.connect(env.request);
+    expect(env.factory.create).not.toHaveBeenCalled();
+    expect(env.room.subscribeAgent).toHaveBeenCalledWith(agent);
+    await connection.close();
+  });
+  it("times out a present agent with no audio and never opens the microphone", async () => {
+    const env = environment();
+    env.room.readyAudio = null;
+    const rejected = expect(env.transport.connect(env.request)).rejects.toThrow(
+      "unavailable",
+    );
+    await settle();
+    await vi.advanceTimersByTimeAsync(15000);
+    await rejected;
+    expect(env.factory.create).not.toHaveBeenCalled();
+    expect(env.room.publishAudio).not.toHaveBeenCalled();
+    expect(env.lease.close).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it("does not accept an output subscription after current owner authority is revoked", async () => {
+    const env = environment();
+    env.room.readyAudio = null;
+    const rejected = expect(env.transport.connect(env.request)).rejects.toThrow(
+      "unavailable",
+    );
+    await settle();
+    env.request.mayRenewReservation = () => false;
+    env.room.events?.trackSubscribed(readyAudio().track, agent);
+    await vi.advanceTimersByTimeAsync(15000);
+    await rejected;
+    expect(env.factory.create).not.toHaveBeenCalled();
+    expect(env.room.publishAudio).not.toHaveBeenCalled();
+  });
+  it("ignores audio arriving after abort and a subscription retired before join completion", async () => {
+    const env = environment();
+    env.room.readyAudio = null;
+    const rejected = expect(env.transport.connect(env.request)).rejects.toThrow(
+      "unavailable",
+    );
+    await settle();
+    const receive = env.room.events?.trackSubscribed;
+    env.abort.abort();
+    await rejected;
+    const stale = remoteAudio();
+    receive?.(stale.track, agent);
+    expect(stale.track.detach).toHaveBeenCalled();
+    expect(env.factory.create).not.toHaveBeenCalled();
+    const retired = environment();
+    retired.room.readyAudio = null;
+    const refusal = expect(
+      retired.transport.connect(retired.request),
+    ).rejects.toThrow("unavailable");
+    await settle();
+    const own = remoteAudio();
+    retired.room.events?.trackSubscribed(own.track, agent);
+    retired.room.events?.trackUnsubscribed(own.track);
+    await refusal;
+    expect(retired.factory.create).not.toHaveBeenCalled();
+    expect(retired.lease.close).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -1324,6 +1447,7 @@ describe("qualified LiveKit Vox adapter", () => {
     const listeners = new Map<string, (...args: unknown[]) => void>();
     const connect = vi.fn(async () => {});
     const disconnect = vi.fn(async () => {});
+    const ready = readyAudio();
     const Room = vi.fn(
       class {
         constructor(
@@ -1337,7 +1461,25 @@ describe("qualified LiveKit Vox adapter", () => {
         state = "connected";
         localParticipant = { identity: participant };
         remoteParticipants = new Map([
-          [agent, { trackPublications: new Map() }],
+          [
+            agent,
+            {
+              trackPublications: new Map([
+                [
+                  "ready",
+                  {
+                    kind: "audio",
+                    setSubscribed: () =>
+                      listeners.get("trackSubscribed")?.(
+                        ready.track,
+                        {},
+                        { identity: agent },
+                      ),
+                  },
+                ],
+              ]),
+            },
+          ],
         ]);
         connect = connect;
         disconnect = disconnect;

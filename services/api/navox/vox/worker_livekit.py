@@ -713,17 +713,21 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             on("participant_metadata_changed", metadata_changed)
             on("reconnecting", reconnecting)
             on("disconnected", disconnected)
+            for participant in ctx.room.remote_participants.values():
+                participant_connected(participant)
+            spawn(audio_input.consume(receive_frame))
+            if isinstance(worker, ConfiguredVoiceWorker):
+                spawn(usage.heartbeat())
+            # The owned output track is the client's readiness boundary. Install
+            # input handling first so immediate client speech survives publication.
             track = rtc.LocalAudioTrack.create_audio_track("navox-vox", source)
             await check()
             await ctx.room.local_participant.publish_track(
                 track, rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)
             )
-            for participant in ctx.room.remote_participants.values():
-                participant_connected(participant)
-            spawn(audio_input.consume(receive_frame))
+            # Queued text commands may produce audio, so consume them only after
+            # output publication succeeds.
             spawn(watch())
-            if isinstance(worker, ConfiguredVoiceWorker):
-                spawn(usage.heartbeat())
             # An unused dispatch must not occupy the single worker indefinitely.
             try:
                 await asyncio.wait_for(stopped.wait(), timeout=20)

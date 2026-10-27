@@ -23,6 +23,11 @@ signup, login, memory change, quota reset or runtime configuration change.
   transport at most 135 seconds. Transport USD remains explicitly UNKNOWN when
   its price is absent; no combined dollar total or zero transport price is claimed.
   Unchanged native quotas and metering still apply.
+  The explicit `neutral-private-only` continuation permits exactly two new calls
+  after one root-verified prior call. Its prior provider estimate and transport
+  duration are subtracted from the original $2 / 135-second limits, and its
+  report retains the three-call ceiling. Missing prior usage refuses execution.
+  A scoped pass covers only the selected profile.
 - `run_on_isolated.py`: exact source/config/pricing preflight, parent-owned
   in-memory session, stdin-only transfer to the browser child, emergency call
   retirement, scoped erasure and logout. No credential is written to files or
@@ -33,6 +38,10 @@ signup, login, memory change, quota reset or runtime configuration change.
   reported for context and is never required or enabled by this harness. Current
   consent/generation/native availability are checked through GET `/memory/learning`
   after an authorized test session exists.
+  The loopback registration session is revoked immediately before HTTPS login,
+  using its exact cookie in memory even when Secure prevents automatic loopback
+  transmission. The same revoked cookie must then fail `/auth/me` with 401.
+  Final cleanup separately revokes the HTTPS session.
 
 ## Flow after root approval
 
@@ -48,6 +57,30 @@ signup, login, memory change, quota reset or runtime configuration change.
    intentionally uses a fixed Settings instruction and no invented RTC topic.
 3. Third call: verify neutral cross-call recall, the enforced notice prefix before
    historical excerpts, and withholding of the privately saved second source.
+
+The `neutral-private-only` profile runs steps 1–2 and never starts step 3. Its
+cross-call recall, historical host notice and private withholding fields remain
+`not_run` with `live_qualified: false`. Those checks require future authorized
+qualification; the two-call result must not be described as full qualification.
+
+Before any fixture, the harness requires current native remote audio attachment,
+an attached audio element with a play attempt for that live remote track, a live
+synthetic input track and outbound RTP. A silent worker may leave play pending
+until its first reply; pre-speech readiness permits that. Post-response checks
+still require resolved playback, live playing output and increased received
+bytes/energy. The product admits only the leased agent's output audio and now
+waits for its actual output subscription. An enabled textbox by itself is not
+sufficient, and no arbitrary startup sleep substitutes for readiness. Completed
+dialogue counts and revision numbers expose unexpected split-turn behavior
+without retaining questions or answers.
+
+Unexpected writes remain blocked. Diagnostics contain only an HTTP-method enum,
+a predefined route template (or `unclassified`) and a pathname hash; query data,
+bodies and arbitrary raw paths are never recorded. The one additional permitted
+home restore write is exact POST `/workspace/timezone/initialize`, with exactly
+the three expected keys, the current in-memory owner IDs and the browser's
+validated timezone. Only its fixed route and count enter evidence. Ordinary
+assistant session creation and provider writes remain blocked.
 
 The parent then erases QA memory and disables History, ends any owned reservation,
 logs out the same session and preserves billing/audit records. No email/calendar
@@ -87,6 +120,17 @@ Only root may decide that pricing/contract/source readiness is satisfied and iss
 ```bash
 python3 /srv/navox-vox-test/browser/voice-qualification/run_on_isolated.py authorized-run FULL_SHA --root-explicitly-authorized-live-provider-calls
 ```
+
+For an approved continuation after exactly one settled call, root must provide
+the independently verified prior usage values to both preflight and execution:
+
+```bash
+python3 /srv/navox-vox-test/browser/voice-qualification/run_on_isolated.py preflight FULL_SHA --profile neutral-private-only --prior-provider-usd VERIFIED_USD --prior-connected-ms VERIFIED_MS --prior-call-count 1
+python3 /srv/navox-vox-test/browser/voice-qualification/run_on_isolated.py authorized-run FULL_SHA --profile neutral-private-only --prior-provider-usd VERIFIED_USD --prior-connected-ms VERIFIED_MS --prior-call-count 1 --root-explicitly-authorized-live-provider-calls
+```
+
+The placeholders are mandatory, non-secret billing metadata, not inferred
+estimates. No command above authorizes itself; root still controls execution.
 
 `--stt-billing-shape duration` is the default only for exact `gpt-transcribe`,
 whose duration contract root verified. It never adds missing prices or changes

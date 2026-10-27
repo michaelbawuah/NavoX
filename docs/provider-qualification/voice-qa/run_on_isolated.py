@@ -38,9 +38,13 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def api(opener, resource, *, method="GET", body=None, account=None, loopback=False):
+def api(opener, resource, *, method="GET", body=None, account=None, loopback=False, private_loopback_cookie=None):
     base = "http://127.0.0.1:18000" if loopback else SITE
     headers = {"Origin": SITE, "Cache-Control": "no-store"}
+    if private_loopback_cookie is not None:
+        if not loopback or resource not in ("/auth/logout", "/auth/me"):
+            raise ValueError("Private registration cookie is loopback-revocation-only")
+        headers["Cookie"] = private_loopback_cookie
     if account:
         headers["X-NavoX-Account"] = account
     if body is not None:
@@ -75,6 +79,28 @@ def nonnegative(value):
     except Exception:
         return False
     return value is not None and parsed.is_finite() and parsed >= 0
+
+
+def qualification_limits(profile, prior_provider_usd=None, prior_connected_ms=None, prior_call_count=None):
+    """Root supplies preserved, settled usage; this never resets an allowance."""
+    limits = {"profile": profile, "max_calls": 3, "prior_call_count": 0,
+              "total_call_ceiling": 3, "prior_provider_usd": "0", "prior_connected_ms": 0,
+              "remaining_provider_usd": "2", "remaining_transport_ms": 135000}
+    if profile == "full-three-calls":
+        if any(value is not None for value in (prior_provider_usd, prior_connected_ms, prior_call_count)):
+            raise ValueError("Prior usage requires the explicit continuation profile")
+        return limits
+    if profile != "neutral-private-only" or prior_call_count != 1:
+        raise ValueError("Continuation requires exactly one root-verified prior call")
+    if not nonnegative(prior_provider_usd) or Decimal(str(prior_provider_usd)) >= 2:
+        raise ValueError("Continuation provider estimate is unknown or exhausted")
+    if type(prior_connected_ms) is not int or not 0 < prior_connected_ms <= 45000:
+        raise ValueError("Continuation needs verified time and two remaining call windows")
+    cost = Decimal(str(prior_provider_usd))
+    return {**limits, "max_calls": 2, "prior_call_count": 1,
+            "prior_provider_usd": str(cost), "prior_connected_ms": prior_connected_ms,
+            "remaining_provider_usd": str(Decimal(2) - cost),
+            "remaining_transport_ms": 135000 - prior_connected_ms}
 
 
 def native_binding(ops, sha):
@@ -184,6 +210,29 @@ def cookies_for_browser(jar):
     return [{"name": cookie.name, "value": cookie.value, "url": SITE, "httpOnly": cookie.has_nonstandard_attr("HttpOnly"), "secure": cookie.secure, "sameSite": "Lax", **({"expires": cookie.expires} if cookie.expires else {})} for cookie in jar if cookie.domain.lstrip(".") == host]
 
 
+def revoke_registration_session(opener, jar):
+    # Secure cookies are stored but not automatically sent over loopback HTTP.
+    # Present this exact registration cookie only for immediate revocation and
+    # a negative /me proof; its value never leaves RAM or enters diagnostics.
+    cookies = [cookie for cookie in jar if cookie.domain.lstrip(".") == "127.0.0.1"]
+    if len(cookies) != 1:
+        raise RuntimeError("Exact loopback registration session unavailable")
+    cookie = cookies[0]
+    private_cookie = cookie.name + "=" + cookie.value
+    status, value = api(opener, "/auth/logout", method="POST", body={}, loopback=True,
+                        private_loopback_cookie=private_cookie)
+    if status != 200 or value != {"status": "signed_out"}:
+        raise RuntimeError("Registration session revocation unconfirmed")
+    status, _ = api(opener, "/auth/me", loopback=True, private_loopback_cookie=private_cookie)
+    if status != 401:
+        raise RuntimeError("Registration session remained authorized")
+    try:
+        jar.clear(cookie.domain, cookie.path, cookie.name)
+    except KeyError:
+        pass  # The logout response may already have expired this cookie.
+    return True
+
+
 def cleanup(opener, account_key):
     outcome = {"call_stopped": False, "qa_memory_erased": False, "history_disabled": False, "test_session_logged_out": False}
     try:
@@ -221,11 +270,18 @@ def main():
     parser.add_argument("mode", choices=("preflight", "authorized-run"))
     parser.add_argument("sha")
     parser.add_argument("--stt-billing-shape", choices=("tokens", "duration"), default="duration")
+    parser.add_argument("--profile", choices=("full-three-calls", "neutral-private-only"), default="full-three-calls")
+    parser.add_argument("--prior-provider-usd")
+    parser.add_argument("--prior-connected-ms", type=int)
+    parser.add_argument("--prior-call-count", type=int)
     parser.add_argument("--root-explicitly-authorized-live-provider-calls", action="store_true")
     arguments = parser.parse_args()
     if not re.fullmatch("[a-f0-9]{40}", arguments.sha):
         raise ValueError("Full immutable source SHA required")
+    limits = qualification_limits(arguments.profile, arguments.prior_provider_usd,
+                                  arguments.prior_connected_ms, arguments.prior_call_count)
     public, private = preflight(arguments.sha, arguments.stt_billing_shape)
+    public["qualification_limits"] = limits
     if arguments.mode == "preflight":
         print(json.dumps(public))
         return
@@ -237,12 +293,15 @@ def main():
     jar = http.cookiejar.CookieJar()
     opener = urllib.request.build_opener(NoRedirect(), urllib.request.HTTPCookieProcessor(jar))
     secret = {"email": "voice-qualified-" + secrets.token_hex(12) + "@example.com", "password": secrets.token_urlsafe(32), "display_name": "Synthetic spoken voice QA"}
-    report = {"sha": arguments.sha, "scope": "isolated-test", "provider_calls_authorized": True, "source_preflight": public, "passed": False}
+    report = {"sha": arguments.sha, "scope": "isolated-test", "provider_calls_authorized": True,
+              "qualification_limits": limits, "pass_scope": "selected-profile-only",
+              "source_preflight": public, "registration_session_revoked": False, "passed": False}
     account_key = None
     child = None
     name = None
     try:
         registered = required(opener, "/auth/register", method="POST", body=secret, loopback=True)
+        report["registration_session_revoked"] = revoke_registration_session(opener, jar)
         account = required(opener, "/auth/login", method="POST", body={"email": secret["email"], "password": secret["password"]})
         if (registered["id"], registered["workspace"]["id"]) != (account["id"], account["workspace"]["id"]):
             raise RuntimeError("Synthetic account scope changed")
@@ -255,6 +314,10 @@ def main():
         secret.clear()
         name = PROJECT + "-voice-qualification-" + secrets.token_hex(6)
         command = ["docker", "run", "--rm", "-i", "--name", name, "--network", "host", "--memory", "1g", "--cpus", "2", "--shm-size", "512m", "-v", str(ROOT / "browser") + ":/test", "-w", "/test", IMAGE, "node", "/test/voice-qualification/qualify.cjs", "--authorized-live-voice-qualification", arguments.sha]
+        if limits["profile"] == "neutral-private-only":
+            command.extend(["--profile", limits["profile"], "--prior-provider-usd", limits["prior_provider_usd"],
+                            "--prior-connected-ms", str(limits["prior_connected_ms"]),
+                            "--prior-call-count", str(limits["prior_call_count"])])
         LIVE_CALLS_MAY_HAVE_STARTED = True
         child = subprocess.run(command, input=json.dumps(payload), text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300)
         payload.clear()
@@ -273,6 +336,12 @@ def main():
     except Exception as error:
         report["failure_class"] = type(error).__name__
     finally:
+        if not report["registration_session_revoked"] and any(cookie.domain.lstrip(".") == "127.0.0.1" for cookie in jar):
+            try:
+                report["registration_session_revoked"] = revoke_registration_session(opener, jar)
+            except Exception as error:
+                report["registration_cleanup_failure_class"] = type(error).__name__
+                report["passed"] = False
         if name:
             # A timeout kills the Docker CLI, not necessarily its container.
             # Stop only this helper before recovering the same owned session.
@@ -303,7 +372,7 @@ def main():
         report["private_configuration_unchanged"] = private["configuration_hashes"] == {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in private["configuration_hashes"]}
         policy_row = json.loads(ops.psql("SELECT json_build_object('revision',revision,'definition',definition) FROM vox_usage_policy WHERE id=1"))
         report["policy_unchanged"] = private["policy_hash"] == hashlib.sha256(json.dumps(policy_row, sort_keys=True).encode()).hexdigest()
-        report["passed"] &= report["private_configuration_unchanged"] and report["policy_unchanged"]
+        report["passed"] &= report["registration_session_revoked"] and report["private_configuration_unchanged"] and report["policy_unchanged"]
         report["source_scope"] = "isolated-test-only; main/public production unchanged"
         report["physical_phone_acceptance"] = False
         destination = DIRECTORY / ("result-" + arguments.sha[:12] + "-" + dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ") + ".json")

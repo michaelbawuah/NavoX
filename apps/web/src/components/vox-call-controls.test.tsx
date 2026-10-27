@@ -186,6 +186,21 @@ async function clickHome() {
 }
 
 describe("Home entry shares the app-scoped Vox call", () => {
+  it("marks media readiness only for the current verified active connection", async () => {
+    const test = rig(),
+      joined = deferred<ReturnType<typeof test.join>>();
+    test.transport.connect.mockImplementationOnce(async (request) => {
+      test.requests.push(request);
+      return joined.promise;
+    });
+    await test.mount();
+    await click("Talk with NavoX");
+    expect(dialog().getAttribute("data-vox-media-ready")).toBe("false");
+    await act(async () => joined.resolve(test.join(test.requests[0])));
+    expect(dialog().getAttribute("data-vox-media-ready")).toBe("true");
+    await click("Hang up");
+    expect(dialog().getAttribute("data-vox-media-ready")).toBe("false");
+  });
   it("shows verified off-record status in the expanded and minimized call", async () => {
     const test = rig();
     vi.mocked(fetch).mockImplementation(async (url, options) => {

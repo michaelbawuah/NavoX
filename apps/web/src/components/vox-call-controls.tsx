@@ -299,6 +299,9 @@ function CallDialog({
     <dialog
       ref={dialog}
       className={styles.dialog}
+      data-vox-media-ready={
+        state.ownerVerified && state.phase === "active" ? "true" : "false"
+      }
       aria-labelledby={`${id}-title`}
       aria-describedby={`${id}-detail`}
       aria-modal="true"
