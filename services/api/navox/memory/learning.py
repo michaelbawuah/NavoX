@@ -13,6 +13,7 @@ import re
 from datetime import datetime, timedelta
 from typing import Any, Literal
 from uuid import UUID, uuid4, uuid5
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field
 from sqlalchemy import delete, func, select
@@ -58,7 +59,10 @@ def unavailable() -> MemoryError:
 
 
 def source_digest(
-    settings: Settings, source: MemoryConversation, turns: list[dict[str, Any]]
+    settings: Settings,
+    source: MemoryConversation,
+    turns: list[dict[str, Any]],
+    timezones: dict[str, Any] | None = None,
 ) -> str:
     # A keyed digest prevents low-entropy personal statements from becoming a
     # dictionary-testable plaintext metadata fingerprint.
@@ -72,8 +76,16 @@ def source_digest(
         if value is not None and value.get_secret_value()
     )
     key = hashlib.sha256(b"memory-learning-proof.v1:" + secret.encode()).digest()
+    proof: list[Any] = [str(source.user_id), str(source.workspace_id), str(source.id), turns]
+    recorded = {
+        str(index): timezones[str(index)]
+        for index, turn in enumerate(turns)
+        if turn["role"] == "user" and timezones is not None and str(index) in timezones
+    }
+    if recorded:
+        proof.append({"recorded_turn_timezones": recorded})
     payload = json.dumps(
-        [str(source.user_id), str(source.workspace_id), str(source.id), turns],
+        proof,
         ensure_ascii=True,
         sort_keys=True,
         separators=(",", ":"),
@@ -100,6 +112,7 @@ def retained_turns(transcript: dict[str, Any]) -> list[dict[str, Any]]:
 def selected_turns(
     turns: list[dict[str, Any]],
     sequences: dict[str, int] | None = None,
+    timezones: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     # Whole completed student messages only. Long turns are unavailable, never
     # truncated into an apparent neutral declaration or a fabricated quotation.
@@ -109,10 +122,21 @@ def selected_turns(
             "content": turn["content"],
             "created_at": turn["created_at"],
             "sequence": (sequences or {}).get(str(index)),
+            "timezone": recorded_timezone((timezones or {}).get(str(index))),
         }
         for index, turn in enumerate(turns)
         if turn["role"] == "user" and 1 <= len(turn["content"]) <= 500
     ][-MAX_SOURCE_TURNS:]
+
+
+def recorded_timezone(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        ZoneInfo(value)
+    except (ValueError, ZoneInfoNotFoundError):
+        return None
+    return value
 
 
 async def enqueue_learning(
@@ -175,7 +199,7 @@ async def enqueue_learning(
         generation=source.generation,
         sequence=source.last_sequence,
         message_count=len(turns),
-        source_digest=source_digest(settings, source, turns),
+        source_digest=source_digest(settings, source, turns, transcript.get("turn_timezones")),
         status="queued",
         pending_count=0,
         task_id=uuid4(),
@@ -252,7 +276,10 @@ async def current_source(
     if (
         len(turns) < job.message_count
         or not hmac.compare_digest(
-            source_digest(settings, source, turns[: job.message_count]), job.source_digest
+            source_digest(
+                settings, source, turns[: job.message_count], transcript.get("turn_timezones")
+            ),
+            job.source_digest,
         )
         or transcript.get("recall_superseded")
         or (
@@ -269,7 +296,11 @@ async def current_source(
     return (
         source,
         transcript,
-        selected_turns(turns[: job.message_count], transcript.get("turn_sequences")),
+        selected_turns(
+            turns[: job.message_count],
+            transcript.get("turn_sequences"),
+            transcript.get("turn_timezones"),
+        ),
     )
 
 
@@ -285,7 +316,9 @@ def evidence(quote: EvidenceQuote, turns: list[dict[str, Any]]) -> dict[str, Any
     return matches[0]
 
 
-def neutral_fragment(turn: dict[str, Any], quote: str, *, timezone: str, now: datetime) -> bool:
+def neutral_fragment(
+    turn: dict[str, Any], quote: str, *, timezone: str | None, now: datetime
+) -> bool:
     text = turn["content"]
     sentences = [part.strip() for part in re.split(r"(?<=[.!])\s+", text)]
     if (
@@ -298,10 +331,12 @@ def neutral_fragment(turn: dict[str, Any], quote: str, *, timezone: str, now: da
     # Positive certification of the whole parent prevents a model from selecting
     # first-person words that the student is merely reporting or reading aloud.
     for sentence in sentences:
-        parent = derive_literal_turn(sentence, timezone=timezone, now=now)
+        # UTC is only a grammar-certification basis for legacy non-date facts;
+        # no semantic thread is created without a recorded source timezone.
+        parent = derive_literal_turn(sentence, timezone=timezone or "UTC", now=now)
         if not (parent.facts or parent.threads):
             return False
-    result = derive_literal_turn(quote, timezone=timezone, now=now)
+    result = derive_literal_turn(quote, timezone=timezone or "UTC", now=now)
     return bool(result.facts or result.threads)
 
 
@@ -336,8 +371,6 @@ async def apply_learning(
     if job.status != "processing" or job.claim_id != claim_id:
         raise unavailable()
     validate_output(output, turns)
-    user = await database.get(User, job.user_id)
-    assert user is not None
     from navox.memory.extraction import learn_completed_turn
 
     old_fact_rows = await database.execute(
@@ -376,9 +409,12 @@ async def apply_learning(
     for index, item in ordered_facts:
         turn = evidence(item, turns)
         observed = history.utc(datetime.fromisoformat(turn["created_at"]))
+        source_timezone = turn.get("timezone")
         if (
-            neutral_fragment(turn, item.quote, timezone=user.timezone, now=observed)
-            and derive_literal_turn(item.quote, timezone=user.timezone, now=observed).facts
+            neutral_fragment(turn, item.quote, timezone=source_timezone, now=observed)
+            and derive_literal_turn(
+                item.quote, timezone=source_timezone or "UTC", now=observed
+            ).facts
         ):
             await learn_completed_turn(
                 database,
@@ -392,6 +428,7 @@ async def apply_learning(
                 source_turn_index=turn["turn_index"],
                 source_turn_sequence=turn.get("sequence"),
                 source_span_start=turn["content"].find(item.quote),
+                source_timezone=source_timezone,
             )
         else:
             quote_digest = hashlib.sha256(item.quote.encode()).hexdigest()
@@ -411,9 +448,14 @@ async def apply_learning(
     for thread_item in output.threads if source.last_sequence == job.sequence else ():
         turn = evidence(thread_item, turns)
         observed = history.utc(datetime.fromisoformat(turn["created_at"]))
+        source_timezone = turn.get("timezone")
+        if source_timezone is None:
+            continue
         if (
-            neutral_fragment(turn, thread_item.quote, timezone=user.timezone, now=observed)
-            and derive_literal_turn(thread_item.quote, timezone=user.timezone, now=observed).threads
+            neutral_fragment(turn, thread_item.quote, timezone=source_timezone, now=observed)
+            and derive_literal_turn(
+                thread_item.quote, timezone=source_timezone, now=observed
+            ).threads
         ):
             await learn_completed_turn(
                 database,
@@ -427,6 +469,7 @@ async def apply_learning(
                 source_turn_index=turn["turn_index"],
                 source_turn_sequence=turn.get("sequence"),
                 source_span_start=turn["content"].find(thread_item.quote),
+                source_timezone=source_timezone,
             )
     await database.flush()
     new_fact_rows = await database.execute(

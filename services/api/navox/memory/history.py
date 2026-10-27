@@ -29,6 +29,7 @@ from navox.db.conversation_memory import (
     MemoryThread,
 )
 from navox.db.memory import OwnerMemory
+from navox.db.models import User
 from navox.memory.history_schemas import FactCreate, FactUpdate, PrivacyResponse, PrivacyUpdate
 from navox.memory.sensitivity import SENSITIVE as SENSITIVE
 from navox.memory.service import MemoryError, lock_owner
@@ -352,6 +353,11 @@ async def append_completed_turn(
     )
     # Provenance is native archive sequence, not an index guessed by a model.
     transcript.setdefault("turn_sequences", {})[str(len(turns) - 2)] = sequence
+    source_user = await database.get(User, user_id, populate_existing=True)
+    if source_user is not None:
+        # Relative language belongs to the timezone at this archived exchange,
+        # not a future profile setting. Keep it out of public HistoryTurn keys.
+        transcript.setdefault("turn_timezones", {})[str(len(turns) - 2)] = source_user.timezone
     from navox.memory.extraction import learn_completed_turn
 
     await learn_completed_turn(

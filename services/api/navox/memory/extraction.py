@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from navox.core.settings import Settings
 from navox.db.conversation_memory import MemoryConversation, MemoryFact, MemoryThread
 from navox.db.models import User
-from navox.memory.extraction_rules import derive_literal_turn, excluded_source
+from navox.memory.extraction_rules import LiteralExtraction, derive_literal_turn, excluded_source
 
 METHOD = "literal_v1"
 AUTOMATIC_METHODS = frozenset({METHOD, "semantic_v1"})
@@ -38,6 +38,7 @@ async def learn_completed_turn(
     source_turn_index: int | None = None,
     source_turn_sequence: int | None = None,
     source_span_start: int | None = None,
+    source_timezone: str | None = None,
 ) -> None:
     """Derive only recognized declarations, with exact source turn provenance."""
     from navox.memory import history
@@ -111,7 +112,12 @@ async def learn_completed_turn(
             ):
                 await database.delete(thread)
         return
-    extracted = derive_literal_turn(question, now=now, timezone=user.timezone)
+    timezone = source_timezone if method == "semantic_v1" else user.timezone
+    extracted = derive_literal_turn(question, now=now, timezone=timezone or "UTC")
+    if method == "semantic_v1" and source_timezone is None:
+        # Legacy history can still certify a date-independent neutral fact.
+        # It cannot supply an invented timezone for relative event dates.
+        extracted = LiteralExtraction(facts=extracted.facts, excluded=extracted.excluded)
     for candidate in extracted.facts:
         key = "employer" if candidate.key == "employer_departure" else candidate.key
         if any(
@@ -194,6 +200,7 @@ async def learn_completed_turn(
             value["source_turn_index"] = source_turn_index
             value["source_turn"] = source_turn_sequence
             value["source_span_start"] = source_span_start
+            value["source_timezone"] = source_timezone
         fact.source_conversation_id, fact.source_kind = source.id, source.source_kind
         fact.updated_at = now
         fact.encrypted_content = history.encrypt(

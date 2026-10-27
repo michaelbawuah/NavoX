@@ -23,7 +23,6 @@ from navox.ai.validation import compile_schema
 from navox.connectors.sync_state import database_now
 from navox.core.settings import Settings
 from navox.db.conversation_memory import MemoryLearningJob
-from navox.db.models import User
 from navox.intelligence.contracts import SourceDocument
 from navox.memory import history
 from navox.memory.learning import (
@@ -196,11 +195,10 @@ class LearningContext:
                 )
             except MemoryError:
                 raise ContextDenied("Memory learning source changed") from None
-            user = await database.get(User, task.user_id)
             payload = {
                 "schema_version": "conversation-memory-learning-input.v1",
                 "source_kind": source.source_kind,
-                "timezone": user.timezone if user else "UTC",
+                "date_basis": "recorded_source_turn_timezones_only; absent_means_unknown",
                 "completed_student_turns": self.turns,
                 "coverage": "last_eight_whole_student_messages_at_most_500_characters_each",
             }
