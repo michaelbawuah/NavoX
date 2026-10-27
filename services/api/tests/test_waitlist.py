@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from navox.api.middleware import ApplicationCORSMiddleware, RequestHardeningMiddleware
 from navox.api.waitlist import create_waitlist_app
+from navox.api.waitlist_service import create_app as create_standalone_app
+from navox.api.waitlist_service import initialize_database
 from navox.core.settings import Settings
 from navox.db.base import Base
 from navox.db.session import get_database_session
@@ -178,6 +180,27 @@ def test_production_cors_excludes_localhost():
     with patch("navox.api.waitlist.get_settings", return_value=settings):
         app = create_waitlist_app()
     assert app.user_middleware[0].kwargs["allow_origins"] == ["https://navox.net"]
+
+
+@pytest.mark.asyncio
+async def test_standalone_service_exposes_no_student_routes():
+    app = create_standalone_app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        for path in ["/docs", "/openapi.json", "/api/v1/auth/register", "/api/v1/student"]:
+            assert (await client.get(path)).status_code == 404
+        assert (
+            await client.options(
+                "/v1/waitlist",
+                headers={"Origin": "https://navox.net", "Access-Control-Request-Method": "POST"},
+            )
+        ).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_standalone_bootstrap_refuses_the_student_database():
+    with patch("navox.api.waitlist_service.get_settings", return_value=Settings(_env_file=None)):
+        with pytest.raises(RuntimeError, match="dedicated navox_waitlist"):
+            await initialize_database()
 
 
 def test_migration_upgrade_and_downgrade():

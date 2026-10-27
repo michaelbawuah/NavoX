@@ -26,5 +26,17 @@
         }
       ]
     }
+  ],
+  "redirects": [
+    {
+      "source": "/api/v1/connections/google/callback",
+      "destination": "https://app.navox.net/api/v1/connections/google/callback",
+      "statusCode": 307
+    },
+    {
+      "source": "/api/v1/connectors/canvas-lms/callback",
+      "destination": "https://app.navox.net/api/v1/connectors/canvas-lms/callback",
+      "statusCode": 307
+    }
   ]
 }

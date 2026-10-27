@@ -1,0 +1,9 @@
+# Reuse the qualified production API dependencies; no student app process is replaced.
+ARG NAVOX_API_IMAGE=navox-waitlist-base:qualified
+FROM ${NAVOX_API_IMAGE}
+WORKDIR /app
+COPY navox/api/waitlist.py navox/api/waitlist_service.py navox/api/middleware.py ./navox/api/
+COPY navox/db/waitlist.py ./navox/db/
+RUN uv pip install --python .venv/bin/python filelock==4.2.1
+EXPOSE 8000
+CMD ["uv", "run", "--no-sync", "uvicorn", "navox.api.waitlist_service:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

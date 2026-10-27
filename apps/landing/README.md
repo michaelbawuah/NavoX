@@ -21,7 +21,7 @@ The deployment itself needs no build command. Vercel project root: `apps/landing
 
 `POST /v1/waitlist` accepts `{ "email": "student@example.edu", "source": "landing" }`. EmailStr validation, lowercase normalization, a primary-key unique index, and shared database counters enforce 201 / 409 / 422 / 429. The limit is five requests per IP per fixed UTC minute; duplicate and invalid-email attempts count. Counters expire after two minutes. Responses and application logs never echo emails or database parameters. Run behind a trusted proxy that sets the ASGI client address; never expose the service directly or trust arbitrary forwarding headers.
 
-The isolated public subapp allows only `https://navox.net`, plus `http://localhost:8080` outside production. It does not change the application's existing authenticated CORS policy. Apply migration `0053_landing_waitlist` before enabling the endpoint.
+The isolated public subapp allows only `https://navox.net`, plus `http://localhost:8080` outside production. It does not change the application's existing authenticated CORS policy. Use `navox.api.waitlist_service` with the dedicated `navox_waitlist` database for an independent release; bootstrap with `python -m navox.api.waitlist_service`. It refuses the student database. The main-API migration `0053_landing_waitlist` must be reconciled with concurrent application migrations before a combined release.
 
 Keep the form without `data-endpoint` until a deployed API has passed its HTTP checks. Its initial and submitted message remains “Early-access sign-ups open soon. Check back here.” Then set `data-endpoint="https://api.navox.net/v1/waitlist"` on `#joinForm` in the source and rebuild.
 
