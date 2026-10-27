@@ -1,5 +1,4 @@
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 from navox.api.actions import router as actions_router
 from navox.api.agent import router as agent_router
@@ -29,7 +28,7 @@ from navox.api.knowledge_lifecycle import router as knowledge_lifecycle_router
 from navox.api.lms_feed import router as lms_feed_router
 from navox.api.mcp import router as mcp_router
 from navox.api.memory import router as memory_router
-from navox.api.middleware import RequestHardeningMiddleware
+from navox.api.middleware import ApplicationCORSMiddleware, RequestHardeningMiddleware
 from navox.api.news import router as news_router
 from navox.api.news_conversations import router as news_conversations_router
 from navox.api.news_following import router as news_following_router
@@ -52,6 +51,7 @@ from navox.api.subscriptions import router as subscriptions_router
 from navox.api.thread_watches import router as thread_watches_router
 from navox.api.today import router as today_router
 from navox.api.vox import router as vox_router
+from navox.api.waitlist import create_waitlist_app
 from navox.api.workspace import router as workspace_router
 from navox.core.settings import get_settings
 
@@ -64,7 +64,7 @@ def create_app() -> FastAPI:
         description="Policy-enforced API gateway for the NavoX AI Operations Platform.",
     )
     app.add_middleware(
-        CORSMiddleware,
+        ApplicationCORSMiddleware,
         allow_origins=[settings.web_origin],
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
@@ -79,6 +79,7 @@ def create_app() -> FastAPI:
         max_age=600,
     )
     app.add_middleware(RequestHardeningMiddleware)
+    app.mount("/v1", create_waitlist_app())
     app.include_router(canvas_router, prefix="/api/v1")
     app.include_router(import_router, prefix="/api/v1")
     app.include_router(generic_rest_router, prefix="/api/v1")

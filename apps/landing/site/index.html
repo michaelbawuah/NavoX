@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NavoX · your semester, on speaking terms</title>
+<meta name="description" content="NavoX is the voice-first personal assistant for college students. Talk to Vox and it plans your week, finds time, drafts the email to your professor, and teaches you on a whiteboard. Nothing happens without your yes.">
+<meta name="theme-color" content="#08090C" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://navox.net/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="NavoX · your semester, on speaking terms">
+<meta property="og:description" content="The voice-first assistant for college students. Every action waits for your yes.">
+<meta property="og:url" content="https://navox.net/">
+<meta property="og:image" content="https://navox.net/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="assets/landing.css">
+<script>
+  /* Apply the saved theme before first paint so there is no flash */
+  try {
+    var t = localStorage.getItem('navox-theme');
+    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+  } catch (e) {}
+</script>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="NavoX home">
+      <svg width="24" height="24" viewBox="0 0 22 22" aria-hidden="true"><rect x="2" y="7" width="3" height="8" rx="1.5" fill="var(--accent)"></rect><rect x="9.5" y="3" width="3" height="16" rx="1.5" fill="var(--accent)"></rect><rect x="17" y="6" width="3" height="10" rx="1.5" fill="var(--accent)"></rect></svg>
+      NavoX
+    </a>
+    <nav class="nav" aria-label="Sections">
+      <a href="#say">What it does</a>
+      <a href="#noa">Meet Noa</a>
+      <a href="#screens">The app</a>
+      <a href="#trust">Privacy</a>
+    </nav>
+    <div class="controls">
+      <div class="vibes" role="group" aria-label="Color vibe">
+        <button class="vibe" type="button" data-vibe="midnight" aria-label="Midnight vibe" style="background:#4FD1B5"></button>
+        <button class="vibe" type="button" data-vibe="lavender" aria-label="Lavender vibe" style="background:#B69CFF"></button>
+        <button class="vibe" type="button" data-vibe="sunset" aria-label="Sunset vibe" style="background:#FF8A5B"></button>
+        <button class="vibe" type="button" data-vibe="matcha" aria-label="Matcha vibe" style="background:#B5E550"></button>
+      </div>
+      <button class="icon-btn" id="theme" type="button" aria-label="Switch light or dark">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"></circle><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"></path></svg>
+      </button>
+      <a class="btn btn-primary" href="#join">Get early access</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <div class="wrap">
+      <div class="hero-copy">
+        <span class="pill"><i></i>The voice-first assistant for college students</span>
+        <h1>Your semester, on <span class="hl">speaking terms.</span></h1>
+        <p class="lede">Tap Vox and just talk. NavoX knows your classes, deadlines and free time. It plans your week, drafts the email to your professor, and teaches you on a whiteboard. Every action waits for your yes.</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#join">Get early access</a>
+          <button class="btn btn-ghost" id="replay" type="button">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"></path></svg>
+            Watch a call
+          </button>
+        </div>
+        <div class="facts"><span>Google, Outlook and Apple calendars</span><span>Any college</span><span>Nothing sent without your OK</span></div>
+      </div>
+
+      <div class="stage" id="stage" aria-label="A sample Vox call: Noa finds time in a student's week and adds the meeting">
+        <div class="week-box" id="weekBox">
+          <canvas id="week3d" role="img" aria-label="A student's week in 3D. Classes, a lab and shifts are raised blocks. Friday 3:30 to 4:30 is free and a new meeting drops into it."></canvas>
+          <div class="float" style="left: 4%; top: 2%"><span class="sticker" id="heroSticker" style="--r:-7deg">all ears</span></div>
+          <div class="float" style="right: 2%; top: 8%"><span class="sticker" style="--r:5deg; background: var(--sun); animation-delay: 1.5s">drag to turn your week</span></div>
+          <div class="noa-hero" id="noaHero"></div>
+          <div class="tip" id="weekTip" hidden></div>
+        </div>
+        <div class="week-legend" aria-hidden="true">
+          <span><i style="background:#B69CFF"></i>MATH 2940</span>
+          <span><i style="background:#7AA2F7"></i>CS 2110</span>
+          <span><i style="background:#2FB89A"></i>ECE 2300</span>
+          <span><i style="background:#FF8A9B"></i>ECE 2720</span>
+          <span><i style="background:#F5B14C"></i>Shifts</span>
+        </div>
+        <div class="chat" id="chat" aria-live="polite"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="says" aria-label="Things you can say">
+    <div class="says-plane">
+      <div class="track" id="trackA"></div>
+      <div class="track back" id="trackB"></div>
+    </div>
+  </section>
+
+  <section class="section inverse" id="say">
+    <div class="wrap" style="display:flex; flex-direction:column; gap:30px">
+      <div style="display:flex; flex-direction:column; gap:12px">
+        <span class="eyebrow">You say it</span>
+        <h2 style="font-size: var(--step-3); line-height: 1">Noa handles it.</h2>
+      </div>
+      <div class="tabs" role="tablist" aria-label="Examples" id="tabs"></div>
+      <div class="flip-row">
+        <div class="say-card"><span class="who">you</span><span class="q" id="sayQ"></span></div>
+        <div class="reply-card" id="reply" role="tabpanel"><span class="who">noa</span><p class="r" id="replyText"></p><div class="chips" id="replyChips"></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="features">
+    <div class="wrap" style="display:flex; flex-direction:column; gap:36px">
+      <div style="display:flex; flex-direction:column; gap:12px; max-width: 780px">
+        <span class="eyebrow">One tap. Everything handled.</span>
+        <h2 style="font-size: var(--step-3); line-height: 1.02">Not another app to manage. A friend who already looked at your week.</h2>
+      </div>
+      <div class="grid4">
+        <article class="tilt" data-tilt>
+          <div class="vis"><div class="bars" id="bigBars"></div></div>
+          <h3>Vox</h3>
+          <p>A hands-free call you can keep open all day. Interrupt it, ramble, go quiet. Say “Hey NavoX” and it picks up where you left off.</p>
+        </article>
+        <article class="tilt" data-tilt>
+          <div class="vis" style="gap:16px; justify-content:flex-start; padding: 0 18px">
+            <svg width="78" height="78" viewBox="0 0 84 84" aria-hidden="true"><circle cx="42" cy="42" r="34" fill="none" stroke="var(--line)" stroke-width="8"></circle><circle cx="42" cy="42" r="34" fill="none" stroke="var(--accent)" stroke-width="8" stroke-linecap="round" stroke-dasharray="150 214" transform="rotate(-90 42 42)"></circle><text x="42" y="49" text-anchor="middle" font-size="21" font-weight="700" fill="currentColor" font-family="Instrument Sans, sans-serif">15</text></svg>
+            <div style="display:flex; flex-direction:column; gap:4px"><span style="font-size:12px; color: var(--accent-text); font-weight:700">Next up · 15 min</span><strong>ECE 2300</strong><span style="font-size:12px; color:#F5B14C; font-weight:700">Leave by 12:20</span></div>
+          </div>
+          <h3>Today</h3>
+          <p>Your next class with a countdown and when to leave, your day in order, and the free windows you didn’t know you had.</p>
+        </article>
+        <article class="tilt" data-tilt>
+          <div class="vis" style="flex-direction:column; align-items:stretch; justify-content:center; gap:10px; padding: 0 18px">
+            <div class="weekbar"><b>Mon</b><i style="width:22%; background: var(--line)"></i><i style="width:30%; background: var(--accent); opacity:.5"></i></div>
+            <div class="weekbar"><b>Tue</b><i style="width:28%; margin-left:18%; background: var(--line)"></i><i style="width:34%; background: var(--accent)"></i></div>
+            <div class="weekbar"><b>Wed</b><i style="width:22%; background: var(--line)"></i><i style="width:22%; background: var(--accent)"></i><i style="width:18%; background:#F5B14C"></i></div>
+            <div class="weekbar"><b>Thu</b><i style="width:38%; margin-left:6%; background: var(--accent)"></i><i style="width:26%; background: var(--line)"></i></div>
+          </div>
+          <h3>Planner</h3>
+          <p>Say what’s due. NavoX splits it into study blocks around your classes, shifts and sleep, then replans when life happens.</p>
+        </article>
+        <article class="tilt" data-tilt>
+          <div class="vis" style="background:#F7F6F2">
+            <svg width="230" height="96" viewBox="0 0 230 96" fill="none" stroke="#1B2230" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path class="draw" d="M10 70 L40 70 L40 30 L80 30 M80 18 L80 42 M88 18 L88 42 M88 30 L120 30 L120 70 L150 70 M150 58 L150 82 L158 70 Z M170 70 L210 70"></path><circle cx="40" cy="70" r="4" fill="#0F9F86" stroke="none"></circle></svg>
+          </div>
+          <h3>Board</h3>
+          <p>A whiteboard tutor that draws and explains step by step, using your own slides. Interrupt with any question, any time.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="noa" style="padding-top: 0">
+    <div class="wrap meet">
+      <div class="turntable">
+        <div class="disc" aria-hidden="true"></div>
+        <div class="noa-meet" id="noaMeet"></div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:18px; min-width:0">
+        <span class="sticker" style="align-self:flex-start; background: var(--sun); transform: rotate(-2deg)">meet noa</span>
+        <h2 style="font-size: var(--step-3); line-height: 1">Listens, thinks, talks, celebrates, locks in with you. Gets sleepy at 2am.</h2>
+        <p class="lede">Noa is the face of Vox, an original character made for NavoX. Pick a look, then tap a mood.</p>
+        <div class="seg" id="looks" role="group" aria-label="Noa's look"></div>
+        <div class="seg" id="moods" role="group" aria-label="Noa's mood"></div>
+        <p class="mood-note" id="moodNote" aria-live="polite"></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section inverse" id="screens">
+    <div class="wrap" style="display:flex; flex-direction:column; gap:22px">
+      <div style="display:flex; flex-direction:column; gap:12px; text-align:center; align-items:center">
+        <span class="eyebrow">The app</span>
+        <h2 style="font-size: var(--step-3); line-height: 1">Spin through it. Drag, swipe or tap.</h2>
+      </div>
+      <div class="carousel" id="carousel" aria-roledescription="carousel" aria-label="NavoX app screens">
+        <div class="ring" id="ring"></div>
+      </div>
+      <div class="car-ui">
+        <button class="icon-btn" id="prev" type="button" aria-label="Previous screen" style="border-color: color-mix(in srgb, var(--invert-ink) 30%, transparent); color: var(--invert-ink)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"></path></svg></button>
+        <p class="car-cap" id="carCap" aria-live="polite"></p>
+        <button class="icon-btn" id="next" type="button" aria-label="Next screen" style="border-color: color-mix(in srgb, var(--invert-ink) 30%, transparent); color: var(--invert-ink)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></button>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="wrap screen-stage" style="display:flex; flex-direction:column; gap:30px">
+      <div style="display:flex; flex-direction:column; gap:12px; max-width: 760px">
+        <span class="eyebrow">On your laptop too</span>
+        <h2 style="font-size: var(--step-3); line-height: 1.02">Everything in one calm place.</h2>
+        <p class="lede">Your next class, your whole day, what’s due and who needs a reply. Vox follows you on every page.</p>
+      </div>
+      <div class="laptop" id="laptop">
+        <div class="bar"><i></i><i></i><i></i><span>app.navox.net/today</span></div>
+        <img src="assets/img/desktop.png" alt="NavoX Today on a laptop: next class countdown, the day's timeline, due soon and replies">
+      </div>
+    </div>
+  </section>
+
+  <section class="section" style="padding-top: 0">
+    <div class="wrap">
+      <div class="rewards" id="rewards">
+        <canvas id="confetti" aria-hidden="true"></canvas>
+        <div style="display:flex; flex-direction:column; gap:18px; min-width:0; position:relative">
+          <span class="eyebrow">Streaks that count real work</span>
+          <h2 style="font-size: var(--step-3); line-height: 1">Do the work. Dress up Noa.</h2>
+          <p class="lede">Study blocks, focus sessions and classes grow your streak. Opening the app doesn’t. Miss a day and a freeze has your back. Unlocks are yours forever.</p>
+          <div class="streak"><strong id="streakNum">2</strong><span>day streak</span></div>
+          <div style="display:flex; gap:10px; flex-wrap:wrap">
+            <button class="btn btn-primary" id="addDay" type="button">Finish a study block</button>
+            <button class="btn btn-ghost" id="resetDay" type="button">Reset</button>
+          </div>
+          <div class="unlocks" id="unlocks"></div>
+        </div>
+        <img src="assets/img/dressed.png" alt="Noa wearing the beanie, glasses and lavender hoodie in the app" style="position:relative">
+      </div>
+    </div>
+  </section>
+
+  <section class="section" style="padding-top: 0">
+    <div class="wrap" style="display:flex; flex-direction:column; gap:28px">
+      <h2 style="font-size: var(--step-3); line-height: 1">A day with NavoX</h2>
+      <div class="day" id="day"></div>
+    </div>
+  </section>
+
+  <section class="section" id="trust" style="padding-top: 0">
+    <div class="wrap trust">
+      <div style="display:flex; flex-direction:column; gap:14px">
+        <h2 style="font-size: var(--step-3); line-height: 1.02">You stay in charge. Always.</h2>
+        <p class="lede">An assistant that knows your schedule has to earn that trust. These are product rules, not settings you have to find.</p>
+      </div>
+      <div class="promises">
+        <div class="promise"><strong>Nothing happens without your yes</strong><span>Every calendar change and every email waits for your approval, with Undo right after.</span></div>
+        <div class="promise"><strong>Text, never your voice recordings</strong><span>NavoX remembers what helps, as text you can read, edit or delete.</span></div>
+        <div class="promise"><strong>Forget anything, anytime</strong><span>Say “forget that”, go off the record, or delete everything in one tap.</span></div>
+        <div class="promise"><strong>Never sold. Never shared with your school.</strong><span>Not with professors, not with advertisers. Your week is yours.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" style="padding-top: 0">
+    <div class="wrap" style="max-width: 900px">
+      <h2 style="font-size: var(--step-3); margin-bottom: 22px">Fair questions</h2>
+      <details open><summary>Does it work at my school?</summary><p>Yes, any college. Add your classes by talking, importing your schedule file, or snapping a photo. Canvas, Blackboard, Moodle and Brightspace calendar feeds can connect too.</p></details>
+      <details><summary>Will it send emails or change my calendar on its own?</summary><p>Never. NavoX shows exactly what it will do and waits for your yes. Every calendar change comes with Undo.</p></details>
+      <details><summary>Does my school or professor see my data?</summary><p>No. Your data is never shared with your school, professors or advertisers, and never sold.</p></details>
+      <details><summary>Will it just do my homework?</summary><p>It teaches step by step on the Board, checks your work line by line, and respects your course’s AI policy.</p></details>
+      <details><summary>How much does it cost?</summary><p>[Pricing to be announced]</p></details>
+    </div>
+  </section>
+
+  <section class="cta" id="join">
+    <div class="wrap">
+      <div class="noa-cta" id="noaCta"></div>
+      <div style="min-width:0">
+        <h2>Stop being cooked.<br>Get NavoX.</h2>
+        <form class="join" id="joinForm" novalidate>
+          <label for="email" style="position:absolute; width:1px; height:1px; overflow:hidden">School email</label>
+          <input id="email" name="email" type="email" placeholder="you@school.edu" autocomplete="email" required>
+          <button type="submit">Get early access</button>
+        </form>
+        <p class="join-note" id="joinNote" aria-live="polite">Early-access sign-ups open soon. Check back here.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer><div class="wrap"><span>NavoX · built for students at any college</span><span>navox.net</span></div></footer>
+
+<script src="assets/vendor/three.min.js" defer></script>
+<script src="assets/noa-data.js" defer></script>
+<script src="assets/landing.js" defer></script>
+</body>
+</html>

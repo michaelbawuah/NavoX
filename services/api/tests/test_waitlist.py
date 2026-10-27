@@ -1,0 +1,177 @@
+import importlib.util
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+import pytest_asyncio
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from navox.api.middleware import ApplicationCORSMiddleware, RequestHardeningMiddleware
+from navox.api.waitlist import create_waitlist_app
+from navox.core.settings import Settings
+from navox.db.base import Base
+from navox.db.session import get_database_session
+from navox.db.waitlist import WaitlistEntry
+
+
+@pytest_asyncio.fixture
+async def env(tmp_path):
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/waitlist.db")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def database():
+        async with factory() as session:
+            yield session
+
+    with patch("navox.api.waitlist.get_settings", return_value=Settings(_env_file=None)):
+        public = create_waitlist_app()
+    public.dependency_overrides[get_database_session] = database
+    app = FastAPI()
+    app.add_middleware(ApplicationCORSMiddleware, allow_origins=["http://localhost:3000"])
+    app.add_middleware(RequestHardeningMiddleware)
+    app.mount("/v1", public)
+    yield app, factory, public
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_insert_normalizes_and_persists_without_logging_email(env, caplog):
+    app, factory, _ = env
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        with caplog.at_level("INFO"):
+            response = await client.post(
+                "/v1/waitlist", json={"email": "Student@Example.EDU", "source": "landing"}
+            )
+        assert response.status_code == 201
+        assert response.json() == {"status": "created"}
+        duplicate = await client.post("/v1/waitlist", json={"email": "student@example.edu"})
+        assert duplicate.status_code == 409
+    async with factory() as database:
+        entry = await database.get(WaitlistEntry, "student@example.edu")
+        assert entry.source == "landing"
+        assert entry.school_domain == "example.edu"
+        assert entry.created_at is not None
+        assert await database.scalar(select(func.count()).select_from(WaitlistEntry)) == 1
+    assert "student@example.edu" not in caplog.text.lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"email": "private-invalid-address"},
+        {"email": "student@example.edu", "source": "arbitrary"},
+        {"email": "student@example.edu", "secret": "extra"},
+        {},
+    ],
+)
+async def test_invalid_input_is_redacted(env, payload, caplog):
+    app, _, _ = env
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/v1/waitlist", json=payload)
+    assert response.status_code == 422
+    assert "student@example.edu" not in response.text + caplog.text
+    assert "private-invalid-address" not in response.text + caplog.text
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_survives_clients_and_ignores_spoofed_forwarding(env):
+    app, _, _ = env
+    with patch("navox.api.waitlist.time", return_value=120):
+        for i in range(5):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.post("/v1/waitlist", json={"email": f"s{i}@example.edu"})
+                assert response.status_code == 201
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/v1/waitlist",
+                json={"email": "six@example.edu"},
+                headers={"X-Forwarded-For": "198.51.100.1"},
+            )
+            assert response.status_code == 429
+            assert response.headers["Retry-After"] == "60"
+            with patch("navox.api.waitlist.time", return_value=180):
+                assert (
+                    await client.post("/v1/waitlist", json={"email": "six@example.edu"})
+                ).status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_invalid_emails_also_consume_quota(env):
+    app, _, _ = env
+    with patch("navox.api.waitlist.time", return_value=120):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            for _ in range(5):
+                assert (await client.post("/v1/waitlist", json={"email": "bad"})).status_code == 422
+            assert (await client.post("/v1/waitlist", json={"email": "bad"})).status_code == 429
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "origin,allowed",
+    [
+        ("https://navox.net", True),
+        ("http://localhost:8080", True),
+        ("https://evil.example", False),
+        ("http://localhost:3000", False),
+    ],
+)
+async def test_cors_is_scoped_to_landing(env, origin, allowed):
+    app, _, _ = env
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.options(
+            "/v1/waitlist",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+    assert response.headers.get("Access-Control-Allow-Origin") == (origin if allowed else None)
+
+
+@pytest.mark.asyncio
+async def test_database_failure_returns_no_email_or_sql(env, caplog):
+    app, _, _ = env
+    with patch(
+        "sqlalchemy.ext.asyncio.AsyncSession.execute", side_effect=SQLAlchemyError("private")
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post("/v1/waitlist", json={"email": "private@example.edu"})
+    assert response.status_code == 503
+    assert "private" not in response.text + caplog.text
+
+
+def test_production_cors_excludes_localhost():
+    settings = Settings(
+        _env_file=None, app_environment="production", web_origin="https://app.navox.net"
+    )
+    with patch("navox.api.waitlist.get_settings", return_value=settings):
+        app = create_waitlist_app()
+    assert app.user_middleware[0].kwargs["allow_origins"] == ["https://navox.net"]
+
+
+def test_migration_upgrade_and_downgrade():
+    path = Path(__file__).parents[1] / "migrations/versions/0053_landing_waitlist.py"
+    spec = importlib.util.spec_from_file_location("waitlist_migration", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with patch.object(module, "op") as op:
+        module.upgrade()
+        assert [call.args[0] for call in op.create_table.call_args_list] == [
+            "waitlist_entries",
+            "waitlist_rate_limits",
+        ]
+        module.downgrade()
+        assert [call.args[0] for call in op.drop_table.call_args_list] == [
+            "waitlist_rate_limits",
+            "waitlist_entries",
+        ]
