@@ -55,6 +55,14 @@ checks pass. Use synthetic neutral speech, a fresh synthetic test account and
 explicit retention consent. Limit the scenario to three short calls under the
 existing allowance and configured routes; preserve usage receipts and limits.
 
+The prepared harness caps each call at 45 seconds and the three-call transport
+window at 135 seconds, with a $2 stop threshold for known provider estimates.
+Transport USD remains explicitly unknown because the existing policy has no
+transport rate; this is not a known all-in dollar cap. No pricing value is
+invented or changed. The exact configured `gpt-transcribe` uses the registered
+duration rate and must return duration usage, rather than being assigned missing
+token rates. See the official [input transcription usage contract](https://developers.openai.com/api/docs/guides/voice-latency-cost).
+
 Qualify actual audio input through STT or realtime input, model/tool handling,
 host speech, browser playback and native hang-up. Observe content-free timing,
 call/generation IDs, usage counters and result hashes. Exercise multi-statement
