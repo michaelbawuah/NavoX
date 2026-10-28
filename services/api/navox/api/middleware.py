@@ -4,10 +4,22 @@ from time import perf_counter
 from uuid import UUID, uuid4
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.types import Receive, Scope, Send
 
 logger = logging.getLogger("navox.request")
+
+
+class ApplicationCORSMiddleware(CORSMiddleware):
+    """The public waitlist subapp owns its narrower CORS policy."""
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope.get("path", "").startswith("/v1/"):
+            await self.app(scope, receive, send)
+            return
+        await super().__call__(scope, receive, send)
 
 
 def normalized_request_id(value: str | None) -> str:

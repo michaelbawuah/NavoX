@@ -18,6 +18,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  landing:
+    name: Landing page quality
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: node --check apps/landing/site/assets/landing.js
+      - run: node --test apps/landing/tests/waitlist.test.cjs
+      - name: Verify source rebuild matches the deployed assets
+        run: |
+          node apps/landing/source/build.js /tmp/navox-landing
+          diff -rq --exclude=vercel.json /tmp/navox-landing apps/landing/site
   web:
     name: Web quality
     runs-on: ubuntu-24.04

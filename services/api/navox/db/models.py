@@ -37,6 +37,7 @@ from navox.db import (
     vox,  # noqa: F401 - registers content-free Vox reservations and generation fences
     vox_media,  # noqa: F401 - registers media epochs and independent cleanup instructions
     vox_provision,  # noqa: F401 - registers independent uncertain provider outcomes
+    waitlist,  # noqa: F401 - registers public early-access registrations
 )
 from navox.db.base import Base
 
