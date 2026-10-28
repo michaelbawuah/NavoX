@@ -23,7 +23,6 @@ import {
 import { productFeatures } from "../lib/product-features";
 import { notifyCalendarAccessChanged } from "../lib/student-calendar-privacy";
 import type { CourseMaterialReference } from "../lib/student-material-link";
-import { NavoXCinematic } from "./navox-cinematic";
 import { StudentAssistantPanel } from "./student-assistant-panel";
 import { StudentAvailability } from "./student-availability";
 import { StudentClassesWorkspace } from "./student-classes";
@@ -69,7 +68,7 @@ export function AccountWorkspace({
   courseId?: string;
   materialReference?: CourseMaterialReference | null;
 }) {
-  const [mode, setMode] = useState<AuthMode>("register");
+  const [mode, setMode] = useState<AuthMode>("login");
   const [account, setAccount] = useState<Account | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
@@ -443,119 +442,136 @@ export function AccountWorkspace({
   }
 
   return (
-    <NavoXCinematic>
-      <section
-        aria-labelledby="auth-heading"
-        className="auth-card access-card"
-        id="access-panel"
-      >
-        <div className="access-card-topline">
-          <span>WELCOME TO NAVOX</span>
-          <span>✦</span>
-        </div>
-        <fieldset aria-label="Account access" className="auth-tabs">
-          <button
-            aria-pressed={mode === "register"}
-            className={mode === "register" ? "active" : ""}
-            onClick={() => {
-              setMode("register");
-              setMessage("");
-            }}
-            type="button"
-          >
-            Create account
-          </button>
-          <button
-            aria-pressed={mode === "login"}
-            className={mode === "login" ? "active" : ""}
-            onClick={() => {
-              setMode("login");
-              setMessage("");
-            }}
-            type="button"
-          >
-            Sign in
-          </button>
-        </fieldset>
-        <div className="access-card-heading">
-          <p className="access-step">Your account</p>
-          <h2 id="auth-heading" tabIndex={-1}>
-            {mode === "register" ? "Make yourself at home" : "Welcome back"}
-          </h2>
-          <p>
-            {mode === "register"
-              ? "Your day, a little easier."
-              : "Pick up where you left off."}
-          </p>
-        </div>
-        <form className="auth-form" onSubmit={submit}>
-          {mode === "register" && (
+    <div className="account-entry">
+      <header className="account-entry-header">
+        <a
+          className="account-entry-brand"
+          href="https://navox.net"
+          aria-label="NavoX home"
+        >
+          NavoX{" "}
+          <span className="account-entry-mark" aria-hidden="true">
+            ✳
+          </span>
+        </a>
+        <a className="account-entry-back" href="https://navox.net">
+          Back to NavoX <span aria-hidden="true">↗</span>
+        </a>
+      </header>
+      <main className="account-entry-main">
+        <section
+          aria-labelledby="auth-heading"
+          className="auth-card access-card"
+          id="access-panel"
+        >
+          <div className="access-card-topline">
+            <span>WELCOME TO NAVOX</span>
+            <span>✦</span>
+          </div>
+          <fieldset aria-label="Account access" className="auth-tabs">
+            <button
+              aria-pressed={mode === "login"}
+              className={mode === "login" ? "active" : ""}
+              onClick={() => {
+                setMode("login");
+                setMessage("");
+              }}
+              type="button"
+            >
+              Sign in
+            </button>
+            <button
+              aria-pressed={mode === "register"}
+              className={mode === "register" ? "active" : ""}
+              onClick={() => {
+                setMode("register");
+                setMessage("");
+              }}
+              type="button"
+            >
+              Create account
+            </button>
+          </fieldset>
+          <div className="access-card-heading">
+            <p className="access-step">Your account</p>
+            <h1 id="auth-heading" tabIndex={-1}>
+              {mode === "register" ? "Make yourself at home" : "Welcome back"}
+            </h1>
+            <p>
+              {mode === "register"
+                ? "Your day, a little easier."
+                : "Pick up where you left off."}
+            </p>
+          </div>
+          <form className="auth-form" onSubmit={submit}>
+            {mode === "register" && (
+              <label>
+                Your name
+                <input
+                  autoComplete="name"
+                  maxLength={256}
+                  minLength={1}
+                  onChange={(event) => setDisplayName(event.target.value)}
+                  required
+                  value={displayName}
+                />
+              </label>
+            )}
             <label>
-              Your name
+              Email address
               <input
-                autoComplete="name"
-                maxLength={256}
-                minLength={1}
-                onChange={(event) => setDisplayName(event.target.value)}
+                autoComplete="email"
+                onChange={(event) => setEmail(event.target.value)}
                 required
-                value={displayName}
+                type="email"
+                value={email}
               />
             </label>
-          )}
-          <label>
-            Email address
-            <input
-              autoComplete="email"
-              onChange={(event) => setEmail(event.target.value)}
-              required
-              type="email"
-              value={email}
-            />
-          </label>
-          <label>
-            Password
-            <input
-              autoComplete={
-                mode === "register" ? "new-password" : "current-password"
-              }
-              minLength={mode === "register" ? 12 : 1}
-              maxLength={128}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              type="password"
-              value={password}
-            />
-            {mode === "register" && <small>Use 12 to 128 characters.</small>}
-          </label>
-          {message && (
-            <p className="form-message" role="alert">
-              {message}
-            </p>
-          )}
-          {sessionUnavailable && (
-            <button type="button" onClick={() => window.location.reload()}>
-              Reload sign-in
+            <label>
+              Password
+              <input
+                autoComplete={
+                  mode === "register" ? "new-password" : "current-password"
+                }
+                minLength={mode === "register" ? 12 : 1}
+                maxLength={128}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                type="password"
+                value={password}
+              />
+              {mode === "register" && <small>Use 12 to 128 characters.</small>}
+            </label>
+            {message && (
+              <p className="form-message" role="alert">
+                {message}
+              </p>
+            )}
+            {sessionUnavailable && (
+              <button type="button" onClick={() => window.location.reload()}>
+                Reload sign-in
+              </button>
+            )}
+            <button
+              className="primary-button"
+              disabled={isLoading || sessionUnavailable}
+              type="submit"
+            >
+              {isLoading
+                ? "Working…"
+                : mode === "register"
+                  ? "Create account"
+                  : "Sign in"}
             </button>
-          )}
-          <button
-            className="primary-button"
-            disabled={isLoading || sessionUnavailable}
-            type="submit"
-          >
-            {isLoading
-              ? "Working…"
-              : mode === "register"
-                ? "Create account"
-                : "Sign in"}
-          </button>
-        </form>
-        <p className="access-footnote">
-          <span aria-hidden="true" className="access-footnote-symbol">
-            ⌁
-          </span>
-          Your account is private. Connect your apps when you’re ready.
-        </p>
-      </section>
-    </NavoXCinematic>
+          </form>
+          <p className="access-footnote">
+            <span aria-hidden="true" className="access-footnote-symbol">
+              ⌁
+            </span>
+            Your account is private. Connect your apps when you’re ready.
+          </p>
+        </section>
+      </main>
+    </div>
   );
 }

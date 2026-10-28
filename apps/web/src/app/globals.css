@@ -645,6 +645,82 @@ small {
   font-size: 1.05rem;
 }
 
+/* Direct account entry on the app host. */
+.account-entry {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  padding: 1.25rem clamp(1rem, 5vw, 4rem);
+  background:
+    radial-gradient(ellipse at 50% 15%, rgb(42 202 178 / 9%), transparent 35rem),
+    var(--night);
+}
+
+.account-entry-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  max-width: 76rem;
+  margin-inline: auto;
+}
+
+.account-entry-header a {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.account-entry-brand {
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: -0.05em;
+}
+
+.account-entry-mark {
+  color: var(--aqua);
+}
+
+.account-entry-back {
+  font-size: 0.85rem;
+}
+
+.account-entry-header a:hover {
+  color: var(--aqua-bright);
+}
+
+.account-entry-header a:focus-visible,
+.account-entry .auth-tabs button:focus-visible {
+  outline: 2px solid var(--aqua);
+  outline-offset: 4px;
+}
+
+.account-entry-main {
+  display: grid;
+  flex: 1;
+  align-content: center;
+  justify-items: center;
+  padding-block: clamp(2rem, 6vh, 4rem);
+}
+
+.account-entry .access-card {
+  justify-self: center;
+  max-width: 29rem;
+}
+
+.account-entry h1 {
+  max-width: none;
+  margin: 0;
+  font-size: clamp(1.75rem, 5vw, 2.1rem);
+  line-height: 1.15;
+  letter-spacing: -0.04em;
+}
+
+.account-entry .access-footnote {
+  align-items: baseline;
+  line-height: 1.5;
+}
+
 .form-message {
   margin: 0;
   color: var(--danger);
