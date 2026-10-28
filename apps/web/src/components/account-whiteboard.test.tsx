@@ -301,7 +301,7 @@ describe("account-owned whiteboard lifecycle", () => {
     });
     await act(async () => button("Sign out").click());
     expect(board()).toBeNull();
-    expect(host.textContent).toContain("Make yourself at home");
+    expect(host.textContent).toContain("Welcome back");
     expect(
       host.querySelector('[aria-label="Your pen annotations"]'),
     ).toBeNull();
