@@ -83,7 +83,33 @@
       else { noa(heroNoa, 'girl', 'idle'); if (Week) Week.phase('idle'); }
     }, 2800);
   }
-  document.getElementById('replay').addEventListener('click', playDemo);
+  const callDemoButton = document.getElementById('replay');
+  const callDemoDialog = document.getElementById('callDemoDialog');
+  const callDemoVideo = document.getElementById('callDemoVideo');
+  const callDemoStatus = document.getElementById('callDemoStatus');
+  function closeCallDemo() { if (callDemoDialog.open) callDemoDialog.close(); }
+  callDemoButton.addEventListener('click', () => {
+    if (callDemoDialog.open) return;
+    callDemoStatus.textContent = '';
+    callDemoDialog.showModal();
+    document.body.classList.add('call-demo-open');
+    callDemoVideo.muted = false;
+    callDemoVideo.currentTime = 0;
+    const playback = callDemoVideo.play();
+    if (playback) playback.catch(() => { callDemoStatus.textContent = 'Press Play to start the demo with sound.'; });
+  });
+  document.getElementById('closeCallDemo').addEventListener('click', closeCallDemo);
+  callDemoDialog.addEventListener('click', (event) => {
+    const bounds = callDemoDialog.getBoundingClientRect();
+    if (event.target === callDemoDialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) closeCallDemo();
+  });
+  callDemoDialog.addEventListener('cancel', () => { callDemoVideo.pause(); });
+  callDemoDialog.addEventListener('close', () => {
+    callDemoVideo.pause();
+    document.body.classList.remove('call-demo-open');
+    callDemoButton.focus({ preventScroll: true });
+  });
+  callDemoVideo.addEventListener('error', () => { callDemoStatus.textContent = 'The video could not load. Please close the demo and try again.'; });
 
   function orbColor() { if (Week) Week.recolor(); }
 

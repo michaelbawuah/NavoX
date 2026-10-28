@@ -48,6 +48,9 @@ function main() {
   let js = src.match(/<script>\n\/\*NOA_DATA\*\/\n([\s\S]*?)<\/script>/)[1];
 
   body = body.split('src="img/').join('src="' + a + 'img/');
+  for (const attribute of ['src', 'poster', 'href']) {
+    body = body.split(attribute + '="demo/').join(attribute + '="' + a + 'demo/');
+  }
   js = js.split("'img/").join("'" + a + 'img/');
 
   const ogImage = SITE_URL + base.replace(/^\//, '') + 'og.png';
@@ -103,6 +106,9 @@ function main() {
 
   for (const f of fs.readdirSync(path.join(HERE, 'img'))) {
     copy(path.join(HERE, 'img', f), path.join(out, 'assets', 'img', f));
+  }
+  for (const f of fs.readdirSync(path.join(HERE, 'demo'))) {
+    copy(path.join(HERE, 'demo', f), path.join(out, 'assets', 'demo', f));
   }
   for (const f of ['three.min.js', 'THREE-LICENSE.txt']) {
     copy(path.join(HERE, 'vendor', f), path.join(out, 'assets', 'vendor', f));

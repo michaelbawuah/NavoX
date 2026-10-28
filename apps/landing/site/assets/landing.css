@@ -253,3 +253,19 @@ footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wr
   .reply-card.flip { animation-duration: .3s; }
   html { scroll-behavior: auto; }
 }
+/* The voiced call demo opens in the native top-layer dialog. */
+body.call-demo-open { overflow: hidden; }
+.call-demo { width: min(1100px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 0; border: 1px solid #343B47; border-radius: 22px; background: #0B0D10; color: #F2F4F7; overflow: auto; box-shadow: 0 28px 100px rgba(0,0,0,.5); }
+.call-demo::backdrop { background: rgba(0,0,0,.84); backdrop-filter: blur(8px); }
+.call-demo-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 24px; }
+.call-demo-head h2 { margin: 0; font: 700 clamp(22px, 3vw, 30px)/1.2 var(--font-display); }
+.call-demo-head p { margin: 6px 0 0; color: #A3ACB8; font-size: 14px; }
+.call-demo-close { display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; padding: 0; border: 1px solid #343B47; border-radius: 50%; background: #14171C; color: #F2F4F7; cursor: pointer; }
+.call-demo-close:hover { background: #222832; }
+.call-demo-close:focus-visible { outline: 3px solid #4FD1B5; outline-offset: 3px; }
+.call-demo video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #0B0D10; }
+.call-demo-note { padding: 16px 24px 20px; color: #A3ACB8; font-size: 13px; line-height: 1.7; }
+.call-demo-note p { margin: 0; }
+.call-demo-note a { color: #4FD1B5; }
+.call-demo-status:empty { display: none; }
+@media (max-width: 600px) { .call-demo { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); border-radius: 16px; } .call-demo-head { padding: 16px; gap: 12px; } .call-demo-note { padding: 14px 16px 17px; } }

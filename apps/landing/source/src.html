@@ -259,6 +259,22 @@ footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wr
   .reply-card.flip { animation-duration: .3s; }
   html { scroll-behavior: auto; }
 }
+/* The voiced call demo opens in the native top-layer dialog. */
+body.call-demo-open { overflow: hidden; }
+.call-demo { width: min(1100px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 0; border: 1px solid #343B47; border-radius: 22px; background: #0B0D10; color: #F2F4F7; overflow: auto; box-shadow: 0 28px 100px rgba(0,0,0,.5); }
+.call-demo::backdrop { background: rgba(0,0,0,.84); backdrop-filter: blur(8px); }
+.call-demo-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 24px; }
+.call-demo-head h2 { margin: 0; font: 700 clamp(22px, 3vw, 30px)/1.2 var(--font-display); }
+.call-demo-head p { margin: 6px 0 0; color: #A3ACB8; font-size: 14px; }
+.call-demo-close { display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; padding: 0; border: 1px solid #343B47; border-radius: 50%; background: #14171C; color: #F2F4F7; cursor: pointer; }
+.call-demo-close:hover { background: #222832; }
+.call-demo-close:focus-visible { outline: 3px solid #4FD1B5; outline-offset: 3px; }
+.call-demo video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #0B0D10; }
+.call-demo-note { padding: 16px 24px 20px; color: #A3ACB8; font-size: 13px; line-height: 1.7; }
+.call-demo-note p { margin: 0; }
+.call-demo-note a { color: #4FD1B5; }
+.call-demo-status:empty { display: none; }
+@media (max-width: 600px) { .call-demo { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); border-radius: 16px; } .call-demo-head { padding: 16px; gap: 12px; } .call-demo-note { padding: 14px 16px 17px; } }
 </style>
 
 <header class="top">
@@ -297,7 +313,7 @@ footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wr
         <p class="lede">Tap Vox and just talk. NavoX knows your classes, deadlines and free time. It plans your week, drafts the email to your professor, and teaches you on a whiteboard. Every action waits for your yes.</p>
         <div class="hero-actions">
           <a class="btn btn-primary" href="#join">Get early access</a>
-          <button class="btn btn-ghost" id="replay" type="button">
+          <button class="btn btn-ghost" id="replay" type="button" aria-haspopup="dialog" aria-controls="callDemoDialog">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"></path></svg>
             Watch a call
           </button>
@@ -504,6 +520,19 @@ footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wr
   </section>
 </main>
 
+<dialog class="call-demo" id="callDemoDialog" aria-labelledby="callDemoTitle" aria-describedby="callDemoDescription">
+  <div class="call-demo-head">
+    <div><h2 id="callDemoTitle">Watch a call</h2><p>Sound on · Student + Vox · 64 seconds</p></div>
+    <button class="call-demo-close" id="closeCallDemo" type="button" aria-label="Close demo" autofocus><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
+  </div>
+  <video id="callDemoVideo" controls playsinline preload="none" poster="demo/navox-voice-demo-poster.jpg" aria-label="NavoX student and Vox spoken product demo">
+    <source src="demo/navox-voice-demo.mp4" type="video/mp4">
+    <track kind="captions" src="demo/navox-voice-demo.vtt" srclang="en" label="English">
+    Your browser cannot play this video. <a href="demo/navox-voice-demo.mp4">Open the demo video</a>.
+  </video>
+  <div class="call-demo-note"><p id="callDemoDescription">Scripted product demo with generated student and Vox voices, illustrated actions, and sample data.</p><p class="call-demo-status" id="callDemoStatus" role="status" aria-live="polite"></p></div>
+</dialog>
+
 <footer><div class="wrap"><span>NavoX · built for students at any college</span><a href="https://app.navox.net">Open the app</a><span>navox.net</span></div></footer>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -593,7 +622,33 @@ footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wr
       else { noa(heroNoa, 'girl', 'idle'); if (Week) Week.phase('idle'); }
     }, 2800);
   }
-  document.getElementById('replay').addEventListener('click', playDemo);
+  const callDemoButton = document.getElementById('replay');
+  const callDemoDialog = document.getElementById('callDemoDialog');
+  const callDemoVideo = document.getElementById('callDemoVideo');
+  const callDemoStatus = document.getElementById('callDemoStatus');
+  function closeCallDemo() { if (callDemoDialog.open) callDemoDialog.close(); }
+  callDemoButton.addEventListener('click', () => {
+    if (callDemoDialog.open) return;
+    callDemoStatus.textContent = '';
+    callDemoDialog.showModal();
+    document.body.classList.add('call-demo-open');
+    callDemoVideo.muted = false;
+    callDemoVideo.currentTime = 0;
+    const playback = callDemoVideo.play();
+    if (playback) playback.catch(() => { callDemoStatus.textContent = 'Press Play to start the demo with sound.'; });
+  });
+  document.getElementById('closeCallDemo').addEventListener('click', closeCallDemo);
+  callDemoDialog.addEventListener('click', (event) => {
+    const bounds = callDemoDialog.getBoundingClientRect();
+    if (event.target === callDemoDialog && (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)) closeCallDemo();
+  });
+  callDemoDialog.addEventListener('cancel', () => { callDemoVideo.pause(); });
+  callDemoDialog.addEventListener('close', () => {
+    callDemoVideo.pause();
+    document.body.classList.remove('call-demo-open');
+    callDemoButton.focus({ preventScroll: true });
+  });
+  callDemoVideo.addEventListener('error', () => { callDemoStatus.textContent = 'The video could not load. Please close the demo and try again.'; });
 
   function orbColor() { if (Week) Week.recolor(); }
 
