@@ -4,6 +4,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccountSessionCallbacks } from "../lib/account-session";
+import { selectAvailabilityOptions } from "../lib/student-availability-options";
+import type { StudentAvailabilitySuggestionsApi } from "../lib/student-availability-suggestions-api";
 import type {
   AvailabilityPreviewInput,
   AvailabilitySnapshot,
@@ -186,6 +188,12 @@ function button(text: string) {
   if (!found) throw new Error(`Missing button ${text}`);
   return found;
 }
+function googleConsentInput() {
+  const label = [...host.querySelectorAll("label")].find(
+    (element) => element.textContent === calendarConsent,
+  );
+  return label?.querySelector('input[type="checkbox"]') ?? null;
+}
 async function click(text: string) {
   await act(async () => {
     button(text).click();
@@ -204,10 +212,56 @@ async function select(label: string, value: string) {
     await settle();
   });
 }
-async function mountAvailability(client: StudentCalendarApi) {
+async function mountAvailability(
+  client: StudentCalendarApi,
+  suppliedSuggestions?: StudentAvailabilitySuggestionsApi,
+) {
+  const suggestionsApi =
+    suppliedSuggestions ??
+    ({
+      suggest: vi.fn(async (input, signal) => {
+        const { purpose: _purpose, ...request } = input;
+        const current = await client.preview(request, signal);
+        const options = selectAvailabilityOptions(
+          current.result,
+          input.duration_minutes,
+          Date.now(),
+        );
+        return {
+          changes_applied: false as const,
+          snapshot: current,
+          selection: {
+            status:
+              current.result.status === "needs_routine"
+                ? ("needs_routine" as const)
+                : current.result.status === "partial"
+                  ? ("partial_information" as const)
+                  : options.length
+                    ? ("ok" as const)
+                    : ("no_time" as const),
+            timezone: current.result.timezone,
+            duration_minutes: input.duration_minutes,
+            suggestions: options.map((item) => ({
+              start_at: item.start_at,
+              end_at: item.end_at,
+              minutes: item.duration_minutes,
+              reasons: [],
+              displaced_study_block_ids: [] as [],
+            })),
+            alternatives_available: 0,
+            changes_applied: false as const,
+          },
+        };
+      }),
+    } satisfies StudentAvailabilitySuggestionsApi);
   await act(async () => {
     root.render(
-      <StudentAvailability accountId={accountId} timezone="UTC" api={client} />,
+      <StudentAvailability
+        accountId={accountId}
+        timezone="UTC"
+        api={client}
+        suggestionsApi={suggestionsApi}
+      />,
     );
     await settle();
   });
@@ -241,6 +295,103 @@ afterEach(async () => {
 });
 
 describe("private calendar connection and availability screens", () => {
+  it("shows server ranked options and sends purpose without creating an event", async () => {
+    const client = api();
+    const suggest = vi.fn<StudentAvailabilitySuggestionsApi["suggest"]>(
+      async (input) => ({
+        changes_applied: false as const,
+        snapshot: snapshot(input),
+        selection: {
+          status: "ok",
+          timezone: "UTC",
+          duration_minutes: input.duration_minutes,
+          suggestions: [
+            {
+              start_at: "2026-10-22T09:10:00Z",
+              end_at: "2026-10-22T09:40:00Z",
+              minutes: 30,
+              reasons: ["soonest"],
+              displaced_study_block_ids: [],
+            },
+          ],
+          alternatives_available: 0,
+          changes_applied: false,
+        },
+      }),
+    );
+    await mountAvailability(client, { suggest });
+    await chooseAssumptions();
+    await select("What are you making time for?", "coffee");
+    await click("Find openings");
+    expect(suggest).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: "coffee", duration_minutes: 30 }),
+      expect.any(AbortSignal),
+    );
+    expect(client.preview).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("Earliest suitable option");
+    expect(host.textContent).toContain("9:10");
+    expect(host.textContent).toContain(
+      "No event, invitation, email or study-plan change was made",
+    );
+    await select("What are you making time for?", "lunch");
+    expect(host.textContent).not.toContain("Earliest suitable option");
+    const duration = [...host.querySelectorAll("label")]
+      .find((label) => label.textContent?.includes("Meeting duration"))
+      ?.querySelector("select");
+    expect(duration?.value).toBe("60");
+  });
+
+  it("marks certified study suggestions for exact review and describes the bounded search", async () => {
+    const client = api();
+    const current = snapshot();
+    current.result.status = "partial";
+    current.result.provisional_openings = [
+      {
+        ...current.result.confirmed_openings[0],
+        reasons: ["movable_study"],
+        displaced_study_block_ids: ["study"],
+      },
+    ];
+    current.result.confirmed_openings = [];
+    const suggest = vi.fn<StudentAvailabilitySuggestionsApi["suggest"]>(
+      async () => ({
+        changes_applied: false,
+        snapshot: current,
+        selection: {
+          status: "partial_information",
+          timezone: "UTC",
+          duration_minutes: 30,
+          suggestions: [
+            {
+              start_at: "2026-10-22T09:10:00Z",
+              end_at: "2026-10-22T09:40:00Z",
+              minutes: 30,
+              reasons: ["moves_study_block"],
+              displaced_study_block_ids: ["study"],
+            },
+          ],
+          alternatives_available: 0,
+          changes_applied: false,
+        },
+      }),
+    );
+    await mountAvailability(client, { suggest });
+    await chooseAssumptions();
+    await click("Find openings");
+    expect(host.textContent).toContain("One time to consider");
+    expect(host.textContent).toContain("Requires moving 1 study block");
+    expect(host.textContent).toContain("Review the exact replacement times");
+    expect(host.textContent).toContain("Nothing has moved");
+    expect(host.textContent).toContain("limited set of plans");
+    expect(host.textContent).toContain(
+      "Other study-compatible times may exist",
+    );
+    expect(host.textContent).not.toContain(
+      "A second distinct option did not fit",
+    );
+    expect(client.preview).not.toHaveBeenCalled();
+  });
+
   it("loads only saved routine metadata on mount and requires both explicit assumptions before provider reads", async () => {
     const client = api();
     await mountAvailability(client);
@@ -267,9 +418,7 @@ describe("private calendar connection and availability screens", () => {
     );
     expect(host.textContent).toContain("One time fits");
     expect(host.textContent).toContain("A second distinct option did not fit");
-    expect(host.textContent).toContain(
-      "10 minutes before and after kept clear",
-    );
+    expect(host.textContent).toContain("10-minute buffers before and after");
     expect(host.textContent).not.toContain("Option 2");
   });
   it("shows unknown coverage/travel/displaced study honestly and never promotes a provisional window", async () => {
@@ -430,7 +579,7 @@ describe("private calendar connection and availability screens", () => {
       await settle();
     });
     expect(host.textContent).not.toContain("calendar@example.test");
-    expect(host.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(googleConsentInput()).toBeNull();
   });
   it("rejects a snapshot that expires during the final account proof", async () => {
     const client = api();
@@ -505,7 +654,7 @@ describe("private calendar connection and availability screens", () => {
     await click("Check calendar access");
     await click("Stop availability access");
     expect(host.textContent).not.toContain("calendar@example.test");
-    expect(host.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(googleConsentInput()).toBeNull();
     expect(host.textContent).toContain("Refresh before continuing");
     expect(button("Check calendar access").disabled).toBe(false);
   });

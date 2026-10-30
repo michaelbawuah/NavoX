@@ -45,7 +45,11 @@ from navox.student.schemas import (
 def expected_owner(request: Request, account: CurrentAccountDependency) -> None:
     values = request.headers.getlist("X-NavoX-Account")
     if values and values != [f"{account.workspace.id}:{account.user.id}"]:
-        raise HTTPException(409, "Your account changed. Reopen this page and try again")
+        raise HTTPException(
+            409,
+            "Your account changed. Reopen this page and try again",
+            headers={"Cache-Control": "private, no-store"},
+        )
 
 
 router = APIRouter(prefix="/student", tags=["student"], dependencies=[Depends(expected_owner)])

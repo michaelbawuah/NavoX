@@ -23,10 +23,12 @@ from navox.db.student_calendars import (
     StudentCalendarWriteGrant,
 )
 from navox.student import service as schedule
+from navox.student_calendars.operation_guard import check_operation
 from navox.student_calendars.schemas import (
     AVAILABILITY_SCOPES,
     CONSENT_VERSION,
     MAX_REVISION,
+    MICROSOFT_AVAILABILITY_SCOPES,
     CalendarCommand,
     CalendarGrantView,
     CalendarProvider,
@@ -46,6 +48,7 @@ class CalendarGrantSnapshot:
     external_account_id: str | None = field(repr=False)
     granted_scopes: frozenset[str]
     connection_status: str | None
+    provider: str = "google"
 
 
 @dataclass(frozen=True)
@@ -95,6 +98,7 @@ async def boundary(
     lock: bool = True,
     allow_paused: bool = False,
 ) -> Boundary:
+    await check_operation()
     if lock:
         # Management/runtime serialize connector→membership→User→legacy. Take
         # the same ordered connector prefix before native student authority;
@@ -132,6 +136,7 @@ async def boundary(
         raise schedule.StudentError(401, "Your sign-in is no longer available")
     if user.agent_paused and not allow_paused:
         raise schedule.StudentError(409, "Resume NavoX before checking calendar availability")
+    await check_operation()
     return Boundary(await state(database, user_id, workspace_id), session, now)
 
 
@@ -190,11 +195,19 @@ async def owned_connection(
             Connection.id == connection_id,
             Connection.user_id == user_id,
             Connection.workspace_id == workspace_id,
-            Connection.provider == "google",
+            Connection.provider.in_(("google", "microsoft", "icloud")),
         )
         .execution_options(populate_existing=True)
     )
     return row
+
+
+def required_scopes(provider: str) -> tuple[str, ...]:
+    if provider == "microsoft":
+        return MICROSOFT_AVAILABILITY_SCOPES
+    if provider == "icloud":
+        return ("navox:apple-calendar-busy.v1",)
+    return AVAILABILITY_SCOPES if provider == "google" else ("unsupported-calendar-provider",)
 
 
 def ready(connection: Connection | None) -> bool:
@@ -202,7 +215,7 @@ def ready(connection: Connection | None) -> bool:
         connection is not None
         and connection.status == "active"
         and connection.credential_reference is not None
-        and set(AVAILABILITY_SCOPES).issubset(connection.granted_scopes)
+        and set(required_scopes(connection.provider)).issubset(connection.granted_scopes)
     )
 
 
@@ -239,8 +252,12 @@ async def scope_snapshot(
                 else None,
                 granted_scopes=frozenset(connection.granted_scopes) if connection else frozenset(),
                 connection_status=connection.status if connection else None,
+                provider=connection.provider if connection else "google",
             )
         )
+    from navox.student_calendars import apple
+
+    items.extend(await apple.snapshots(database, user_id, workspace_id, current))
     return CalendarScope(user_id, workspace_id, current.generation, current.revision, tuple(items))
 
 
@@ -267,6 +284,10 @@ async def view(
     items = []
     for grant in await grants(database, user_id, workspace_id):
         connection = await owned_connection(database, user_id, workspace_id, grant.connection_id)
+        attempt = await database.get(OAuthAuthorizationAttempt, grant.oauth_attempt_id)
+        provider = (
+            connection.provider if connection else (attempt.provider if attempt else "google")
+        )
         status: Literal["pending", "connected", "unavailable", "revoked"] = (
             "revoked" if grant.status == "revoked" else "unavailable"
         )
@@ -283,6 +304,7 @@ async def view(
         items.append(
             CalendarGrantView(
                 id=grant.id,
+                provider="outlook" if provider == "microsoft" else "google",
                 connection_id=connection.id if connection else None,
                 account_label=connection.external_email if connection else None,
                 status=status,
@@ -296,8 +318,14 @@ async def view(
     )
     try:
         CredentialVault(settings)
+        encrypted_credentials_ready = True
     except CredentialVaultError:
+        encrypted_credentials_ready = False
         configured = False
+    from navox.student_calendars import apple
+
+    apple_view = await apple.view(database, user_id, workspace_id, session_hash, settings)
+    items.extend(CalendarGrantView.model_validate(item.model_dump()) for item in apple_view.grants)
     return CalendarView(
         generation=current.generation,
         revision=current.revision,
@@ -305,8 +333,18 @@ async def view(
             CalendarProvider(
                 id="google", availability="available" if configured else "setup_pending"
             ),
-            CalendarProvider(id="outlook", availability="unavailable"),
-            CalendarProvider(id="icloud", availability="unavailable"),
+            CalendarProvider(
+                id="outlook",
+                availability="available"
+                if encrypted_credentials_ready
+                and settings.microsoft_oauth_client_id.strip()
+                and settings.microsoft_oauth_client_secret
+                and settings.microsoft_oauth_client_secret.get_secret_value().strip()
+                else "setup_pending",
+            ),
+            CalendarProvider(
+                id="icloud", availability="available" if apple_view.configured else "setup_pending"
+            ),
         ],
         grants=items,
     )
@@ -319,7 +357,11 @@ async def retire(
         return
     grant.status, grant.revoked_at = "revoked", now
     grant.revision = min(MAX_REVISION, grant.revision + 1)
-    attempt = await database.get(OAuthAuthorizationAttempt, grant.oauth_attempt_id)
+    attempt = (
+        await database.get(OAuthAuthorizationAttempt, grant.oauth_attempt_id)
+        if grant.oauth_attempt_id is not None
+        else None
+    )
     if attempt is not None and attempt.used_at is None:
         attempt.used_at = now
 
@@ -344,7 +386,12 @@ async def disconnect(
         .execution_options(populate_existing=True)
     )
     if grant is None:
-        raise schedule.StudentError(404, "Calendar permission not found")
+        from navox.student_calendars import apple
+
+        await apple.disconnect(
+            database, user_id, workspace_id, session_hash, grant_id, payload, settings
+        )
+        return await view(database, user_id, workspace_id, session_hash, settings)
     if current.state is None or grant.owner_scope_id != current.state.id:
         raise schedule.StudentError(409, "Calendar permissions changed. Refresh and try again")
     if payload.generation != current.generation:
@@ -361,6 +408,9 @@ async def disconnect(
 
 async def forget_calendar_data(database: AsyncSession, user_id: UUID, workspace_id: UUID) -> None:
     """Caller holds User; retain reset fencing while removing purpose links only."""
+    from navox.student_calendars import apple
+
+    await apple.forget_calendar_data(database, user_id, workspace_id)
     row = await state(database, user_id, workspace_id)
     if row is None:
         row = StudentCalendarState(

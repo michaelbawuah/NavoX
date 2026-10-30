@@ -1,0 +1,624 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import {
+  memoryForgetDraftKey,
+  saveMemoryForgetDraft,
+} from "../lib/vox-memory-review";
+import { saveMemoryCandidateDraft } from "../lib/vox-memory-save-review";
+import {
+  memoryLearningFixture,
+  savedSuggestionFixture,
+  suggestion,
+} from "../test-fixtures/memory-learning";
+import { memorySaveReviewFixture } from "../test-fixtures/memory-save-review";
+import { MemoryPrivacyPanel } from "./memory-privacy";
+
+const session = vi.hoisted(() => ({
+  callbacks: null as null | {
+    checking: () => void;
+    restored: (value: unknown) => void;
+    unavailable: () => void;
+    revoking?: () => void;
+  },
+}));
+vi.mock("../lib/account-session", () => ({
+  observeAccountSession: (callbacks: typeof session.callbacks) => {
+    session.callbacks = callbacks;
+    callbacks?.restored({
+      account: { id: "student", workspace: { id: "school" } },
+    });
+    return { dispose: vi.fn() };
+  },
+  notifyAccountSessionChanging: vi.fn(() => ({ id: "change" })),
+  notifyAccountSessionChanged: vi.fn(),
+}));
+vi.mock("./personal-memory", () => ({
+  PersonalMemoryPanel: () => <p>Writing preferences</p>,
+}));
+const privacy = {
+  history_enabled: false,
+  retention_days: null,
+  off_the_record: false,
+  generation: 4,
+  disclosure_version: null,
+};
+const fact = {
+  id: "fact-1",
+  label: "Study preference",
+  content: "I focus in the morning.",
+  source_kind: "vox",
+  source_conversation_id: "call-1",
+  created_at: "2026-10-26T12:00:00Z",
+  updated_at: "2026-10-26T12:00:00Z",
+  sensitive: false,
+};
+const call = {
+  id: "call-1",
+  title: "Morning plan",
+  source_kind: "vox",
+  created_at: fact.created_at,
+  updated_at: fact.updated_at,
+  message_count: 2,
+};
+let host: HTMLDivElement, root: Root;
+beforeEach(() => {
+  sessionStorage.clear();
+  window.history.replaceState({}, "", "/settings");
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, options?: RequestInit) => {
+      if (options?.method === "DELETE")
+        return new Response(null, { status: 204 });
+      if (options?.method === "PUT")
+        return Response.json({
+          ...privacy,
+          ...JSON.parse(String(options.body)),
+          disclosure_version: 1,
+        });
+      if (url.includes("/privacy")) return Response.json(privacy);
+      if (url.endsWith("/facts")) return Response.json([fact]);
+      if (url.endsWith("/history/page"))
+        return Response.json({
+          items: [call],
+          next_cursor: null,
+          search_complete: true,
+          scanned: 1,
+        });
+      return Response.json({
+        ...call,
+        turns: [
+          {
+            role: "user",
+            content: "Plan my morning",
+            created_at: call.created_at,
+          },
+        ],
+        summary: null,
+      });
+    }),
+  );
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+});
+afterEach(() => {
+  act(() => root.unmount());
+  host.remove();
+  vi.unstubAllGlobals();
+  session.callbacks = null;
+  vi.useRealTimers();
+});
+async function mount() {
+  await act(async () =>
+    root.render(
+      <MemoryPrivacyPanel
+        accountKey="school:student"
+        timezone="America/New_York"
+      />,
+    ),
+  );
+}
+function button(label: string) {
+  const result = [...host.querySelectorAll("button")].find(
+    (node) => node.textContent?.trim() === label,
+  );
+  if (!result) throw Error(`Missing ${label}`);
+  return result;
+}
+async function click(label: string) {
+  await act(async () => button(label).click());
+}
+async function select(value: string) {
+  await act(async () => {
+    const input = host.querySelector("select");
+    if (!input) throw Error("Missing retention choice");
+    input.value = value;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+async function type(input: HTMLInputElement, value: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set?.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+it("does not preselect retention and requires separate disclosure before history starts", async () => {
+  await mount();
+  expect(host.querySelector("select")?.value).toBe("");
+  expect(host.textContent).toContain("From a Vox call");
+  await select("never");
+  expect(button("Save history choice").disabled).toBe(true);
+  const checkbox = host.querySelector(
+    'input[type="checkbox"]',
+  ) as HTMLInputElement;
+  await act(async () => checkbox.click());
+  expect(button("Save history choice").disabled).toBe(false);
+  await click("Save history choice");
+  const writes = vi
+    .mocked(fetch)
+    .mock.calls.filter(([, options]) => options?.method === "PUT");
+  expect(writes).toHaveLength(1);
+  expect(JSON.parse(String(writes[0][1]?.body))).toEqual({
+    history_enabled: true,
+    retention_days: null,
+    off_the_record: false,
+    generation: 4,
+    disclosure_accepted: true,
+  });
+});
+it("off-record changes preserve saved retention instead of an unapproved draft", async () => {
+  await mount();
+  await select("90");
+  await click("Off");
+  const call = vi
+    .mocked(fetch)
+    .mock.calls.find(([, options]) => options?.method === "PUT");
+  expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+    history_enabled: false,
+    retention_days: null,
+    off_the_record: true,
+    disclosure_accepted: false,
+  });
+});
+it("requires exact review before forgetting a conversation and uses its source id", async () => {
+  await mount();
+  await click("View and search history");
+  const forget = [...host.querySelectorAll("button")].find((node) =>
+    node.textContent?.startsWith("Forget Morning plan"),
+  );
+  if (!forget) throw Error("Missing conversation forget");
+  await act(async () => forget.click());
+  expect(host.textContent).toContain("every fact learned from it");
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.some(([, options]) => options?.method === "DELETE"),
+  ).toBe(false);
+  await click("Yes, forget it");
+  const removal = vi
+    .mocked(fetch)
+    .mock.calls.find(([, options]) => options?.method === "DELETE");
+  expect(removal?.[0]).toMatch(/\/history\/call-1$/);
+  expect(removal?.[1]?.headers).toMatchObject({
+    "X-NavoX-Account": "school:student",
+  });
+});
+it("finds older matches through empty pages using private POST bodies", async () => {
+  await mount();
+  const search = "private morning subject";
+  const original = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    if (String(url).endsWith("/history/page")) {
+      const body = JSON.parse(String(options?.body));
+      expect(String(url)).not.toContain(search);
+      expect(options?.method).toBe("POST");
+      expect(body.query).toBe(search);
+      if (!body.cursor)
+        return Response.json({
+          items: [],
+          next_cursor: "older-proof",
+          search_complete: false,
+          scanned: 25,
+        });
+      expect(body.cursor).toBe("older-proof");
+      return Response.json({
+        items: [
+          { ...call, id: "older-101", title: "Older private conversation" },
+        ],
+        next_cursor: null,
+        search_complete: true,
+        scanned: 25,
+      });
+    }
+    if (!original) throw Error("Missing fixture");
+    return original(url, options);
+  });
+  // Open the controls before submitting the bounded private search.
+  vi.mocked(fetch).mockImplementationOnce(async () =>
+    Response.json({
+      items: [],
+      next_cursor: null,
+      search_complete: true,
+      scanned: 0,
+    }),
+  );
+  await click("View and search history");
+  await type(
+    host.querySelector('input[type="search"]') as HTMLInputElement,
+    search,
+  );
+  await click("Search history");
+  expect(host.textContent).toContain("pages checked so far");
+  expect(host.textContent).toContain("Checked 25 saved conversations");
+  await click("Search older conversations");
+  expect(host.textContent).toContain("Older private conversation");
+  expect(host.textContent).toContain("Checked 50 saved conversations");
+  expect(host.textContent).not.toContain("pages checked so far");
+  expect(window.location.href).not.toContain("private");
+});
+
+it("fences an older page when the owner is being rechecked", async () => {
+  await mount();
+  vi.mocked(fetch).mockImplementationOnce(async () =>
+    Response.json({
+      items: [call],
+      next_cursor: "older-proof",
+      search_complete: false,
+      scanned: 25,
+    }),
+  );
+  await click("View and search history");
+  let resolve: (response: Response) => void = () => {};
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  await act(async () => button("Load older conversations").click());
+  await act(async () => session.callbacks?.checking());
+  await act(async () =>
+    resolve(
+      Response.json({
+        items: [{ ...call, id: "older", title: "Late private page" }],
+        next_cursor: null,
+        search_complete: true,
+        scanned: 1,
+      }),
+    ),
+  );
+  expect(host.textContent).not.toContain("Late private page");
+  expect(host.textContent).not.toContain("Morning plan");
+});
+it("lets a new search replace a pending older page without mixing results", async () => {
+  await mount();
+  vi.mocked(fetch).mockImplementationOnce(async () =>
+    Response.json({
+      items: [call],
+      next_cursor: "older-proof",
+      search_complete: false,
+      scanned: 25,
+    }),
+  );
+  await click("View and search history");
+  let resolve: (response: Response) => void = () => {};
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  await act(async () => button("Load older conversations").click());
+  await type(
+    host.querySelector('input[type="search"]') as HTMLInputElement,
+    "different subject",
+  );
+  vi.mocked(fetch).mockImplementationOnce(async () =>
+    Response.json({
+      items: [{ ...call, id: "new-search", title: "Fresh search match" }],
+      next_cursor: null,
+      search_complete: true,
+      scanned: 1,
+    }),
+  );
+  await click("Search history");
+  await act(async () =>
+    resolve(
+      Response.json({
+        items: [{ ...call, id: "late-old", title: "Old search late page" }],
+        next_cursor: null,
+        search_complete: true,
+        scanned: 25,
+      }),
+    ),
+  );
+  expect(host.textContent).toContain("Fresh search match");
+  expect(host.textContent).not.toContain("Old search late page");
+  expect(host.textContent).toContain("Checked 1 saved conversation");
+});
+it("clears an older-page spinner when opening a conversation supersedes it", async () => {
+  await mount();
+  vi.mocked(fetch).mockImplementationOnce(async () =>
+    Response.json({
+      items: [call],
+      next_cursor: "older-proof",
+      search_complete: false,
+      scanned: 25,
+    }),
+  );
+  await click("View and search history");
+  let resolve: (response: Response) => void = () => {};
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  await click("Load older conversations");
+  expect(button("Checking older conversations…").disabled).toBe(true);
+  const row = [...host.querySelectorAll("button")].find(
+    (node) => node.querySelector("strong")?.textContent === call.title,
+  );
+  if (!row) throw Error("Missing saved conversation");
+  await act(async () => row.click());
+  expect(host.textContent).toContain("Plan my morning");
+  expect(button("Load older conversations").disabled).toBe(false);
+  await act(async () =>
+    resolve(
+      Response.json({
+        items: [{ ...call, id: "late-old", title: "Late old page" }],
+        next_cursor: null,
+        search_complete: true,
+        scanned: 25,
+      }),
+    ),
+  );
+  expect(host.textContent).not.toContain("Late old page");
+  expect(button("Load older conversations").disabled).toBe(false);
+  await click("Load older conversations");
+  expect(host.textContent).not.toContain("Checking older conversations…");
+});
+it("clears a conversation spinner when a new search supersedes its pending read", async () => {
+  await mount();
+  await click("View and search history");
+  let resolve: (response: Response) => void = () => {};
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  const row = [...host.querySelectorAll("button")].find(
+    (node) => node.querySelector("strong")?.textContent === call.title,
+  );
+  if (!row) throw Error("Missing saved conversation");
+  await act(async () => row.click());
+  expect(host.textContent).toContain("Opening the conversation…");
+  await type(
+    host.querySelector('input[type="search"]') as HTMLInputElement,
+    "fresh search",
+  );
+  vi.mocked(fetch).mockImplementationOnce(async () =>
+    Response.json({
+      items: [{ ...call, id: "fresh", title: "Fresh search result" }],
+      next_cursor: null,
+      search_complete: true,
+      scanned: 1,
+    }),
+  );
+  await click("Search history");
+  expect(host.textContent).toContain("Fresh search result");
+  expect(host.textContent).not.toContain("Opening the conversation…");
+  await act(async () =>
+    resolve(
+      Response.json({
+        ...call,
+        summary: null,
+        turns: [
+          {
+            role: "user",
+            content: "Late conversation content",
+            created_at: call.created_at,
+          },
+        ],
+      }),
+    ),
+  );
+  expect(host.textContent).not.toContain("Late conversation content");
+  expect(host.textContent).not.toContain("Opening the conversation…");
+  expect(host.textContent).toContain("Fresh search result");
+});
+it("blocks delete-all until the exact phrase is entered", async () => {
+  await mount();
+  await click("Delete all memory");
+  expect(button("Permanently delete everything").disabled).toBe(true);
+  await type(
+    host.querySelector(
+      'input[aria-label="Type DELETE EVERYTHING to confirm"]',
+    ) as HTMLInputElement,
+    "DELETE EVERYTHING",
+  );
+  expect(button("Permanently delete everything").disabled).toBe(false);
+  await click("Permanently delete everything");
+  const removal = vi
+    .mocked(fetch)
+    .mock.calls.find(([, options]) => options?.method === "DELETE");
+  expect(JSON.parse(String(removal?.[1]?.body))).toEqual({
+    generation: 4,
+    confirmation: "DELETE EVERYTHING",
+  });
+});
+it("keeps other memory writes disabled while a candidate save is pending", async () => {
+  saveMemoryCandidateDraft(
+    sessionStorage,
+    "school:student",
+    memorySaveReviewFixture().review,
+  );
+  await mount();
+  const privateAgreement = host.querySelector<HTMLInputElement>(
+    '[aria-labelledby] input[type="checkbox"]',
+  );
+  if (!privateAgreement) throw Error("Missing private agreement");
+  await act(async () => privateAgreement.click());
+  let reject: (reason: Error) => void = () => {};
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+  );
+  await act(async () => button("Save this memory").click());
+  expect(button("Add something").disabled).toBe(true);
+  expect(button("Delete all memory").disabled).toBe(true);
+  await act(async () => reject(Error("lost candidate response")));
+  expect(button("Add something").disabled).toBe(true);
+  expect(host.textContent).toContain("Reload your memory");
+});
+it("fences other memory writes during a private learning save and reloads its new privacy generation", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(Date.parse(suggestion.created_at));
+  await mount();
+  const original = vi.mocked(fetch).getMockImplementation();
+  let saved = false,
+    resolve!: (value: Response) => void;
+  const held = new Promise<Response>((yes) => {
+    resolve = yes;
+  });
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    if (String(url).endsWith("/learning"))
+      return Response.json(memoryLearningFixture());
+    if (String(url).endsWith("/confirm")) return held;
+    if (saved && String(url).endsWith("/privacy"))
+      return Response.json({ ...privacy, generation: 5 });
+    if (saved && String(url).endsWith("/facts"))
+      return Response.json([fact, savedSuggestionFixture()]);
+    if (!original) throw Error("Missing fixture");
+    return original(url, options);
+  });
+  await click("Check learning and suggestions");
+  const agreement = host.querySelector<HTMLInputElement>(
+    '[aria-label^="Private suggestion:"] input[type="checkbox"]',
+  );
+  if (!agreement) throw Error("Missing private suggestion agreement");
+  await act(async () => agreement.click());
+  await click("Save this suggestion");
+  expect(button("Add something").disabled).toBe(true);
+  expect(button("Delete all memory").disabled).toBe(true);
+  await act(async () => {
+    saved = true;
+    resolve(Response.json(savedSuggestionFixture(), { status: 201 }));
+  });
+  expect(button("Add something").disabled).toBe(false);
+  expect(host.textContent).toContain(suggestion.content);
+  expect(host.querySelector('[aria-label^="Private suggestion:"]')).toBeNull();
+});
+it("clears private data and fences a delayed history response when the session changes", async () => {
+  await mount();
+  let resolve: (response: Response) => void = () => {};
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  await act(async () => button("View and search history").click());
+  await act(async () => session.callbacks?.checking());
+  await act(async () => resolve(Response.json([call])));
+  expect(host.textContent).not.toContain("Morning plan");
+  expect(host.textContent).not.toContain(fact.content);
+  expect(host.querySelector("select")).toBeNull();
+});
+it("fences further writes after an uncertain mutation until the saved state is loaded", async () => {
+  await mount();
+  await click("Add something");
+  await type(
+    host.querySelector('input[maxlength="80"]') as HTMLInputElement,
+    "My goal",
+  );
+  const textarea = host.querySelector("textarea");
+  if (!textarea) throw Error("Missing fact content");
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )?.set?.call(textarea, "Learn circuits");
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  vi.mocked(fetch).mockRejectedValueOnce(new Error("network lost"));
+  await click("Save fact");
+  expect(button("Add something").disabled).toBe(true);
+  expect(host.textContent).toContain("Reload your memory");
+  saveMemoryForgetDraft(sessionStorage, "school:student", "morning");
+  await act(async () =>
+    window.dispatchEvent(new Event("navox:memory-forget-ready")),
+  );
+  expect(
+    sessionStorage.getItem(memoryForgetDraftKey("school:student")),
+  ).not.toBeNull();
+  expect(host.textContent).not.toContain("Review matches for “morning”");
+  await click("Retry");
+  expect(button("Add something").disabled).toBe(false);
+  expect(host.textContent).toContain("Review matches for “morning”");
+});
+
+it("explains that a corrected fact replaces current memory while preserving history", async () => {
+  await mount();
+  const edit = [...host.querySelectorAll("button")].find((node) =>
+    node.textContent?.startsWith("Edit Study preference"),
+  );
+  if (!edit) throw new Error("Missing fact edit");
+  await act(async () => edit.click());
+  expect(host.textContent).toContain("conversation stays in History");
+  expect(host.textContent).not.toContain(
+    "also forgets its original conversation",
+  );
+  expect(button("Save correction").disabled).toBe(false);
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.some(([, options]) => options?.method === "PATCH"),
+  ).toBe(false);
+});
+
+it("opens an owner-bound Vox search without deleting or putting its subject in the URL", async () => {
+  saveMemoryForgetDraft(sessionStorage, "school:student", "morning");
+  await mount();
+  expect(host.textContent).toContain("Review matches for “morning”");
+  expect(
+    (host.querySelector('input[type="search"]') as HTMLInputElement).value,
+  ).toBe("morning");
+  expect(
+    host.querySelector('[data-memory-match="true"]')?.textContent,
+  ).toContain("Study preference");
+  expect(window.location.href).not.toContain("morning");
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.some(
+        ([url, options]) =>
+          String(url).endsWith("/history/page") &&
+          options?.method === "POST" &&
+          JSON.parse(String(options.body)).query === "morning",
+      ),
+  ).toBe(true);
+  expect(
+    vi
+      .mocked(fetch)
+      .mock.calls.some(([, options]) => options?.method === "DELETE"),
+  ).toBe(false);
+});
+
+it("discards a pending private review when its login is revoked", async () => {
+  await mount();
+  saveMemoryForgetDraft(sessionStorage, "school:student", "private subject");
+  await act(async () => session.callbacks?.revoking?.());
+  expect(
+    sessionStorage.getItem(memoryForgetDraftKey("school:student")),
+  ).toBeNull();
+});

@@ -161,7 +161,7 @@ describe("workspace destinations", () => {
       expect(settings).not.toContain("Local time and weather");
       expect(settings).not.toContain("Pause assistance");
       expect(settings).toContain("Settings sections");
-      expect(settings).toContain("What NavoX knows about me");
+      expect(settings).toContain("Opening your private memory");
       expect(settings).toContain("Voice &amp; Noa");
       expect(fetchMock).not.toHaveBeenCalled();
     } finally {

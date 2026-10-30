@@ -12,14 +12,21 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from navox.connectors.sync_state import database_now, utc
+from navox.core.credential_vault import CredentialVaultError
 from navox.core.settings import Settings
 from navox.db.models import Connection
 from navox.db.student_planning import StudentPlanningState, StudentStudyBlock
+from navox.providers.apple_availability import AppleAvailabilitySnapshot
 from navox.providers.google_availability import (
     GoogleAvailabilityProvider,
     GoogleAvailabilitySnapshot,
 )
 from navox.providers.google_oauth import GoogleAccessTokenError, access_token_for_connection
+from navox.providers.microsoft_availability import (
+    MicrosoftAvailabilityProvider,
+    MicrosoftAvailabilitySnapshot,
+)
+from navox.providers.microsoft_mail import MicrosoftMailError
 from navox.student import service as schedule
 from navox.student.occurrences import ClassProjectionIssue, project
 from navox.student_availability.engine import compute_availability
@@ -34,13 +41,14 @@ from navox.student_availability.schemas import (
     SourceCoverage,
     StudyBlock,
 )
+from navox.student_calendars import apple, microsoft
 from navox.student_calendars import service as calendars
-from navox.student_calendars.schemas import AVAILABILITY_SCOPES
 from navox.student_planning import service as planning_service
 from navox.student_planning.schemas import Preferences
 
 TIMETABLE = "student-timetable"
 STUDY = "student-study-plan"
+NATIVE_CALENDAR = "student-calendar-actions"
 MAX_ACCOUNTS_PER_CHECK = 8
 SOURCE_PADDING = timedelta(minutes=250)
 
@@ -55,6 +63,7 @@ class InternalSnapshot:
     busy: tuple[BusyInterval, ...]
     studies: tuple[StudyBlock, ...]
     uncertainties: tuple[ProjectionUncertainty, ...]
+    native_claim_count: int = 0
 
 
 def _source_window(payload: AvailabilityPreview, timezone: str) -> tuple[datetime, datetime]:
@@ -79,7 +88,12 @@ async def _internal(
     user_id: UUID,
     workspace_id: UUID,
     payload: AvailabilityPreview,
+    *,
+    settings: Settings,
 ) -> InternalSnapshot:
+    # Local import prevents the scheduling -> availability -> planning cycle.
+    from navox.student_calendars import claims
+
     user = await schedule.owner(database, user_id, workspace_id)
     preferences = await planning_service.preferences(database, user_id, workspace_id)
     if (
@@ -180,6 +194,38 @@ async def _internal(
         )
         for item in fixed
     )
+    native = await claims.snapshot(database, user_id, workspace_id, settings=settings)
+    for claim in native:
+        if claim.unknown_travel or payload.travel_assumption == "unknown":
+            busy.append(
+                BusyInterval(
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    id=f"native-{claim.id.hex}",
+                    source_id=NATIVE_CALENDAR,
+                    kind="meeting",
+                    start_at=claim.start_at,
+                    end_at=claim.end_at,
+                )
+            )
+            continue
+        first, last = claim.interval()
+        # The retained interval already contains its own meeting buffer (or a
+        # conservative unknown-travel day). Fixed avoids padding it twice;
+        # the positioned new meeting still reserves its separate ten minutes.
+        busy.append(
+            BusyInterval(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                id=f"native-{claim.id.hex}",
+                source_id=NATIVE_CALENDAR,
+                kind="fixed",
+                start_at=first,
+                end_at=last,
+                travel_before_minutes=0,
+                travel_after_minutes=0,
+            )
+        )
     uncertainties = [
         ProjectionUncertainty(
             user_id=user_id,
@@ -240,6 +286,9 @@ async def _internal(
             for block in blocks
         ],
     }
+    native_fingerprint = claims.fingerprint(native)
+    if native_fingerprint is not None:
+        body["calendar_claims"] = native_fingerprint
     digest = hashlib.sha256(
         json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -252,6 +301,7 @@ async def _internal(
         tuple(busy),
         studies,
         tuple(uncertainties),
+        len(native),
     )
 
 
@@ -309,17 +359,21 @@ async def preview(
     payload: AvailabilityPreview,
     *,
     provider: GoogleAvailabilityProvider | None = None,
+    microsoft_provider: MicrosoftAvailabilityProvider | None = None,
 ) -> AvailabilitySnapshot:
     async with factory() as database:
         scope = await calendars.scope_snapshot(database, user_id, workspace_id, session_hash)
-        internal = await _internal(database, user_id, workspace_id, payload)
+        internal = await _internal(database, user_id, workspace_id, payload, settings=settings)
         started = await database_now(database)
         await database.commit()
     if len(scope.grants) > 198:
         raise schedule.StudentError(409, "Too many calendar permissions to check safely")
     provider = provider or GoogleAvailabilityProvider()
+    microsoft_provider = microsoft_provider or MicrosoftAvailabilityProvider()
     source_start, source_end = _source_window(payload, internal.timezone)
-    external: dict[UUID, GoogleAvailabilitySnapshot] = {}
+    external: dict[
+        UUID, GoogleAvailabilitySnapshot | MicrosoftAvailabilitySnapshot | AppleAvailabilitySnapshot
+    ] = {}
 
     async def check() -> None:
         async with factory() as database:
@@ -335,14 +389,36 @@ async def preview(
                     or grant.connection_status != "active"
                     or grant.credential_id is None
                     or grant.connection_id is None
-                    or not set(AVAILABILITY_SCOPES).issubset(grant.granted_scopes)
+                    or not set(calendars.required_scopes(grant.provider)).issubset(
+                        grant.granted_scopes
+                    )
                 ):
                     continue
                 try:
-                    token = await _token(factory, settings, scope, grant, session_hash)
-                except GoogleAccessTokenError:
+                    if grant.provider == "icloud":
+                        async with factory() as apple_database:
+                            external[grant.id] = await apple.read(
+                                apple_database,
+                                scope,
+                                grant,
+                                settings,
+                                start_at=source_start,
+                                end_at=source_end,
+                                session_hash=session_hash,
+                            )
+                        continue
+                    if grant.provider == "microsoft":
+                        token = await microsoft.access(
+                            factory, settings, scope, grant, session_hash
+                        )
+                    elif grant.provider == "google":
+                        token = await _token(factory, settings, scope, grant, session_hash)
+                    else:
+                        continue
+                except (GoogleAccessTokenError, MicrosoftMailError, CredentialVaultError):
                     continue
-                external[grant.id] = await provider.collect(
+                reader = microsoft_provider if grant.provider == "microsoft" else provider
+                external[grant.id] = await reader.collect(
                     access_token=token,
                     start_at=source_start,
                     end_at=source_end,
@@ -353,7 +429,7 @@ async def preview(
             raise
     async with factory() as database:
         await calendars.check_scope(database, scope, session_hash)
-        current = await _internal(database, user_id, workspace_id, payload)
+        current = await _internal(database, user_id, workspace_id, payload, settings=settings)
         if current.digest != internal.digest:
             raise schedule.StudentError(409, "Your schedule or study plan changed. Check again")
         now = await database_now(database)
@@ -364,6 +440,8 @@ async def preview(
         summaries = []
         busy = list(current.busy)
         required = [TIMETABLE, STUDY]
+        if current.native_claim_count:
+            required.append(NATIVE_CALENDAR)
         for source_id in required:
             coverage.append(
                 SourceCoverage(
@@ -379,9 +457,15 @@ async def preview(
                 )
             )
             summaries.append(
-                AvailabilitySourceSummary(source_id=source_id, state="complete", calendar_count=0)
+                AvailabilitySourceSummary(
+                    source_id=source_id,
+                    state="complete",
+                    calendar_count=current.native_claim_count
+                    if source_id == NATIVE_CALENDAR
+                    else 0,
+                )
             )
-        grant_sources = [(f"google-{grant.id.hex}", grant) for grant in scope.grants]
+        grant_sources = [(f"{grant.provider}-{grant.id.hex}", grant) for grant in scope.grants]
         if not grant_sources:
             required.append("google-calendar-availability")
             coverage.append(

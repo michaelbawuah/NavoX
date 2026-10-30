@@ -3,8 +3,9 @@
 This increment lets a student review a single personal event, approve its exact
 calendar/title/location/time/timezone, and undo only the unchanged event NavoX
 created. It does not invite attendees, send meeting invitations, create repeating
-events, create conferencing links, override unknown availability, or move study
-blocks. Source and synthetic provider tests do not qualify a live Google account.
+events, create conferencing links or override unknown availability. The extension
+below permits separately reviewed, feasible internal study moves. Source and
+synthetic provider tests do not qualify a live Google account.
 
 ## Authority
 
@@ -44,7 +45,7 @@ All paths below begin `/api/v1/student/calendars`.
 | POST `/google/scheduling/start` | `CalendarCommand` plus `consent_version`, explicit `confirmed:true`, existing `connection_id`; returns account-bound OAuth URL. |
 | POST `/scheduling/{grant_id}/disconnect` | `CalendarCommand`; revokes scheduling only and preserves busy-time consent. |
 | POST `/scheduling/targets` | `CalendarCommand` plus `grant_id`; freshly lists bounded owner-role targets. |
-| POST `/events/preview` | `CalendarCommand` plus `grant_id`, `calendar_id`, title/location, aware start/end, IANA timezone and `AvailabilityPreview`; returns exact encrypted review. |
+| POST `/events/preview` | `CalendarCommand` plus `grant_id`, `calendar_id`, title/location, aware start/end, IANA timezone and `AvailabilityPreview`; optional `allow_study_displacement` defaults to false. Returns exact encrypted review. |
 | GET `/events?cursor={last_owned_event_id}` | Twenty event reviews per page, held requests first; `next_cursor` is an owned opaque event UUID or null. No provider I/O. Stale cursors return 409 to restart. |
 | GET `/events/{id}` | Recover one known owned receipt with fresh native generation/revisions and no provider I/O. |
 | POST `/events/{id}/approve` | `CalendarCommand` plus `event_revision`, `digest`, explicit `confirmed:true`. |
@@ -66,9 +67,11 @@ complete within 100 targets/four pages. API bodies remain bounded to 4 KiB.
 ## State and outcome
 
 A preview is `pending` and causes no provider event mutation. Preview and approval
-both require fresh complete availability, a confirmed routine and an opening that
-contains the entire event without moving a study block. Changes or uncertainty
-return 409 for a new availability check. Native timetable/routine digests and the
+both require fresh complete required-source coverage, a confirmed routine and
+room for the entire event with both meeting buffers. An ordinary review requires
+no actual study movement; an explicitly opted-in review may instead include the
+exact feasible study replacements described below. Changed sources or unsafe
+coverage return 409 for a new check. Native timetable/routine digests and the
 60-second availability deadline are checked again immediately around admission.
 Google does not expose an atomic free-busy-plus-insert operation; another actor
 can change its calendar after a fresh check.
@@ -135,7 +138,10 @@ Drafts, target identity/label, title, location, availability choices and ETags a
 stored only in an owner/action/generation-bound encrypted envelope using the
 existing source-content encryption boundary. Audit events contain opaque IDs,
 not draft text, calendar IDs, credentials or provider bodies. Credentials remain
-in the existing vault. No AI provider sees an event draft in this increment.
+in the existing vault. Screen-only scheduling does not send its draft to an AI
+provider. Vox can prepare draft fields through its existing metered model loop;
+its exact private read-back, including reviewed study details, uses the configured
+qualified host speech path. Model tools receive no execution approval authority.
 
 Reset revokes scheduling grants, removes unsent/failed previews and advances the
 retained generation fence. Submitted operational receipts remain held rather
@@ -150,6 +156,60 @@ downgrade while either table contains data. It does not mutate the retained Gmai
 uncertain inventory, existing Temporal workflows, worker pins or production flags.
 Live provider acceptance, production signed-in qualification and supported-device
 evidence remain separate before enabling this capability.
+
+## Host voice approval and reviewed study replacements
+
+Vox can obtain the same fresh ranked options and prepare one exact Google review.
+The host derives the browser session from the active native call; a model cannot
+choose an owner, session proof or approval. Exact host-generated read-back must
+finish playing before a bounded contextual affirmative can consume its one-use
+90-second approval. Declines, refinements, interruptions, replacement proposals,
+changed sources and expiry invalidate it. A model-facing approval function is
+never exposed. Long reviews and calls without an already-qualified host speech
+path require the existing screen review instead.
+
+An exact read-back carries its native output authority through metered speech
+generation and each audio-frame publication. Receipt and semantic internal-source
+proof are checked together under the owner lock. Erasure during generation or
+output stops the remaining cached read-back. Provider availability is checked at
+review/arming/admission boundaries, not on every audio frame. All provider and
+media checks still apply after an operation is admitted; call loss never permits
+automatic creation replay or discarding an uncertain operational receipt.
+
+Study-only provisional windows are not ordinary free time. A bounded server-only
+pass can certify exact replacement assignments against current owned tasks,
+remaining minutes, revisions, deadlines, work limits, protected rest, begun work,
+native calendar claims and complete provider coverage. Client-supplied study IDs
+or a provisional marker cannot certify a slot. Even an ordinary zero-move slot
+inside a broader provisional window is independently recertified. Moving study
+requires the existing planning capability; deadline avoidance remains relevant
+when that capability is disabled. Suggestions do not move anything, and a bounded
+search does not claim to exhaust every possible replacement.
+
+The exact review discloses every affected block's before/after times and minutes.
+Approval commits those internal moves and the executing event receipt together
+before the single provider insert. This is not a distributed transaction: moved
+study can remain if creation fails or is uncertain. Responses report local study
+changes separately from external event confirmation. Calendar Undo removes only
+the unchanged event and does not restore study moves; both screen and voice
+reviews disclose that limitation. Unknown outcomes preserve holds and exact
+recovery rather than silently rolling back or replaying creation.
+
+Task/course erasure redacts matching derived review details, invalidates unsent
+reviews and preserves opaque admitted-action proof. Planner calendar reads use
+the same ten-minute meeting buffers plus travel as availability and retained
+claims. New events include server-owned Added by NavoX provenance; legacy exact
+version-safe Undo remains supported.
+
+There is no schema migration for the new encrypted review fields. This does not
+make older application code a safe rollback after new study-move receipts exist:
+drafts can carry `allow_study_displacement` and receipts can carry
+`study_displacement` version 1. For any newly admitted or uncertain outcome,
+retain API/worker readers and reconciliation at source
+`a8b73df88fbcd93af1990bd594545a0492f9fe01` or a later source preserving this
+PR's compatible receipt and output safeguards. This reader floor does not claim
+live qualification of that source. Do not roll back to `4df5f1e` or restore a
+pre-action database snapshot over an admitted or uncertain external outcome.
 
 Google references: [scopes](https://developers.google.com/workspace/calendar/api/auth),
 [insert](https://developers.google.com/workspace/calendar/api/v3/reference/events/insert),

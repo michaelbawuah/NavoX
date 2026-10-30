@@ -9,6 +9,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
+from navox.vox.host_turn import HostReplyRequired, HostTurnHooks, OutputAuthorization
 from navox.vox.inference_config import VoxInferenceConfig
 from navox.vox.inference_http import (
     OpenAICompatiblePipeline,
@@ -49,11 +50,13 @@ class ConfiguredVoiceWorker:
         pipeline: OpenAICompatiblePipeline,
         *,
         usage: UsageHooks | None = None,
+        host_hooks: HostTurnHooks | None = None,
     ):
         self.assignment, self.check, self.output = assignment, check, output
         self.config, self.context = config, context
         self.realtime, self.pipeline = realtime, pipeline
         self.usage = usage
+        self.host_hooks = host_hooks
         self._preroll: deque[bytes] = deque(maxlen=10)
         self.context.begin_epoch(assignment.connection_id)
         self.failed = False
@@ -244,14 +247,50 @@ class ConfiguredVoiceWorker:
                 self._task = None
 
     async def _respond(self, pcm: bytes | None, epoch: int, text: str | None = None) -> None:
+        output_started = False
+        output_authorize: OutputAuthorization | None = None
+        notices: list[str] = []
+
         async def current() -> None:
             if self._closed or epoch != self._epoch:
                 raise WorkerAccessLost("The voice turn was interrupted")
             await self._authority()
+            if output_authorize is not None:
+                await output_authorize()
 
         async def emit(frame: bytes) -> None:
             await current()
+            await before_output()
             await self.output.play_pcm(frame, current)
+
+        async def before_output() -> None:
+            nonlocal output_started
+            if output_started and (
+                self.host_hooks is None or not self.host_hooks.needs_output_boundary
+            ):
+                return
+            if self.host_hooks is not None:
+                notice = await self.host_hooks.before_output()
+                if notice:
+                    try:
+                        spoken = await self.pipeline.speak("", notice)
+                    except ProviderUnavailable:
+                        # A required host notice is an output authority fence,
+                        # not a realtime transport failure eligible for fallback.
+                        raise ProviderRejected(
+                            "The required voice notice could not be played"
+                        ) from None
+                    await current()
+                    # A generic privacy notice is not private response exposure
+                    # and cannot arm a consequential calendar approval.
+                    play_notice = getattr(self.output, "play_notice", self.output.play)
+                    await play_notice(spoken.audio, current)
+                    await current()
+                    await self.host_hooks.notice_played(notice)
+                    notices.append(notice)
+                await current()
+                await self.host_hooks.output_started()
+            output_started = True
 
         try:
             async with asyncio.timeout(self.config.turn_timeout_seconds + 5):
@@ -263,6 +302,26 @@ class ConfiguredVoiceWorker:
                             await self.realtime.begin_turn(self._history())
                         turn = await self.realtime.respond(emit, text=text)
                         await self.output.finish_pcm(current)
+                    except HostReplyRequired as host_reply:
+                        # Discard unplayed model context before exact host speech.
+                        # The next realtime socket restores the heard host turn.
+                        await self.realtime.close()
+                        await self.output.clear()
+                        if host_reply.authorize is None:
+                            reply = await self.pipeline.speak(
+                                host_reply.question, host_reply.answer
+                            )
+                        else:
+                            reply = await self.pipeline.speak(
+                                host_reply.question,
+                                host_reply.answer,
+                                authorize=host_reply.authorize,
+                            )
+                        output_authorize = getattr(reply, "authorize", None)
+                        await current()
+                        await before_output()
+                        await self.output.play(reply.audio, current)
+                        turn = MemoryTurn(reply.question, reply.answer)
                     except ProviderUnavailable:
                         can_retry = (
                             self.config.fallback_enabled
@@ -287,10 +346,16 @@ class ConfiguredVoiceWorker:
                     reply = await self.pipeline.respond(
                         _wav(pcm) if pcm is not None else None, self._history(), question=text
                     )
+                    output_authorize = getattr(reply, "authorize", None)
                     await current()
+                    await before_output()
                     await self.output.play(reply.audio, current)
                     turn = MemoryTurn(reply.question, reply.answer)
                 await current()
+                if self.host_hooks is not None:
+                    await self.host_hooks.played(turn.answer)
+                if notices:
+                    turn = MemoryTurn(turn.question, " ".join([*notices, turn.answer]))
                 await self.context.commit(self.assignment.connection_id, turn.question, turn.answer)
                 if hasattr(self.realtime, "mark_played"):
                     self.realtime.mark_played()
@@ -299,6 +364,9 @@ class ConfiguredVoiceWorker:
             raise
         except WorkerAccessLost:
             self.failed = not self._closed and epoch == self._epoch
+            if self.host_hooks is not None:
+                self.host_hooks.invalidate("authority_lost")
+                await self.host_hooks.failed()
             await self.output.clear()
         except Exception as error:
             trace = error.__traceback__
@@ -313,6 +381,9 @@ class ConfiguredVoiceWorker:
             )
             # Only code location and type: no exception text, traceback, locals or content.
             self.failed = True
+            if self.host_hooks is not None:
+                self.host_hooks.invalidate("failed")
+                await self.host_hooks.failed()
             await self.output.clear()
         finally:
             if self._task is asyncio.current_task():
@@ -326,6 +397,8 @@ class ConfiguredVoiceWorker:
         self._task = asyncio.create_task(self._respond(None, self._epoch, text))
 
     async def interrupt(self) -> None:
+        if self.host_hooks is not None and (self._task is not None or self._pcm):
+            self.host_hooks.invalidate("interrupted")
         self._barge_frames.clear()
         self._barge_samples = 0
         self._pcm.clear()
@@ -364,4 +437,6 @@ class ConfiguredVoiceWorker:
             await self.interrupt()
         finally:
             await self.realtime.close()
+            if self.host_hooks is not None:
+                await self.host_hooks.close()
             self.context.close()

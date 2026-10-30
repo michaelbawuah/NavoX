@@ -10,10 +10,14 @@ import {
   useRef,
   useState,
 } from "react";
+import type { AvailabilityOption } from "../lib/student-availability-options";
 import {
-  type AvailabilityOption,
-  selectAvailabilityOptions,
-} from "../lib/student-availability-options";
+  createStudentAvailabilitySuggestionsApi,
+  type MeetingPurpose,
+  type MeetingSuggestionReason,
+  meetingOption,
+  type StudentAvailabilitySuggestionsApi,
+} from "../lib/student-availability-suggestions-api";
 import {
   type AvailabilityPreviewInput,
   type AvailabilitySnapshot,
@@ -43,11 +47,25 @@ const reasons = {
   travel_unknown: "Travel time is unknown.",
   movable_study: "Study work overlaps this window and has not been replanned.",
 };
+const suggestionLabels: Record<MeetingSuggestionReason, string> = {
+  within_their_hours: "Within the sourced availability",
+  right_after_commitment: "Keeps your day together",
+  right_before_commitment: "Fits before your next commitment",
+  lunch_time: "During lunch hours",
+  soonest: "Earliest suitable option",
+  clear_of_deadlines: "Clear of the checked deadlines",
+  moves_study_block: "Needs reviewed study moves",
+};
+type RankedOption = AvailabilityOption & { reasons: MeetingSuggestionReason[] };
 
 function sourceLabel(sourceId: string, index: number) {
   if (sourceId === "student-timetable") return "Classes and fixed commitments";
   if (sourceId === "student-study-plan") return "Saved study plan";
+  if (sourceId === "student-calendar-actions")
+    return "Saved NavoX calendar events";
   if (sourceId.startsWith("google-")) return "Google calendar access";
+  if (sourceId.startsWith("microsoft-")) return "Outlook calendar access";
+  if (sourceId.startsWith("icloud-")) return "Apple calendar access";
   return `Other required source ${index + 1}`;
 }
 
@@ -64,7 +82,7 @@ function PositionedOption({
   index,
   timezone,
 }: {
-  option: AvailabilityOption;
+  option: RankedOption;
   index: number;
   timezone: string;
 }) {
@@ -75,13 +93,25 @@ function PositionedOption({
         {timeRange(option.start_at, option.end_at, timezone)}
       </p>
       <p className={styles.hint}>
-        {option.duration_minutes} minutes · 10 minutes before and after kept
-        clear
+        {option.duration_minutes} minutes · 10-minute buffers before and after
       </p>
       <p className={styles.hint}>
         Including buffers: {studentClock(option.reserved_start_at, timezone)}–
         {studentClock(option.reserved_end_at, timezone)}
       </p>
+      {option.reasons.length > 0 && (
+        <p className={styles.hint}>
+          {option.reasons.map((reason) => suggestionLabels[reason]).join(" · ")}
+        </p>
+      )}
+      {!!option.displaced_study_block_ids?.length && (
+        <p className={styles.warning}>
+          Requires moving {option.displaced_study_block_ids.length} study
+          {option.displaced_study_block_ids.length === 1 ? " block" : " blocks"}
+          . Review the exact replacement times before approving. Nothing has
+          moved.
+        </p>
+      )}
     </li>
   );
 }
@@ -90,6 +120,7 @@ interface AvailabilityProps {
   accountId: string;
   timezone: string;
   api?: StudentCalendarApi;
+  suggestionsApi?: StudentAvailabilitySuggestionsApi;
 }
 
 export function StudentAvailability({
@@ -120,17 +151,29 @@ function AvailabilityWorkspace({
   accountId,
   timezone,
   api: suppliedApi,
+  suggestionsApi: suppliedSuggestionsApi,
 }: AvailabilityProps) {
   const id = useId();
   const api = useMemo(
     () => suppliedApi ?? createStudentCalendarApi(accountId),
     [accountId, suppliedApi],
   );
+  const suggestionsApi = useMemo(
+    () =>
+      suppliedSuggestionsApi ??
+      createStudentAvailabilitySuggestionsApi(accountId),
+    [accountId, suppliedSuggestionsApi],
+  );
   const [preferences, setPreferences] = useState<StudyPreferences | null>(null);
   const [snapshot, setSnapshot] = useState<AvailabilitySnapshot | null>(null);
   const [searchRequest, setSearchRequest] =
     useState<AvailabilityPreviewInput | null>(null);
-  const [options, setOptions] = useState<AvailabilityOption[]>([]);
+  const [options, setOptions] = useState<RankedOption[]>([]);
+  const studyWindows = snapshot?.result.provisional_openings.some(
+    (opening) =>
+      opening.reasons.length === 1 && opening.reasons[0] === "movable_study",
+  );
+  const [purpose, setPurpose] = useState<MeetingPurpose>("other");
   const [duration, setDuration] = useState(30);
   const [routine, setRoutine] = useState<"" | "confirmed" | "unknown">("");
   const [travel, setTravel] = useState<"" | "unknown" | "zero">("");
@@ -254,8 +297,9 @@ function AvailabilityWorkspace({
     const requestedDuration = duration;
     void run(
       (signal) =>
-        api.preview(
+        suggestionsApi.suggest(
           {
+            purpose,
             start_at: start,
             end_at: end,
             duration_minutes: requestedDuration,
@@ -267,7 +311,7 @@ function AvailabilityWorkspace({
           },
           signal,
         ),
-      (current) => {
+      ({ snapshot: current, selection }) => {
         if (current.input.timezone !== preferences.timezone)
           throw new Error("Your timezone changed. Reload your saved routine.");
         if (Date.parse(current.expires_at) <= Date.now())
@@ -275,11 +319,10 @@ function AvailabilityWorkspace({
             "This check expired before it finished. Find openings again.",
           );
         setOptions(
-          selectAvailabilityOptions(
-            current.result,
-            requestedDuration,
-            Date.now(),
-          ),
+          selection.suggestions.map((item) => ({
+            ...meetingOption(item),
+            reasons: item.reasons,
+          })),
         );
         setSnapshot(current);
         setSearchRequest({
@@ -305,8 +348,8 @@ function AvailabilityWorkspace({
         <Link href="/connections">Manage calendar access →</Link>
       </div>
       <p>
-        Check connected Google calendars alongside saved classes, fixed
-        commitments and study work. Calendar event names stay private.
+        Check connected calendars alongside saved classes, fixed commitments and
+        study work. Calendar event names stay private.
       </p>
       {preferences ? (
         <div className={styles.routine}>
@@ -376,6 +419,32 @@ function AvailabilityWorkspace({
           className={styles.fields}
           disabled={!privateState.ready || !preferences || privateState.busy}
         >
+          <label htmlFor={`${id}-purpose`}>
+            What are you making time for?
+            <select
+              id={`${id}-purpose`}
+              value={purpose}
+              onChange={(event) => {
+                changeSearch();
+                const next = event.target.value as MeetingPurpose;
+                setPurpose(next);
+                setDuration(
+                  next === "lunch" ||
+                    next === "project_meeting" ||
+                    next === "study_session"
+                    ? 60
+                    : 30,
+                );
+              }}
+            >
+              <option value="other">A meeting</option>
+              <option value="lunch">Lunch</option>
+              <option value="coffee">Coffee</option>
+              <option value="office_hours">Office hours</option>
+              <option value="project_meeting">Project meeting</option>
+              <option value="study_session">Study session</option>
+            </select>
+          </label>
           <label htmlFor={`${id}-from`}>
             From · {(preferences?.timezone ?? timezone).replaceAll("_", " ")}
             <input
@@ -489,8 +558,12 @@ function AvailabilityWorkspace({
             {options.length === 2
               ? "Two times to consider"
               : options.length === 1
-                ? "One time fits"
-                : "No confirmed option fits this search"}
+                ? options[0].displaced_study_block_ids?.length
+                  ? "One time to consider"
+                  : "One time fits"
+                : studyWindows
+                  ? "No study-compatible option was confirmed in this check"
+                  : "No confirmed option fits this search"}
           </h3>
           {snapshot.result.status === "needs_routine" && (
             <p className={styles.warning}>
@@ -498,8 +571,10 @@ function AvailabilityWorkspace({
             </p>
           )}
           <p className={styles.hint}>
-            Clear within the checked sources and saved schedule. Other
-            commitments may be missing. Times shown in{" "}
+            {options.some((option) => option.displaced_study_block_ids?.length)
+              ? "Checked against calendar and fixed commitments. Marked study moves still require your exact review."
+              : "Clear within the checked sources and saved schedule."}{" "}
+            Other commitments may be missing. Times shown in{" "}
             {snapshot.result.timezone.replaceAll("_", " ")}.
           </p>
           {options.length > 0 && (
@@ -516,9 +591,19 @@ function AvailabilityWorkspace({
           )}
           {options.length < 2 && (
             <p>
-              {options.length === 1
-                ? "A second distinct option did not fit with your duration and buffers."
-                : "NavoX has not invented a free time. Try a different window, confirm missing information or use a shorter duration."}
+              {studyWindows
+                ? "Other study-compatible times may exist. Try a narrower window or shorter duration."
+                : options.length === 1
+                  ? "A second distinct option did not fit with your duration and buffers."
+                  : "NavoX has not invented a free time. Try a different window, confirm missing information or use a shorter duration."}
+            </p>
+          )}
+          {options.some(
+            (option) => option.displaced_study_block_ids?.length,
+          ) && (
+            <p className={styles.hint}>
+              Study replacement checks cover a limited set of plans. Narrow your
+              search to check other times.
             </p>
           )}
           {snapshot.result.provisional_openings.length > 0 && (

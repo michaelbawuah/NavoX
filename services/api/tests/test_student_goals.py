@@ -109,6 +109,40 @@ async def current(env):
     return response.json()
 
 
+@pytest.mark.asyncio
+async def test_goal_summary_rejects_a_switched_cookie_before_exposing_or_mutating_data(goals_env):
+    env = goals_env
+    expected = f"{env.workspace_id}:{env.user_id}"
+    await create(env)
+    assert (await env.client.get(ROOT, headers={"X-NavoX-Account": expected})).status_code == 200
+    registration = await env.client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "other-goals@example.com",
+            "password": "twelve-character-password",
+            "display_name": "Another student",
+        },
+    )
+    assert registration.status_code == 201
+    read = await env.client.get(ROOT, headers={"X-NavoX-Account": expected})
+    assert read.status_code == 409
+    assert read.headers["cache-control"] == "private, no-store"
+    assert PRIVATE_TITLE not in read.text
+    write = await env.client.post(ROOT, headers={"X-NavoX-Account": expected}, json=goal_body())
+    assert write.status_code == 409
+    assert (await current(env))["goals"] == []
+
+
+@pytest.mark.asyncio
+async def test_goal_summary_rejects_duplicate_browser_account_headers(goals_env):
+    env = goals_env
+    expected = f"{env.workspace_id}:{env.user_id}"
+    response = await env.client.get(
+        ROOT, headers=[("X-NavoX-Account", expected), ("X-NavoX-Account", expected)]
+    )
+    assert response.status_code == 409
+
+
 def report_body(goal, **changes):
     return {
         "request_id": str(uuid4()),

@@ -33,15 +33,16 @@ import {
   IntelligenceControls,
   IntelligenceFeedback,
 } from "./intelligence-controls";
+import { MemoryPrivacyPanel } from "./memory-privacy";
 import { NoaSettings } from "./noa-settings";
 import { OperationalAssistance } from "./operational-assistance";
 import { OutlookConnectionPanel } from "./outlook-connection-panel";
 import { OutlookInbox } from "./outlook-inbox";
 import { PagedList } from "./paged-list";
-import { PersonalMemoryPanel } from "./personal-memory";
 import { PersonalRoutines } from "./personal-routines";
 import { ProactivePanel } from "./proactive-panel";
 import { RoutineAlarmSettings } from "./routine-alarm-settings";
+import { SettingsNavigation } from "./settings-navigation";
 import { SourceReferences } from "./source-references";
 import { StudentCalendarConnections } from "./student-calendar-connections";
 import { StudentClassesWorkspace } from "./student-classes";
@@ -1479,22 +1480,7 @@ function LegacyTodayWorkspace({
 
         {view === "settings" && (
           <div className={styles.settingsLayout}>
-            <nav className={styles.settingsNav} aria-label="Settings sections">
-              {[
-                ["profile", "Profile"],
-                ["school-term", "School & term"],
-                ["settings-connections", "Connections"],
-                ["notifications", "Notifications"],
-                ["voice-noa", "Voice & Noa"],
-                ["memory-privacy", "Memory & privacy"],
-                ["appearance", "Appearance"],
-                ["routine-alarm", "Routine & alarm"],
-              ].map(([id, label]) => (
-                <a key={id} href={`#${id}`}>
-                  {label}
-                </a>
-              ))}
-            </nav>
+            <SettingsNavigation />
             <div className={styles.focusColumn}>
               <section id="profile" className={styles.controlCard}>
                 <h2>Profile</h2>
@@ -1542,8 +1528,10 @@ function LegacyTodayWorkspace({
                 />
               </div>
               <div id="memory-privacy">
-                <PersonalMemoryPanel
+                <MemoryPrivacyPanel
                   key={`${account.id}:${account.workspace.id}`}
+                  accountKey={`${account.workspace.id}:${account.id}`}
+                  timezone={timezone}
                 />
               </div>
               <div id="appearance">
@@ -1559,7 +1547,10 @@ function LegacyTodayWorkspace({
               )}
               <details className={styles.toolDisclosure}>
                 <summary>AI and usage</summary>
-                <AISettings />
+                <AISettings
+                  key={`ai:${account.workspace.id}:${account.id}`}
+                  accountKey={`${account.workspace.id}:${account.id}`}
+                />
                 <VoxUsageReport
                   key={`${account.workspace.id}:${account.id}`}
                   accountId={`${account.workspace.id}:${account.id}`}

@@ -1,6 +1,10 @@
 import type { WakeWordAdapter } from "@navox/assistant-runtime/voice";
 import type { LocalAudioTrack, RemoteTrack } from "livekit-client";
 import { VoxActivityTracker } from "./vox-activity";
+import {
+  parseVoxCalendarReview,
+  VOX_CALENDAR_REVIEW_TOPIC,
+} from "./vox-calendar-review";
 import type {
   VoxConnection,
   VoxOwner,
@@ -8,6 +12,14 @@ import type {
   VoxTransportRequest,
 } from "./vox-call";
 import { VoxStandbyWake, type VoxWakeFactory } from "./vox-local-wake";
+import {
+  parseVoxMemoryReview,
+  VOX_MEMORY_REVIEW_TOPIC,
+} from "./vox-memory-review";
+import {
+  parseVoxMemorySaveReview,
+  VOX_MEMORY_SAVE_REVIEW_TOPIC,
+} from "./vox-memory-save-review";
 import { parseVoxPlanReview } from "./vox-plan-review";
 import type { PorcupineWakeConfig } from "./vox-porcupine-wake";
 import { VoxReservationError } from "./vox-reservations";
@@ -744,9 +756,19 @@ export function createLiveKitVoxTransport(options: {
             if (topic === "navox.vox.web.v1") {
               const result = parseVoxWebLookup(data);
               if (result) request.onEvent({ type: "web-lookup", result });
+            } else if (topic === VOX_MEMORY_REVIEW_TOPIC) {
+              const result = parseVoxMemoryReview(data);
+              if (result) request.onEvent({ type: "memory-review", result });
+            } else if (topic === VOX_MEMORY_SAVE_REVIEW_TOPIC) {
+              const result = parseVoxMemorySaveReview(data);
+              if (result)
+                request.onEvent({ type: "memory-save-review", result });
             } else if (topic === "navox.vox.plan-review.v1") {
               const result = parseVoxPlanReview(data);
               if (result) request.onEvent({ type: "plan-review", result });
+            } else if (topic === VOX_CALENDAR_REVIEW_TOPIC) {
+              const result = parseVoxCalendarReview(data);
+              if (result) request.onEvent({ type: "calendar-review", result });
             }
           },
           participantJoined(id) {
@@ -771,6 +793,7 @@ export function createLiveKitVoxTransport(options: {
               return;
             }
             remoteTracks.add(track);
+            agentReady?.();
             play(track);
           },
           trackUnsubscribed(track) {
@@ -831,15 +854,29 @@ export function createLiveKitVoxTransport(options: {
           room.identity() !== lease.participantIdentity
         )
           throw unavailable();
-        if (!room.hasParticipant(lease.agentIdentity)) {
+        // Presence precedes worker warm-up and input setup. The leased agent
+        // publishes its output only after those boundaries are ready; subscribe
+        // before waiting so already-present publications are handled as well.
+        const agentAudioReady = () =>
+          fresh() &&
+          visible() &&
+          room?.isConnected() === true &&
+          room.name() === lease?.roomName &&
+          room.identity() === lease?.participantIdentity &&
+          room.hasParticipant(lease?.agentIdentity ?? "") &&
+          (!request.mayRenewReservation || request.mayRenewReservation()) &&
+          remoteTracks.size > 0;
+        room.subscribeAgent(lease.agentIdentity);
+        if (!agentAudioReady()) {
           await new Promise<void>((resolve, reject) => {
-            agentReady = resolve;
+            agentReady = () => {
+              if (agentAudioReady()) resolve();
+            };
             agentFailed = () => reject(unavailable());
             agentTimer = setTimeout(() => reject(unavailable()), 15_000);
           });
         }
-        if (!fresh() || !room.hasParticipant(lease.agentIdentity))
-          throw unavailable();
+        if (!agentAudioReady()) throw unavailable();
         if (agentTimer !== null) clearTimeout(agentTimer);
         agentReady = agentFailed = null;
         joined = true;
@@ -887,7 +924,6 @@ export function createLiveKitVoxTransport(options: {
               });
           },
         });
-        room.subscribeAgent(lease.agentIdentity);
         if (!fresh() || !joined) throw unavailable();
         timer = setInterval(() => {
           resumeSignalling();

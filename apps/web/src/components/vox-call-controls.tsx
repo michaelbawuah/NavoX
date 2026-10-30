@@ -11,14 +11,18 @@ import {
   useState,
 } from "react";
 import type { VoxCallController, VoxCallState } from "../lib/vox-call";
+import { useVoxCallPrivacy, voxPrivacyLabel } from "../lib/vox-call-privacy";
 import {
   useVoxConversation,
   type VoxConversationModel,
 } from "../lib/vox-conversation";
+import { VoxCalendarReview } from "./vox-calendar-review";
 import styles from "./vox-call-controls.module.css";
 import { useVoxCall } from "./vox-call-provider";
 import { VoxClassReview } from "./vox-class-review";
 import { VoxConversation } from "./vox-conversation";
+import { VoxMemoryReview } from "./vox-memory-review";
+import { VoxMemorySaveReview } from "./vox-memory-save-review";
 import { VoxPlanReview } from "./vox-plan-review";
 import { VoxRoutineReview } from "./vox-routine-review";
 import { VoxTaskReview } from "./vox-task-review";
@@ -203,6 +207,7 @@ function CallDialog({
   onDone,
   onStart,
   usageNotice,
+  privacy,
 }: {
   conversation: VoxConversationModel;
   controller: VoxCallController;
@@ -212,6 +217,7 @@ function CallDialog({
   onDone: () => void;
   onStart: () => void;
   usageNotice?: string;
+  privacy: ReturnType<typeof useVoxCallPrivacy>;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const returnTarget = useRef<HTMLElement | null>(null);
@@ -293,6 +299,9 @@ function CallDialog({
     <dialog
       ref={dialog}
       className={styles.dialog}
+      data-vox-media-ready={
+        state.ownerVerified && state.phase === "active" ? "true" : "false"
+      }
       aria-labelledby={`${id}-title`}
       aria-describedby={`${id}-detail`}
       aria-modal="true"
@@ -331,10 +340,11 @@ function CallDialog({
                 </button>
               </fieldset>
               <p className={styles.captionNote}>
-                Off the record. This conversation clears when you hang up.
+                Text in this panel clears when the call ends. Saved history
+                follows your Memory &amp; privacy settings.
               </p>
-              <Link href="/settings" onClick={onMinimize}>
-                Voice and saved preferences
+              <Link href="/settings#memory-privacy" onClick={onMinimize}>
+                Memory &amp; privacy
               </Link>
             </div>
           </details>
@@ -364,6 +374,15 @@ function CallDialog({
         >
           {phaseLabel(state)}
         </p>
+        {!ended && (
+          <p
+            className={styles.privacyStatus}
+            data-vox-privacy={privacy.value?.mode ?? "unknown"}
+            role="status"
+          >
+            {privacy.value ? voxPrivacyLabel(privacy.value) : privacy.label}
+          </p>
+        )}
         {state.startedAt !== null && (
           <time
             role="timer"
@@ -380,6 +399,44 @@ function CallDialog({
         </p>
       </div>
       <WebLookup state={state} />
+      {state.ownerVerified && state.owner && !ended && state.calendarReview && (
+        <VoxCalendarReview
+          key={`${state.callId}:${state.owner.workspaceId}:${state.owner.userId}:${state.calendarReview.event_id}:${state.calendarReview.status}`}
+          proposal={state.calendarReview}
+          onReview={() => {
+            controller.dismissCalendarReview();
+            controller.setMinimized(true);
+          }}
+          onClose={() => controller.dismissCalendarReview()}
+        />
+      )}
+      {state.ownerVerified &&
+        state.owner &&
+        !ended &&
+        state.memorySaveReview && (
+          <VoxMemorySaveReview
+            key={`${state.callId}:${state.owner.workspaceId}:${state.owner.userId}:${state.memorySaveReview.review.id}`}
+            proposal={state.memorySaveReview}
+            accountKey={`${state.owner.workspaceId}:${state.owner.userId}`}
+            onReview={() => {
+              controller.dismissMemorySaveReview();
+              controller.setMinimized(true);
+            }}
+            onClose={() => controller.dismissMemorySaveReview()}
+          />
+        )}
+      {state.ownerVerified && state.owner && !ended && state.memoryReview && (
+        <VoxMemoryReview
+          key={`${state.callId}:${state.owner.workspaceId}:${state.owner.userId}:${state.memoryReview.query}`}
+          proposal={state.memoryReview}
+          accountKey={`${state.owner.workspaceId}:${state.owner.userId}`}
+          onReview={() => {
+            controller.dismissMemoryReview();
+            controller.setMinimized(true);
+          }}
+          onClose={() => controller.dismissMemoryReview()}
+        />
+      )}
       {state.ownerVerified &&
         state.owner &&
         !ended &&
@@ -664,6 +721,7 @@ export function VoxCallControls({
 }) {
   const call = useVoxCall();
   const conversation = useVoxConversation(call?.state);
+  const privacy = useVoxCallPrivacy(call?.state);
   const launcher = useRef<HTMLButtonElement>(null);
   const [dismissedCallId, setDismissedCallId] = useState<string | null>(null);
   const [startError, setStartError] = useState(false);
@@ -803,6 +861,15 @@ export function VoxCallControls({
           </span>
         )}
       </button>
+      {ongoing && state.minimized && (
+        <p
+          className={styles.privacyStatus}
+          data-vox-privacy={privacy.value?.mode ?? "unknown"}
+          role="status"
+        >
+          {privacy.value ? voxPrivacyLabel(privacy.value) : privacy.label}
+        </p>
+      )}
       {cleanupIncomplete && !open ? (
         <p className={styles.hint}>
           Call cleanup could not be confirmed. Reload before starting another
@@ -847,6 +914,7 @@ export function VoxCallControls({
           onDone={done}
           onStart={() => void start()}
           usageNotice={call.usageNotice?.message}
+          privacy={privacy}
         />
       )}
     </section>

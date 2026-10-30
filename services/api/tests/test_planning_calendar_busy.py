@@ -15,10 +15,20 @@ from navox.student_planning import calendar_busy
 @pytest.mark.parametrize("coverage", ["complete", "partial", "unavailable"])
 async def test_planner_calendar_adapter_requires_complete_coverage(monkeypatch, coverage):
     user_id, workspace_id, connection_id = uuid4(), uuid4(), uuid4()
-    original = [{"id": str(uuid4()), "status": "active", "connection_id": str(connection_id)}]
+    original = [
+        {
+            "id": str(uuid4()),
+            "status": "active",
+            "connection_id": str(connection_id),
+            "provider": "google",
+        }
+    ]
 
     async def inventory(*args):
         return original
+
+    async def no_native_claims(*args, **kwargs):
+        return ()
 
     async def owner(*args):
         return SimpleNamespace(agent_paused=False)
@@ -45,12 +55,15 @@ async def test_planner_calendar_adapter_requires_complete_coverage(monkeypatch, 
 
     class Provider:
         async def collect(self, **kwargs):
+            assert kwargs["start_at"] == now - timedelta(minutes=25)
+            assert kwargs["end_at"] == now + timedelta(days=1, minutes=25)
             await kwargs["check"]()
             return GoogleAvailabilitySnapshot(
                 coverage, 1, (ProviderBusy(now, now + timedelta(hours=1)),), now
             )
 
     monkeypatch.setattr(calendar_busy, "inventory", inventory)
+    monkeypatch.setattr(calendar_busy.calendar_claims, "snapshot", no_native_claims)
     monkeypatch.setattr(calendar_busy.schedule, "owner", owner)
     monkeypatch.setattr(calendar_busy.calendars, "owned_connection", owned)
     monkeypatch.setattr(calendar_busy, "access_token_for_connection", token)
@@ -75,6 +88,6 @@ async def test_planner_calendar_adapter_requires_complete_coverage(monkeypatch, 
             travel_minutes=15,
         )
         assert value.intervals == (
-            (now - timedelta(minutes=15), now + timedelta(hours=1, minutes=15)),
+            (now - timedelta(minutes=25), now + timedelta(hours=1, minutes=25)),
         )
         assert value.connected

@@ -1,12 +1,14 @@
-/** Reviewed scheduling uses its own Google permission; busy-time consent never grants writes. */
+/** Reviewed scheduling needs separate provider consent; busy-time consent never grants writes. */
 import {
   type AvailabilityPreviewInput,
   CALENDAR_READ_SCOPES,
   type CalendarAuthorization,
   type CalendarCommand,
+  type CalendarProviderId,
   CalendarRequestError,
   createStudentCalendarApi,
   createStudentCalendarTransport,
+  MICROSOFT_CALENDAR_READ_SCOPES,
   readAvailabilityPreviewInput,
   readCalendarAuthorization,
   readCalendarCommand,
@@ -19,9 +21,20 @@ export const CALENDAR_SCHEDULING_SCOPES = [
   ...CALENDAR_READ_SCOPES,
   "https://www.googleapis.com/auth/calendar.events.owned",
 ] as const;
+export const MICROSOFT_CALENDAR_SCHEDULING_SCOPES = [
+  ...MICROSOFT_CALENDAR_READ_SCOPES,
+  "Calendars.ReadWrite",
+] as const;
+export function calendarProviderName(provider: CalendarProviderId = "google") {
+  return provider === "google"
+    ? "Google"
+    : provider === "outlook"
+      ? "Microsoft"
+      : "Apple / iCloud";
+}
 export interface CalendarSchedulingGrant {
   id: string;
-  provider: "google";
+  provider: CalendarProviderId;
   connection_id: string | null;
   account_label: string | null;
   status: "pending" | "connected" | "unavailable" | "revoked";
@@ -33,6 +46,11 @@ export interface CalendarSchedulingView {
   consent_version: typeof CALENDAR_SCHEDULING_CONSENT_VERSION;
   grants: CalendarSchedulingGrant[];
   changes_applied: false;
+  providers?: {
+    id: CalendarProviderId;
+    availability: "available" | "setup_pending" | "unavailable";
+    message: string;
+  }[];
 }
 export interface CalendarSchedulingStart extends CalendarCommand {
   consent_version: typeof CALENDAR_SCHEDULING_CONSENT_VERSION;
@@ -50,6 +68,7 @@ export interface CalendarSchedulingTargets {
   grant_id: string;
   targets: CalendarSchedulingTarget[];
   changes_applied: false;
+  provider?: CalendarProviderId;
 }
 export interface CalendarEventPreviewInput extends CalendarCommand {
   grant_id: string;
@@ -60,6 +79,7 @@ export interface CalendarEventPreviewInput extends CalendarCommand {
   end_at: string;
   timezone: string;
   availability: AvailabilityPreviewInput;
+  allow_study_displacement?: boolean;
 }
 export type CalendarEventStatus =
   | "pending"
@@ -87,6 +107,20 @@ export interface CalendarEventView {
   changes_applied: boolean | null;
   can_undo: boolean;
   message: string;
+  provider?: CalendarProviderId;
+  study_changes_applied?: boolean;
+  study_moves?: CalendarStudyMove[];
+  study_details_redacted?: boolean;
+}
+export interface CalendarStudyMove {
+  block_id: string;
+  task_id: string;
+  title: string;
+  minutes: number;
+  before_start_at: string;
+  before_end_at: string;
+  after_start_at: string;
+  after_end_at: string;
 }
 export interface CalendarEventsView {
   generation: number;
@@ -107,6 +141,14 @@ export interface StudentCalendarSchedulingApi extends StudentCalendarApi {
     input: CalendarSchedulingStart,
     signal: AbortSignal,
   ): Promise<CalendarAuthorization>;
+  startOutlookScheduling(
+    input: CalendarSchedulingStart,
+    signal: AbortSignal,
+  ): Promise<CalendarAuthorization>;
+  startAppleScheduling(
+    input: CalendarSchedulingStart,
+    signal: AbortSignal,
+  ): Promise<CalendarSchedulingView>;
   stopScheduling(
     grantId: string,
     input: CalendarCommand,
@@ -122,6 +164,7 @@ export interface StudentCalendarSchedulingApi extends StudentCalendarApi {
     signal: AbortSignal,
   ): Promise<CalendarEventView>;
   events(signal: AbortSignal, cursor?: string): Promise<CalendarEventsView>;
+  event(eventId: string, signal: AbortSignal): Promise<CalendarEventView>;
   approveEvent(
     eventId: string,
     input: CalendarEventApproval,
@@ -140,6 +183,16 @@ export interface StudentCalendarSchedulingApi extends StudentCalendarApi {
 }
 function invalid(): never {
   throw new CalendarRequestError("invalid-response");
+}
+function provider(value: unknown): CalendarProviderId {
+  if (!["google", "outlook", "icloud"].includes(String(value)))
+    return invalid();
+  return value as CalendarProviderId;
+}
+function optionalKeys(value: unknown, ...keys: string[]): string[] {
+  return value && typeof value === "object"
+    ? keys.filter((key) => Object.hasOwn(value, key))
+    : [];
 }
 function obj(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -230,6 +283,7 @@ export function readCalendarSchedulingView(
     "consent_version",
     "grants",
     "changes_applied",
+    ...optionalKeys(value, "providers"),
   ]);
   if (
     v.consent_version !== CALENDAR_SCHEDULING_CONSENT_VERSION ||
@@ -241,6 +295,32 @@ export function readCalendarSchedulingView(
     revision: num(v.revision),
     consent_version: CALENDAR_SCHEDULING_CONSENT_VERSION,
     changes_applied: false,
+    ...(Object.hasOwn(v, "providers")
+      ? {
+          providers: array(
+            v.providers,
+            (value) => {
+              const item = obj(value, ["id", "availability", "message"]);
+              if (
+                !["available", "setup_pending", "unavailable"].includes(
+                  String(item.availability),
+                )
+              )
+                return invalid();
+              return {
+                id: provider(item.id),
+                availability: item.availability as
+                  | "available"
+                  | "setup_pending"
+                  | "unavailable",
+                message: text(item.message, 500),
+              };
+            },
+            3,
+            (item) => item.id,
+          ),
+        }
+      : {}),
     grants: array(
       v.grants,
       (item) => {
@@ -252,10 +332,7 @@ export function readCalendarSchedulingView(
           "status",
           "revision",
         ]);
-        if (
-          g.provider !== "google" ||
-          (g.status === "connected" && g.connection_id === null)
-        )
+        if (g.status === "connected" && g.connection_id === null)
           return invalid();
         if (
           !["pending", "connected", "unavailable", "revoked"].includes(
@@ -265,7 +342,7 @@ export function readCalendarSchedulingView(
           return invalid();
         return {
           id: id(g.id),
-          provider: "google" as const,
+          provider: provider(g.provider),
           connection_id: g.connection_id === null ? null : id(g.connection_id),
           account_label:
             g.account_label === null ? null : text(g.account_label, 320),
@@ -279,6 +356,15 @@ export function readCalendarSchedulingView(
   };
 }
 export function readCalendarEventView(value: unknown): CalendarEventView {
+  const studyKeys = [
+    "study_changes_applied",
+    "study_moves",
+    "study_details_redacted",
+  ];
+  const hasStudy =
+    !!value &&
+    typeof value === "object" &&
+    studyKeys.some((key) => Object.hasOwn(value, key));
   const v = obj(value, [
     "generation",
     "calendar_revision",
@@ -296,6 +382,8 @@ export function readCalendarEventView(value: unknown): CalendarEventView {
     "changes_applied",
     "can_undo",
     "message",
+    ...optionalKeys(value, "provider"),
+    ...(hasStudy ? studyKeys : []),
   ]);
   if (
     ![
@@ -325,6 +413,68 @@ export function readCalendarEventView(value: unknown): CalendarEventView {
     Date.parse(end_at) - Date.parse(start_at) > 480 * 60_000
   )
     return invalid();
+  let study: Pick<
+    CalendarEventView,
+    "study_changes_applied" | "study_moves" | "study_details_redacted"
+  > = {};
+  if (hasStudy) {
+    if (
+      typeof v.study_changes_applied !== "boolean" ||
+      typeof v.study_details_redacted !== "boolean" ||
+      (v.status === "pending" &&
+        (v.study_changes_applied || v.study_details_redacted)) ||
+      (!["pending", "failed"].includes(String(v.status)) &&
+        !v.study_changes_applied)
+    )
+      return invalid();
+    const moves = array(
+      v.study_moves,
+      (value) => {
+        const move = obj(value, [
+          "block_id",
+          "task_id",
+          "title",
+          "minutes",
+          "before_start_at",
+          "before_end_at",
+          "after_start_at",
+          "after_end_at",
+        ]);
+        const minutes = num(move.minutes),
+          before_start_at = instant(move.before_start_at),
+          before_end_at = instant(move.before_end_at),
+          after_start_at = instant(move.after_start_at),
+          after_end_at = instant(move.after_end_at);
+        if (
+          minutes < 1 ||
+          minutes > 90 ||
+          Date.parse(before_end_at) - Date.parse(before_start_at) !==
+            minutes * 60000 ||
+          Date.parse(after_end_at) - Date.parse(after_start_at) !==
+            minutes * 60000
+        )
+          return invalid();
+        return {
+          block_id: id(move.block_id),
+          task_id: id(move.task_id),
+          title: text(move.title, 200, 1),
+          minutes,
+          before_start_at,
+          before_end_at,
+          after_start_at,
+          after_end_at,
+        };
+      },
+      24,
+      (move) => move.block_id,
+    );
+    if (!moves.length && !v.study_details_redacted) return invalid();
+    study = {
+      study_changes_applied: v.study_changes_applied,
+      study_details_redacted: v.study_details_redacted,
+      study_moves: moves,
+    };
+  }
   return {
     generation: num(v.generation),
     calendar_revision: num(v.calendar_revision),
@@ -342,6 +492,8 @@ export function readCalendarEventView(value: unknown): CalendarEventView {
     changes_applied: v.changes_applied as boolean | null,
     can_undo: v.can_undo,
     message: text(v.message, 1000),
+    ...(Object.hasOwn(v, "provider") ? { provider: provider(v.provider) } : {}),
+    ...study,
   };
 }
 function eventCommand(input: CalendarEventCommand): CalendarEventCommand {
@@ -392,6 +544,33 @@ function boundEvent(
     return invalid();
   return event;
 }
+function schedulingStart(
+  input: CalendarSchedulingStart,
+): CalendarSchedulingStart {
+  obj(input, [
+    "generation",
+    "revision",
+    "request_id",
+    "consent_version",
+    "confirmed",
+    "connection_id",
+  ]);
+  if (
+    input.consent_version !== CALENDAR_SCHEDULING_CONSENT_VERSION ||
+    input.confirmed !== true
+  )
+    return invalid();
+  return {
+    ...readCalendarCommand({
+      generation: input.generation,
+      revision: input.revision,
+      request_id: input.request_id,
+    }),
+    consent_version: CALENDAR_SCHEDULING_CONSENT_VERSION,
+    confirmed: true,
+    connection_id: id(input.connection_id),
+  };
+}
 export function createStudentCalendarSchedulingApi(
   accountId: string,
   options: StudentCalendarTransportOptions = {},
@@ -408,35 +587,52 @@ export function createStudentCalendarSchedulingApi(
         512 * 1024,
       ),
     startScheduling: (input, signal) => {
-      obj(input, [
-        "generation",
-        "revision",
-        "request_id",
-        "consent_version",
-        "confirmed",
-        "connection_id",
-      ]);
-      if (
-        input.consent_version !== CALENDAR_SCHEDULING_CONSENT_VERSION ||
-        input.confirmed !== true
-      )
-        return invalid();
-      const checked = {
-        ...readCalendarCommand({
-          generation: input.generation,
-          revision: input.revision,
-          request_id: input.request_id,
-        }),
-        consent_version: CALENDAR_SCHEDULING_CONSENT_VERSION,
-        confirmed: true,
-        connection_id: id(input.connection_id),
-      };
+      const checked = schedulingStart(input);
       return send(
         "/student/calendars/google/scheduling/start",
         (value) =>
           readCalendarAuthorization(value, checked, CALENDAR_SCHEDULING_SCOPES),
         signal,
         checked,
+      );
+    },
+    startOutlookScheduling: (input, signal) => {
+      const checked = schedulingStart(input);
+      return send(
+        "/student/calendars/outlook/scheduling/start",
+        (value) =>
+          readCalendarAuthorization(
+            value,
+            checked,
+            MICROSOFT_CALENDAR_SCHEDULING_SCOPES,
+            "outlook",
+          ),
+        signal,
+        checked,
+      );
+    },
+    startAppleScheduling: (input, signal) => {
+      const checked = schedulingStart(input);
+      return send(
+        "/student/calendars/apple/scheduling/start",
+        (value) => {
+          const view = readCalendarSchedulingView(value);
+          if (
+            view.generation !== checked.generation ||
+            view.revision < checked.revision ||
+            !view.grants.some(
+              (grant) =>
+                grant.provider === "icloud" &&
+                grant.connection_id === checked.connection_id &&
+                grant.status === "connected",
+            )
+          )
+            return invalid();
+          return view;
+        },
+        signal,
+        checked,
+        512 * 1024,
       );
     },
     stopScheduling: (grantId, input, signal) =>
@@ -458,6 +654,7 @@ export function createStudentCalendarSchedulingApi(
             "grant_id",
             "targets",
             "changes_applied",
+            ...optionalKeys(value, "provider"),
           ]);
           if (
             v.changes_applied !== false ||
@@ -471,6 +668,9 @@ export function createStudentCalendarSchedulingApi(
             revision: num(v.revision),
             grant_id: id(v.grant_id),
             changes_applied: false,
+            ...(Object.hasOwn(v, "provider")
+              ? { provider: provider(v.provider) }
+              : {}),
             targets: array(
               v.targets,
               (item) => {
@@ -504,7 +704,15 @@ export function createStudentCalendarSchedulingApi(
         "end_at",
         "timezone",
         "availability",
+        ...("allow_study_displacement" in input
+          ? ["allow_study_displacement"]
+          : []),
       ]);
+      if (
+        "allow_study_displacement" in input &&
+        typeof input.allow_study_displacement !== "boolean"
+      )
+        return invalid();
       const checked = {
         ...readCalendarCommand({
           generation: input.generation,
@@ -519,6 +727,9 @@ export function createStudentCalendarSchedulingApi(
         end_at: instant(input.end_at),
         timezone: timezone(input.timezone),
         availability: readAvailabilityPreviewInput(input.availability),
+        ...("allow_study_displacement" in input
+          ? { allow_study_displacement: input.allow_study_displacement }
+          : {}),
       };
       if (Date.parse(checked.end_at) <= Date.parse(checked.start_at))
         return invalid();
@@ -588,8 +799,23 @@ export function createStudentCalendarSchedulingApi(
         },
         signal,
         undefined,
-        256 * 1024,
+        // Twenty receipts may each contain24 full study moves and UTF-8 titles.
+        1024 * 1024,
       ),
+    event: (eventId, signal) => {
+      const expectedId = id(eventId);
+      return send(
+        `/student/calendars/events/${expectedId}`,
+        (value) => {
+          const receipt = readCalendarEventView(value);
+          if (receipt.id !== expectedId) return invalid();
+          return receipt;
+        },
+        signal,
+        undefined,
+        65536,
+      );
+    },
     approveEvent: (eventId, input, signal) => {
       const selected = id(eventId),
         checked = approval(input);

@@ -1197,9 +1197,21 @@ async def assignments(
 async def clear_coursework_data(
     database: AsyncSession, *, user_id: UUID, workspace_id: UUID, course_id: UUID | None = None
 ) -> None:
-    """Caller holds the shared User lock. No decryption or providers are required."""
+    """Caller holds User; redact derived study reviews without provider I/O."""
+    from navox.student_calendars.displacement import redact
     from navox.student_recovery.service import invalidate_recovery_previews
 
+    task_ids = set(
+        await database.scalars(
+            select(StudentTask.id).where(
+                StudentTask.user_id == user_id,
+                StudentTask.workspace_id == workspace_id,
+                *([StudentTask.course_id == course_id] if course_id is not None else []),
+            )
+        )
+    )
+    if task_ids:
+        await redact(database, user_id, workspace_id, task_ids=task_ids)
     await invalidate_recovery_previews(database, user_id, workspace_id)
     for model in (CourseEmailLink, CourseMaterial, CourseWorkspaceState, CourseworkCommand):
         conditions = [model.user_id == user_id, model.workspace_id == workspace_id]

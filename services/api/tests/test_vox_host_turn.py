@@ -1,0 +1,432 @@
+"""Host input/playout boundaries, using synthetic providers and audio only."""
+
+import asyncio
+import json
+import struct
+from uuid import uuid4
+
+import httpx
+import pytest
+from test_vox_inference import Check, FailingRealtime, Hooks, Output, Socket, settings
+
+from navox.student import service as schedule
+from navox.vox.calendar_approval import CalendarApprovalCoordinator, PendingCalendarAction
+from navox.vox.host_turn import CompositeHostTurnHooks, HostReply, HostReplyRequired, HostTurnHooks
+from navox.vox.inference_config import VoxInferenceConfig
+from navox.vox.inference_http import OpenAICompatiblePipeline, PipelineReply, ProviderRejected
+from navox.vox.inference_realtime import OpenAIRealtimeAdapter
+from navox.vox.inference_worker import ConfiguredVoiceWorker
+from navox.vox.session_context import CallContextKey, InMemoryContextStore, VoxCallContext
+from navox.vox.worker import WorkerAssignment
+
+READBACK = "Add Study meeting to My calendar on Monday at 3 PM, UTC?"
+
+
+def action(calls, *, validate=None):
+    async def fresh():
+        calls.append("fresh")
+        if validate:
+            await validate()
+
+    async def apply():
+        calls.append("apply")
+        return "The provider confirmed this exact event."
+
+    return PendingCalendarAction("receipt:revision:digest", READBACK, fresh, apply)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "yes",
+    [
+        "yes",
+        "Yeah!",
+        "of course",
+        "sure",
+        "go ahead",
+        "yes please",
+        "Sure, go ahead.",
+        "Of course — go ahead",
+        "Okay, go ahead!",
+    ],
+)
+async def test_exact_played_review_accepts_one_current_contextual_yes_only_once(yes):
+    calls = []
+    host = CalendarApprovalCoordinator()
+    assert host.prepare(action(calls))
+    assert (await host.after_tool()).answer == READBACK
+    assert calls == ["fresh"]
+    await host.played(READBACK)
+    assert calls == ["fresh", "fresh"]
+    reply = await host.input(yes)
+    assert "provider confirmed" in reply.answer
+    assert calls == ["fresh", "fresh", "fresh", "apply"]
+    assert await host.input(yes) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reply", ["yes but make it four", "yeah no", "sure, change the title", "yes it is sunny"]
+)
+async def test_refinements_and_unrelated_acknowledgements_never_apply(reply):
+    calls = []
+    host = CalendarApprovalCoordinator()
+    host.prepare(action(calls))
+    await host.played(READBACK)
+    assert await host.input(reply) is None
+    assert "apply" not in calls and not host.needs_input
+
+
+@pytest.mark.asyncio
+async def test_unplayed_interrupted_expired_and_changed_sources_cannot_approve():
+    calls, now = [], [0.0]
+    host = CalendarApprovalCoordinator(clock=lambda: now[0])
+    host.prepare(action(calls))
+    assert "no longer active" in (await host.input("yes")).answer
+    host.prepare(action(calls))
+    await host.played(READBACK)
+    host.invalidate("interrupted")
+    assert "no longer active" in (await host.input("yes")).answer
+    host.prepare(action(calls))
+    await host.played(READBACK)
+    now[0] = 90
+    assert "no longer active" in (await host.input("yes")).answer
+
+    changed = [False]
+
+    async def validate():
+        if changed[0]:
+            raise schedule.StudentError(409, "synthetic private source changed")
+
+    host.prepare(action(calls, validate=validate))
+    await host.played(READBACK)
+    changed[0] = True
+    assert "changed" in (await host.input("yes")).answer
+    assert "apply" not in calls
+
+
+@pytest.mark.asyncio
+async def test_source_change_during_readback_keeps_next_yes_in_host_failure_path():
+    calls = []
+
+    source_changed = [False]
+
+    async def changed():
+        if source_changed[0]:
+            raise schedule.StudentError(409, "changed synthetic source")
+
+    host = CalendarApprovalCoordinator()
+    host.prepare(action(calls, validate=changed))
+    await host.after_tool()
+    source_changed[0] = True
+    await host.played(READBACK)
+    assert host.needs_input
+    assert "no longer active" in (await host.input("yes")).answer
+    assert "apply" not in calls
+    assert await host.input("Instead, find tomorrow's lunch options") is None
+    assert not host.needs_input
+
+
+@pytest.mark.asyncio
+async def test_erased_source_before_host_reply_never_releases_cached_private_text():
+    calls = []
+
+    async def erased():
+        raise schedule.StudentError(409, "synthetic erased private title")
+
+    host = CalendarApprovalCoordinator()
+    host.prepare(action(calls, validate=erased))
+    reply = await host.after_tool()
+    assert reply.answer != READBACK and "private title" not in reply.answer
+    assert reply.authorize is None
+    assert "no longer active" in (await host.input("yes")).answer
+    assert "apply" not in calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("when,requests_expected", [("admission", 0), ("response", 1)])
+async def test_exact_readback_rechecks_after_admission_and_after_tts_response(
+    when, requests_expected
+):
+    changed, calls, requests = [False], [], []
+
+    async def current():
+        if changed[0]:
+            raise schedule.StudentError(409, "synthetic erased source")
+
+    host = CalendarApprovalCoordinator()
+    host.prepare(action(calls, validate=current))
+    reply = await host.after_tool()
+
+    class Admission(Hooks):
+        async def begin(self, *args):
+            await super().begin(*args)
+            if when == "admission":
+                changed[0] = True
+
+    async def handle(request):
+        requests.append(request)
+        changed[0] = True
+        return httpx.Response(200, content=b"cached-private-mp3")
+
+    pipeline = OpenAICompatiblePipeline(
+        VoxInferenceConfig(),
+        settings(),
+        Check(),
+        Admission(),
+        transport=httpx.MockTransport(handle),
+    )
+    with pytest.raises(ProviderRejected) as failure:
+        await pipeline.speak("prepare it", reply.answer, authorize=reply.authorize)
+    assert "erased" not in str(failure.value)
+    assert len(requests) == requests_expected
+    assert not host._pending and "apply" not in calls
+
+
+@pytest.mark.asyncio
+async def test_erasure_between_readback_frames_stops_cached_audio_and_never_arms():
+    changed, calls, frames = [False], [], []
+
+    async def current():
+        if changed[0]:
+            raise schedule.StudentError(409, "synthetic private source erased during playback")
+
+    host = CalendarApprovalCoordinator()
+    host.prepare(action(calls, validate=current))
+    staged = await host.after_tool()
+
+    class Realtime(FailingRealtime):
+        async def respond(self, emit, text=None):
+            raise HostReplyRequired("prepare it", staged.answer, staged.authorize)
+
+    class Playback(Output):
+        async def play(self, data, check):
+            await check()
+            frames.append("first")
+            changed[0] = True
+            await check()
+            frames.append("second")
+
+    async def handle(request):
+        return httpx.Response(200, content=b"cached-private-mp3")
+
+    pipeline = OpenAICompatiblePipeline(
+        VoxInferenceConfig(), settings(), Check(), Hooks(), transport=httpx.MockTransport(handle)
+    )
+    worker = await worker_parts(Realtime(False), pipeline, Playback(), host)
+    await worker._respond(b"pcm", 0)
+    assert frames == ["first"] and worker.failed
+    assert host._armed_until is None and "apply" not in calls
+    await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_reply_gets_one_clarification_without_extending_ttl():
+    calls, now = [], [0.0]
+    host = CalendarApprovalCoordinator(clock=lambda: now[0])
+    host.prepare(action(calls))
+    await host.played(READBACK)
+    now[0] = 80
+    clarification = await host.input("maybe")
+    assert "yes or no" in clarification.answer
+    await host.played(clarification.answer)
+    now[0] = 91
+    assert "no longer active" in (await host.input("yes")).answer
+    assert "apply" not in calls
+
+
+class Immediate(HostTurnHooks):
+    needs_input = True
+
+    def __init__(self):
+        self.questions = []
+
+    async def input(self, question):
+        self.questions.append(question)
+        return HostReply(READBACK)
+
+
+@pytest.mark.asyncio
+async def test_realtime_host_uses_only_matching_current_transcription_before_model_response():
+    socket, host = Socket(), Immediate()
+
+    async def connect(url, headers):
+        return socket
+
+    realtime = OpenAIRealtimeAdapter(
+        VoxInferenceConfig(), settings(), Check(), Hooks(), connector=connect, host_hooks=host
+    )
+    await realtime.begin_turn(())
+    for _ in range(10):
+        await realtime.append_audio(struct.pack("<h", 2000) * 320)
+    with pytest.raises(HostReplyRequired) as caught:
+        await realtime.respond(lambda raw: asyncio.sleep(0))
+    assert host.questions == ["Question 1"]
+    assert caught.value.answer == READBACK
+    assert str(caught.value) == "A host-owned reply is required"
+    assert not any(event["type"] == "response.create" for event in socket.sent)
+    await realtime.close()
+
+
+@pytest.mark.asyncio
+async def test_host_input_uses_existing_metered_tts_without_another_model_request():
+    requests, host = [], Immediate()
+
+    async def handle(request):
+        requests.append((request.url.path, json.loads(request.content)))
+        assert request.url.path == "/v1/audio/speech"
+        return httpx.Response(200, content=b"synthetic-mp3")
+
+    usage = Hooks()
+    pipeline = OpenAICompatiblePipeline(
+        VoxInferenceConfig(),
+        settings(),
+        Check(),
+        usage,
+        transport=httpx.MockTransport(handle),
+        host_hooks=host,
+    )
+    reply = await pipeline.respond(None, (), question="yes")
+    assert reply.answer == READBACK and host.questions == ["yes"]
+    assert requests[0][1]["input"] == READBACK
+    assert len(usage.started) == 1 and usage.finished[0][2] is False
+
+
+async def worker_parts(realtime, pipeline, output, host, *, mode="realtime"):
+    check, connection = Check(), uuid4()
+    context = await VoxCallContext.load(
+        CallContextKey(check.authority.user_id, check.authority.workspace_id, uuid4(), 0),
+        InMemoryContextStore(),
+    )
+    worker = ConfiguredVoiceWorker(
+        WorkerAssignment(
+            connection, "vx-" + connection.hex, "vc-" + connection.hex, "va-" + connection.hex
+        ),
+        check,
+        output,
+        VoxInferenceConfig(mode=mode),
+        context,
+        realtime,
+        pipeline,
+        host_hooks=host,
+    )
+    return worker
+
+
+@pytest.mark.asyncio
+async def test_notice_never_arms_approval_and_full_host_readback_must_finish():
+    calls, playing, release = [], asyncio.Event(), asyncio.Event()
+    host = CalendarApprovalCoordinator()
+    host.prepare(action(calls))
+    await host.after_tool()
+
+    class Notice(HostTurnHooks):
+        async def before_output(self):
+            return "Private saved context may be used."
+
+        async def notice_played(self, text):
+            calls.append("notice_played")
+
+        async def output_started(self):
+            calls.append("response_exposure")
+
+    class Realtime(FailingRealtime):
+        async def respond(self, emit, text=None):
+            raise HostReplyRequired("prepare it", READBACK)
+
+    class Speech:
+        async def speak(self, question, answer):
+            calls.append(answer)
+            return PipelineReply(question, answer, answer.encode())
+
+    class Playback(Output):
+        async def play(self, data, check):
+            await check()
+            if data == READBACK.encode():
+                playing.set()
+                await release.wait()
+            calls.append("played:" + data.decode())
+
+    worker = await worker_parts(
+        Realtime(False), Speech(), Playback(), CompositeHostTurnHooks(host, Notice())
+    )
+    task = asyncio.create_task(worker._respond(b"pcm", 0))
+    await asyncio.wait_for(playing.wait(), 1)
+    assert host._armed_until is None
+    assert calls.index("notice_played") < calls.index("response_exposure")
+    release.set()
+    await task
+    assert host._armed_until is not None
+    assert calls.index("played:" + READBACK) < len(calls) - 1
+    assert calls[-1] == "fresh"
+    await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_idle_authenticated_typed_answer_preserves_pending_review():
+    calls, host = [], CalendarApprovalCoordinator()
+    host.prepare(action(calls))
+    await host.after_tool()
+    await host.played(READBACK)
+
+    async def handle(request):
+        assert request.url.path == "/v1/audio/speech"
+        return httpx.Response(200, content=b"synthetic-mp3")
+
+    pipeline = OpenAICompatiblePipeline(
+        VoxInferenceConfig(mode="cascade"),
+        settings(),
+        Check(),
+        Hooks(),
+        transport=httpx.MockTransport(handle),
+        host_hooks=host,
+    )
+    worker = await worker_parts(FailingRealtime(False), pipeline, Output(), host, mode="cascade")
+    await worker.text_turn("yes")
+    await worker._task
+    assert calls.count("apply") == 1 and not worker.failed
+    await worker.close()
+
+
+@pytest.mark.asyncio
+async def test_transport_failure_during_host_decision_cannot_retry_through_model_fallback():
+    class Decision(HostTurnHooks):
+        needs_input = True
+
+        def __init__(self):
+            self.effects = 0
+
+        async def input(self, question):
+            self.effects += 1
+            raise OSError("synthetic metadata failure after native decision")
+
+    class Fallback:
+        def __init__(self):
+            self.calls = 0
+
+        async def respond(self, *args, **kwargs):
+            self.calls += 1
+            raise AssertionError("A host decision must not be replayed through fallback")
+
+    socket, host = Socket(), Decision()
+
+    async def connector(url, headers):
+        return socket
+
+    realtime = OpenAIRealtimeAdapter(
+        VoxInferenceConfig(),
+        settings(),
+        Check(),
+        Hooks(),
+        connector=connector,
+        host_hooks=host,
+    )
+    fallback = Fallback()
+    worker = await worker_parts(realtime, fallback, Output(), host)
+    await realtime.begin_turn(())
+    for _ in range(10):
+        await realtime.append_audio(struct.pack("<h", 1000) * 320)
+    await worker._respond(b"pcm", 0)
+    assert host.effects == 1 and realtime.tool_started
+    assert fallback.calls == 0
+    await worker.close()

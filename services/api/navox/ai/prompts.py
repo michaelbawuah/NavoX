@@ -127,6 +127,7 @@ def builtin_prompts() -> tuple[tuple[PromptDefinition, ...], tuple[SchemaDefinit
     from navox.ai.conversation import conversation_artifacts
     from navox.ai.embedding_contracts import embedding_artifacts
     from navox.knowledge.ask_contracts import answer_artifacts
+    from navox.memory.learning_contracts import learning_artifacts
     from navox.news.ai_contracts import news_artifacts
 
     schemas: list[SchemaDefinition] = []
@@ -134,6 +135,9 @@ def builtin_prompts() -> tuple[tuple[PromptDefinition, ...], tuple[SchemaDefinit
     conversation_prompt, conversation_schema = conversation_artifacts()
     prompts.append(conversation_prompt)
     schemas.append(conversation_schema)
+    learning_prompt, learning_schema = learning_artifacts()
+    prompts.append(learning_prompt)
+    schemas.append(learning_schema)
     embedding_prompt, embedding_schema = embedding_artifacts()
     prompts.append(embedding_prompt)
     schemas.append(embedding_schema)

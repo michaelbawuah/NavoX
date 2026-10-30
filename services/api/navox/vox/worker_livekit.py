@@ -27,14 +27,27 @@ from navox.ai.speech_adapters import MAX_SPEECH_AUDIO_BYTES
 from navox.core.settings import Settings, get_settings
 from navox.db.session import get_database_engine, get_session_factory
 from navox.vox.audio_input import AudioInputBuffer
+from navox.vox.calendar_approval import CalendarApprovalCoordinator
+from navox.vox.calendar_tools import CALENDAR_REVIEW_TOPIC, CalendarTools
 from navox.vox.capture_tools import CaptureTools
 from navox.vox.context_store import DatabaseContextStore
-from navox.vox.inference_config import load_inference_config
+from navox.vox.host_turn import CompositeHostTurnHooks
+from navox.vox.inference_config import (
+    InferenceConfigurationError,
+    VoxInferenceConfig,
+    load_inference_config,
+    route_credential,
+)
 from navox.vox.inference_http import OpenAICompatiblePipeline, UsageHooks
 from navox.vox.inference_realtime import OpenAIRealtimeAdapter
 from navox.vox.inference_worker import ConfiguredVoiceWorker
+from navox.vox.memory_learning_tools import MemoryLearningTools
+from navox.vox.memory_save_tools import MEMORY_SAVE_REVIEW_TOPIC, MemorySaveTools
+from navox.vox.memory_tools import MEMORY_REVIEW_TOPIC, MemoryTools
 from navox.vox.planning_tools import REVIEW_TOPIC, PlanningTools
 from navox.vox.provider import cloud_config
+from navox.vox.recall_delivery import RecallDeliveryCoordinator
+from navox.vox.recall_tools import MemoryReadTools
 from navox.vox.schedule_tools import ScheduleTools
 from navox.vox.session_context import CallContextKey, VoxCallContext
 from navox.vox.web_tools import WEB_TOPIC, PublicWebTools, VoxReadTools
@@ -50,6 +63,17 @@ from navox.vox.worker import (
 MAX_OUTPUT_SAMPLES = 48_000 * 60
 # Absorb short provider/DB scheduling stalls; interruption still clears immediately.
 OUTPUT_QUEUE_MS = 200
+
+
+def host_speech_available(config: VoxInferenceConfig, settings: Settings) -> bool:
+    """Use only the same operator-selected TTS route admitted for cascade speech."""
+    if config.mode != "cascade" and not config.fallback_enabled:
+        return False
+    try:
+        route_credential(config.tts, settings)
+    except InferenceConfigurationError:
+        return False
+    return True
 
 
 def log_worker_failure(stage: str, error: BaseException) -> None:
@@ -116,6 +140,9 @@ class LiveKitAudioOutput:
         self._pcm_resampler: av.AudioResampler | None = None
         self._pcm_samples = 0
         self._pcm_decoded_samples = 0
+        self._output_epoch = 0
+        self._notice_playing = False
+        self._notice_provider_ms = 0
         self._output_frames = 0
         self._starvations = 0
         self._starvation_seconds = 0.0
@@ -124,6 +151,8 @@ class LiveKitAudioOutput:
         self.usage: UsageHooks | None = None
 
     def played_pcm_ms(self) -> int:
+        if self._notice_playing:
+            return self._notice_provider_ms
         return max(0, int(self._pcm_samples / 48 - self.source.queued_duration * 1000))
 
     def _report_playout(self) -> None:
@@ -142,6 +171,9 @@ class LiveKitAudioOutput:
         self._queued_until = None
 
     async def clear(self) -> None:
+        self._output_epoch += 1
+        self._notice_playing = False
+        self._notice_provider_ms = 0
         self.source.clear_queue()
         self._report_playout()
         self._pcm_resampler = None
@@ -156,6 +188,9 @@ class LiveKitAudioOutput:
             data = raw[start : start + 1920]
             if self.usage:
                 await self.usage.note_audio(max(1, len(data) * 1000 // 96000), direction="output")
+                # Credit admission is an await too. Revocation or source
+                # erasure during it must win before the frame is published.
+                await check()
             now = time.monotonic()
             self._max_proof_seconds = max(self._max_proof_seconds, now - began)
             if self._queued_until is not None and now - self._queued_until > 0.002:
@@ -193,6 +228,32 @@ class LiveKitAudioOutput:
         await self.source.wait_for_playout()
         self._report_playout()
         self._pcm_samples = 0
+
+    async def play_notice(self, mp3: bytes, check: Callable[[], Awaitable[None]]) -> None:
+        """Host notice audio never advances the provider's interruption timeline."""
+        await check()
+        await self.source.wait_for_playout()
+        await check()
+        epoch = self._output_epoch
+        samples, decoded, resampler = (
+            self._pcm_samples,
+            self._pcm_decoded_samples,
+            self._pcm_resampler,
+        )
+        self._notice_provider_ms = max(0, int(samples / 48))
+        self._notice_playing = True
+        try:
+            await self.play(mp3, check)
+        finally:
+            # An interrupt/clear wins over a cancelled notice's late completion.
+            if epoch == self._output_epoch:
+                self._pcm_samples, self._pcm_decoded_samples, self._pcm_resampler = (
+                    samples,
+                    decoded,
+                    resampler,
+                )
+                self._notice_playing = False
+                self._notice_provider_ms = 0
 
     async def _capture_pcm(
         self, frames: list[av.AudioFrame], check: Callable[[], Awaitable[None]]
@@ -388,16 +449,96 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                     topic=REVIEW_TOPIC,
                 )
 
+            qualified_host_speech = host_speech_available(inference, settings)
+            memory_delivery = RecallDeliveryCoordinator(
+                check,
+                settings,
+                user_id=authority.user_id,
+                workspace_id=authority.workspace_id,
+                context_key=f"vox:{context_key.call_id}",
+                notice_available=qualified_host_speech,
+            )
+            memory_tools = MemoryReadTools(
+                check, settings, context_key=f"vox:{context_key.call_id}", delivery=memory_delivery
+            )
+
+            async def publish_memory(result: dict[str, object]) -> None:
+                await inference_check()
+                await ctx.room.local_participant.publish_data(
+                    json.dumps(result, ensure_ascii=False).encode(),
+                    reliable=True,
+                    destination_identities=[assignment.client_identity],
+                    topic=MEMORY_REVIEW_TOPIC,
+                )
+
+            async def publish_memory_save(result: dict[str, object]) -> None:
+                await inference_check()
+                await ctx.room.local_participant.publish_data(
+                    json.dumps(result, ensure_ascii=False).encode(),
+                    reliable=True,
+                    destination_identities=[assignment.client_identity],
+                    topic=MEMORY_SAVE_REVIEW_TOPIC,
+                )
+
+            async def publish_calendar(result: dict[str, object]) -> None:
+                await inference_check()
+                await ctx.room.local_participant.publish_data(
+                    json.dumps(result, ensure_ascii=False).encode(),
+                    reliable=True,
+                    destination_identities=[assignment.client_identity],
+                    topic=CALENDAR_REVIEW_TOPIC,
+                )
+
+            calendar_approval = CalendarApprovalCoordinator()
+            host_hooks = CompositeHostTurnHooks(calendar_approval, memory_delivery)
+
             tools = VoxReadTools(
                 PlanningTools(check, settings, publish_plan),
                 CaptureTools(check, settings, publish_plan),
                 ScheduleTools(check),
                 PublicWebTools(check, inference, settings, usage, publish_web),
+                memory_tools,
+                MemoryTools(check, settings, publish_memory),
+                MemorySaveTools(
+                    check, settings, call_id=context_key.call_id, publish=publish_memory_save
+                ),
+                MemoryLearningTools(check, settings, call_id=context_key.call_id),
+                CalendarTools(
+                    check,
+                    settings,
+                    calendar_approval,
+                    publish_calendar,
+                    voice_available=qualified_host_speech,
+                ),
             )
-            realtime = OpenAIRealtimeAdapter(inference, settings, inference_check, usage, tools)
-            pipeline = OpenAICompatiblePipeline(inference, settings, inference_check, usage, tools)
+            realtime = OpenAIRealtimeAdapter(
+                inference,
+                settings,
+                inference_check,
+                usage,
+                tools,
+                memory_context=memory_tools.context,
+                host_hooks=host_hooks,
+            )
+            pipeline = OpenAICompatiblePipeline(
+                inference,
+                settings,
+                inference_check,
+                usage,
+                tools,
+                memory_context=memory_tools.context,
+                host_hooks=host_hooks,
+            )
             worker = ConfiguredVoiceWorker(
-                assignment, check, output, inference, context, realtime, pipeline, usage=usage
+                assignment,
+                check,
+                output,
+                inference,
+                context,
+                realtime,
+                pipeline,
+                usage=usage,
+                host_hooks=host_hooks,
             )
         stopped = asyncio.Event()
         streams: set[asyncio.Task[None]] = set()
@@ -572,17 +713,21 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
             on("participant_metadata_changed", metadata_changed)
             on("reconnecting", reconnecting)
             on("disconnected", disconnected)
+            for participant in ctx.room.remote_participants.values():
+                participant_connected(participant)
+            spawn(audio_input.consume(receive_frame))
+            if isinstance(worker, ConfiguredVoiceWorker):
+                spawn(usage.heartbeat())
+            # The owned output track is the client's readiness boundary. Install
+            # input handling first so immediate client speech survives publication.
             track = rtc.LocalAudioTrack.create_audio_track("navox-vox", source)
             await check()
             await ctx.room.local_participant.publish_track(
                 track, rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)
             )
-            for participant in ctx.room.remote_participants.values():
-                participant_connected(participant)
-            spawn(audio_input.consume(receive_frame))
+            # Queued text commands may produce audio, so consume them only after
+            # output publication succeeds.
             spawn(watch())
-            if isinstance(worker, ConfiguredVoiceWorker):
-                spawn(usage.heartbeat())
             # An unused dispatch must not occupy the single worker indefinitely.
             try:
                 await asyncio.wait_for(stopped.wait(), timeout=20)
@@ -609,9 +754,22 @@ async def serve_job(ctx: agents.JobContext, settings: Settings) -> None:
                 },
             )
             try:
-                await worker.close()
-                if isinstance(worker, ConfiguredVoiceWorker):
-                    await usage.close()
+                worker_close_failed = False
+                try:
+                    await worker.close()
+                except BaseException:
+                    worker_close_failed = True
+                    raise
+                finally:
+                    if isinstance(worker, ConfiguredVoiceWorker):
+                        try:
+                            await usage.close()
+                        except BaseException as error:
+                            if not worker_close_failed:
+                                raise
+                            # Keep the worker shutdown failure while reporting
+                            # only a secondary metering error's type/location.
+                            log_worker_failure("usage_close", error)
             finally:
                 for task in tuple(streams):
                     task.cancel()
@@ -650,7 +808,9 @@ def build_server(settings: Settings) -> agents.AgentServer:
         permissions=agents.WorkerPermissions(
             can_publish=True,
             can_subscribe=True,
-            can_publish_data=inference is not None and inference.web_search is not None,
+            # Native review/result topics are independent of optional web search.
+            # Publishers retain exact call proof and client-identity targeting.
+            can_publish_data=inference is not None,
             can_update_metadata=False,
             can_publish_sources=[rtc.TrackSource.SOURCE_MICROPHONE],  # type: ignore[list-item]
         ),

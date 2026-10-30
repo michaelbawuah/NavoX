@@ -14,6 +14,7 @@ import { productFeatures } from "../lib/product-features";
 import type { AvailabilityOption } from "../lib/student-availability-options";
 import type {
   AvailabilityPreviewInput,
+  CalendarProviderId,
   CalendarView,
 } from "../lib/student-calendar-api";
 import {
@@ -23,8 +24,10 @@ import {
 import {
   CALENDAR_SCHEDULING_CONSENT_VERSION,
   type CalendarEventView,
+  type CalendarSchedulingStart,
   type CalendarSchedulingTargets,
   type CalendarSchedulingView,
+  calendarProviderName,
   createStudentCalendarSchedulingApi,
   type StudentCalendarSchedulingApi,
 } from "../lib/student-calendar-scheduling";
@@ -33,7 +36,22 @@ import { useCalendarWorkspace } from "./use-calendar-workspace";
 
 export const calendarSchedulingConsent =
   "Let NavoX add and verify events I review in a Google calendar I own. Each event needs my approval. Undo may remove only the unchanged event NavoX created. I can stop scheduling access separately from busy-time checks.";
-const MAX_LOADED_ACTIONS = 551;
+function schedulingConsent(provider: CalendarProviderId) {
+  if (provider === "google") return calendarSchedulingConsent;
+  return `Let NavoX add and verify events I review in a ${calendarProviderName(provider)} calendar I choose. Each event needs my approval. Undo is offered only when the exact unchanged event can be removed safely. I can stop scheduling access separately from busy-time checks.${provider === "icloud" ? " Use the app-specific credential already connected for busy-time access; do not request or save a new password." : " This consent does not enable Outlook mail or sending messages."}`;
+}
+function providerAvailable(
+  view: CalendarSchedulingView,
+  provider: CalendarProviderId,
+) {
+  return view.providers
+    ? view.providers.some(
+        (item) => item.id === provider && item.availability === "available",
+      )
+    : provider === "google";
+}
+// Match the activity endpoint's 500 current reviews + 500 retained claims.
+const MAX_LOADED_ACTIONS = 1_000;
 const command = (view: { generation: number; revision: number }) => ({
   generation: view.generation,
   revision: view.revision,
@@ -42,6 +60,13 @@ const command = (view: { generation: number; revision: number }) => ({
 function eventTime(
   event: Pick<CalendarEventView, "start_at" | "end_at" | "timezone">,
 ) {
+  const instants = [event.start_at, event.end_at];
+  const fractional = instants.some((instant) =>
+    /\.\d*[1-9]\d*(?:Z|[+-]\d{2}:\d{2})$/.test(instant),
+  );
+  const seconds =
+    fractional ||
+    instants.some((instant) => new Date(instant).getUTCSeconds() !== 0);
   const format = new Intl.DateTimeFormat("en-US", {
     timeZone: event.timezone,
     weekday: "short",
@@ -50,9 +75,21 @@ function eventTime(
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    ...(seconds ? { second: "2-digit" as const } : {}),
     timeZoneName: "short",
   });
-  return `${format.format(new Date(event.start_at))} – ${format.format(new Date(event.end_at))}`;
+  const local = `${format.format(new Date(event.start_at))} – ${format.format(new Date(event.end_at))}`;
+  // Date/Intl cannot preserve microseconds. Keep the original instants visible
+  // when a review or retained receipt contains fractional-second precision.
+  return fractional
+    ? `${local} (exact instants: ${event.start_at} – ${event.end_at})`
+    : local;
+}
+function studyMoveCount(option: AvailabilityOption) {
+  return "displaced_study_block_ids" in option &&
+    Array.isArray(option.displaced_study_block_ids)
+    ? option.displaced_study_block_ids.length
+    : 0;
 }
 interface ConsentProps {
   accountId: string;
@@ -73,6 +110,7 @@ export function StudentCalendarSchedulingConsent({
   const [view, setView] = useState<CalendarSchedulingView | null>(null);
   const [connections, setConnections] = useState<CalendarView | null>(null);
   const [selected, setSelected] = useState("");
+  const [provider, setProvider] = useState<CalendarProviderId>("google");
   const [confirmed, setConfirmed] = useState(false);
   const [notice, setNotice] = useState("");
   const clear = useCallback(() => {
@@ -114,18 +152,40 @@ export function StudentCalendarSchedulingConsent({
     );
   };
   const connect = () => {
-    if (!writesAvailable || !view || !confirmed || !selected) return;
+    if (
+      !writesAvailable ||
+      !view ||
+      !providerAvailable(view, provider) ||
+      !confirmed ||
+      !selected
+    )
+      return;
+    const input: CalendarSchedulingStart = {
+      ...command(view),
+      consent_version: CALENDAR_SCHEDULING_CONSENT_VERSION,
+      connection_id: selected,
+      confirmed: true as const,
+    };
+    setConfirmed(false);
+    if (provider === "icloud") {
+      void access.run(
+        (signal) => api.startAppleScheduling(input, signal),
+        (next) => {
+          setView(next);
+          setSelected("");
+          notifyCalendarAccessChanged();
+          setNotice(
+            "Apple / iCloud reviewed scheduling is connected. Each event still needs its own exact approval.",
+          );
+        },
+      );
+      return;
+    }
     void access.run(
       (signal) =>
-        api.startScheduling(
-          {
-            ...command(view),
-            consent_version: CALENDAR_SCHEDULING_CONSENT_VERSION,
-            connection_id: selected,
-            confirmed: true,
-          },
-          signal,
-        ),
+        (provider === "outlook"
+          ? api.startOutlookScheduling
+          : api.startScheduling)(input, signal),
       (authorization) =>
         window.location.assign(authorization.authorization_url),
     );
@@ -146,7 +206,10 @@ export function StudentCalendarSchedulingConsent({
   };
   const active =
     connections?.grants.filter(
-      (grant) => grant.status === "connected" && grant.connection_id !== null,
+      (grant) =>
+        grant.provider === provider &&
+        grant.status === "connected" &&
+        grant.connection_id !== null,
     ) ?? [];
   return (
     <section className={styles.panel} aria-labelledby={`${id}-heading`}>
@@ -169,12 +232,16 @@ export function StudentCalendarSchedulingConsent({
       </p>
       {view?.grants.map((grant) => (
         <article className={styles.card} key={grant.id}>
-          <strong>{grant.account_label ?? "Google calendar account"}</strong>
+          <strong>
+            {grant.account_label ??
+              `${calendarProviderName(grant.provider)} calendar account`}
+          </strong>
+          <p>{calendarProviderName(grant.provider)}</p>
           <p>
             {grant.status === "connected"
               ? "Reviewed scheduling is connected"
               : grant.status === "pending"
-                ? "Google setup has not completed"
+                ? `${calendarProviderName(grant.provider)} setup has not completed`
                 : grant.status === "revoked"
                   ? "Scheduling access is off"
                   : "Scheduling access is unavailable"}
@@ -190,51 +257,90 @@ export function StudentCalendarSchedulingConsent({
           )}
         </article>
       ))}
-      {writesAvailable && view && active.length > 0 && (
-        <div className={styles.fields}>
-          <label htmlFor={`${id}-account`}>
-            Google account
-            <select
-              id={`${id}-account`}
-              value={selected}
-              disabled={!access.ready || access.busy}
-              onChange={(e) => {
-                setSelected(e.target.value);
-                setConfirmed(false);
-              }}
-            >
-              <option value="">Choose an account</option>
-              {active.map((grant) => (
-                <option key={grant.id} value={grant.connection_id ?? ""}>
-                  {grant.account_label ?? "Connected Google account"}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.check}>
-            <input
-              type="checkbox"
-              checked={confirmed}
-              disabled={!access.ready || access.busy || !selected}
-              onChange={(e) => setConfirmed(e.target.checked)}
-            />
-            <span>{calendarSchedulingConsent}</span>
-          </label>
-          <button
-            type="button"
-            disabled={!access.ready || access.busy || !selected || !confirmed}
-            onClick={connect}
+      {view && (
+        <label className={styles.fields} htmlFor={`${id}-provider`}>
+          Calendar service
+          <select
+            id={`${id}-provider`}
+            value={provider}
+            disabled={!access.ready || access.busy}
+            onChange={(event) => {
+              access.cancel();
+              setProvider(event.target.value as CalendarProviderId);
+              setSelected("");
+              setConfirmed(false);
+              setNotice("");
+            }}
           >
-            Connect reviewed scheduling
-          </button>
-        </div>
+            <option value="google">Google</option>
+            <option value="outlook">Microsoft</option>
+            <option value="icloud">Apple / iCloud</option>
+          </select>
+        </label>
       )}
-      {writesAvailable && view && active.length === 0 && (
-        <p>
-          Connect Google busy-time access above first, then check scheduling
-          access again.
+      {view?.providers?.find((item) => item.id === provider)?.message && (
+        <p className={styles.hint}>
+          {view.providers.find((item) => item.id === provider)?.message}
         </p>
       )}
+      {writesAvailable && view && !providerAvailable(view, provider) && (
+        <p>
+          {calendarProviderName(provider)} reviewed scheduling is unavailable
+          here. Existing receipts and access can still be checked.
+        </p>
+      )}
+      {writesAvailable &&
+        view &&
+        providerAvailable(view, provider) &&
+        active.length > 0 && (
+          <div className={styles.fields}>
+            <label htmlFor={`${id}-account`}>
+              {calendarProviderName(provider)} account
+              <select
+                id={`${id}-account`}
+                value={selected}
+                disabled={!access.ready || access.busy}
+                onChange={(e) => {
+                  setSelected(e.target.value);
+                  setConfirmed(false);
+                }}
+              >
+                <option value="">Choose an account</option>
+                {active.map((grant) => (
+                  <option key={grant.id} value={grant.connection_id ?? ""}>
+                    {grant.account_label ??
+                      `Connected ${calendarProviderName(provider)} account`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={styles.check}>
+              <input
+                type="checkbox"
+                checked={confirmed}
+                disabled={!access.ready || access.busy || !selected}
+                onChange={(e) => setConfirmed(e.target.checked)}
+              />
+              <span>{schedulingConsent(provider)}</span>
+            </label>
+            <button
+              type="button"
+              disabled={!access.ready || access.busy || !selected || !confirmed}
+              onClick={connect}
+            >
+              Connect reviewed scheduling
+            </button>
+          </div>
+        )}
+      {writesAvailable &&
+        view &&
+        providerAvailable(view, provider) &&
+        active.length === 0 && (
+          <p>
+            Connect {calendarProviderName(provider)} busy-time access above
+            first, then check scheduling access again.
+          </p>
+        )}
       {!writesAvailable && (
         <p className={styles.hint}>
           New calendar scheduling is unavailable here. You can still review and
@@ -284,6 +390,7 @@ export function StudentCalendarScheduling({
   const [title, setTitle] = useState("");
   const [location, setLocation] = useState("");
   const [event, setEvent] = useState<CalendarEventView | null>(null);
+  const selectedReceiptId = useRef<string | null>(null);
   const [recent, setRecent] = useState<CalendarEventView[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -300,6 +407,7 @@ export function StudentCalendarScheduling({
     setTitle("");
     setLocation("");
     setEvent(null);
+    selectedReceiptId.current = null;
     setRecent([]);
     setCursor(null);
     setConfirmed(false);
@@ -320,6 +428,7 @@ export function StudentCalendarScheduling({
     () =>
       observeCalendarAccessChanges(() => {
         access.cancel();
+        selectedReceiptId.current = null;
         setView(null);
         setTargets(null);
         setEvent((old) => (old?.status === "pending" ? null : old));
@@ -358,11 +467,14 @@ export function StudentCalendarScheduling({
     setChoice("");
     setConfirmed(false);
     setUndoConfirmed(false);
+    if (event?.status === "pending" && !mustCheck)
+      selectedReceiptId.current = null;
     setEvent((old) => (old?.status === "pending" && !mustCheck ? null : old));
-  }, [searchKey, access.cancel, mustCheck]);
+  }, [searchKey, access.cancel, mustCheck, event]);
   const draftChanged = () => {
     access.cancel();
     setEvent(null);
+    selectedReceiptId.current = null;
     setConfirmed(false);
     setUndoConfirmed(false);
     setMustCheck(false);
@@ -370,18 +482,22 @@ export function StudentCalendarScheduling({
     access.setError("");
   };
   const acceptEvent = (current: CalendarEventView) => {
+    selectedReceiptId.current = current.id;
     setEvent(current);
     setConfirmed(false);
     setUndoConfirmed(false);
     setMustCheck(
       ["executing", "uncertain", "undoing"].includes(current.status),
     );
-    setRecent((rows) =>
-      [current, ...rows.filter((row) => row.id !== current.id)].slice(
-        0,
-        MAX_LOADED_ACTIONS,
-      ),
-    );
+    setRecent((rows) => {
+      const remaining = rows.filter((row) => row.id !== current.id);
+      // A separately recovered exact receipt stays visible in the selected
+      // card; never evict an already loaded action to put it in the list.
+      return remaining.length === rows.length &&
+        rows.length >= MAX_LOADED_ACTIONS
+        ? rows
+        : [current, ...remaining];
+    });
     setView((old) =>
       old
         ? {
@@ -393,31 +509,54 @@ export function StudentCalendarScheduling({
     );
   };
   const check = () => {
+    const selectedId = selectedReceiptId.current;
     setConfirmed(false);
     setUndoConfirmed(false);
+    // A page refresh must not retain old private details when a selected receipt
+    // is older than page one or its study sources have since been forgotten.
+    setEvent(null);
+    setRecent([]);
+    setView(null);
+    setTargets(null);
     void access.run(
       async (signal) => {
         const [scheduling, events] = await Promise.all([
           api.scheduling(signal),
           api.events(signal),
         ]);
+        const selected = selectedId
+          ? (events.events.find((receipt) => receipt.id === selectedId) ??
+            (await api.event(selectedId, signal)))
+          : null;
         if (
           scheduling.generation !== events.generation ||
-          scheduling.revision !== events.calendar_revision
+          scheduling.revision !== events.calendar_revision ||
+          (selected &&
+            (selected.generation !== events.generation ||
+              selected.calendar_revision !== events.calendar_revision))
         )
           throw new Error("Calendar access changed. Check it again.");
-        return { scheduling, events };
+        return { scheduling, events, selected };
       },
-      ({ scheduling, events }) => {
+      ({ scheduling, events, selected }) => {
         setView(scheduling);
         setRecent(events.events);
         setCursor(events.next_cursor);
-        const recovered = events.events.find((row) => row.id === event?.id);
-        if (recovered) acceptEvent(recovered);
+        const priorPending =
+          selected?.status === "pending" &&
+          selected.message.startsWith("This request predates your reset;");
+        if (priorPending) {
+          selectedReceiptId.current = null;
+          setMustCheck(false);
+        } else if (selected) acceptEvent(selected);
         setTargets(null);
         setGrantId("");
         setCalendarId("");
-        setNotice("Scheduling access and recent calendar actions checked.");
+        setNotice(
+          priorPending
+            ? "That pending review predates your reset and cannot be approved. Review a fresh event using current openings."
+            : "Scheduling access and recent calendar actions checked.",
+        );
       },
     );
   };
@@ -431,18 +570,23 @@ export function StudentCalendarScheduling({
           next.calendar_revision < view.revision
         )
           throw new Error("Calendar access changed. Check scheduling again.");
-        setRecent((rows) =>
-          [
-            ...new Map(
-              [...rows, ...next.events].map((row) => [row.id, row]),
-            ).values(),
-          ].slice(0, MAX_LOADED_ACTIONS),
-        );
+        const combined = [
+          ...new Map(
+            [...recent, ...next.events].map((row) => [row.id, row]),
+          ).values(),
+        ];
+        if (combined.length > MAX_LOADED_ACTIONS)
+          throw new Error(
+            "Calendar activity changed. Check scheduling again before loading more actions.",
+          );
+        setRecent(combined);
         setCursor(next.next_cursor);
         setView((old) =>
           old ? { ...old, revision: next.calendar_revision } : old,
         );
-        const recovered = next.events.find((row) => row.id === event?.id);
+        const recovered = next.events.find(
+          (row) => row.id === selectedReceiptId.current,
+        );
         if (recovered) acceptEvent(recovered);
       },
     );
@@ -454,8 +598,19 @@ export function StudentCalendarScheduling({
     setCalendarId("");
     setGrantId(selected);
     if (!selected) return;
+    const grant = view.grants.find(
+      (item) => item.id === selected && item.status === "connected",
+    );
+    if (!grant || !providerAvailable(view, grant.provider)) return;
     void access.run(
-      (signal) => api.targets(selected, command(view), signal),
+      async (signal) => {
+        const current = await api.targets(selected, command(view), signal);
+        if ((current.provider ?? "google") !== grant.provider)
+          throw new Error(
+            "The calendar service changed. Check scheduling again.",
+          );
+        return current;
+      },
       (current) => {
         setTargets(current);
         setView((old) =>
@@ -473,6 +628,9 @@ export function StudentCalendarScheduling({
   const preview = (submit: FormEvent<HTMLFormElement>) => {
     submit.preventDefault();
     const selected = options.find((option) => option.start_at === choice);
+    const grant = view?.grants.find(
+      (item) => item.id === grantId && item.status === "connected",
+    );
     if (
       !writesAvailable ||
       !view ||
@@ -480,28 +638,37 @@ export function StudentCalendarScheduling({
       !selected ||
       !calendarId ||
       !title.trim() ||
-      !availability
+      !availability ||
+      !grant ||
+      !providerAvailable(view, grant.provider) ||
+      (targets.provider ?? "google") !== grant.provider
     )
       return;
     draftChanged();
-    void access.run(
-      (signal) =>
-        api.previewEvent(
-          {
-            ...command(view),
-            grant_id: grantId,
-            calendar_id: calendarId,
-            title: title.trim(),
-            location: location.trim(),
-            start_at: selected.start_at,
-            end_at: selected.end_at,
-            timezone: availability.expected_timezone,
-            availability,
-          },
-          signal,
-        ),
-      acceptEvent,
-    );
+    void access.run(async (signal) => {
+      const current = await api.previewEvent(
+        {
+          ...command(view),
+          grant_id: grantId,
+          calendar_id: calendarId,
+          title: title.trim(),
+          location: location.trim(),
+          start_at: selected.start_at,
+          end_at: selected.end_at,
+          timezone: availability.expected_timezone,
+          availability,
+          ...(studyMoveCount(selected) > 0
+            ? { allow_study_displacement: true }
+            : {}),
+        },
+        signal,
+      );
+      if ((current.provider ?? "google") !== grant.provider)
+        throw new Error(
+          "The calendar service changed. Check scheduling again.",
+        );
+      return current;
+    }, acceptEvent);
   };
   const eventCommand = (current: CalendarEventView) => ({
     ...command({
@@ -514,6 +681,8 @@ export function StudentCalendarScheduling({
   const approve = () => {
     if (
       !writesAvailable ||
+      !view ||
+      !providerAvailable(view, event?.provider ?? "google") ||
       event?.status !== "pending" ||
       !confirmed ||
       mustCheck ||
@@ -549,7 +718,14 @@ export function StudentCalendarScheduling({
     );
   };
   const undo = () => {
-    if (!writesAvailable || !event?.can_undo || !undoConfirmed || mustCheck)
+    if (
+      !writesAvailable ||
+      !view ||
+      !providerAvailable(view, event?.provider ?? "google") ||
+      !event?.can_undo ||
+      !undoConfirmed ||
+      mustCheck
+    )
       return;
     const captured = event;
     setUndoConfirmed(false);
@@ -568,6 +744,10 @@ export function StudentCalendarScheduling({
     );
   };
   const locked = access.busy || !access.ready;
+  const eventWritesAvailable =
+    writesAvailable &&
+    !!view &&
+    providerAvailable(view, event?.provider ?? "google");
   const unsettled =
     mustCheck ||
     (!!event && ["executing", "uncertain", "undoing"].includes(event.status));
@@ -576,9 +756,16 @@ export function StudentCalendarScheduling({
   );
   const editable = (!event || event.status === "pending") && !unresolved;
   const connected =
-    view?.grants.filter((grant) => grant.status === "connected") ?? [];
+    view?.grants.filter(
+      (grant) =>
+        grant.status === "connected" && providerAvailable(view, grant.provider),
+    ) ?? [];
   return (
-    <section className={styles.panel} aria-labelledby={`${id}-heading`}>
+    <section
+      id="calendar"
+      className={styles.panel}
+      aria-labelledby={`${id}-heading`}
+    >
       <div className={styles.heading}>
         <div>
           <p className={styles.eyebrow}>Make a time official</p>
@@ -594,8 +781,8 @@ export function StudentCalendarScheduling({
       </p>
       {!availability && (
         <p className={styles.hint}>
-          Find confirmed openings above before reviewing a new event. Recent
-          actions can still be checked here.
+          <Link href="/planner">Find confirmed openings in Planner</Link> before
+          reviewing a new event. Recent actions can still be checked here.
         </p>
       )}
       {view && connected.length === 0 && (
@@ -647,7 +834,9 @@ export function StudentCalendarScheduling({
           <form onSubmit={preview}>
             <fieldset className={styles.fields} disabled={locked}>
               <label htmlFor={`${id}-grant`}>
-                Google account
+                {connected.some((grant) => grant.provider !== "google")
+                  ? "Calendar account"
+                  : "Google account"}
                 <select
                   id={`${id}-grant`}
                   value={grantId}
@@ -657,7 +846,8 @@ export function StudentCalendarScheduling({
                   <option value="">Choose an account</option>
                   {connected.map((grant) => (
                     <option key={grant.id} value={grant.id}>
-                      {grant.account_label ?? "Google calendar account"}
+                      {calendarProviderName(grant.provider)} ·{" "}
+                      {grant.account_label ?? "Calendar account"}
                     </option>
                   ))}
                 </select>
@@ -700,6 +890,8 @@ export function StudentCalendarScheduling({
                         ...option,
                         timezone: availability.expected_timezone,
                       })}
+                      {studyMoveCount(option) > 0 &&
+                        ` · review moving ${studyMoveCount(option)} study ${studyMoveCount(option) === 1 ? "block" : "blocks"}`}
                     </option>
                   ))}
                 </select>
@@ -746,6 +938,10 @@ export function StudentCalendarScheduling({
           <p>{eventTime(event)}</p>
           <dl>
             <div>
+              <dt>Service</dt>
+              <dd>{calendarProviderName(event.provider)}</dd>
+            </div>
+            <div>
               <dt>Calendar</dt>
               <dd>{event.calendar_label}</dd>
             </div>
@@ -760,6 +956,50 @@ export function StudentCalendarScheduling({
               </div>
             )}
           </dl>
+          {event.study_moves && (
+            <section aria-label="Exact study plan changes">
+              <h4>Study plan changes</h4>
+              <p>
+                {event.study_changes_applied
+                  ? "This receipt records applied study moves."
+                  : "These study moves are proposed, not applied."}
+              </p>
+              {event.study_details_redacted && (
+                <p className={styles.warning}>
+                  Some study details were forgotten and are no longer available
+                  in this receipt. Check current blocks in{" "}
+                  <Link href="/planner">Planner</Link>.
+                </p>
+              )}
+              <ol className={styles.list}>
+                {event.study_moves.map((move) => (
+                  <li key={move.block_id}>
+                    <strong>{move.title}</strong> · {move.minutes} minutes
+                    <p>
+                      Before:{" "}
+                      {eventTime({
+                        start_at: move.before_start_at,
+                        end_at: move.before_end_at,
+                        timezone: event.timezone,
+                      })}
+                    </p>
+                    <p>
+                      After:{" "}
+                      {eventTime({
+                        start_at: move.after_start_at,
+                        end_at: move.after_end_at,
+                        timezone: event.timezone,
+                      })}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+              <p className={styles.warning}>
+                Study moves may remain if the calendar request fails. Calendar
+                Undo only removes the event.
+              </p>
+            </section>
+          )}
           {(event.message.startsWith("This request predates your reset;") ||
             (event.status === "created" && !event.can_undo)) && (
             <p className={styles.hint}>{event.message}</p>
@@ -779,7 +1019,7 @@ export function StudentCalendarScheduling({
                         ? "The event was not added. Review recent actions before starting again."
                         : "The outcome needs checking. NavoX will not try to add another event."}
           </p>
-          {writesAvailable && event.status === "pending" && !unsettled && (
+          {eventWritesAvailable && event.status === "pending" && !unsettled && (
             <>
               <label className={styles.check}>
                 <input
@@ -794,6 +1034,8 @@ export function StudentCalendarScheduling({
                 />
                 <span>
                   I reviewed this title, time, timezone, location and calendar.
+                  {event.study_moves &&
+                    " I also reviewed every exact before-and-after study move and understand those changes may remain if the event fails."}
                   Add this exact event.
                 </span>
               </label>
@@ -824,7 +1066,7 @@ export function StudentCalendarScheduling({
               Check event status
             </button>
           )}
-          {writesAvailable && event.can_undo && !unsettled && (
+          {eventWritesAvailable && event.can_undo && !unsettled && (
             <>
               <label className={styles.check}>
                 <input

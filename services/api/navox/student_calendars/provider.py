@@ -8,7 +8,7 @@ import asyncio
 import json
 import re
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, TypeGuard, cast
 from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -54,6 +54,18 @@ class CalendarTarget:
     id: str
     label: str
     timezone: str
+
+
+@dataclass(frozen=True)
+class CalendarCreateReceipt:
+    """Observed event plus independent original-creation version evidence.
+
+    A later GET may prove a matching event exists without proving that its
+    current version was the original version created by the submitted request.
+    """
+
+    event: dict[str, Any] = field(repr=False)
+    creation_etag: str | None = field(repr=False)
 
 
 def _text(value: object, limit: int) -> TypeGuard[str]:

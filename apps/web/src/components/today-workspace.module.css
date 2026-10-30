@@ -1104,13 +1104,14 @@
   align-items: center;
   padding: 8px 12px;
   border-radius: 10px;
-  color: var(--text-muted, #a3acb8);
+  color: var(--nx-muted);
   text-decoration: none;
 }
+.settingsNav a[aria-current="location"],
 .settingsNav a:hover,
 .settingsNav a:focus-visible {
-  background: var(--surface-raised, #1b1f26);
-  color: var(--text, #f2f4f7);
+  background: var(--nx-raised);
+  color: var(--nx-text);
 }
 .settingsLayout section,
 .settingsLayout [id] {
@@ -1129,4 +1130,29 @@
   .settingsNav a {
     flex-shrink: 0;
   }
+}
+
+/* Settings follows the shared theme while older action surfaces keep their own scope. */
+.settingsLayout {
+  color: var(--nx-text);
+}
+.settingsLayout .controlCard,
+.settingsLayout .toolDisclosure {
+  background: var(--nx-surface);
+  border-color: var(--nx-border);
+}
+.settingsLayout .controlCard h2,
+.settingsLayout .accountDetails dd,
+.settingsLayout .toolDisclosure > summary {
+  color: var(--nx-text);
+}
+.settingsLayout .controlCard > p,
+.settingsLayout .accountDetails dt {
+  color: var(--nx-muted);
+}
+.settingsLayout .textLink {
+  color: var(--nx-accent-text);
+}
+.settingsLayout .accountDetails > div {
+  border-color: var(--nx-border);
 }

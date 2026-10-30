@@ -7,7 +7,7 @@ from typing import Any, Literal, cast
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from navox.agent.audit import add_audit_event
@@ -183,6 +183,10 @@ async def save_profile(
     database: AsyncSession, user_id: UUID, workspace_id: UUID, payload: ProfileInput
 ) -> ProfileView:
     user = await owner(database, user_id, workspace_id, lock=True)
+    # An unchanged explicit UTC value still needs SQLite's write lock before
+    # the profile-choice marker is read/inserted. Device initialization must
+    # never win merely because the ORM found no changed User attribute.
+    await database.execute(update(User).where(User.id == user_id).values(timezone=payload.timezone))
     row = await database.scalar(
         select(StudentProfile).where(
             StudentProfile.user_id == user_id, StudentProfile.workspace_id == workspace_id
@@ -959,6 +963,7 @@ async def reset_data(
         erase_all_owned_feeds,
         lock_all_feeds_for_reset,
     )
+    from navox.memory.history import erase_all_memory
     from navox.outlook.cleanup import clear_private_data, lock_for_reset
     from navox.student_calendars.service import forget_calendar_data
     from navox.student_email.service import forget_email_data
@@ -1018,6 +1023,7 @@ async def reset_data(
     await forget_goals_data(database, user_id, workspace_id)
     await forget_board_data(database, user_id, workspace_id)
     await forget_vox_data(database, user_id, workspace_id)
+    await erase_all_memory(database, user_id, workspace_id)
     await clear_coursework_data(database, user_id=user_id, workspace_id=workspace_id)
     from navox.student_alerts.service import clear_student_alert_data
 

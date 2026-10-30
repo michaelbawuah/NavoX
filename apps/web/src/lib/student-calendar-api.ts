@@ -1,5 +1,6 @@
 /** Private calendar-purpose transport. Construction performs no I/O. */
 import { googleAuthorizationUrl } from "./connection-management";
+import { outlookAuthorizationUrl } from "./outlook";
 import type { AlarmPreferences, StudyPreferences } from "./student-planning";
 
 export const CALENDAR_CONSENT_VERSION = "calendar-availability.v1";
@@ -8,6 +9,14 @@ export const CALENDAR_READ_SCOPES = [
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
   "https://www.googleapis.com/auth/calendar.events.freebusy",
+] as const;
+export const MICROSOFT_CALENDAR_READ_SCOPES = [
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+  "User.Read",
+  "Calendars.Read",
 ] as const;
 const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -24,7 +33,7 @@ export type CoverageState =
   | "revoked";
 export interface CalendarGrant {
   id: string;
-  provider: "google";
+  provider: CalendarProviderId;
   connection_id: string | null;
   account_label: string | null;
   status: "pending" | "connected" | "unavailable" | "revoked";
@@ -191,6 +200,10 @@ export interface StudentCalendarApi {
   preferences(signal: AbortSignal): Promise<StudyPreferences>;
   calendars(signal: AbortSignal): Promise<CalendarView>;
   start(
+    input: CalendarStartInput,
+    signal: AbortSignal,
+  ): Promise<CalendarAuthorization>;
+  startOutlook?(
     input: CalendarStartInput,
     signal: AbortSignal,
   ): Promise<CalendarAuthorization>;
@@ -463,10 +476,6 @@ export function readCalendarView(value: unknown): CalendarView {
     ),
     (p) => p.id,
   );
-  if (
-    providers.some((p) => p.id !== "google" && p.availability !== "unavailable")
-  )
-    return invalid();
   const grants = unique(
     list(
       v.grants,
@@ -479,10 +488,9 @@ export function readCalendarView(value: unknown): CalendarView {
           "status",
           "revision",
         ]);
-        if (g.provider !== "google") return invalid();
         return {
           id: id(g.id),
-          provider: "google" as const,
+          provider: en(g.provider, ["google", "outlook", "icloud"]),
           connection_id: nullable(g.connection_id, id),
           account_label: nullable(g.account_label, (label) => text(label, 320)),
           status: en(g.status, [
@@ -553,6 +561,7 @@ export function readCalendarAuthorization(
   value: unknown,
   request: Pick<CalendarCommand, "generation" | "revision">,
   expectedScopes: readonly string[] = CALENDAR_READ_SCOPES,
+  authorizationProvider: "google" | "outlook" = "google",
 ): CalendarAuthorization {
   const v = obj(value, [
       "authorization_url",
@@ -571,7 +580,9 @@ export function readCalendarAuthorization(
   let target: URL;
   try {
     target = new URL(
-      googleAuthorizationUrl(text(v.authorization_url, 8192, 1)),
+      (authorizationProvider === "outlook"
+        ? outlookAuthorizationUrl
+        : googleAuthorizationUrl)(text(v.authorization_url, 8192, 1)),
     );
   } catch {
     return invalid();
@@ -584,10 +595,12 @@ export function readCalendarAuthorization(
   if (
     !sameSet(single("scope").split(" "), expectedScopes) ||
     single("response_type") !== "code" ||
-    single("access_type") !== "offline" ||
-    single("prompt") !== "consent" ||
+    (authorizationProvider === "google" &&
+      single("access_type") !== "offline") ||
+    (authorizationProvider === "google" && single("prompt") !== "consent") ||
     single("code_challenge_method") !== "S256" ||
-    single("include_granted_scopes") !== "true" ||
+    (authorizationProvider === "google" &&
+      single("include_granted_scopes") !== "true") ||
     !/^[A-Za-z0-9_-]{43,128}$/.test(single("code_challenge")) ||
     single("state").length > 1024 ||
     single("client_id").length > 1024 ||
@@ -1220,6 +1233,21 @@ export function createStudentCalendarApi(
       return send(
         "/student/calendars/google/start",
         (value) => readCalendarAuthorization(value, checked),
+        signal,
+        checked,
+      );
+    },
+    startOutlook: (input, signal) => {
+      const checked = startInput(input);
+      return send(
+        "/student/calendars/outlook/start",
+        (value) =>
+          readCalendarAuthorization(
+            value,
+            checked,
+            MICROSOFT_CALENDAR_READ_SCOPES,
+            "outlook",
+          ),
         signal,
         checked,
       );

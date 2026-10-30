@@ -186,6 +186,205 @@ async function clickHome() {
 }
 
 describe("Home entry shares the app-scoped Vox call", () => {
+  it("marks media readiness only for the current verified active connection", async () => {
+    const test = rig(),
+      joined = deferred<ReturnType<typeof test.join>>();
+    test.transport.connect.mockImplementationOnce(async (request) => {
+      test.requests.push(request);
+      return joined.promise;
+    });
+    await test.mount();
+    await click("Talk with NavoX");
+    expect(dialog().getAttribute("data-vox-media-ready")).toBe("false");
+    await act(async () => joined.resolve(test.join(test.requests[0])));
+    expect(dialog().getAttribute("data-vox-media-ready")).toBe("true");
+    await click("Hang up");
+    expect(dialog().getAttribute("data-vox-media-ready")).toBe("false");
+  });
+  it("shows verified off-record status in the expanded and minimized call", async () => {
+    const test = rig();
+    vi.mocked(fetch).mockImplementation(async (url, options) => {
+      expect(options?.headers).toEqual({
+        "X-NavoX-Account": `${account.workspace.id}:${account.id}`,
+      });
+      const callId = String(url).split("/calls/")[1]?.split("/")[0];
+      return Response.json({
+        user_id: account.id,
+        workspace_id: account.workspace.id,
+        client_call_id: callId,
+        generation: 0,
+        privacy_generation: 2,
+        mode: "off-record",
+        retention_days: null,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      });
+    });
+    await test.mount();
+    expect(fetch).not.toHaveBeenCalled();
+    await click("Talk with NavoX");
+    expect(
+      dialog().querySelector('[data-vox-privacy="off-record"]')?.textContent,
+    ).toBe("Off the record");
+    await click("Minimize call");
+    expect(
+      host.querySelector('[data-vox-privacy="off-record"]')?.textContent,
+    ).toBe("Off the record");
+    const check = deferred<AccountAccess>();
+    test.restoreAccess.mockImplementationOnce(() => check.promise);
+    await act(async () =>
+      document.dispatchEvent(new Event("visibilitychange")),
+    );
+    expect(host.querySelector('[data-vox-privacy="off-record"]')).toBeNull();
+    await act(async () => check.resolve(proof));
+  });
+
+  it("does not apply a late privacy response after hang-up", async () => {
+    const test = rig();
+    const responses: ReturnType<typeof deferred<Response>>[] = [];
+    vi.mocked(fetch).mockImplementation(() => {
+      const response = deferred<Response>();
+      responses.push(response);
+      return response.promise;
+    });
+    await test.mount();
+    await click("Talk with NavoX");
+    const callId = latest?.state.callId;
+    await click("Hang up");
+    await act(async () => {
+      for (const response of responses)
+        response.resolve(
+          Response.json({
+            user_id: account.id,
+            workspace_id: account.workspace.id,
+            client_call_id: callId,
+            generation: 0,
+            privacy_generation: 0,
+            mode: "off-record",
+            retention_days: null,
+            expires_at: new Date(Date.now() + 60000).toISOString(),
+          }),
+        );
+    });
+    expect(host.querySelector('[data-vox-privacy="off-record"]')).toBeNull();
+    expect(latest?.state.phase).toBe("ended");
+  });
+
+  it("clears an expired privacy label when a refresh cannot be verified", async () => {
+    vi.useFakeTimers();
+    const test = rig();
+    let fail = false;
+    vi.mocked(fetch).mockImplementation(async (url) =>
+      fail
+        ? Response.json({}, { status: 503 })
+        : Response.json({
+            user_id: account.id,
+            workspace_id: account.workspace.id,
+            client_call_id: String(url).split("/calls/")[1]?.split("/")[0],
+            generation: 0,
+            privacy_generation: 1,
+            mode: "off-record",
+            retention_days: null,
+            expires_at: new Date(Date.now() + 1000).toISOString(),
+          }),
+    );
+    await test.mount();
+    await click("Talk with NavoX");
+    expect(
+      dialog().querySelector('[data-vox-privacy="off-record"]'),
+    ).not.toBeNull();
+    fail = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1001);
+    });
+    expect(
+      dialog().querySelector('[data-vox-privacy="off-record"]'),
+    ).toBeNull();
+    expect(dialog().textContent).toContain("Privacy status unavailable");
+  });
+  it("briefly retries a not-yet-reserved privacy read while the call is connecting", async () => {
+    vi.useFakeTimers();
+    const test = rig(),
+      joined = deferred<ReturnType<typeof test.join>>();
+    test.transport.connect.mockImplementationOnce(async (request) => {
+      test.requests.push(request);
+      return joined.promise;
+    });
+    let privacyReads = 0;
+    vi.mocked(fetch).mockImplementation(async (url) => {
+      if (!String(url).endsWith("/privacy") || ++privacyReads === 1)
+        return Response.json({}, { status: 404 });
+      return Response.json({
+        user_id: account.id,
+        workspace_id: account.workspace.id,
+        client_call_id: String(url).split("/calls/")[1]?.split("/")[0],
+        generation: 0,
+        privacy_generation: 1,
+        mode: "off-record",
+        retention_days: null,
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+      });
+    });
+    await test.mount();
+    await click("Talk with NavoX");
+    expect(latest?.state.phase).toBe("connecting");
+    expect(
+      dialog().querySelector('[data-vox-privacy="off-record"]'),
+    ).toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1001);
+    });
+    expect(latest?.state.phase).toBe("connecting");
+    expect(
+      dialog().querySelector('[data-vox-privacy="off-record"]'),
+    ).not.toBeNull();
+    await act(async () => joined.resolve(test.join(test.requests[0])));
+  });
+
+  it("distinguishes temporary call text from saved history without claiming a privacy status", async () => {
+    const test = rig();
+    await test.mount();
+    await click("Talk with NavoX");
+    expect(dialog().textContent).toContain(
+      "Text in this panel clears when the call ends. Saved history follows your Memory & privacy settings.",
+    );
+    expect(dialog().textContent).not.toContain("Off the record.");
+    expect(dialog().textContent).not.toContain(
+      "This conversation clears when you hang up",
+    );
+    const privacy = dialog().querySelector<HTMLAnchorElement>(
+      'a[href="/settings#memory-privacy"]',
+    );
+    expect(privacy?.textContent?.trim()).toBe("Memory & privacy");
+    // The policy isn't loaded by this view, so it cannot advertise a current status.
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.some(([url]) => String(url).includes("/memory/privacy")),
+    ).toBe(false);
+  });
+
+  it("opens the memory settings destination while preserving the app-owned call", async () => {
+    const test = rig();
+    await test.mount();
+    await click("Talk with NavoX");
+    const callId = latest?.state.callId;
+    const privacy = dialog().querySelector<HTMLAnchorElement>(
+      'a[href="/settings#memory-privacy"]',
+    );
+    if (!privacy) throw new Error("Missing Memory & privacy link");
+    // Keep jsdom from attempting a document navigation; the Link's click handler
+    // still minimizes the call before the simulated client-route transition.
+    privacy.addEventListener("click", (event) => event.preventDefault());
+    await act(async () => privacy.click());
+    expect(latest?.state.minimized).toBe(true);
+    await test.mount("Settings");
+    expect(latest?.state.callId).toBe(callId);
+    expect(latest?.state.phase).toBe("active");
+    expect(test.transport.connect).toHaveBeenCalledTimes(1);
+    expect(test.connections[0].close).not.toHaveBeenCalled();
+    expect(test.transport.endCall).not.toHaveBeenCalled();
+  });
+
   it("explains a budget denial once and permits a later manual attempt without reload", async () => {
     const test = rig();
     test.transport.connect.mockRejectedValueOnce(
@@ -1066,4 +1265,33 @@ it("shows clickable inline web citations and removes them at hang-up", async () 
   );
   await click("Hang up");
   expect(host.querySelector('[aria-label="Web lookup sources"]')).toBeNull();
+});
+
+it("renders current calendar review metadata and clears it on dismissal and hang-up", async () => {
+  const test = rig();
+  await test.mount();
+  await click("Talk with NavoX");
+  const result = {
+    kind: "calendar-event" as const,
+    event_id: "11111111-1111-4111-8111-111111111111",
+    status: "uncertain" as const,
+    voice_approval_available: false,
+    destination: "/connections#calendar" as const,
+  };
+  await act(async () =>
+    test.requests[0].onEvent({ type: "calendar-review", result }),
+  );
+  expect(
+    host
+      .querySelector('[aria-label="Vox calendar review"] a')
+      ?.getAttribute("href"),
+  ).toBe("/connections#calendar");
+  expect(host.textContent).toContain("event result has not been confirmed");
+  await click("Dismiss calendar review");
+  expect(host.querySelector('[aria-label="Vox calendar review"]')).toBeNull();
+  await act(async () =>
+    test.requests[0].onEvent({ type: "calendar-review", result }),
+  );
+  await click("Hang up");
+  expect(host.querySelector('[aria-label="Vox calendar review"]')).toBeNull();
 });

@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email import policy
@@ -28,6 +29,7 @@ from navox.core.settings import Settings
 GRAPH = "https://graph.microsoft.com/v1.0"
 USERINFO = "https://graph.microsoft.com/oidc/userinfo"
 READ_SCOPES = ("openid", "profile", "email", "offline_access", "User.Read", "Mail.Read")
+ALLOWED_SCOPES = (*READ_SCOPES, "Mail.Send", "Calendars.Read", "Calendars.ReadWrite")
 READ_CAPABILITY = "communication.messages.read"
 SEND_CAPABILITY = "communication.messages.send"
 _EMAIL = TypeAdapter(EmailStr)
@@ -133,7 +135,7 @@ def email_address(value: object) -> str:
 def normalize_scopes(value: object) -> frozenset[str]:
     if not isinstance(value, str) or not value.strip() or len(value) > 8192:
         raise MicrosoftMailError("invalid_response")
-    accepted = {item.casefold(): item for item in (*READ_SCOPES, "Mail.Send")}
+    accepted = {item.casefold(): item for item in ALLOWED_SCOPES}
     scopes = set()
     for item in value.split():
         name = item.removeprefix("https://graph.microsoft.com/")
@@ -409,8 +411,14 @@ def receipt_matches(actual: bytes, expected: bytes) -> bool:
 
 
 class MicrosoftMailGateway:
-    def __init__(self, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(
+        self,
+        transport: httpx.AsyncBaseTransport | None = None,
+        *,
+        check: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         self.transport = transport
+        self.check = check
 
     async def _request(
         self,
@@ -423,6 +431,8 @@ class MicrosoftMailGateway:
         mime: bytes | None = None,
         maximum: int = 1_500_000,
     ) -> bytes:
+        if self.check:
+            await self.check()
         headers = {"Prefer": 'outlook.body-content-type="text", IdType="ImmutableId"'}
         if token:
             headers["Authorization"] = f"Bearer {token}"
@@ -456,6 +466,8 @@ class MicrosoftMailGateway:
                         data.extend(part)
                         if len(data) > maximum:
                             raise MicrosoftMailError("invalid_response")
+                    if self.check:
+                        await self.check()
                     return bytes(data)
         except httpx.HTTPError:
             raise MicrosoftMailError() from None
@@ -509,7 +521,7 @@ class MicrosoftMailGateway:
         else:
             # Only the verified consent request or previously stored grant supplies
             # absence-only fallback (OAuth 2.0 sections 5.1 and 6). Never widen it.
-            if not fallback_scopes or not fallback_scopes.issubset({*READ_SCOPES, "Mail.Send"}):
+            if not fallback_scopes or not fallback_scopes.issubset(ALLOWED_SCOPES):
                 raise MicrosoftMailError("invalid_response")
             scopes = fallback_scopes
         return MailToken(access, rotated, scopes)

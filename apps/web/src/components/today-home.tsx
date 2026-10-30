@@ -177,7 +177,14 @@ function TodayHomeAccount({
         return readHomeItems(await r.json());
       }),
       productFeatures.studentGoals
-        ? goalsRequest("", readStudentGoalsBoard)
+        ? goalsRequest(
+            "",
+            readStudentGoalsBoard,
+            "GET",
+            undefined,
+            controller.signal,
+            accountKey,
+          )
         : Promise.resolve(null),
       productFeatures.studentWhiteboard
         ? createSavedBoardsApi(accountKey).list(controller.signal)

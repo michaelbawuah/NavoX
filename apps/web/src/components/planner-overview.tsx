@@ -75,20 +75,28 @@ export function PlannerOverview({
     return () => clearInterval(timer);
   }, [timetable.server_now]);
   useEffect(() => {
-    let live = true;
+    const abort = new AbortController();
+    setGoals([]);
     if (productFeatures.studentGoals)
-      void goalsRequest("", readStudentGoalsBoard)
+      void goalsRequest(
+        "",
+        readStudentGoalsBoard,
+        "GET",
+        undefined,
+        abort.signal,
+        accountKey,
+      )
         .then((data) => {
-          if (live)
+          if (!abort.signal.aborted)
             setGoals(
               data.goals.filter((g) => g.status === "active").slice(0, 3),
             );
         })
         .catch(() => {});
     return () => {
-      live = false;
+      abort.abort();
     };
-  }, []);
+  }, [accountKey]);
   const zone = timetable.timezone,
     today = studentDateInZone(new Date(now).toISOString(), zone);
   const first =
@@ -104,10 +112,8 @@ export function PlannerOverview({
   const active = plan.blocks
     .filter((b) => b.status === "planned")
     .sort((a, b) => Date.parse(a.start_at) - Date.parse(b.start_at));
-  const next =
-    active.find((b) => b.id === selected) ??
-    active.find((b) => Date.parse(b.end_at) > now) ??
-    active.at(-1);
+  const selectedBlock = active.find((b) => b.id === selected);
+  const next = selectedBlock ?? active.find((b) => Date.parse(b.end_at) > now);
   const nextTask = tasks.find((t) => t.id === next?.task_id);
   const minutes = (date: string) => {
     const value = studentLocalTime(date, zone);
@@ -140,7 +146,12 @@ export function PlannerOverview({
       days.includes(studentDateInZone(b.start_at, zone)) &&
       ["planned", "done", "took_longer"].includes(b.status),
   );
-  const planned = visibleBlocks.reduce((sum, b) => sum + b.minutes, 0);
+  const planned = visibleBlocks
+    .filter((b) => b.status === "planned")
+    .reduce((sum, b) => sum + b.minutes, 0);
+  const recorded = visibleBlocks
+    .filter((b) => ["done", "took_longer"].includes(b.status))
+    .reduce((sum, b) => sum + b.actual_minutes, 0);
   const group = (task: StudyTask) =>
     task.due_at && studentDateInZone(task.due_at, zone) <= today
       ? "Today"
@@ -177,8 +188,9 @@ export function PlannerOverview({
           <strong>
             {planned
               ? `${studyMinutes(planned)} of study planned.`
-              : "No study blocks planned yet."}
+              : "No study blocks planned in this view."}
           </strong>{" "}
+          {recorded > 0 && `${studyMinutes(recorded)} of study recorded. `}
           {plan.needs_review
             ? "Your plan needs a fresh review."
             : openings.data?.calendar_checked && openings.data.routine_confirmed
@@ -296,7 +308,7 @@ export function PlannerOverview({
           {next && nextTask && (
             <section className={styles.nextStudy}>
               <p>
-                {selected ? "Selected" : "Next"} study block ·{" "}
+                {selectedBlock ? "Selected" : "Next"} study block ·{" "}
                 {studentClock(next.start_at, zone)} –{" "}
                 {studentClock(next.end_at, zone)}
               </p>
@@ -330,6 +342,15 @@ export function PlannerOverview({
                   }}
                 />
               )}
+            </section>
+          )}
+          {!next && (
+            <section className={styles.nextStudy}>
+              <h3>No upcoming study block</h3>
+              <p>
+                Select a past block to record its outcome, or review a replan
+                for your remaining work.
+              </p>
             </section>
           )}
           {receipt && (

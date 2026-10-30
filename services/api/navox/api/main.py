@@ -5,6 +5,7 @@ from navox.api.actions import router as actions_router
 from navox.api.agent import router as agent_router
 from navox.api.ai import router as ai_router
 from navox.api.ai_operations import router as ai_operations_router
+from navox.api.apple_calendars import router as apple_calendars_router
 from navox.api.auth import router as auth_router
 from navox.api.board import router as board_router
 from navox.api.canvas import router as canvas_router
@@ -29,6 +30,9 @@ from navox.api.knowledge_lifecycle import router as knowledge_lifecycle_router
 from navox.api.lms_feed import router as lms_feed_router
 from navox.api.mcp import router as mcp_router
 from navox.api.memory import router as memory_router
+from navox.api.memory_candidates import router as memory_candidates_router
+from navox.api.memory_history import router as memory_history_router
+from navox.api.memory_learning import router as memory_learning_router
 from navox.api.middleware import RequestHardeningMiddleware
 from navox.api.news import router as news_router
 from navox.api.news_conversations import router as news_conversations_router
@@ -112,11 +116,15 @@ def create_app() -> FastAPI:
     app.include_router(outlook_router, prefix="/api/v1")
     app.include_router(thread_watches_router, prefix="/api/v1")
     app.include_router(routines_router, prefix="/api/v1")
+    app.include_router(memory_history_router, prefix="/api/v1")
+    app.include_router(memory_learning_router, prefix="/api/v1")
+    app.include_router(memory_candidates_router, prefix="/api/v1")
     app.include_router(memory_router, prefix="/api/v1")
     app.include_router(student_router, prefix="/api/v1")
     app.include_router(student_alerts_router, prefix="/api/v1")
     app.include_router(student_availability_router, prefix="/api/v1")
     app.include_router(student_calendars_router, prefix="/api/v1")
+    app.include_router(apple_calendars_router, prefix="/api/v1")
     app.include_router(student_screenshot_router, prefix="/api/v1")
     app.include_router(student_planning_router, prefix="/api/v1")
     app.include_router(noa_router, prefix="/api/v1")

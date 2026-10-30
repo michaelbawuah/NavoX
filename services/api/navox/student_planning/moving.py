@@ -12,6 +12,7 @@ from navox.connectors.sync_state import utc
 from navox.db.student_planning import StudentStudyBlock
 from navox.student import service as schedule
 from navox.student.occurrences import project
+from navox.student_calendars import claims as calendar_claims
 from navox.student_planning import calendar_busy, service
 from navox.student_planning.alarm import alarm_schedule
 from navox.student_planning.authority import require_session
@@ -30,6 +31,8 @@ async def move(
     expected_preview: str | None = None,
 ) -> dict[str, Any]:
     user = await schedule.owner(database, user_id, workspace_id, lock=True)
+    if expected_preview is not None:
+        await calendar_claims.require_mutable(database, user_id, workspace_id)
     await require_session(database, user_id, session_hash)
     body = {
         "block_id": str(block_id),

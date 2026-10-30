@@ -5,6 +5,7 @@ import {
   type CalendarEventView,
   type CalendarSchedulingStart,
   createStudentCalendarSchedulingApi,
+  MICROSOFT_CALENDAR_SCHEDULING_SCOPES,
   readCalendarEventView,
   readCalendarSchedulingView,
 } from "./student-calendar-scheduling";
@@ -37,6 +38,18 @@ function event(): CalendarEventView {
     changes_applied: false,
     can_undo: false,
     message: "Review this event",
+  };
+}
+function studyMove(index = 1) {
+  return {
+    block_id: `70000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    task_id: `80000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    title: `Synthetic study block ${index}`,
+    minutes: 30,
+    before_start_at: "2026-10-22T12:50:00Z",
+    before_end_at: "2026-10-22T13:20:00Z",
+    after_start_at: "2026-10-22T14:00:00Z",
+    after_end_at: "2026-10-22T14:30:00Z",
   };
 }
 function view() {
@@ -88,6 +101,201 @@ function authorization() {
 }
 
 describe("separate reviewed calendar scheduling boundary", () => {
+  it("preserves legacy Google views and reads independent bounded write capabilities", () => {
+    expect(readCalendarSchedulingView(view())).not.toHaveProperty("providers");
+    const multi = {
+      ...view(),
+      providers: [
+        {
+          id: "outlook",
+          availability: "unavailable",
+          message: "Exact conditional Undo is unavailable.",
+        },
+      ],
+      grants: [{ ...view().grants[0], provider: "icloud" }],
+    };
+    expect(readCalendarSchedulingView(multi)).toMatchObject({
+      providers: multi.providers,
+      grants: [{ provider: "icloud" }],
+    });
+    for (const change of [
+      { providers: [...multi.providers, ...multi.providers] },
+      { providers: [{ ...multi.providers[0], availability: "connected" }] },
+      { providers: [{ ...multi.providers[0], message: "x".repeat(501) }] },
+      { grants: [{ ...view().grants[0], provider: "invented" }] },
+    ])
+      expect(() =>
+        readCalendarSchedulingView({ ...multi, ...change }),
+      ).toThrow();
+    expect(
+      readCalendarEventView({ ...event(), provider: "outlook" }).provider,
+    ).toBe("outlook");
+    expect(() =>
+      readCalendarEventView({ ...event(), provider: "invented" }),
+    ).toThrow();
+  });
+  it("binds Microsoft write consent to exact calendar-only scopes and OAuth host", async () => {
+    const target = new URL(
+      "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+    );
+    for (const [key, value] of Object.entries({
+      client_id: "calendar-client",
+      response_type: "code",
+      redirect_uri: "https://api.example.test/api/v1/outlook/callback",
+      scope: MICROSOFT_CALENDAR_SCHEDULING_SCOPES.join(" "),
+      state: "random-state",
+      code_challenge: "a".repeat(43),
+      code_challenge_method: "S256",
+    }))
+      target.searchParams.set(key, value);
+    const answer = {
+      ...authorization(),
+      authorization_url: target.toString(),
+      requested_scopes: [...MICROSOFT_CALENDAR_SCHEDULING_SCOPES],
+    };
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => json(answer));
+    const api = createStudentCalendarSchedulingApi(account, {
+      fetch,
+      baseUrl: "https://api.example.test/api/v1",
+    });
+    const input: CalendarSchedulingStart = {
+      ...command,
+      consent_version: CALENDAR_SCHEDULING_CONSENT_VERSION,
+      connection_id: connection,
+      confirmed: true,
+    };
+    await api.startOutlookScheduling(input, signal());
+    expect(fetch).toHaveBeenCalledWith(
+      "https://api.example.test/api/v1/student/calendars/outlook/scheduling/start",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "X-NavoX-Account": account,
+          "Content-Type": "application/json",
+        },
+      }),
+    );
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual(input);
+    for (const invalid of [
+      {
+        ...answer,
+        requested_scopes: [...answer.requested_scopes, "Mail.Send"],
+      },
+      {
+        ...answer,
+        authorization_url: target
+          .toString()
+          .replace(
+            "login.microsoftonline.com",
+            "login.microsoftonline.com.attacker.test",
+          ),
+      },
+      { ...answer, authorization_url: authorization().authorization_url },
+      {
+        ...answer,
+        requested_scopes: answer.requested_scopes.filter(
+          (scope) => scope !== "Calendars.ReadWrite",
+        ),
+      },
+    ]) {
+      fetch.mockResolvedValueOnce(json(invalid));
+      await expect(
+        api.startOutlookScheduling(input, signal()),
+      ).rejects.toThrow();
+    }
+  });
+  it("accepts Apple native write consent only for the exact connected current credential", async () => {
+    const input: CalendarSchedulingStart = {
+      ...command,
+      consent_version: CALENDAR_SCHEDULING_CONSENT_VERSION,
+      connection_id: connection,
+      confirmed: true,
+    };
+    const answer = {
+      ...view(),
+      revision: 6,
+      grants: [{ ...view().grants[0], provider: "icloud" }],
+    };
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => json(answer));
+    const api = createStudentCalendarSchedulingApi(account, { fetch });
+    await api.startAppleScheduling(input, signal());
+    const [url, options] = fetch.mock.calls[0];
+    expect(url).toMatch(/\/apple\/scheduling\/start$/);
+    expect(JSON.parse(String(options?.body))).toEqual(input);
+    expect(String(options?.body)).not.toMatch(/apple_id|password|credential/);
+    for (const invalid of [
+      { ...answer, generation: 3 },
+      { ...answer, grants: [{ ...answer.grants[0], provider: "google" }] },
+      { ...answer, grants: [{ ...answer.grants[0], connection_id: request }] },
+      { ...answer, grants: [{ ...answer.grants[0], status: "pending" }] },
+    ]) {
+      fetch.mockResolvedValueOnce(json(invalid));
+      await expect(api.startAppleScheduling(input, signal())).rejects.toThrow();
+    }
+    fetch.mockClear();
+    for (const method of [
+      api.startScheduling,
+      api.startOutlookScheduling,
+      api.startAppleScheduling,
+    ]) {
+      expect(() =>
+        method(
+          { ...input, confirmed: false } as unknown as CalendarSchedulingStart,
+          signal(),
+        ),
+      ).toThrow();
+      expect(() =>
+        method(
+          { ...input, provider: "icloud" } as CalendarSchedulingStart,
+          signal(),
+        ),
+      ).toThrow();
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it("reads complete bounded displacement receipts and truthful redaction", () => {
+    expect(readCalendarEventView(event())).not.toHaveProperty("study_moves");
+    const full = {
+      ...event(),
+      study_changes_applied: false,
+      study_details_redacted: false,
+      study_moves: Array.from({ length: 24 }, (_, index) =>
+        studyMove(index + 1),
+      ),
+    };
+    expect(readCalendarEventView(full).study_moves).toHaveLength(24);
+    for (const changes of [
+      { study_moves: [...full.study_moves, studyMove(25)] },
+      { study_moves: [studyMove(), studyMove()] },
+      { study_moves: [{ ...studyMove(), minutes: 20 }] },
+      { study_moves: [{ ...studyMove(), minutes: 91 }] },
+      { study_changes_applied: true },
+      { study_details_redacted: true },
+    ])
+      expect(() => readCalendarEventView({ ...full, ...changes })).toThrow();
+    expect(() =>
+      readCalendarEventView({ ...event(), study_moves: [studyMove()] }),
+    ).toThrow();
+    expect(
+      readCalendarEventView({
+        ...event(),
+        status: "failed",
+        study_changes_applied: true,
+        study_details_redacted: true,
+        study_moves: [],
+      }).study_changes_applied,
+    ).toBe(true);
+    expect(
+      readCalendarEventView({
+        ...event(),
+        status: "failed",
+        study_changes_applied: false,
+        study_details_redacted: true,
+        study_moves: [],
+      }).study_moves,
+    ).toEqual([]);
+  });
   it("does not read or change anything at construction", () => {
     const fetch = vi.fn();
     createStudentCalendarSchedulingApi(account, { fetch });
@@ -110,6 +318,53 @@ describe("separate reviewed calendar scheduling boundary", () => {
         headers: { "X-NavoX-Account": account },
       }),
     );
+  });
+  it("reads a maximum UTF-8 study-move page within the bounded response cap", async () => {
+    const events = Array.from({ length: 20 }, (_, index) => ({
+      ...event(),
+      id: `90000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      calendar_label: "界".repeat(1024),
+      title: "界".repeat(200),
+      location: "界".repeat(500),
+      message: "界".repeat(1000),
+      study_changes_applied: false,
+      study_details_redacted: false,
+      study_moves: Array.from({ length: 24 }, (_, index) => ({
+        ...studyMove(index + 1),
+        title: "界".repeat(200),
+      })),
+    }));
+    const page = {
+      generation: 2,
+      calendar_revision: 5,
+      events,
+      next_cursor: null,
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify(page)).byteLength;
+    expect(bytes).toBeGreaterThan(256 * 1024);
+    expect(bytes).toBeLessThan(1024 * 1024);
+    const api = createStudentCalendarSchedulingApi(account, {
+      fetch: vi.fn(async () => json(page)),
+    });
+    expect((await api.events(signal())).events).toHaveLength(20);
+  });
+  it("reads only the requested account-checked receipt without provider commands", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => json(event()));
+    const api = createStudentCalendarSchedulingApi(account, {
+      fetch,
+      baseUrl: "https://api.example.test/api/v1",
+    });
+    expect(await api.event(action, signal())).toEqual(event());
+    expect(fetch).toHaveBeenCalledWith(
+      `https://api.example.test/api/v1/student/calendars/events/${action}`,
+      expect.objectContaining({
+        method: "GET",
+        headers: { "X-NavoX-Account": account },
+        cache: "no-store",
+      }),
+    );
+    fetch.mockResolvedValue(json({ ...event(), id: request }));
+    await expect(api.event(action, signal())).rejects.toThrow();
   });
   it("accepts exact Google write-purpose authorization, never just read-busy scopes", async () => {
     const answer = authorization();
@@ -180,7 +435,7 @@ describe("separate reviewed calendar scheduling boundary", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
   it("rejects connected grants without exact provider and connection", () => {
-    for (const extra of [{ provider: "outlook" }, { connection_id: null }]) {
+    for (const extra of [{ provider: "unknown" }, { connection_id: null }]) {
       const value = view();
       Object.assign(value.grants[0], extra);
       expect(() => readCalendarSchedulingView(value)).toThrow();
@@ -415,5 +670,40 @@ describe("separate reviewed calendar scheduling boundary", () => {
     const api = createStudentCalendarSchedulingApi(account, { fetch });
     await expect(api.previewEvent(input, signal())).rejects.toThrow();
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it("sends explicit displacement opt-in only when provided", async () => {
+    const input = {
+      ...command,
+      grant_id: grant,
+      calendar_id: "primary",
+      title: "Study with Sam",
+      location: "Library",
+      start_at: event().start_at,
+      end_at: event().end_at,
+      timezone: "UTC",
+      availability: {
+        start_at: "2026-10-22T12:00:00Z",
+        end_at: "2026-10-22T18:00:00Z",
+        duration_minutes: 30,
+        preferences_revision: 2,
+        expected_timezone: "UTC",
+        routine_confirmed: true,
+        travel_assumption: "zero" as const,
+        include_short_slots: false,
+      },
+    };
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => json(event()));
+    const api = createStudentCalendarSchedulingApi(account, { fetch });
+    await api.previewEvent(input, signal());
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).not.toHaveProperty(
+      "allow_study_displacement",
+    );
+    await api.previewEvent(
+      { ...input, allow_study_displacement: true },
+      signal(),
+    );
+    expect(
+      JSON.parse(String(fetch.mock.calls[1][1]?.body)).allow_study_displacement,
+    ).toBe(true);
   });
 });
